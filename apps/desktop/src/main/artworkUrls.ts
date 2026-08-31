@@ -97,7 +97,15 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       // value through the normal host-owned artwork capability. Self-referential
       // custom refs are invalid and must fall through to another candidate.
       if (parseCustomArtworkReference(customDataUrl)) return '';
-      if (!isInlineArtworkSource(customDataUrl)) return artworkDeliveryUrl(customDataUrl, ownerId);
+      if (!isInlineArtworkSource(customDataUrl)) {
+        const deliverySource = customArtwork.target === 'logo'
+          ? customDataUrl.replace(
+            /^https:\/\/image\.tmdb\.org\/t\/p\/original\//i,
+            'https://image.tmdb.org/t/p/w1280/',
+          )
+          : customDataUrl;
+        return artworkDeliveryUrl(deliverySource, ownerId);
+      }
       if (!/^data:image\/[^;,]+;base64,[A-Za-z0-9+/=\r\n]+$/i.test(customDataUrl)) return '';
       // The reference itself is content-independent, so without a version the
       // delivery URL is byte-identical before and after an edit. React then

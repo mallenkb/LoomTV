@@ -52,7 +52,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
       click: options.onOpenWeb,
     },
     ...(options.onOpenAdmin ? [{
-      label: 'Server administration',
+      label: 'Manage server',
       click: options.onOpenAdmin,
     }] : []),
     { type: 'separator' },

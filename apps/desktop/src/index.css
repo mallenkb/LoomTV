@@ -471,6 +471,12 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   color: var(--loom-text);
 }
 
+/* Phosphor navigation glyphs use a 256-unit view box. Match their outline to
+   the 2px stroke used by the sidebar's 24-unit icon set. */
+.loom-sidebar-phosphor-outline :where(path, circle, ellipse, line, polyline, polygon, rect) {
+  stroke-width: 20;
+}
+
 .loom-shared-highlight-group {
   --loom-shared-highlight-background: rgb(255 255 255 / 0.05);
   position: relative;

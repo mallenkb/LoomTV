@@ -111,6 +111,8 @@ import {
   desktopStoredProgressSchema,
   ffmpegStatusSchema,
   githubReleaseSchema,
+  iptvChannelPageSchema,
+  iptvSourceListSchema,
   localNetworkStatusSchema,
   mediaSegmentResponseSchema,
   metadataKeyTestResultsSchema,
@@ -134,6 +136,7 @@ import {
 } from './desktopDecoders';
 import { lanStreamingProviderSchema } from '@loom-media-server/lan-protocol';
 import { z } from 'zod';
+import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 export type {
   ActiveProfileState,
   ApiResult,
@@ -921,6 +924,23 @@ export const desktopApi = {
     if (window.desktopApi) {
       return window.desktopApi.getStreamUrl(filePath, options);
     }
+    const iptvReference = parseIptvPlaybackReference(filePath);
+    if (iptvReference) {
+      const params = new URLSearchParams({
+        sourceId: iptvReference.sourceId,
+        channelId: iptvReference.channelId,
+      });
+      const isHls = iptvReference.format === 'hls';
+      return {
+        url: await localMediaUrl(isHls ? '/iptv/live.m3u8' : '/iptv/live.stream', params),
+        contentType: isHls ? 'application/vnd.apple.mpegurl' : 'video/mp2t',
+        fileName: 'Live TV stream',
+        isTranscoded: false,
+        isRemuxed: false,
+        playbackMode: 'direct',
+        decisionReason: 'Host-proxied Live TV stream for browser playback.',
+      };
+    }
     const ext = filePath.split('.').pop()?.toLowerCase() || '';
     const contentTypeMap: Record<string, string> = {
       mp4: 'video/mp4', webm: 'video/webm', mov: 'video/mp4', m4v: 'video/mp4',
@@ -1313,32 +1333,47 @@ export const desktopApi = {
    */
   async listIptvSources(): Promise<IptvSourceSummary[]> {
     if (window.desktopApi?.listIptvSources) return window.desktopApi.listIptvSources();
-    return [];
+    return fetchJson('/api/renderer/iptv/sources', iptvSourceListSchema);
   },
 
   async addIptvSource(input: IptvSourceInput): Promise<IptvSourceSummary[]> {
     if (window.desktopApi?.addIptvSource) return window.desktopApi.addIptvSource(input);
-    throw new Error('Live TV sources can only be added from the LoomTV desktop app.');
+    return fetchJson('/api/renderer/iptv/sources', iptvSourceListSchema, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   },
 
   async updateIptvSource(sourceId: string, patch: IptvSourcePatch): Promise<IptvSourceSummary[]> {
     if (window.desktopApi?.updateIptvSource) return window.desktopApi.updateIptvSource(sourceId, patch);
-    throw new Error('Live TV sources can only be edited from the LoomTV desktop app.');
+    return fetchJson('/api/renderer/iptv/sources', iptvSourceListSchema, {
+      method: 'PATCH',
+      body: JSON.stringify({ sourceId, patch }),
+    });
   },
 
   async removeIptvSource(sourceId: string): Promise<IptvSourceSummary[]> {
     if (window.desktopApi?.removeIptvSource) return window.desktopApi.removeIptvSource(sourceId);
-    throw new Error('Live TV sources can only be removed from the LoomTV desktop app.');
+    return fetchJson('/api/renderer/iptv/sources', iptvSourceListSchema, {
+      method: 'DELETE',
+      body: JSON.stringify({ sourceId }),
+    });
   },
 
   async refreshIptvSource(sourceId: string): Promise<IptvSourceSummary[]> {
     if (window.desktopApi?.refreshIptvSource) return window.desktopApi.refreshIptvSource(sourceId);
-    throw new Error('Live TV sources can only be refreshed from the LoomTV desktop app.');
+    return fetchJson('/api/renderer/iptv/sources/refresh', iptvSourceListSchema, {
+      method: 'POST',
+      body: JSON.stringify({ sourceId }),
+    });
   },
 
   async listIptvChannels(request: IptvChannelRequest): Promise<IptvChannelPage> {
     if (window.desktopApi?.listIptvChannels) return window.desktopApi.listIptvChannels(request);
-    throw new Error('Live TV is currently available only in the LoomTV desktop app.');
+    return fetchJson('/api/renderer/iptv/channels', iptvChannelPageSchema, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
   },
 
   async getSettings(): Promise<SettingsPayload> {

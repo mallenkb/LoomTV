@@ -76,6 +76,62 @@ export const resourceIdResultSchema = z.object({ resourceId: z.string().min(1) }
 export const portResultSchema = z.object({ port: nonNegativeNumber });
 export const stringRecordSchema = z.record(z.string(), z.string());
 
+export const iptvSourceIconSchema = z.enum([
+  'general',
+  'entertainment',
+  'news',
+  'sports',
+  'movies',
+  'series',
+  'music',
+  'kids',
+  'documentary',
+  'education',
+  'lifestyle',
+  'travel',
+  'cooking',
+  'science',
+  'religious',
+  'weather',
+]);
+export const iptvSourceSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  iconId: iptvSourceIconSchema,
+  playlistUrl: z.string(),
+  epgUrl: z.string(),
+  channelCount: nonNegativeNumber,
+  programmeCount: nonNegativeNumber,
+  skippedInsecure: nonNegativeNumber,
+  skippedMalformed: nonNegativeNumber,
+  refreshedAt: nonNegativeNumber,
+  refreshError: z.string(),
+});
+export const iptvSourceListSchema = z.array(iptvSourceSummarySchema);
+const iptvChannelCountSchema = z.object({ name: z.string(), channelCount: nonNegativeNumber });
+export const iptvChannelPageSchema = z.object({
+  sourceId: z.string(),
+  sourceName: z.string(),
+  channels: z.array(z.object({
+    channelId: z.string(),
+    name: z.string(),
+    logoUrl: z.string(),
+    groupTitle: z.string(),
+    streamUrl: z.string(),
+    nowTitle: z.string(),
+    nowStartMs: nonNegativeNumber,
+    nowEndMs: nonNegativeNumber,
+    nextTitle: z.string(),
+    nextStartMs: nonNegativeNumber,
+  })),
+  total: nonNegativeNumber,
+  offset: nonNegativeNumber,
+  groups: z.array(iptvChannelCountSchema),
+  subcategories: z.array(iptvChannelCountSchema),
+  refreshedAt: nonNegativeNumber,
+  refreshError: z.string(),
+});
+
 export const stremioCatalogItemSchema = z.object({
   id: z.string(),
   type: z.string(),

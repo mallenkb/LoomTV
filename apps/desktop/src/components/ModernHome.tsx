@@ -12,7 +12,7 @@ import MediaRail from '@/components/MediaRail';
 import ContinueWatchingCard from '@/components/ContinueWatchingCard';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { backdropSources, logoSources, posterSources, routeArtworkState } from '@/lib/artwork';
+import { backdropSources, logoSources, posterSources, routeArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { resetProgress, useProgressSnapshot } from '@/lib/progress';
 import { useTheme } from '@/components/ThemeProvider';
@@ -417,7 +417,26 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
   const hasRating = displayedProviderRatings.length > 0 || item.rating > 0;
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
-  const heroLogoSources = useMemo(() => logoSources(item), [item]);
+  const [savedHeroLogo, setSavedHeroLogo] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setSavedHeroLogo('');
+    void desktopApi.getCustomArtwork(item.id)
+      .then((artwork) => {
+        if (!cancelled) setSavedHeroLogo(artwork.logo || '');
+      })
+      .catch(() => {
+        // The compact catalog remains the fallback when custom artwork cannot
+        // be read, such as for a disconnected paired client.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id]);
+  const heroLogoSources = useMemo(
+    () => uniqueArtworkSources(savedHeroLogo, logoSources(item)),
+    [item, savedHeroLogo],
+  );
   const heroPosterSources = useMemo(() => posterSources(item), [item]);
   const heroArtworkSources = useMemo(() => backdropSources(item), [item]);
   const heroFilePathCandidate = item.filePath || item.episodeFiles?.find((episode) => Boolean(episode.filePath))?.filePath || '';
@@ -455,7 +474,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
     [generatedHeroArtwork, item],
   );
   const [logoFailed, setLogoFailed] = useState(false);
-  useEffect(() => setLogoFailed(false), [item.id]);
+  useEffect(() => setLogoFailed(false), [heroLogoSources, item.id]);
   const showsHeroLogo = heroLogoSources.length > 0 && !logoFailed;
   const artworkTransition = prefersReducedMotion
     ? { duration: 0 }

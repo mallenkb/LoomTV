@@ -599,9 +599,9 @@ export default function VideoPlayer({
   }, [trackPreferenceScopeKey]);
   const pauseLogoSources = useMemo(() =>
     Array.from(new Set([
-      ...playbackLogoCandidates,
-      ...(artwork?.logoCandidates || []),
       artwork?.logo,
+      ...(artwork?.logoCandidates || []),
+      ...playbackLogoCandidates,
     ].filter((source): source is string => Boolean(source)))),
   [artwork?.logo, artwork?.logoCandidates, playbackLogoCandidates]);
   useEffect(() => {
@@ -3961,7 +3961,8 @@ export default function VideoPlayer({
               src={activeIframeUrl}
               title={title}
               className="h-full w-full border-0 bg-black"
-              allow="autoplay; picture-in-picture; encrypted-media; web-share"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; web-share"
+              allowFullScreen
               referrerPolicy="strict-origin-when-cross-origin"
               onLoad={handleIframeLoad}
               onError={() => {

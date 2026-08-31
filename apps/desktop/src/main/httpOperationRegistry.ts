@@ -41,6 +41,33 @@ const transcodeOptionsSchema = z.object({
   subtitleStyle: z.record(z.string(), z.union([z.string(), finiteNumber, z.boolean()])).optional(),
   forceTranscode: z.boolean().optional(),
 });
+const iptvSourceIdSchema = nonEmptyString.max(120);
+const iptvSourceIconSchema = z.enum([
+  'general', 'entertainment', 'news', 'sports', 'movies', 'series', 'music', 'kids',
+  'documentary', 'education', 'lifestyle', 'travel', 'cooking', 'science', 'religious', 'weather',
+]);
+const iptvSourceInputSchema = z.object({
+  playlistUrl: nonEmptyString.max(2048),
+  epgUrl: z.string().max(2048).optional(),
+  name: nonEmptyString.max(120),
+  iconId: iptvSourceIconSchema.optional(),
+});
+const iptvSourcePatchSchema = z.object({
+  name: z.string().max(120).optional(),
+  playlistUrl: z.string().max(2048).optional(),
+  epgUrl: z.string().max(2048).optional(),
+  iconId: iptvSourceIconSchema.optional(),
+});
+const iptvChannelRequestSchema = z.object({
+  sourceId: iptvSourceIdSchema,
+  query: z.string().max(200).optional(),
+  group: z.string().max(400).optional(),
+  subcategory: z.string().max(400).optional(),
+  geoFilter: z.enum(['all', 'exclude', 'only']).optional(),
+  sort: z.enum(['name-asc', 'name-desc', 'category']).optional(),
+  limit: finiteNumber.positive().max(200).optional(),
+  offset: finiteNumber.nonnegative().max(1_000_000).optional(),
+});
 
 type OperationDefinition<TSchema extends z.ZodType> = {
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -57,13 +84,18 @@ export const httpOperations = {
   lanPlaybackPlan: operation({ method: 'POST', path: '/api/v2/playback-plan', owner: 'playback', scope: 'media:stream', requestSchema: lanPlaybackPlanRequestSchema }),
   lanStartHls: operation({ method: 'POST', path: '/api/v2/start-hls', owner: 'playback', scope: 'media:stream', requestSchema: lanStartHlsRequestSchema }),
   rendererSettingsSave: operation({ method: 'POST', path: '/api/renderer/settings', owner: 'settings', scope: 'desktop', requestSchema: rendererSettingsPatchSchema }),
+  rendererIptvAdd: operation({ method: 'POST', path: '/api/renderer/iptv/sources', owner: 'settings', scope: 'desktop', requestSchema: iptvSourceInputSchema }),
+  rendererIptvUpdate: operation({ method: 'PATCH', path: '/api/renderer/iptv/sources', owner: 'settings', scope: 'desktop', requestSchema: z.object({ sourceId: iptvSourceIdSchema, patch: iptvSourcePatchSchema }) }),
+  rendererIptvRemove: operation({ method: 'DELETE', path: '/api/renderer/iptv/sources', owner: 'settings', scope: 'desktop', requestSchema: z.object({ sourceId: iptvSourceIdSchema }) }),
+  rendererIptvRefresh: operation({ method: 'POST', path: '/api/renderer/iptv/sources/refresh', owner: 'settings', scope: 'desktop', requestSchema: z.object({ sourceId: iptvSourceIdSchema }) }),
+  rendererIptvChannels: operation({ method: 'POST', path: '/api/renderer/iptv/channels', owner: 'catalog', scope: 'desktop', requestSchema: iptvChannelRequestSchema }),
   rendererMediaProbe: operation({ method: 'POST', path: '/api/renderer/media/probe', owner: 'media', scope: 'desktop', requestSchema: z.object({ filePath: nonEmptyString }) }),
   rendererSubtitleResource: operation({ method: 'POST', path: '/api/renderer/media/subtitle-resource', owner: 'media', scope: 'desktop', requestSchema: z.object({ mediaFilePath: nonEmptyString, subtitleFilePath: nonEmptyString }) }),
   rendererStartTranscode: operation({ method: 'POST', path: '/api/renderer/media/start-transcode', owner: 'media', scope: 'desktop', requestSchema: z.object({ filePath: nonEmptyString, options: transcodeOptionsSchema.optional() }) }),
   rendererStopTranscode: operation({ method: 'POST', path: '/api/renderer/media/stop-transcode', owner: 'media', scope: 'desktop', requestSchema: z.object({ sessionId: nonEmptyString }) }),
   rendererMetadataProvider: operation({ method: 'POST', path: '/api/renderer/metadata/provider', owner: 'metadata', scope: 'desktop', requestSchema: metadataProviderRequestSchema }),
   rendererMetadataRefreshIncomplete: operation({ method: 'POST', path: '/api/renderer/metadata/refresh-incomplete', owner: 'metadata', scope: 'desktop', requestSchema: z.object({ mediaId: nonEmptyString.max(512) }) }),
-  rendererArtworkSave: operation({ method: 'POST', path: '/api/renderer/artwork', owner: 'artwork', scope: 'desktop', requestSchema: z.object({ mediaId: nonEmptyString.max(512), target: z.enum(['thumbnail', 'poster', 'cover']), dataUrl: z.string().max(25 * 1024 * 1024) }) }),
+  rendererArtworkSave: operation({ method: 'POST', path: '/api/renderer/artwork', owner: 'artwork', scope: 'desktop', requestSchema: z.object({ mediaId: nonEmptyString.max(512), target: z.enum(['thumbnail', 'poster', 'cover', 'logo']), dataUrl: z.string().max(25 * 1024 * 1024) }) }),
   rendererArtworkCandidates: operation({ method: 'POST', path: '/api/renderer/artwork/official-candidates', owner: 'artwork', scope: 'desktop', requestSchema: z.object({ mediaId: nonEmptyString.max(512) }) }),
   rendererArtworkApply: operation({ method: 'POST', path: '/api/renderer/artwork/apply-official', owner: 'artwork', scope: 'desktop', requestSchema: z.object({
     mediaId: nonEmptyString.max(512),
@@ -71,8 +103,10 @@ export const httpOperations = {
       id: nonEmptyString.max(512),
       thumbnail: z.string().max(4096).optional(),
       cover: z.string().max(4096).optional(),
+      logo: z.string().max(4096).optional(),
+      logoCandidates: z.array(z.string().max(4096)).optional(),
     }),
-    target: z.enum(['all', 'poster', 'cover', 'episodes']).optional(),
+    target: z.enum(['all', 'poster', 'cover', 'logo', 'episodes']).optional(),
   }) }),
   lanProfileCreate: operation({ method: 'POST', path: '/api/v2/profiles', owner: 'profiles', scope: 'playback:write', requestSchema: lanProfileCreateRequestSchema }),
   lanProfileSelect: operation({ method: 'POST', path: '/api/v2/profiles/select', owner: 'profiles', scope: 'catalog:read', requestSchema: lanProfileSelectRequestSchema }),
@@ -96,6 +130,11 @@ export const httpBodyParsers = {
   lanPlaybackPlan: parser(httpOperations.lanPlaybackPlan.requestSchema),
   lanStartHls: parser(httpOperations.lanStartHls.requestSchema),
   rendererSettingsSave: parser(httpOperations.rendererSettingsSave.requestSchema),
+  rendererIptvAdd: parser(httpOperations.rendererIptvAdd.requestSchema),
+  rendererIptvUpdate: parser(httpOperations.rendererIptvUpdate.requestSchema),
+  rendererIptvRemove: parser(httpOperations.rendererIptvRemove.requestSchema),
+  rendererIptvRefresh: parser(httpOperations.rendererIptvRefresh.requestSchema),
+  rendererIptvChannels: parser(httpOperations.rendererIptvChannels.requestSchema),
   rendererMediaProbe: parser(httpOperations.rendererMediaProbe.requestSchema),
   rendererSubtitleResource: parser(httpOperations.rendererSubtitleResource.requestSchema),
   rendererStartTranscode: parser(httpOperations.rendererStartTranscode.requestSchema),

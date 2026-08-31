@@ -359,7 +359,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                           key={channel.channelId}
                           channel={channel}
                           nowMs={nowMs}
-                          onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId), channel.name, channel.logoUrl)}
+                          onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, channel.logoUrl)}
                         />
                       ))}
                     </div>
@@ -373,7 +373,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                     key={channel.channelId}
                     channel={channel}
                     nowMs={nowMs}
-                    onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId), channel.name, channel.logoUrl)}
+                    onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, channel.logoUrl)}
                   />
                 ))}
               </div>

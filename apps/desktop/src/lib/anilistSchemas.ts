@@ -22,12 +22,12 @@ export const aniListCharacterEdgeSchema = z.object({
 export const aniListMediaSchema = z.object({
   id: z.number().int(),
   title: z.object({
-    userPreferred: z.string().optional(),
-    english: z.string().optional(),
-    native: z.string().optional(),
-  }).optional(),
+    userPreferred: z.string().nullish(),
+    english: z.string().nullish(),
+    native: z.string().nullish(),
+  }).nullish(),
   description: z.string().nullish(),
-  genres: z.array(z.string()).optional(),
+  genres: z.array(z.string()).nullish(),
   averageScore: z.number().nullish(),
   format: z.string().nullish(),
   duration: z.number().nullish(),
@@ -43,7 +43,7 @@ export const aniListMediaSchema = z.object({
   }).nullish(),
   bannerImage: z.string().nullish(),
   episodes: z.number().nullish(),
-  characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).optional() }).optional(),
+  characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).nullish() }).nullish(),
   trailer: z.object({
     id: z.string().nullish(),
     site: z.string().nullish(),
@@ -54,13 +54,13 @@ const aniListErrorsSchema = z.array(z.object({ message: z.string().optional() })
 
 export const aniListDiscoverResponseSchema = z.object({
   data: z.object({
-    Page: z.object({ media: z.array(aniListMediaSchema).optional() }).optional(),
-  }).optional(),
+    Page: z.object({ media: z.array(aniListMediaSchema).nullish() }).nullish(),
+  }).nullish(),
   errors: aniListErrorsSchema,
 });
 
 export const aniListGenreResponseSchema = z.object({
-  data: z.object({ GenreCollection: z.array(z.string()).optional() }).optional(),
+  data: z.object({ GenreCollection: z.array(z.string()).nullish() }).nullish(),
   errors: aniListErrorsSchema,
 });
 
@@ -69,7 +69,7 @@ export const aniListCastResponseSchema = z.object({
     Media: z.object({
       characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).nullish() }).nullish(),
     }).nullish(),
-  }).optional(),
+  }).nullish(),
   errors: aniListErrorsSchema,
 });
 

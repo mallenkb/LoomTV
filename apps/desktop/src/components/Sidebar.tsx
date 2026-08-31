@@ -708,7 +708,8 @@ export default function Sidebar() {
                 }
                 const isActive = isSidebarItemActive(item.id);
                 const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
-                const usesRedActiveIcon = item.id === 'sports' || item.id.startsWith('live:') || item.id.startsWith('stremio:');
+                const usesPhosphorNavIcon = item.id.startsWith('live:') || item.id.startsWith('stremio:');
+                const usesRedActiveIcon = item.id === 'sports' || usesPhosphorNavIcon;
                 return (
                   <Link
                     key={`modern-${item.id}`}
@@ -724,8 +725,9 @@ export default function Sidebar() {
                     )}
                   >
                     <Icon className={cn(
-                      item.id === 'discover' ? 'h-7 w-7' : 'h-6 w-6',
-                      usesRedActiveIcon ? (isActive ? 'text-red-500' : 'text-white') : undefined,
+                      item.id === 'discover' || usesPhosphorNavIcon ? 'h-7 w-7' : 'h-6 w-6',
+                      usesPhosphorNavIcon && !isActive && 'loom-sidebar-phosphor-outline',
+                      usesRedActiveIcon && isActive ? 'text-red-500' : undefined,
                     )} />
                   </Link>
                 );
@@ -853,7 +855,8 @@ export default function Sidebar() {
             }
             const isActive = isSidebarItemActive(item.id);
             const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
-            const usesRedActiveIcon = item.id === 'sports' || item.id.startsWith('live:') || item.id.startsWith('stremio:');
+            const usesPhosphorNavIcon = item.id.startsWith('live:') || item.id.startsWith('stremio:');
+            const usesRedActiveIcon = item.id === 'sports' || usesPhosphorNavIcon;
 
             return (
               <Link
@@ -870,8 +873,9 @@ export default function Sidebar() {
                 )}
               >
                 <Icon className={cn(
-                  'h-5 w-5',
-                  usesRedActiveIcon ? (isActive ? 'text-red-500' : 'text-white') : undefined,
+                  usesPhosphorNavIcon ? 'h-6 w-6' : 'h-5 w-5',
+                  usesPhosphorNavIcon && !isActive && 'loom-sidebar-phosphor-outline',
+                  usesRedActiveIcon && isActive ? 'text-red-500' : undefined,
                 )} />
                 <span className="truncate text-sm font-medium">{item.label}</span>
               </Link>

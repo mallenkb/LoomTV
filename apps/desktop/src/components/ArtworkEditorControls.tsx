@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, X } from 'lucide-react';
+import { FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, Type, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
@@ -7,7 +7,7 @@ import { useToast } from '@/components/ToastProvider';
 import { desktopApi, type OfficialArtworkRefreshTarget, type OfficialMetadataApplyTarget, type OfficialMetadataCandidate } from '@/lib/desktopApi';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
-export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster', string>>;
+export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster' | 'logo', string>>;
 
 type ArtworkPreview = {
   target: ArtworkTarget;
@@ -28,6 +28,7 @@ type ArtworkPrepareState = {
 type MetadataArtworkChoice = {
   id: string;
   imageUrl: string;
+  sourceLabel: string;
   candidate: OfficialMetadataCandidate;
 };
 
@@ -52,7 +53,11 @@ export type OfficialArtworkResult = {
   rating?: number;
   posterCandidates?: string[];
   backdropCandidates?: string[];
+  logo?: string;
+  logoCandidates?: string[];
 };
+
+const METADATA_ARTWORK_BATCH_SIZE = 8;
 
 type ArtworkTargetConfig = {
   label: string;
@@ -83,30 +88,35 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function artworkResolutionTag(
+function artworkQualityLabel(
   dimensions: ArtworkDimensions | undefined,
   target: OfficialMetadataApplyTarget,
-): 'High-res' | 'HD' | null {
+): 'HQ' | null {
   if (!dimensions) return null;
-
   if (target === 'cover') {
-    if (dimensions.width >= 1920 && dimensions.height >= 1080) return 'High-res';
-    if (dimensions.width >= 1280 && dimensions.height >= 720) return 'HD';
-    return null;
+    return dimensions.width >= 1280 && dimensions.height >= 720 ? 'HQ' : null;
   }
-
-  if (dimensions.width >= 1000 && dimensions.height >= 1500) return 'High-res';
-  if (dimensions.width >= 800 && dimensions.height >= 1200) return 'HD';
-  return null;
+  if (target === 'logo') return dimensions.width >= 500 ? 'HQ' : null;
+  return dimensions.width >= 800 && dimensions.height >= 1200 ? 'HQ' : null;
 }
 
 function artworkResolutionRank(
   dimensions: ArtworkDimensions | undefined,
-  target: 'poster' | 'cover',
+  target: 'poster' | 'cover' | 'logo',
 ): number {
-  const tag = artworkResolutionTag(dimensions, target);
-  if (tag === 'High-res') return 0;
-  if (tag === 'HD') return 1;
+  if (!dimensions) return 2;
+  if (target === 'cover') {
+    if (dimensions.width >= 1920 && dimensions.height >= 1080) return 0;
+    if (dimensions.width >= 1280 && dimensions.height >= 720) return 1;
+    return 2;
+  }
+  if (target === 'logo') {
+    if (dimensions.width >= 1000) return 0;
+    if (dimensions.width >= 500) return 1;
+    return 2;
+  }
+  if (dimensions.width >= 1000 && dimensions.height >= 1500) return 0;
+  if (dimensions.width >= 800 && dimensions.height >= 1200) return 1;
   return 2;
 }
 
@@ -116,7 +126,7 @@ function artworkPixelArea(dimensions: ArtworkDimensions | undefined): number {
 
 function preferredArtworkSource(
   urls: Array<string | null | undefined>,
-  target: 'poster' | 'cover',
+  target: 'poster' | 'cover' | 'logo',
   dimensions: Record<string, ArtworkDimensions>,
   failedUrls?: Set<string>,
 ): string {
@@ -132,6 +142,27 @@ function preferredArtworkSource(
       rank: artworkResolutionRank(dimensions[url], target),
     }))
     .sort((left, right) => left.rank - right.rank || right.area - left.area || left.index - right.index)[0]?.url || '';
+}
+
+function artworkProviderLabel(url: string, fallback: OfficialMetadataCandidate['source']): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes('tmdb.org')) return 'TMDB';
+    if (host.includes('fanart.tv')) return 'Fanart.tv';
+    if (host.includes('thetvdb.com')) return 'TVDB';
+  } catch {
+    // Non-URL artwork keeps the metadata provider label.
+  }
+  return fallback;
+}
+
+function isClearLogoCandidate(url: string, sourceLabel: string): boolean {
+  if (sourceLabel !== 'TVDB') return true;
+  try {
+    return /\.(?:png|webp)$/i.test(new URL(url).pathname);
+  } catch {
+    return /\.(?:png|webp)(?:$|[?#])/i.test(url);
+  }
 }
 
 function fileManagerActionLabel(): string {
@@ -184,6 +215,7 @@ interface ArtworkEditorControlsProps {
   onSaved?: () => Promise<void> | void;
   officialThumbnailSources?: string[];
   officialCoverSources?: string[];
+  officialLogoSources?: string[];
   fallbackFrameSource?: string;
   revealPath?: string;
   onFetchOfficialArtwork?: (target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
@@ -200,6 +232,7 @@ export default function ArtworkEditorControls({
   onSaved,
   officialThumbnailSources = [],
   officialCoverSources = [],
+  officialLogoSources = [],
   fallbackFrameSource = '',
   revealPath = '',
   onFetchOfficialArtwork,
@@ -220,9 +253,11 @@ export default function ArtworkEditorControls({
   const [metadataError, setMetadataError] = useState('');
   const [failedMetadataArtwork, setFailedMetadataArtwork] = useState<Set<string>>(() => new Set());
   const [metadataArtworkDimensions, setMetadataArtworkDimensions] = useState<Record<string, ArtworkDimensions>>({});
+  const [visibleMetadataArtworkCount, setVisibleMetadataArtworkCount] = useState(METADATA_ARTWORK_BATCH_SIZE);
   const [artworkSaveError, setArtworkSaveError] = useState('');
   const [isPageScrolled, setIsPageScrolled] = useState(false);
   const artworkMenuRef = useRef<HTMLDivElement | null>(null);
+  const metadataLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
   const { showToast } = useToast();
@@ -267,6 +302,7 @@ export default function ArtworkEditorControls({
     setMetadataError('');
     setFailedMetadataArtwork(new Set());
     setMetadataArtworkDimensions({});
+    setVisibleMetadataArtworkCount(METADATA_ARTWORK_BATCH_SIZE);
   }, [mediaId]);
 
   useEffect(() => {
@@ -302,7 +338,7 @@ export default function ArtworkEditorControls({
     refreshedArtwork: OfficialArtworkResult | null,
     target: OfficialArtworkRefreshTarget = 'all',
   ) => {
-    const thumbnailSource = target !== 'cover' ? (
+    const thumbnailSource = target !== 'cover' && target !== 'logo' ? (
       preferredArtworkSource(
         [
           refreshedArtwork?.thumbnail,
@@ -314,7 +350,7 @@ export default function ArtworkEditorControls({
       )
       || fallbackFrameSource
     ) : '';
-    const coverSource = target !== 'poster' ? (
+    const coverSource = target !== 'poster' && target !== 'logo' ? (
       preferredArtworkSource(
         [refreshedArtwork?.cover, ...(refreshedArtwork?.backdropCandidates || []), ...officialCoverSources],
         'cover',
@@ -327,8 +363,17 @@ export default function ArtworkEditorControls({
       )
       || fallbackFrameSource
     ) : '';
+    const logoSource = target !== 'poster' && target !== 'cover' ? preferredArtworkSource(
+      [
+        refreshedArtwork?.logo,
+        ...(refreshedArtwork?.logoCandidates || []),
+        ...officialLogoSources,
+      ],
+      'logo',
+      metadataArtworkDimensions,
+    ) : '';
 
-    if (!thumbnailSource && !coverSource) {
+    if (!thumbnailSource && !coverSource && !logoSource) {
       setArtworkMenuOpen(false);
       await onSaved?.();
       return true;
@@ -336,10 +381,12 @@ export default function ArtworkEditorControls({
 
     if (thumbnailSource) await saveCustomArtwork(mediaId, 'thumbnail', thumbnailSource, legacyStorageKey);
     if (coverSource) await saveCustomArtwork(mediaId, 'cover', coverSource, legacyStorageKey);
+    if (logoSource) await saveCustomArtwork(mediaId, 'logo', logoSource, legacyStorageKey);
     onCustomArtworkChange((current) => ({
       ...current,
       ...(thumbnailSource ? { thumbnail: thumbnailSource, poster: thumbnailSource } : {}),
       ...(coverSource ? { cover: coverSource } : {}),
+      ...(logoSource ? { logo: logoSource } : {}),
     }));
     setArtworkMenuOpen(false);
     await onSaved?.();
@@ -370,13 +417,15 @@ export default function ArtworkEditorControls({
         return;
       }
 
-      const artworkTarget = target === 'poster' || target === 'cover' ? target : 'all';
+      const artworkTarget = target === 'poster' || target === 'cover' || target === 'logo' ? target : 'all';
       const refreshedArtwork = onFetchOfficialArtwork ? await onFetchOfficialArtwork(artworkTarget) : null;
-      const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
+      const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover || refreshedArtwork?.logo);
       if (onFetchOfficialArtwork && !hasFreshOfficialArtwork) {
         showToast({
           title: 'Official artwork was not found',
-          description: fallbackFrameSource
+          description: artworkTarget === 'logo'
+            ? 'I could not find a clear logo from TMDB, Fanart.tv, or TheTVDB.'
+            : fallbackFrameSource
             ? 'I could not get a matching poster or cover from the metadata APIs, so I used a video frame for now.'
             : 'I could not get a matching poster or cover from the metadata APIs. Check your metadata keys and try again.',
           tone: 'warning',
@@ -394,10 +443,25 @@ export default function ArtworkEditorControls({
   };
 
   const applyMetadataCandidate = async (candidate: OfficialMetadataCandidate) => {
-    if (!onApplyOfficialArtworkCandidate || applyingCandidateId) return;
+    if (applyingCandidateId) return;
+    if (metadataApplyTarget !== 'logo' && !onApplyOfficialArtworkCandidate) return;
     setApplyingCandidateId(candidate.id);
     setMetadataError('');
     try {
+      if (metadataApplyTarget === 'logo') {
+        const selectedLogo = candidate.logo || candidate.logoCandidates?.find(Boolean) || '';
+        if (!selectedLogo) throw new Error('The selected logo is unavailable.');
+        await saveCustomArtwork(mediaId, 'logo', selectedLogo, legacyStorageKey);
+        onCustomArtworkChange((current) => ({ ...current, logo: selectedLogo }));
+        await onSaved?.();
+        setMetadataDialogOpen(false);
+        showToast({
+          title: 'Logo updated',
+          description: `The selected logo for ${candidate.title} was saved.`,
+          tone: 'success',
+        });
+        return;
+      }
       const candidateToApply = metadataApplyTarget === 'all'
         ? {
             ...candidate,
@@ -413,9 +477,15 @@ export default function ArtworkEditorControls({
               metadataArtworkDimensions,
               failedMetadataArtwork,
             ) || candidate.cover,
+            logo: preferredArtworkSource(
+              [candidate.logo, ...(candidate.logoCandidates || [])],
+              'logo',
+              metadataArtworkDimensions,
+              failedMetadataArtwork,
+            ) || candidate.logo,
           }
         : candidate;
-      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidateToApply, metadataApplyTarget);
+      const refreshedArtwork = await onApplyOfficialArtworkCandidate!(candidateToApply, metadataApplyTarget);
       if (metadataApplyTarget === 'episodes') {
         await onSaved?.();
       } else {
@@ -435,7 +505,9 @@ export default function ArtworkEditorControls({
         tone: 'success',
       });
     } catch {
-      setMetadataError('That artwork could not be applied. Choose another image or upload a poster image instead.');
+      setMetadataError(metadataApplyTarget === 'logo'
+        ? 'That logo could not be saved. Choose another clear logo and try again.'
+        : 'That artwork could not be applied. Choose another image or upload a poster image instead.');
     } finally {
       setApplyingCandidateId('');
     }
@@ -526,6 +598,8 @@ export default function ArtworkEditorControls({
     ? 'Choose Poster'
     : metadataApplyTarget === 'cover'
       ? 'Choose Cover'
+      : metadataApplyTarget === 'logo'
+        ? 'Choose Logo'
       : metadataApplyTarget === 'episodes'
         ? 'Choose Episode Names'
         : 'Choose Metadata';
@@ -533,37 +607,48 @@ export default function ArtworkEditorControls({
     ? 'Choose any poster returned by the connected metadata providers. Only the poster and thumbnail will change, and your selection will be saved to the library database.'
     : metadataApplyTarget === 'cover'
       ? 'Choose any cover returned by the connected metadata providers. Only the cover will change, and your selection will be saved to the library database.'
+      : metadataApplyTarget === 'logo'
+        ? 'Choose a clear logo from TMDB, Fanart.tv, or TheTVDB. Only the logo will change.'
       : metadataApplyTarget === 'episodes'
         ? 'Choose a match to replace only the episode names. Artwork and the rest of the show metadata will stay unchanged.'
         : 'Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, genres, and episode names from that source.';
-  const isArtworkTarget = metadataApplyTarget === 'cover' || metadataApplyTarget === 'poster';
+  const isArtworkTarget = metadataApplyTarget === 'cover' || metadataApplyTarget === 'poster' || metadataApplyTarget === 'logo';
   const metadataArtworkChoices = useMemo<MetadataArtworkChoice[]>(() => {
     if (!isArtworkTarget) return [];
 
     const seen = new Set<string>();
-    const artworkTarget = metadataApplyTarget === 'cover' ? 'cover' : 'poster';
+    const artworkTarget = metadataApplyTarget === 'cover' ? 'cover' : metadataApplyTarget === 'logo' ? 'logo' : 'poster';
     return metadataCandidates.flatMap((candidate) => {
       const urls = metadataApplyTarget === 'cover'
         ? [candidate.cover, ...(candidate.backdropCandidates || [])]
+        : metadataApplyTarget === 'logo'
+          ? [candidate.logo, ...(candidate.logoCandidates || [])]
         : [candidate.thumbnail, ...(candidate.posterCandidates || [])];
       const availableUrls = [...new Set(
-        urls.filter((url): url is string => Boolean(url && !failedMetadataArtwork.has(url))),
+        urls.filter((url): url is string => {
+          if (!url || failedMetadataArtwork.has(url)) return false;
+          return metadataApplyTarget !== 'logo'
+            || isClearLogoCandidate(url, artworkProviderLabel(url, candidate.source));
+        }),
       )];
 
       return availableUrls.flatMap((imageUrl) => {
         const key = `${candidate.source}:${imageUrl}`;
         if (seen.has(key)) return [];
         seen.add(key);
-        return [{ candidate, imageUrl }];
+        return [{ candidate, imageUrl, sourceLabel: artworkProviderLabel(imageUrl, candidate.source) }];
       });
-    }).map(({ candidate, imageUrl }) => {
+    }).map(({ candidate, imageUrl, sourceLabel }) => {
       const id = `${candidate.id}:${metadataApplyTarget}:${imageUrl}`;
       const selectedArtwork = metadataApplyTarget === 'cover'
         ? { cover: imageUrl, backdropCandidates: [imageUrl] }
+        : metadataApplyTarget === 'logo'
+          ? { logo: imageUrl, logoCandidates: [imageUrl] }
         : { thumbnail: imageUrl, posterCandidates: [imageUrl] };
       return {
         id,
         imageUrl,
+        sourceLabel,
         candidate: {
           ...candidate,
           id,
@@ -579,6 +664,22 @@ export default function ArtworkEditorControls({
       || left.imageUrl.localeCompare(right.imageUrl)
     ));
   }, [failedMetadataArtwork, isArtworkTarget, metadataApplyTarget, metadataArtworkDimensions, metadataCandidates]);
+  const renderedMetadataArtworkChoices = metadataArtworkChoices.slice(0, visibleMetadataArtworkCount);
+  useEffect(() => {
+    setVisibleMetadataArtworkCount(METADATA_ARTWORK_BATCH_SIZE);
+  }, [metadataApplyTarget, metadataCandidates, metadataDialogOpen]);
+  useEffect(() => {
+    const sentinel = metadataLoadMoreRef.current;
+    const scrollRoot = sentinel?.parentElement || null;
+    if (!sentinel || !scrollRoot || visibleMetadataArtworkCount >= metadataArtworkChoices.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisibleMetadataArtworkCount((count) => Math.min(count + METADATA_ARTWORK_BATCH_SIZE, metadataArtworkChoices.length));
+      }
+    }, { root: scrollRoot, rootMargin: '240px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [metadataArtworkChoices.length, visibleMetadataArtworkCount]);
   const visibleMetadataCandidates = useMemo(() => {
     if (metadataApplyTarget === 'episodes') return metadataCandidates;
 
@@ -594,6 +695,8 @@ export default function ArtworkEditorControls({
     ? 'Use poster'
     : metadataApplyTarget === 'cover'
       ? 'Use cover'
+      : metadataApplyTarget === 'logo'
+        ? 'Use logo'
       : metadataApplyTarget === 'episodes'
         ? 'Use names'
         : 'Apply';
@@ -671,6 +774,16 @@ export default function ArtworkEditorControls({
               >
                 <PanelsTopLeft className="h-4 w-4" />
                 Choose cover / banner image
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void openMetadataCandidates('logo')}
+                disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
+              >
+                <Type className="h-4 w-4" />
+                Choose logo image
               </button>
               <button
                 type="button"
@@ -876,25 +989,26 @@ export default function ArtworkEditorControls({
             {(isArtworkTarget ? metadataArtworkChoices.length : visibleMetadataCandidates.length) === 0 ? (
               <div className="rounded-lg bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
                 {isArtworkTarget
-                  ? `None of the matching results provide a ${metadataApplyTarget === 'cover' ? 'cover' : 'poster'} image.`
+                  ? `None of the matching results provide a ${metadataApplyTarget === 'cover' ? 'cover' : metadataApplyTarget === 'logo' ? 'logo' : 'poster'} image.`
                   : 'No matching metadata was found from the connected metadata APIs.'}
               </div>
             ) : (
-              <div className={`grid max-h-[calc(100vh-18rem)] gap-3 overflow-y-auto pr-1 ${isArtworkTarget ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : ''}`}>
-                {isArtworkTarget ? metadataArtworkChoices.map((choice) => {
-                  const { candidate, imageUrl } = choice;
+              <div className={`grid max-h-[calc(100vh-18rem)] gap-3 overflow-y-auto pr-1 ${isArtworkTarget ? metadataApplyTarget === 'logo' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : ''}`}>
+                {isArtworkTarget ? renderedMetadataArtworkChoices.map((choice, index) => {
+                  const { candidate, imageUrl, sourceLabel } = choice;
                   const isApplying = applyingCandidateId === candidate.id;
-                  const artworkLabel = metadataApplyTarget === 'cover' ? 'cover' : 'poster';
+                  const artworkLabel = metadataApplyTarget === 'cover' ? 'cover' : metadataApplyTarget === 'logo' ? 'logo' : 'poster';
                   const dimensions = metadataArtworkDimensions[imageUrl];
-                  const resolutionTag = artworkResolutionTag(dimensions, metadataApplyTarget);
+                  const qualityLabel = artworkQualityLabel(dimensions, metadataApplyTarget);
                   return (
                     <div
                       key={choice.id}
-                      className={`group relative overflow-hidden rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] shadow-sm ${metadataApplyTarget === 'cover' ? 'aspect-[16/10]' : 'aspect-[2/3]'}`}
+                      className={`group relative overflow-hidden rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] shadow-sm ${metadataApplyTarget === 'cover' ? 'aspect-[16/10]' : metadataApplyTarget === 'logo' ? 'aspect-[16/6]' : 'aspect-[2/3]'}`}
                     >
                       <img
                         src={imageUrl}
-                        alt={`${candidate.title} ${artworkLabel} from ${candidate.source}`}
+                        alt={`${candidate.title} ${artworkLabel} from ${sourceLabel}`}
+                        loading={index < METADATA_ARTWORK_BATCH_SIZE ? 'eager' : 'lazy'}
                         onLoad={(event) => {
                           const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
                           setMetadataArtworkDimensions((current) => {
@@ -908,18 +1022,18 @@ export default function ArtworkEditorControls({
                           next.add(imageUrl);
                           return next;
                         })}
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                        className={`absolute inset-0 h-full w-full transition-transform duration-200 group-hover:scale-[1.03] ${metadataApplyTarget === 'logo' ? 'object-contain p-4' : 'object-cover'}`}
                       />
-                      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
+                      <div className="absolute inset-x-0 top-0 flex items-start justify-start gap-2 p-3">
                         <span className="rounded-full border border-white/15 bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
-                          {candidate.source}
+                          {sourceLabel}
                         </span>
-                        {resolutionTag ? (
+                        {qualityLabel ? (
                           <span
-                            title={`${dimensions?.width} × ${dimensions?.height}`}
-                            className="rounded-full border border-white/20 bg-black/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                            title="High-quality image"
+                            className="rounded-full border border-white/20 bg-black/80 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm"
                           >
-                            {resolutionTag}
+                            {qualityLabel}
                           </span>
                         ) : null}
                       </div>
@@ -928,7 +1042,7 @@ export default function ArtworkEditorControls({
                           type="button"
                           onClick={() => applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId)}
-                          aria-label={`${metadataApplyLabel} ${candidate.title} from ${candidate.source}`}
+                          aria-label={`${metadataApplyLabel} ${candidate.title} from ${sourceLabel}`}
                           className="h-9 rounded-lg border border-white/20 bg-white px-3 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:bg-white/70"
                         >
                           {isApplying ? 'Applying...' : metadataApplyLabel}
@@ -936,7 +1050,14 @@ export default function ArtworkEditorControls({
                       </div>
                     </div>
                   );
-                }) : visibleMetadataCandidates.map((candidate) => {
+                }).concat(metadataArtworkChoices.length > renderedMetadataArtworkChoices.length ? [(
+                  <div
+                    key="metadata-artwork-load-more"
+                    ref={metadataLoadMoreRef}
+                    aria-hidden="true"
+                    className="col-span-full h-1"
+                  />
+                )] : []) : visibleMetadataCandidates.map((candidate) => {
                   const posterImage = preferredArtworkSource(
                     [candidate.thumbnail, ...(candidate.posterCandidates || [])],
                     'poster',

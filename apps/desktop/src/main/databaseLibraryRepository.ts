@@ -166,6 +166,7 @@ function applyDurableState(
     const cover = itemCustom.get('cover');
     const poster = itemCustom.get('poster');
     const thumbnail = itemCustom.get('thumbnail');
+    const logo = itemCustom.get('logo');
     if (cover) {
       const coverReference = customArtworkReference(item.id, 'cover');
       next.backdrop = coverReference;
@@ -176,6 +177,11 @@ function applyDurableState(
       const primary = customArtworkReference(item.id, primaryTarget);
       next.poster = primary;
       next.posterCandidates = [primary, ...(next.posterCandidates || []).filter((source) => source !== primary)];
+    }
+    if (logo) {
+      const logoReference = customArtworkReference(item.id, 'logo');
+      next.logo = logoReference;
+      next.logoCandidates = [logoReference, ...(next.logoCandidates || []).filter((source) => source !== logoReference)];
     }
   }
 

@@ -90,7 +90,7 @@ type ProviderOption = GenreOption & {
   providerIds: number[];
 };
 
-type GridEntry = { id: string; item: StremioPluginCatalogItem };
+type GridEntry = { id: string; item: StremioPluginCatalogItem; rank: number };
 
 
 const DISCOVER_SECTIONS: Record<DiscoverType, readonly DiscoverSection[]> = {
@@ -321,6 +321,18 @@ function stripHtml(value: string): string {
 function tmdbImage(path: string | null | undefined, size: 'w45' | 'w92' | 'w185' | 'w300' | 'w500' | 'w1280'): string {
   if (!path) return '';
   return `${TMDB_IMAGE_BASE}/${size}${path}`;
+}
+
+function tmdbLogoCandidates(details: TmdbDetailResponse): string[] {
+  return [...(details.images?.logos || [])]
+    .sort((left, right) => {
+      const languageRank = (language: string | null | undefined) => language === 'en' ? 0 : language ? 2 : 1;
+      return languageRank(left.iso_639_1) - languageRank(right.iso_639_1)
+        || (right.vote_average || 0) - (left.vote_average || 0)
+        || (right.width || 0) - (left.width || 0);
+    })
+    .map((logo) => tmdbImage(logo.file_path, 'w500'))
+    .filter((url, index, urls) => Boolean(url) && urls.indexOf(url) === index);
 }
 
 function providerDisplayName(value: string): string {
@@ -584,6 +596,7 @@ function mapTmdbToCatalog(media: TmdbListResult, type: 'movie' | 'tv'): StremioP
   const releaseInfo = releaseYear ? String(releaseYear) : releaseDate || '';
   return {
     id: String(media.id),
+    tmdbId: String(media.id),
     type,
     source: 'tmdb',
     format: type === 'movie' ? 'Movie' : 'TV',
@@ -892,8 +905,9 @@ async function enrichCatalogItemWithTmdbCredits(
   credential: string,
 ): Promise<StremioPluginCatalogItem> {
   const response = await requestTmdbJson(`${type}/${item.id}`, credential, tmdbDetailResponseSchema, {
-    append_to_response: 'credits,videos,release_dates,content_ratings,watch/providers,external_ids',
+    append_to_response: 'credits,images,videos,release_dates,content_ratings,watch/providers,external_ids',
   });
+  const logoCandidates = tmdbLogoCandidates(response);
   const trailerUrl = item.trailerUrl
     || tmdbTrailerUrl(response)
     || await fetchTmdbTrailerFallback(type, response.id, credential);
@@ -905,6 +919,7 @@ async function enrichCatalogItemWithTmdbCredits(
     backgroundUrl: response.backdrop_path
       ? tmdbImage(response.backdrop_path, 'w1280')
       : item.backgroundUrl || (response.poster_path ? tmdbImage(response.poster_path, 'w1280') : item.posterUrl),
+    logoUrl: logoCandidates[0] || item.logoUrl,
     rating: typeof response.vote_average === 'number'
       ? response.vote_average
       : item.rating,
@@ -945,8 +960,9 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
   if (!match?.id) return { ...item, streamingProviders: item.streamingProviders || [] };
 
   const details = await requestTmdbJson(`${tmdbType}/${match.id}`, credential, tmdbDetailResponseSchema, {
-    append_to_response: 'videos,watch/providers,release_dates,content_ratings,external_ids',
+    append_to_response: 'images,videos,watch/providers,release_dates,content_ratings,external_ids',
   });
+  const logoCandidates = tmdbLogoCandidates(details);
   const streamingProviders = tmdbStreamingProviders(details);
   const contentRating = tmdbContentRating(details, tmdbType);
   const trailerUrl = item.trailerUrl
@@ -954,7 +970,9 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
     || await fetchTmdbTrailerFallback(tmdbType, match.id, credential);
   return {
     ...item,
+    tmdbId: String(match.id),
     imdbId: details.imdb_id || details.external_ids?.imdb_id || item.imdbId,
+    logoUrl: logoCandidates[0] || item.logoUrl,
     streamingProviders,
     ...(trailerUrl ? { trailerUrl } : {}),
     ...(contentRating ? { contentRating } : {}),
@@ -1915,7 +1933,11 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       : 'border border-[var(--loom-border)] bg-[var(--loom-surface-2)] text-[var(--loom-text)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]'
   }`;
 
-  const gridEntries = useMemo<GridEntry[]>(() => items.map((item) => ({ id: `${item.type}:${item.id}`, item })), [items]);
+  const gridEntries = useMemo<GridEntry[]>(() => items.map((item, index) => ({
+    id: `${item.type}:${item.id}`,
+    item,
+    rank: index + 1,
+  })), [items]);
   const providerDropdownOptions = useMemo<ThemeDropdownOption[]>(() => [
     { value: '', label: providerOptionsLoading ? 'Loading platforms…' : 'All platforms' },
     ...providerOptions.map((provider) => ({
@@ -2086,7 +2108,9 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
             renderItem={(entry) => (
               <StremioPosterCard
                 item={entry.item}
+                rank={entry.rank}
                 metaLine={stremioMetaLine(entry.item)}
+                showContentRating={false}
                 onPlayTrailer={() => { void openItemTrailer(entry.item); }}
                 onSelect={(selected) => {
                   void openItemDetails(selected);

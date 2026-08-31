@@ -113,11 +113,17 @@ import {
 import { libraryItemIdFromPath, libraryItemPathForId } from './mediaServerLibrary.ts';
 import { resolveMediaAccessIdentity } from './mediaAccessIdentity.ts';
 import { httpBodyParsers } from './httpOperationRegistry.ts';
+import { createIptvStreamProxy } from './iptv/iptvStreamProxy.ts';
 import type {
   LibraryIndexPayload,
   LibraryItemDetailsPayload,
   LibraryPayload,
   MediaSegmentResponse,
+  IptvChannelPage,
+  IptvChannelRequest,
+  IptvSourceInput,
+  IptvSourcePatch,
+  IptvSourceSummary,
 } from '../shared/desktopProtocol.ts';
 
 export interface MediaServerDependencies {
@@ -171,6 +177,13 @@ export interface MediaServerDependencies {
   loadLibrary: () => LibraryData;
   resourceRegistryEpoch: string;
   loadSettings: () => AppSettings;
+  listIptvSources: () => IptvSourceSummary[];
+  addIptvSource: (input: IptvSourceInput) => Promise<IptvSourceSummary[]>;
+  updateIptvSource: (sourceId: string, patch: IptvSourcePatch) => IptvSourceSummary[];
+  removeIptvSource: (sourceId: string) => IptvSourceSummary[];
+  refreshIptvSource: (sourceId: string) => Promise<IptvSourceSummary[]>;
+  listIptvChannels: (request: IptvChannelRequest) => IptvChannelPage;
+  resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
   readJsonBody: (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
   requireLocalOrLanAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
   requireStreamAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
@@ -257,6 +270,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     saveSettings,
     writeJson,
   } = deps;
+  const iptvStreamProxy = createIptvStreamProxy(deps.resolveIptvStreamUrl);
   const createRequestHandler = (listenerScope: 'loopback' | 'lan') => (
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -899,6 +913,59 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid settings payload.' }));
           return;
         }
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/sources' && req.method === 'GET') {
+        writeJson(res, 200, deps.listIptvSources());
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/sources' && ['POST', 'PATCH', 'DELETE'].includes(req.method || '')) {
+        try {
+          requireOwner();
+        } catch (error) {
+          writeProfileError(error);
+          return;
+        }
+        const operation = req.method === 'POST'
+          ? httpBodyParsers.rendererIptvAdd
+          : req.method === 'PATCH'
+            ? httpBodyParsers.rendererIptvUpdate
+            : httpBodyParsers.rendererIptvRemove;
+        readJsonBody(req).then(operation as (body: unknown) => unknown)
+          .then(async (body) => {
+            const next = req.method === 'POST'
+              ? await deps.addIptvSource(body as IptvSourceInput)
+              : req.method === 'PATCH'
+                ? deps.updateIptvSource(
+                  (body as { sourceId: string }).sourceId,
+                  (body as { patch: IptvSourcePatch }).patch,
+                )
+                : deps.removeIptvSource((body as { sourceId: string }).sourceId);
+            writeJson(res, 200, next);
+          })
+          .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid Live TV request.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/sources/refresh' && req.method === 'POST') {
+        try {
+          requireOwner();
+        } catch (error) {
+          writeProfileError(error);
+          return;
+        }
+        readJsonBody(req).then(httpBodyParsers.rendererIptvRefresh)
+          .then(async ({ sourceId }) => writeJson(res, 200, await deps.refreshIptvSource(sourceId)))
+          .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid Live TV refresh.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/channels' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererIptvChannels)
+          .then((request) => writeJson(res, 200, deps.listIptvChannels(request)))
+          .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid Live TV request.' }));
+        return;
       }
 
       if (reqUrl.pathname === '/api/renderer/ffmpeg' && req.method === 'GET') {
@@ -1798,6 +1865,33 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           ? `${HLS_STREAM_TOKEN_QUERY_PARAM}=${encodeURIComponent(playlistStreamToken)}`
           : '';
         if (serveHls(reqUrl, res, playlistQuery)) return;
+      }
+
+      if ((req.method === 'GET' || req.method === 'HEAD') && reqUrl.pathname.startsWith('/iptv/')) {
+        if (!loopbackRequest) {
+          res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Live TV playback is available only in the local web app.');
+          return;
+        }
+        if (!requireStreamAccess(reqUrl, req, res)) return;
+        if (reqUrl.pathname === '/iptv/live.m3u8' || reqUrl.pathname === '/iptv/live.stream') {
+          void iptvStreamProxy.serveChannel(
+            reqUrl.searchParams.get('sourceId') || '',
+            reqUrl.searchParams.get('channelId') || '',
+            req,
+            res,
+            reqUrl,
+          );
+          return;
+        }
+        const resourceMatch = reqUrl.pathname.match(/^\/iptv\/resource\/([A-Za-z0-9_-]{32})$/);
+        if (resourceMatch) {
+          void iptvStreamProxy.serveResource(resourceMatch[1], req, res, reqUrl);
+          return;
+        }
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Live TV resource not found.');
+        return;
       }
 
       if (reqUrl.pathname !== '/stream') {

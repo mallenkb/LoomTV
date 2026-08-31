@@ -662,7 +662,7 @@ export interface OfficialArtworkResult {
   }>;
 }
 
-export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
+export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover' | 'logo';
 export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episodes';
 
 export type OfficialMetadataCandidate = OfficialArtworkResult & {
@@ -801,6 +801,8 @@ export interface StremioPluginCatalogItem {
   type: string;
   /** Source namespace used for profile-scoped Discover state. */
   source?: string;
+  /** TMDB identifier used by providers that require an exact movie or show match. */
+  tmdbId?: string;
   format?: string;
   title: string;
   genres: readonly string[];

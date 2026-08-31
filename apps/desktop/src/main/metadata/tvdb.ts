@@ -84,24 +84,37 @@ function artworkType(record: JsonRecord, artworkTypes: Map<string, string>): str
   return `${rawType} ${artworkTypes.get(rawType) || ''} ${text(record.artworkType)} ${text(record.name)} ${text(record.slug)}`.toLowerCase();
 }
 
+function isPosterArtworkType(type: string): boolean {
+  return type.includes('poster');
+}
+
+function isClearLogoArtworkType(type: string): boolean {
+  return type.includes('clearlogo') || type.includes('clear logo');
+}
+
+function isTransparentLogoUrl(url: string): boolean {
+  try {
+    return /\.(?:png|webp)$/i.test(new URL(url).pathname);
+  } catch {
+    return /\.(?:png|webp)(?:$|[?#])/i.test(url);
+  }
+}
+
+function isCoverArtworkType(type: string): boolean {
+  return !isClearLogoArtworkType(type) && (
+    type.includes('background')
+    || type.includes('backdrop')
+    || type.includes('fanart')
+    || type.includes('banner')
+  );
+}
+
 function typedArtworkUrls(series: JsonRecord, matcher: (type: string) => boolean, artworkTypes = new Map<string, string>()): string[] {
   return unique(asArray(series.artworks || series.artwork).flatMap((artwork) => {
     const record = asRecord(artwork);
     return record && matcher(artworkType(record, artworkTypes))
       ? [normalizeImage(record.image || record.image_url), normalizeImage(record.thumbnail), normalizeImage(record.url)]
       : [];
-  }));
-}
-
-function inferredLogoArtworkUrls(series: JsonRecord): string[] {
-  return unique(asArray(series.artworks || series.artwork).flatMap((artwork) => {
-    const record = asRecord(artwork);
-    const includesText = record && (record.includesText === true || text(record.includesText).toLowerCase() === 'true');
-    if (!record || !includesText) return [];
-    const width = number(record.width);
-    const height = number(record.height);
-    if (width <= 0 || height <= 0 || width / height < 1.35) return [];
-    return [normalizeImage(record.image || record.image_url), normalizeImage(record.thumbnail), normalizeImage(record.url)];
   }));
 }
 
@@ -182,19 +195,22 @@ function tvdbSeriesToMetadata(
     .filter((season) => season.number > 0)
     .map((season) => ({ ...season, title: season.title || `Season ${season.number}` }));
   const allArtwork = artworkUrls(series);
-  const poster = typedArtworkUrls(series, (type) => type.includes('poster'), artworkTypes).at(0)
-    || normalizeImage(series.image)
-    || normalizeImage(series.image_url)
-    || normalizeImage(series.poster)
-    || allArtwork[0]
-    || '';
-  const backdrop = typedArtworkUrls(series, (type) => type.includes('background') || type.includes('backdrop') || type.includes('fanart'), artworkTypes).at(0)
-    || allArtwork.find((url) => url !== poster)
-    || '';
-  const logoCandidates = unique([
-    ...typedArtworkUrls(series, (type) => type.includes('logo') || type.includes('clearlogo') || type.includes('banner'), artworkTypes),
-    ...inferredLogoArtworkUrls(series),
+  const posterCandidates = unique([
+    ...typedArtworkUrls(series, isPosterArtworkType, artworkTypes),
+    normalizeImage(series.image),
+    normalizeImage(series.image_url),
+    normalizeImage(series.poster),
+    ...asArray(series.posters).map(normalizeImage),
   ]);
+  const poster = posterCandidates[0] || allArtwork[0] || '';
+  const backdropCandidates = unique([
+    ...typedArtworkUrls(series, isCoverArtworkType, artworkTypes),
+    ...allArtwork.filter((url) => url !== poster && !posterCandidates.includes(url)),
+  ]);
+  const backdrop = backdropCandidates[0] || allArtwork.find((url) => url !== poster) || '';
+  const logoCandidates = unique([
+    ...typedArtworkUrls(series, isClearLogoArtworkType, artworkTypes),
+  ]).filter(isTransparentLogoUrl);
   const cast = asArray(series.characters || series.cast).slice(0, 8).map((entry) => {
     const record = asRecord(entry) || {};
     return {
@@ -212,6 +228,8 @@ function tvdbSeriesToMetadata(
     year: resolvedYear,
     poster,
     backdrop,
+    posterCandidates,
+    backdropCandidates,
     // Some TVDB records include a transparent logo/banner artwork. It is used
     // only when the preferred TMDB or Fanart logo is unavailable.
     logo: logoCandidates[0] || '',

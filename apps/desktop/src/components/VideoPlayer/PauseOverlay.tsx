@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Star } from 'lucide-react';
 import { epCode } from './helpers';
@@ -26,6 +26,11 @@ function PauseOverlay({
   rating,
   isLiveStream = false,
 }: PauseOverlayProps) {
+  const [logoIndex, setLogoIndex] = useState(0);
+  const logoSourceKey = logoSources.join('\n');
+  useEffect(() => setLogoIndex(0), [logoSourceKey, visible]);
+  const logoSource = logoSources[logoIndex] || '';
+
   return (
     <AnimatePresence>
       {visible && (
@@ -52,14 +57,16 @@ function PauseOverlay({
             exit={{ opacity: 0, y: 12, scale: 0.995 }}
             transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
           >
-            {logoSources.length > 0 ? (
+            {logoSource ? (
               <img
-                src={logoSources[0]}
+                key={logoSource}
+                src={logoSource}
                 alt={title}
                 decoding="async"
                 className={`${isLiveStream ? 'mb-3 h-[6.2rem] max-h-[20vh]' : 'mb-4 h-40 max-h-[28vh]'} w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]`}
                 onError={(event) => {
                   event.currentTarget.style.display = 'none';
+                  setLogoIndex((index) => index + 1);
                 }}
               />
             ) : (

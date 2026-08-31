@@ -95,7 +95,7 @@ export function mediaServerRouteAccess(pathname: string, method = 'GET'): MediaS
     return { kind: 'pairing' };
   }
   if (isIpcOnlyHttpRoute(pathname)) return { kind: 'ipc-only' };
-  if (pathname === '/stream' || pathname === '/subtitle' || pathname.startsWith('/hls/')) {
+  if (pathname === '/stream' || pathname === '/subtitle' || pathname.startsWith('/hls/') || pathname.startsWith('/iptv/')) {
     return { kind: 'stream' };
   }
   if (

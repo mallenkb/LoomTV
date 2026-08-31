@@ -10,7 +10,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { WatchedSolidIcon } from '@/components/LoomIcons';
-import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
+import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
@@ -25,6 +25,11 @@ import { normalizeAnimeCast } from '@/shared/animeCast';
 import DetailHeroActions from '@/components/DetailHeroActions';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
+import {
+  buildVidkingMoviePlaybackReference,
+  buildVidkingTvPlaybackReference,
+  normalizeVidkingTmdbId,
+} from '@/shared/vidkingPlayback';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -188,6 +193,7 @@ function showFromStremioCatalogItem(
       voiceActorLanguage: person.voiceActorLanguage,
     })),
     filePath: '',
+    providerIds: item.tmdbId ? { tmdbId: item.tmdbId } : undefined,
     seasons: [],
     subtitles: [],
     episodes: [],
@@ -790,6 +796,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const canPlayShow = Boolean(onPlay && heroEpisode?.filePath);
   const inMyList = lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
   const isRemoteContent = isRemoteStremioShow || Boolean(routeCatalogItem);
+  const vidkingTmdbId = normalizeVidkingTmdbId(
+    show.providerIds?.tmdbId
+    || routeCatalogItem?.tmdbId
+    || (routeCatalogItem?.source === 'tmdb' ? routeCatalogItem.id : ''),
+  );
+  const canPlayEmbedded = Boolean(onPlay && isRemoteContent && vidkingTmdbId);
+  const isAnimeMovie = kind === 'anime' && /movie/i.test(show.format || routeCatalogItem?.format || '');
   const watchedEntryKeys = isRemoteContent
     ? [discoverWatchedKey({ id: show.id, type: routeCatalogItem?.type || (kind === 'anime' ? 'anime' : 'tv'), source: routeCatalogItem?.source })]
     : localWatchedKeysForItem(show);
@@ -831,9 +844,16 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     sourceArtwork?.backdropCandidates,
     sourceArtwork?.backdrop,
   );
+  const officialLogoArtwork = uniqueArtworkSources(
+    show.logoCandidates,
+    show.logo,
+    sourceArtwork?.logoCandidates,
+    sourceArtwork?.logo,
+  );
+  const playerLogoArtwork = uniqueArtworkSources(customArtwork.logo || '', officialLogoArtwork);
   const playerArtwork = {
-    logo: logoSources(show, sourceArtwork)[0] || '',
-    logoCandidates: logoSources(show, sourceArtwork),
+    logo: playerLogoArtwork[0] || '',
+    logoCandidates: playerLogoArtwork,
     poster: posterArtwork[0] || show.poster,
     posterCandidates: posterArtwork,
     backdrop: heroArtwork[0] || show.backdrop,
@@ -859,6 +879,23 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       show.episodeFiles,
       heroEpisode.season,
       heroEpisode.episode,
+      show.id,
+      playerArtwork,
+    );
+  };
+
+  const handlePlayEmbedded = () => {
+    if (!canPlayEmbedded || !onPlay) return;
+    onPlay(
+      isAnimeMovie
+        ? buildVidkingMoviePlaybackReference(vidkingTmdbId)
+        : buildVidkingTvPlaybackReference(vidkingTmdbId),
+      show.title,
+      undefined,
+      undefined,
+      undefined,
+      isAnimeMovie ? undefined : 1,
+      isAnimeMovie ? undefined : 1,
       show.id,
       playerArtwork,
     );
@@ -947,6 +984,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           onSaved={handleArtworkSaved}
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
+          officialLogoSources={officialLogoArtwork}
           fallbackFrameSource={generatedArtwork[0] || ''}
           revealPath={show.filePath}
           onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(show.id, target)}
@@ -1016,6 +1054,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               canBookmark={!isRemoteContent}
               inMyList={inMyList}
               watched={isWatched}
+              onPlayEmbedded={canPlayEmbedded ? handlePlayEmbedded : undefined}
               onPlayTrailer={isRemoteContent && show.trailerUrl ? () => setTrailerOpen(true) : undefined}
               onToggleList={() => void (async () => {
                 await setListEntry(show.id, 'watchlist', !inMyList);

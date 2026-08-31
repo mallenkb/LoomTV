@@ -1051,7 +1051,6 @@ export function registerIpcHandlers<
   }, z.tuple([nonEmptyString]));
   handle('metadata:provider-request', (_event, request) => deps.requestMetadataProvider(request), z.tuple([metadataProviderRequestSchema]));
   handle('metadata:streaming-providers', (_event, mediaId: string) => deps.getStreamingProviders(mediaId), z.tuple([nonEmptyString]));
-
   handleNoArgs('mpv:availability', () => mpvAvailability());
 
   handleNoArgs('mpv:refresh-availability', () => refreshMpvAvailability());
@@ -1467,11 +1466,11 @@ export function registerIpcHandlers<
   handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => {
     deps.authorizeSettingsWrite();
     return deps.applyOfficialMetadataCandidate(mediaId, candidate, target);
-  }, z.tuple([nonEmptyString, artworkCandidateSchema, z.enum(['all', 'poster', 'cover', 'episodes']).optional()]));
+  }, z.tuple([nonEmptyString, artworkCandidateSchema, z.enum(['all', 'poster', 'cover', 'logo', 'episodes']).optional()]));
   handle('artwork:refresh-official', (_event, mediaId: string, target?: OfficialArtworkRefreshTarget) => {
     deps.authorizeSettingsWrite();
     return deps.refreshOfficialArtwork(mediaId, target);
-  }, z.tuple([nonEmptyString, z.enum(['all', 'poster', 'cover']).optional()]));
+  }, z.tuple([nonEmptyString, z.enum(['all', 'poster', 'cover', 'logo']).optional()]));
   handle('artwork:playback-logo', (_event, mediaId: string) => deps.getPlaybackLogo(mediaId), z.tuple([nonEmptyString]));
   handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
     deps.authorizeSettingsWrite();

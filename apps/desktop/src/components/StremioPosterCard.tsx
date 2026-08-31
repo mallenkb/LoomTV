@@ -40,13 +40,17 @@ function fallbackArtwork(title: string) {
 
 const StremioPosterCard = memo(function StremioPosterCard({
   item,
+  rank,
   metaLine = '',
+  showContentRating = true,
   onSelect,
   onPlayTrailer,
   onPlay,
 }: {
   item: StremioPluginCatalogItem;
+  rank?: number;
   metaLine?: string;
+  showContentRating?: boolean;
   onSelect: (item: StremioPluginCatalogItem) => void;
   onPlayTrailer?: () => void;
   onPlay?: (item: StremioPluginCatalogItem) => void;
@@ -120,20 +124,31 @@ const StremioPosterCard = memo(function StremioPosterCard({
               rating={mediaFormatLabel(item.format, item.type)}
               className="shrink-0 bg-[var(--loom-surface-3)]"
             />
-            <ContentRatingBadge rating={item.contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
+            {showContentRating && (
+              <ContentRatingBadge rating={item.contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
+            )}
           </div>
         )}
       </div>
-      <WatchedToggle
-        watched={watched}
-        onToggle={() => {
-          cacheWatchedDiscoverItem(item);
-          void setWatched(watchedKey, !watched);
-        }}
-        className="loom-poster-watched-toggle absolute left-2 top-2 z-20"
-        iconClassName="h-4 w-4"
-        size="compact"
-      />
+      {rank === undefined ? (
+        <WatchedToggle
+          watched={watched}
+          onToggle={() => {
+            cacheWatchedDiscoverItem(item);
+            void setWatched(watchedKey, !watched);
+          }}
+          className="loom-poster-watched-toggle absolute left-2 top-2 z-20"
+          iconClassName="h-4 w-4"
+          size="compact"
+        />
+      ) : (
+        <span
+          aria-label={`Rank ${rank}`}
+          className="pointer-events-none absolute left-3 top-1 z-20 text-[2.7rem] font-black leading-none text-white [text-shadow:0_1px_2px_rgb(0_0_0_/_0.95),0_0_5px_rgb(0_0_0_/_0.9)]"
+        >
+          {rank}
+        </span>
+      )}
     </div>
   );
 });

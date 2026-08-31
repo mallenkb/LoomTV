@@ -61,6 +61,16 @@ const tmdbVideosSchema = z.object({
   })).optional(),
 });
 
+const tmdbImagesSchema = z.object({
+  logos: z.array(z.object({
+    file_path: z.string(),
+    iso_639_1: z.string().nullish(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    vote_average: z.number().optional(),
+  })).optional(),
+});
+
 export const tmdbReleaseDatesResponseSchema = tmdbReleaseDatesSchema;
 export const tmdbContentRatingsResponseSchema = tmdbContentRatingsSchema;
 export const tmdbVideosResponseSchema = tmdbVideosSchema;
@@ -80,6 +90,7 @@ export const tmdbDetailResponseSchema = tmdbListResultSchema.extend({
   release_dates: tmdbReleaseDatesSchema.optional(),
   content_ratings: tmdbContentRatingsSchema.optional(),
   videos: tmdbVideosSchema.optional(),
+  images: tmdbImagesSchema.optional(),
   'watch/providers': tmdbWatchProviderDetailSchema.optional(),
 });
 

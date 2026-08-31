@@ -340,7 +340,7 @@ export default function LiveTvSettingsSection() {
               void handleAdd();
             }}
           >
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
               <label className="sr-only" htmlFor="iptv-source-name">Tab name</label>
               <input
                 id="iptv-source-name"
@@ -350,10 +350,8 @@ export default function LiveTvSettingsSection() {
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Tab name"
-                className={INPUT_CLASS}
+                className={`${INPUT_CLASS} w-full`}
               />
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
               <label className="sr-only" htmlFor="iptv-playlist-url">M3U playlist URL</label>
               <input
                 id="iptv-playlist-url"
@@ -364,7 +362,7 @@ export default function LiveTvSettingsSection() {
                 value={playlistUrl}
                 onChange={(event) => setPlaylistUrl(event.target.value)}
                 placeholder="https://provider.example/playlist.m3u"
-                className={INPUT_CLASS}
+                className={`${INPUT_CLASS} w-full sm:col-span-3`}
               />
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">

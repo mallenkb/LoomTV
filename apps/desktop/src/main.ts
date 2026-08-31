@@ -409,6 +409,12 @@ function advanceLibraryMutationVersion(): void {
   setResourceRegistryCatalogGeneration(libraryMutationVersion);
 }
 
+function saveCustomArtworkAndRefreshCatalog(mediaId: string, target: string, dataUrl: string): void {
+  saveCustomArtwork(mediaId, target, dataUrl);
+  cachedLibrary = null;
+  advanceLibraryMutationVersion();
+}
+
 const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
 const MAIN_WINDOW_DEV_SERVER_URL = getRendererDevServerUrl();
 
@@ -1540,7 +1546,7 @@ function configureRendererSecurityPolicy(): void {
     "font-src 'self' file: data:",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
+    "frame-src https://www.youtube-nocookie.com https://www.youtube.com https://www.vidking.net",
     "frame-ancestors 'none'",
     "form-action 'none'",
   ].join('; ');
@@ -1998,7 +2004,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   cleanupLocalSegmentAnalysis: () => ({ queued: analysisCoordinator.cleanup() }),
   rebuildLocalSegmentAnalysis: analysisCoordinator.rebuild,
   customArtworkForRenderer,
-  saveCustomArtwork,
+  saveCustomArtwork: saveCustomArtworkAndRefreshCatalog,
   getOfficialMetadataCandidates,
   applyOfficialMetadataCandidate,
   refreshOfficialArtwork,
@@ -2078,7 +2084,7 @@ export const mediaServerDeps = {
   getMediaSegments: skipSegmentService.getSegments,
   getOfficialMetadataCandidates,
   customArtworkForRenderer,
-  saveCustomArtwork,
+  saveCustomArtwork: saveCustomArtworkAndRefreshCatalog,
   refreshIncompleteMetadata,
   requestMetadataProvider,
   applyOfficialMetadataCandidate,
@@ -2112,6 +2118,16 @@ export const mediaServerDeps = {
   loadLibrary,
   resourceRegistryEpoch: RESOURCE_REGISTRY_BOOT_ID,
   loadSettings,
+  listIptvSources: () => iptvService.listSources(),
+  addIptvSource: (input) => iptvService.addSource(input),
+  updateIptvSource: (sourceId, patch) => iptvService.updateSource(sourceId, patch),
+  removeIptvSource: (sourceId) => iptvService.removeSource(sourceId),
+  refreshIptvSource: async (sourceId) => {
+    await iptvService.refreshSource(sourceId);
+    return iptvService.listSources();
+  },
+  listIptvChannels: (request) => iptvService.listChannels(request),
+  resolveIptvStreamUrl: (sourceId, channelId) => iptvService.getChannelStreamUrl(sourceId, channelId),
   profileRestrictionIdentity,
   readJsonBody,
   requireLocalOrLanAccess,
@@ -2132,6 +2148,7 @@ async function startBackgroundServices(): Promise<void> {
   const trayGlyphPath = getTrayIconPath();
   const trayIconPath = trayGlyphPath || getWindowIconPath();
   if (trayIconPath) {
+    const unifiedServerState = getUnifiedDesktopServerState();
     createServerTray({
       iconPath: trayIconPath,
       iconIsTemplate: Boolean(trayGlyphPath),
@@ -2147,15 +2164,16 @@ async function startBackgroundServices(): Promise<void> {
           console.warn('[tray] Could not open LoomTV in the default browser:', error);
         });
       },
-      // Keep server administration visible even if the canonical server is
-      // still starting or failed to initialize. The previous conditional
-      // removed the menu item permanently when the tray was created before
-      // the server became ready, leaving users with no discoverable route to
-      // server control.
-      onOpenAdmin: () => {
-        if (isUpdateInstalling() || isAppShuttingDown) return;
-        void openUnifiedDesktopAdmin();
-      },
+      onOpenAdmin: unifiedServerState.ready && unifiedServerState.adminUrl
+        ? () => {
+            if (isUpdateInstalling() || isAppShuttingDown) return;
+            void openUnifiedDesktopAdmin().then((opened) => {
+              if (!opened) console.warn('[tray] Server administration is no longer available.');
+            }).catch((error) => {
+              console.warn('[tray] Could not open server administration:', error);
+            });
+          }
+        : undefined,
       onQuit: () => app.quit(),
       port: getMediaServerPort(),
     });

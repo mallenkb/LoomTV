@@ -20,6 +20,7 @@ import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import DetailHeroActions from '@/components/DetailHeroActions';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKey } from '@/lib/watched';
+import { buildVidkingMoviePlaybackReference, normalizeVidkingTmdbId } from '@/shared/vidkingPlayback';
 
 type MovieDetailRouteState = {
   from?: string;
@@ -123,6 +124,7 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
       image: person.image || '',
     })),
     filePath: '',
+    providerIds: item.tmdbId ? { tmdbId: item.tmdbId } : undefined,
     subtitles: [],
     posterCandidates: poster ? [poster] : [],
     backdropCandidates: backdrop ? [backdrop] : [],
@@ -379,7 +381,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   );
   const officialPosterArtwork = uniqueArtworkSources(movie.posterCandidates, movie.poster, sourceArtwork?.posterCandidates, sourceArtwork?.poster);
   const officialCoverArtwork = uniqueArtworkSources(movie.backdropCandidates, movie.backdrop, sourceArtwork?.backdropCandidates, sourceArtwork?.backdrop);
-  const playerLogoArtwork = logoSources(movie, sourceArtwork);
+  const playerLogoArtwork = uniqueArtworkSources(customArtwork.logo || '', logoSources(movie, sourceArtwork));
   const playerArtwork = {
     logo: playerLogoArtwork[0] || '',
     logoCandidates: playerLogoArtwork,
@@ -395,12 +397,33 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     ? `${formatShortMinutes(progress.position)} of ${formatShortMinutes(progress.duration)}`
     : null;
   const canPlayMovie = Boolean(onPlay && movie.filePath);
+  const vidkingTmdbId = normalizeVidkingTmdbId(
+    movie.providerIds?.tmdbId
+    || routeCatalogItem?.tmdbId
+    || (routeCatalogItem?.source === 'tmdb' ? routeCatalogItem.id : ''),
+  );
+  const canPlayEmbedded = Boolean(onPlay && isRemoteContent && vidkingTmdbId);
   void progressTick;
 
   const handlePlay = async () => {
     if (canPlayMovie && onPlay) {
       onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id, playerArtwork);
     }
+  };
+
+  const handlePlayEmbedded = () => {
+    if (!canPlayEmbedded || !onPlay) return;
+    onPlay(
+      buildVidkingMoviePlaybackReference(vidkingTmdbId),
+      movie.title,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      movie.id,
+      playerArtwork,
+    );
   };
 
   const sourceRoute = routeState?.from?.startsWith('/discover')
@@ -455,6 +478,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           onSaved={handleArtworkSaved}
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
+          officialLogoSources={playerLogoArtwork}
           fallbackFrameSource={fallbackThumbnails[0] || ''}
           revealPath={movie.filePath}
           onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(movie.id, target)}
@@ -523,6 +547,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               canBookmark={!isRemoteContent}
               inMyList={inMyList}
               watched={isWatched}
+              onPlayEmbedded={canPlayEmbedded ? handlePlayEmbedded : undefined}
               onPlayTrailer={isRemoteContent && movie.trailerUrl ? () => setTrailerOpen(true) : undefined}
               onToggleList={() => void (async () => {
                 await setListEntry(movie.id, 'watchlist', !inMyList);

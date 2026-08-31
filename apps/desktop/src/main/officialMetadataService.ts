@@ -61,7 +61,7 @@ export type OfficialArtworkRefreshResult = {
   providerIds?: MetadataProviderIds;
 };
 
-export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
+export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover' | 'logo';
 export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episodes';
 
 export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
@@ -708,6 +708,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const settings = loadSettings();
     const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
+    const fanartApiKey = getMetadataApiKey(settings, 'fanart');
     const tvdbApiKey = getMetadataApiKey(settings, 'tvdb');
     const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
 
@@ -721,7 +722,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         safeMetadataProvider(fetchTVMetadata(title, year), null),
         safeMetadataProvider(fetchTVMetadataCandidates(title, year), []),
       ]);
-      return sortMetadataCandidates(uniqueMetadataCandidates([
+      const candidates = sortMetadataCandidates(uniqueMetadataCandidates([
         metadataCandidate('TMDB', tmdbById, title),
         metadataCandidate('TMDB', tmdbBySearch, title),
         ...matchingMetadataResults(tmdbCandidates, localTitles).map((candidate) => metadataCandidate('TMDB', candidate, title)),
@@ -730,6 +731,23 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
         ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
       ]), title, localTitles);
+      const fanartLogos = await fetchFanartMovieLogos(
+        tmdbById?.providerIds?.tmdbId || tmdbBySearch?.providerIds?.tmdbId || providerIds.tmdbId,
+        fanartApiKey,
+      );
+      const artworkCandidateIndex = candidates.findIndex((candidate) => candidate.source === 'TMDB');
+      if (artworkCandidateIndex >= 0 && fanartLogos.length > 0) {
+        const candidate = candidates[artworkCandidateIndex];
+        candidates[artworkCandidateIndex] = {
+          ...candidate,
+          logo: candidate.logo || fanartLogos[0],
+          logoCandidates: orderedArtworkCandidates(
+            ...(candidate.logoCandidates || []),
+            ...fanartLogos,
+          ),
+        };
+      }
+      return candidates;
     }
 
     const likelyAnime = item.type === 'anime';
@@ -774,10 +792,33 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       : tvdbApiKey?.trim()
         ? [...tvmazeCandidates, ...omdbCandidates, ...tvdbCandidatesInOrder]
         : [...tvmazeCandidates, ...omdbCandidates];
-    return sortMetadataCandidates(uniqueMetadataCandidates([
+    const candidates = sortMetadataCandidates(uniqueMetadataCandidates([
       ...animeCandidates,
       ...providerCandidates,
     ]), title, localTitles);
+    const fanartLogos = await fetchFanartTVLogos(
+      tmdbById?.providerIds?.tvdbId
+        || tmdbBySearch?.providerIds?.tvdbId
+        || tvdbById?.providerIds?.tvdbId
+        || tvdbBySearch?.providerIds?.tvdbId
+        || providerIds.tvdbId,
+      fanartApiKey,
+    );
+    const artworkCandidateIndex = candidates.findIndex((candidate) => candidate.source === 'TMDB') >= 0
+      ? candidates.findIndex((candidate) => candidate.source === 'TMDB')
+      : candidates.findIndex((candidate) => candidate.source === 'TVDB');
+    if (artworkCandidateIndex >= 0 && fanartLogos.length > 0) {
+      const candidate = candidates[artworkCandidateIndex];
+      candidates[artworkCandidateIndex] = {
+        ...candidate,
+        logo: candidate.logo || fanartLogos[0],
+        logoCandidates: orderedArtworkCandidates(
+          ...(candidate.logoCandidates || []),
+          ...fanartLogos,
+        ),
+      };
+    }
+    return candidates;
   }
 
   async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
@@ -1003,15 +1044,18 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     const applyTarget = requestedTarget === 'poster'
       || requestedTarget === 'cover'
+      || requestedTarget === 'logo'
       || requestedTarget === 'episodes'
       ? requestedTarget
       : 'all';
     const applyAll = applyTarget === 'all';
     const applyPoster = applyAll || applyTarget === 'poster';
     const applyCover = applyAll || applyTarget === 'cover';
+    const applyLogo = applyAll || applyTarget === 'logo';
     const applyEpisodes = applyAll || applyTarget === 'episodes';
     const selectedPoster = candidate.thumbnail || candidate.posterCandidates?.find(Boolean) || '';
     const selectedCover = candidate.cover || candidate.backdropCandidates?.find(Boolean) || '';
+    const selectedLogo = candidate.logo || candidate.logoCandidates?.find(Boolean) || '';
 
     /* Ratings are replaced as a block rather than merged. The user picked this
        match precisely because the stored one was wrong, so anything the old
@@ -1035,7 +1079,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
     if (applyPoster && selectedPoster) target.poster = selectedPoster;
     if (applyCover && selectedCover) target.backdrop = selectedCover;
-    if (applyAll && candidate.logo) target.logo = candidate.logo;
+    if (applyLogo && selectedLogo) target.logo = selectedLogo;
     if (applyAll && candidate.summary) target.summary = candidate.summary;
     if (applyAll && candidateRating > 0) target.rating = candidateRating;
     if (applyAll && hasResolvedProviderRatings) {
@@ -1073,7 +1117,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         target.backdrop,
       );
     }
-    if (applyAll) {
+    if (applyLogo) {
       target.logoCandidates = orderedArtworkCandidates(
         ...(candidate.logoCandidates || []),
         candidate.logo,
@@ -1087,7 +1131,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       : applyTarget === 'episodes'
         ? ['episodes']
         : ['artwork']);
-    if (applyPoster || applyCover || applyAll) await cacheArtworkNow(library);
+    if (applyPoster || applyCover || applyLogo) await cacheArtworkNow(library);
 
     return {
       thumbnail: target.poster || '',
@@ -1142,12 +1186,18 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
 
     const refreshed = await fetchOfficialArtworkForItem(target);
-    const refreshTarget = requestedTarget === 'poster' || requestedTarget === 'cover' ? requestedTarget : 'all';
+    const refreshTarget = requestedTarget === 'poster'
+      || requestedTarget === 'cover'
+      || requestedTarget === 'logo'
+      ? requestedTarget
+      : 'all';
     const refreshPoster = refreshTarget === 'all' || refreshTarget === 'poster';
     const refreshCover = refreshTarget === 'all' || refreshTarget === 'cover';
+    const refreshLogo = refreshTarget === 'all' || refreshTarget === 'logo';
     const refreshMetadata = refreshTarget === 'all';
     const refreshedPoster = refreshed.thumbnail || refreshed.posterCandidates?.find(Boolean);
     const refreshedCover = refreshed.cover || refreshed.backdropCandidates?.find(Boolean);
+    const refreshedLogo = refreshed.logo || refreshed.logoCandidates?.find(Boolean);
     const refreshedCast = target.type === 'anime'
       ? normalizeAnimeCast(refreshed.cast?.length ? refreshed.cast : target.cast)
       : refreshed.cast;
@@ -1156,6 +1206,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const hasRefresh = Boolean(
       (refreshPoster && refreshedPoster)
       || (refreshCover && refreshedCover)
+      || (refreshLogo && refreshedLogo)
       || (refreshMetadata && (
         refreshed.format
         || refreshed.contentRating
@@ -1185,7 +1236,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (refreshMetadata && refreshed.runtime) target.runtime = refreshed.runtime;
       if (refreshMetadata && refreshed.seasonCount !== undefined) target.seasonCount = refreshed.seasonCount;
       if (refreshMetadata && refreshed.episodeCount !== undefined) target.episodeCount = refreshed.episodeCount;
-      if (refreshMetadata && refreshed.logo) target.logo = refreshed.logo;
+      if (refreshLogo && refreshedLogo) target.logo = refreshedLogo;
       if (refreshMetadata && refreshed.summary) target.summary = refreshed.summary;
       if (refreshMetadata && refreshed.rating) target.rating = refreshed.rating;
       if (refreshMetadata && refreshedHasProviderRatings) target.providerRatings = refreshed.providerRatings;
@@ -1205,7 +1256,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         ...officialArtworkOnly(target.backdropCandidates || []),
         target.backdrop,
       );
-      if (refreshMetadata) target.logoCandidates = orderedArtworkCandidates(
+      if (refreshLogo) target.logoCandidates = orderedArtworkCandidates(
         ...(refreshed.logoCandidates || []),
         ...officialArtworkOnly(target.logoCandidates || []),
         target.logo,
@@ -1227,6 +1278,12 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       return {
         cover: refreshedCover,
         backdropCandidates: target.backdropCandidates || refreshed.backdropCandidates,
+      };
+    }
+    if (refreshTarget === 'logo') {
+      return {
+        logo: refreshedLogo,
+        logoCandidates: target.logoCandidates || refreshed.logoCandidates,
       };
     }
 
