@@ -11,6 +11,7 @@ import { episodeFileKey, indexEpisodeFiles } from './episodeIndex';
 import SharedListHighlight from '../SharedListHighlight';
 
 interface PlayerEpisodePanelProps {
+  sourceMode?: boolean;
   episodePanelWidth: number;
   setEpisodePanelWidth: React.Dispatch<React.SetStateAction<number>>;
   startSidePanelResize: (
@@ -105,6 +106,7 @@ function EpisodeThumbnail({
 }
 
 interface PlayerEpisodeRowProps {
+  sourceMode?: boolean;
   episode: EpisodeMeta;
   file?: EpisodeFile;
   isCurrent: boolean;
@@ -117,6 +119,7 @@ interface PlayerEpisodeRowProps {
 }
 
 const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
+  sourceMode = false,
   episode,
   file,
   isCurrent,
@@ -130,11 +133,11 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
   const epPath = file?.filePath;
   const epDur = isCurrent ? currentDuration : file?.localMetadata?.durationSeconds;
   const episodeTitle = displayEpisodeTitle(episode.season, episode.number, episode.title, epPath);
-  const watched = epPath ? isWatched(epPath, epDur) : false;
-  const inProgress = epPath ? isInProgress(epPath, epDur) : false;
-  const episodeRating = Number.isFinite(episode.rating) && episode.rating > 0 ? episode.rating : 0;
-  const code = epCode(episode.season, episode.number);
-  const runtime = runtimeLabel(epDur);
+  const watched = !sourceMode && epPath ? isWatched(epPath, epDur) : false;
+  const inProgress = !sourceMode && epPath ? isInProgress(epPath, epDur) : false;
+  const episodeRating = !sourceMode && Number.isFinite(episode.rating) && episode.rating > 0 ? episode.rating : 0;
+  const code = sourceMode ? `Source ${episode.number}` : epCode(episode.season, episode.number);
+  const runtime = sourceMode ? '' : runtimeLabel(epDur);
   const progFrac = isCurrent && currentDuration && currentDuration > 0
     ? (currentPosition || 0) / currentDuration
     : epPath
@@ -152,7 +155,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       aria-current={isCurrent ? 'true' : undefined}
       data-shared-highlight-item
       data-shared-highlight-id={`${episode.season}-${episode.number}`}
-      className={`group relative z-10 flex w-full items-start gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
+      className={`group relative z-10 flex w-full ${sourceMode ? 'items-center' : 'items-start'} gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
         ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
     >
       {isCurrent && (
@@ -198,10 +201,10 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
         )}
       </span>
 
-      <span className="min-w-0 flex-1 pt-0.5">
+      <span className={`min-w-0 flex-1 ${sourceMode ? '' : 'pt-0.5'}`}>
         <span className="flex items-center justify-between gap-2">
           <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
-            {episode.number}. {episodeTitle}
+            {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}
           </span>
           {episodeRating > 0 && (
             <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[var(--loom-rating)]">
@@ -225,6 +228,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
 });
 
 export default function PlayerEpisodePanel({
+  sourceMode = false,
   episodePanelWidth,
   setEpisodePanelWidth,
   startSidePanelResize,
@@ -295,7 +299,7 @@ export default function PlayerEpisodePanel({
 
   return (
     <aside
-      aria-label={`${title} episodes`}
+      aria-label={`${title} ${sourceMode ? 'sources' : 'episodes'}`}
       className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col bg-neutral-950 shadow-2xl"
       style={{ width: clampSidePanelWidth(episodePanelWidth), maxWidth: '40vw' }}
       onClick={(event) => event.stopPropagation()}
@@ -313,20 +317,21 @@ export default function PlayerEpisodePanel({
         <div className="min-w-0">
           <p className="truncate text-base font-semibold tracking-tight text-white">{title}</p>
           <p className="mt-0.5 text-[11px] text-[var(--loom-muted)]">
-            {hasMultipleSeasons ? `${sortedSeasons.length} seasons · ` : ''}{totalEpisodeCount} episodes
+            {!sourceMode && hasMultipleSeasons ? `${sortedSeasons.length} seasons · ` : ''}
+            {totalEpisodeCount} {sourceMode ? 'sources' : 'episodes'}
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
           className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--loom-muted)] transition-colors hover:bg-white/10 hover:text-white"
-          aria-label="Close episode panel"
+          aria-label={`Close ${sourceMode ? 'source' : 'episode'} panel`}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      {hasMultipleSeasons && (
+      {!sourceMode && hasMultipleSeasons && (
         <div className="border-b border-white/[0.07] px-4 pb-3">
           <SharedListHighlight
             activeId={String(activeSeason)}
@@ -389,7 +394,7 @@ export default function PlayerEpisodePanel({
             >
               <div className="sticky top-0 z-10 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
                 <span className="flex items-center gap-2 text-xs font-semibold text-white">
-                  {seasonCode(season)}
+                  {sourceMode ? 'Sources' : seasonCode(season)}
                   {season === currentSeason && (
                     <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">
                       Now playing
@@ -397,7 +402,7 @@ export default function PlayerEpisodePanel({
                   )}
                 </span>
                 <span className="text-[10px] font-medium text-[var(--loom-muted)]">
-                  {(groupedEpisodes[season] || []).length} episodes
+                  {(groupedEpisodes[season] || []).length} {sourceMode ? 'sources' : 'episodes'}
                 </span>
               </div>
               {(groupedEpisodes[season] || []).map((ep) => {
@@ -406,6 +411,7 @@ export default function PlayerEpisodePanel({
                 return (
                   <PlayerEpisodeRow
                     key={`${ep.season}-${ep.number}`}
+                    sourceMode={sourceMode}
                     episode={ep}
                     file={file}
                     isCurrent={isCurrent}

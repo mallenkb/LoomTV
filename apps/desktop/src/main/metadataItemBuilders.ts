@@ -17,6 +17,7 @@ import {
 } from './metadata/helpers.ts';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
 import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
+import { tvMazeShowIsEnded } from './metadata/tvmaze.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import {
@@ -47,6 +48,7 @@ export type MetadataItemBuilderDependencies = {
   fetchJikanMetadata: typeof import('./metadata/jikan.ts').fetchJikanMetadata;
   fetchOMDbMetadata: typeof import('./metadata/omdb.ts').fetchOMDbMetadata;
   fetchOMDbMetadataById: typeof import('./metadata/omdb.ts').fetchOMDbMetadataById;
+  fetchOMDbSeasonEpisodes: typeof import('./metadata/omdb.ts').fetchOMDbSeasonEpisodes;
   fetchTMDBMovieMetadata: typeof import('./metadata/tmdb.ts').fetchTMDBMovieMetadata;
   fetchTMDBMovieMetadataById: typeof import('./metadata/tmdb.ts').fetchTMDBMovieMetadataById;
   fetchTMDBTVMetadata: typeof import('./metadata/tmdb.ts').fetchTMDBTVMetadata;
@@ -74,6 +76,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     fetchJikanMetadata,
     fetchOMDbMetadata,
     fetchOMDbMetadataById,
+    fetchOMDbSeasonEpisodes,
     fetchTMDBMovieMetadata,
     fetchTMDBMovieMetadataById,
     fetchTMDBTVMetadata,
@@ -114,25 +117,20 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
   });
 
   const movieMetadataRating = (
-    tmdbMeta?: Partial<MediaItem> | null,
+    _tmdbMeta?: Partial<MediaItem> | null,
     omdbMeta?: OMDbResponse | null,
-    tvMeta?: { rating?: number } | null,
-  ): number => numericRating(tmdbMeta?.rating)
-    || numericRating(omdbMeta?.imdbRating)
-    || numericRating(tvMeta?.rating);
+    _tvMeta?: { rating?: number } | null,
+  ): number => numericRating(omdbMeta?.imdbRating);
 
   const showMetadataRating = (
-    type: MediaItem['type'],
-    jikanMeta?: Partial<MediaItem> | null,
-    tmdbMeta?: Partial<MediaItem> | null,
-    tvMeta?: { rating?: number } | null,
+    _type: MediaItem['type'],
+    _jikanMeta?: Partial<MediaItem> | null,
+    _tmdbMeta?: Partial<MediaItem> | null,
+    tvMeta?: { rating?: number; showStatus?: string } | null,
     omdbMeta?: OMDbResponse | null,
-    preferOmdbFallback = true,
-  ): number => numericRating(tmdbMeta?.rating)
-    || (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
-    || (preferOmdbFallback
-      ? numericRating(omdbMeta?.imdbRating) || numericRating(tvMeta?.rating)
-      : numericRating(tvMeta?.rating) || numericRating(omdbMeta?.imdbRating));
+  ): number => tvMazeShowIsEnded(tvMeta?.showStatus)
+    ? numericRating(omdbMeta?.imdbRating)
+    : numericRating(tvMeta?.rating);
 
   const officialArtworkOnly = (urls: Array<string | null | undefined>): string[] => {
     const seen = new Set<string>();
@@ -323,9 +321,14 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || defaultTVSummary
       || '';
 
-    const rating = numericRating(matchedTmdbTVMeta?.rating)
-      || (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
-      || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData, preferOmdbFallback);
+    const completedSeries = tvMazeShowIsEnded(matchedTVMeta?.showStatus);
+    const rating = showMetadataRating(
+      finalType,
+      matchedJikanMeta,
+      matchedTmdbTVMeta,
+      matchedTVMeta,
+      matchedOmdbData,
+    );
 
     const defaultTVGenres = preferOmdbFallback
       ? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : matchedTVMeta?.genres)
@@ -360,16 +363,23 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const jikanEpisodesForLocalSeasons = finalType === 'anime'
       ? await fetchJikanEpisodesForLocalAnimeSeasons(episodeFiles, searchTitle, matchedJikanMeta)
       : { episodes: [], malIdBySeason: {} };
-
+    const omdbCompletedEpisodes = completedSeries
+      ? await fetchOMDbSeasonEpisodes(
+        matchedOmdbData?.imdbID || providerIds.imdbId,
+        localSeasons.map((season) => season.number),
+        omdbApiKey,
+      )
+      : [];
     // ── Merge episode metadata onto local files ────────────────────────────────
-    // Keep provider priority per field so anime can use TVmaze titles while Jikan
-    // fills episode scores that TVmaze often leaves empty.
+    // TVmaze supplies ratings while a show is active. Once TVmaze marks it
+    // Ended, OMDb becomes the first rating source and TVmaze remains fallback.
     const mergedEpisodes = mergeEpisodeMetadataSources(localEpisodes, [
       matchedTVMeta?.episodes,
       matchedTVDBMeta?.episodes,
       finalType === 'anime' && jikanEpisodesForLocalSeasons.episodes.length > 0 ? jikanEpisodesForLocalSeasons.episodes : null,
       matchedTmdbTVMeta?.episodes,
-    ], finalType === 'anime' ? { ratingSourceOrder: [1, 0, 2] } : undefined);
+      completedSeries && omdbCompletedEpisodes.length > 0 ? omdbCompletedEpisodes : null,
+    ], { ratingSourceOrder: completedSeries ? [4] : [0] });
     const mergedEpisodeTitleByKey = new Map(
       mergedEpisodes.map((episode) => [`${episode.season}-${episode.number}`, episode.title]),
     );
@@ -403,7 +413,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       seasonCount: matchedTmdbTVMeta?.seasonCount || matchedTVDBMeta?.seasonCount,
       episodeCount: matchedTmdbTVMeta?.episodeCount || matchedTVDBMeta?.episodeCount,
       trailerUrl: matchedTmdbTVMeta?.trailerUrl,
-      providerRatings: omdbProviderRatings(matchedOmdbData),
+      providerRatings: completedSeries ? omdbProviderRatings(matchedOmdbData) : undefined,
       contentRatings: mergeContentRatings(
         matchedTmdbTVMeta?.contentRatings,
         omdbContentRatings(matchedOmdbData),
@@ -615,11 +625,10 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || defaultTVSummary
       || matchedTmdbData?.summary
       || '';
-    const rating = finalType === 'movie'
+    const completedSeries = useShowMetadata && tvMazeShowIsEnded(matchedTVMeta?.showStatus);
+    const rating = useMovieMetadata
       ? movieMetadataRating(matchedTmdbData, matchedOmdbData, matchedTVMeta)
-      : numericRating(matchedTmdbTVMeta?.rating)
-        || (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
-        || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData, preferOmdbFallback);
+      : showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
     const defaultTVGenres = preferOmdbFallback
       ? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : matchedTVMeta?.genres)
       : (matchedTVMeta?.genres ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : undefined));
@@ -670,7 +679,9 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       seasonCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.seasonCount || matchedTVDBMeta?.seasonCount,
       episodeCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.episodeCount || matchedTVDBMeta?.episodeCount,
       trailerUrl: finalType === 'movie' ? matchedTmdbData?.trailerUrl : matchedTmdbTVMeta?.trailerUrl,
-      providerRatings: omdbProviderRatings(matchedOmdbData),
+      providerRatings: useMovieMetadata || completedSeries
+        ? omdbProviderRatings(matchedOmdbData)
+        : undefined,
       contentRatings: mergeContentRatings(
         useMovieMetadata ? matchedTmdbData?.contentRatings : undefined,
         useShowMetadata ? matchedTmdbTVMeta?.contentRatings : undefined,
@@ -701,12 +712,31 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     };
 
     if (finalType === 'anime' || finalType === 'tv') {
-      const remoteEpisodes: EpisodeMeta[] =
-        matchedTVMeta?.episodes
-        ?? matchedTVDBMeta?.episodes
-        ?? (finalType === 'anime' ? matchedJikanMeta?.episodes : null)
-        ?? matchedTmdbTVMeta?.episodes
-        ?? [];
+      const omdbCompletedEpisodes = completedSeries
+        ? await fetchOMDbSeasonEpisodes(
+          matchedOmdbData?.imdbID || providerIds.imdbId,
+          [1],
+          omdbApiKey,
+        )
+        : [];
+      const singleEpisode = mergeEpisodeMetadataSources([{
+        season: 1,
+        number: 1,
+        title: '',
+        summary: '',
+        still: '',
+        rating: 0,
+        airDate: '',
+        localMetadata: probe.localMetadata,
+      }], useShowMetadata ? [
+        matchedTVMeta?.episodes,
+        matchedTVDBMeta?.episodes,
+        finalType === 'anime' ? matchedJikanMeta?.episodes : null,
+        matchedTmdbTVMeta?.episodes,
+        completedSeries ? omdbCompletedEpisodes : null,
+      ] : [], {
+        ratingSourceOrder: completedSeries ? [4] : [0],
+      })[0];
       const remoteSeasons = mergeOfficialSeasonMetadata(
         matchedTmdbTVMeta?.tmdbSeasons,
         matchedTVMeta?.seasons,
@@ -716,26 +746,25 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         [{ number: 1, title: 'Season 1', episodeCount: 1 }],
         remoteSeasons,
       );
-      const episodeStill = remoteEpisodes.find((episode) => Boolean(episode.still))?.still || officialBackdrop || embeddedPoster || localThumbnail;
-      const firstRemoteEpisode = remoteEpisodes.find((episode) => episode.season === 1 && episode.number === 1) || remoteEpisodes[0];
+      const episodeStill = singleEpisode?.still || officialBackdrop || embeddedPoster || localThumbnail;
 
       return {
         ...baseItem,
         seasons,
         episodes: [{
           season: 1, number: 1,
-          title: firstRemoteEpisode?.title || resolvedTitle,
-          summary: firstRemoteEpisode?.summary || summary,
+          title: singleEpisode?.title || resolvedTitle,
+          summary: singleEpisode?.summary || summary,
           still: episodeStill,
-          rating: firstRemoteEpisode?.rating || rating,
-          airDate: firstRemoteEpisode?.airDate || '',
+          rating: singleEpisode?.rating || rating,
+          airDate: singleEpisode?.airDate || '',
           localMetadata: probe.localMetadata,
         }],
         episodeFiles: [{
           season: 1,
           episode: 1,
           filePath: fullPath,
-          title: firstRemoteEpisode?.title || resolvedTitle,
+          title: singleEpisode?.title || resolvedTitle,
           localMetadata: probe.localMetadata,
         }],
       };

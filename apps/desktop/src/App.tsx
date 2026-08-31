@@ -15,6 +15,7 @@ import TVDetail from './pages/TVDetail';
 import Settings from './pages/Settings';
 import PluginDiscover from './pages/PluginDiscover';
 import LiveTv from './pages/LiveTv';
+import ArchiveOrgAddon from './pages/ArchiveOrgAddon';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer/LazyVideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
@@ -39,6 +40,7 @@ import {
 } from './lib/remoteDesktop';
 import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
 import { isIptvPlaybackReference } from './shared/iptvPlayback.ts';
+import { buildExternalPlaybackReference } from './shared/externalPlayback.ts';
 
 interface NowPlaying {
   playbackRequestId: string;
@@ -508,6 +510,20 @@ function AppShell() {
     );
   }, [handlePlayMedia]);
 
+  const handlePlayArchiveMovie = useCallback((streamUrl: string, title: string, posterUrl: string) => {
+    handlePlayMedia(
+      buildExternalPlaybackReference(streamUrl),
+      title,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { poster: posterUrl, backdrop: posterUrl },
+    );
+  }, [handlePlayMedia]);
+
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {
     setNowPlaying((prev) => {
@@ -570,6 +586,7 @@ function AppShell() {
             <Route path="/anime" element={<TVShows kind="anime" />} />
             <Route path="/discover" element={<PluginDiscover />} />
             <Route path="/live/:sourceId" element={<LiveTv onPlay={handlePlayLiveChannel} />} />
+            <Route path="/addons/stremio/:addonId" element={<ArchiveOrgAddon onPlay={handlePlayArchiveMovie} />} />
             <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
             <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
             <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />

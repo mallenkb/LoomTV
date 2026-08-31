@@ -73,9 +73,18 @@ export function createStyles(theme: MobileThemeColors) {
     paddingBottom: 32,
     paddingTop: 24,
   },
+  pairingContentLargeText: {
+    gap: 20,
+    justifyContent: 'flex-start',
+    paddingBottom: 32,
+    paddingTop: 24,
+  },
   pairingHero: {
     alignItems: 'center',
     gap: 14,
+  },
+  pairingHeroLargeText: {
+    alignItems: 'flex-start',
   },
   pairingSubtitle: {
     color: muted,
@@ -83,6 +92,10 @@ export function createStyles(theme: MobileThemeColors) {
     lineHeight: 22,
     maxWidth: 320,
     textAlign: 'center',
+  },
+  pairingSubtitleLargeText: {
+    maxWidth: '100%',
+    textAlign: 'left',
   },
   helpToggle: {
     alignItems: 'center',
@@ -140,6 +153,10 @@ export function createStyles(theme: MobileThemeColors) {
     backgroundColor: accentSoft,
     borderColor: accent,
   },
+  hostCardLargeText: {
+    alignItems: 'flex-start',
+    flexDirection: 'column',
+  },
   hostCardCopy: {
     flex: 1,
     gap: 3,
@@ -158,6 +175,9 @@ export function createStyles(theme: MobileThemeColors) {
     color: accent,
     fontSize: 13,
     fontWeight: '700',
+  },
+  hostConnectLabelLargeText: {
+    alignSelf: 'flex-start',
   },
   emptyDiscoveryCard: {
     alignItems: 'center',

@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 
 /**
  * Keep one LibVLC instance alive for the lifetime of the desktop process.
@@ -13,7 +14,9 @@ import path from 'node:path';
  * state remain session-owned and are released normally between videos.
  */
 
-type NativeValue = string | number | bigint | boolean | null | undefined | Record<string, unknown>;
+type NativeValue = string | number | bigint | boolean | null | undefined
+  | Record<string, unknown>
+  | readonly (string | null)[];
 type DynamicFunction = (...args: NativeValue[]) => NativeValue;
 type KoffiLibrary = {
   func: (name: string, returnType: string, argumentTypes: readonly string[]) => DynamicFunction;
@@ -216,13 +219,13 @@ function loadCandidate(koffi: KoffiRuntime, libraryPath: string): WarmRuntime | 
 
     const library = koffi.load(libraryPath);
     libraries.push(library);
-    const create = library.func('libvlc_new', 'void *', ['int', 'void *']);
+    const create = library.func('libvlc_new', 'void *', ['int', 'const char **']);
     const release = library.func('libvlc_release', 'void', ['void *']);
     const previousPluginPath = process.env.VLC_PLUGIN_PATH;
     const pluginPath = pluginPathForLibrary(libraryPath);
     if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;
     try {
-      const instance = nativeHandle(create(0, null));
+      const instance = nativeHandle(create(LIBVLC_INSTANCE_ARGUMENTS.length, LIBVLC_INSTANCE_ARGUMENTS));
       if (!instance) return null;
       return { instance, release, libraries, libraryPath };
     } finally {

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { windowChromeOptions } from './windowChrome';
 import { pathToFileURL } from 'node:url';
 import { isExpectedAppUrl } from './trustedIpcSender';
+import { installSettingsShortcut } from './openSettings';
 
 const MAIN_WINDOW_DEV_SERVER_URL = (() => {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
@@ -33,7 +34,7 @@ function expectedRendererAppUrl(): string {
   return pathToFileURL(path.resolve(packagedRendererFilePath())).toString();
 }
 
-function isAllowedYouTubeFrameUrl(value: string): boolean {
+function isAllowedEmbeddedFrameUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:') return false;
@@ -137,6 +138,7 @@ export function createWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+  installSettingsShortcut(mainWindow);
   const expectedAppUrl = expectedRendererAppUrl();
   mainWindowIpcIdentity = Object.freeze({
     webContentsId: mainWindow.webContents.id,
@@ -162,12 +164,11 @@ export function createWindow(): void {
       if (!isExpectedAppUrl(details.url, expectedAppUrl)) details.preventDefault();
       return;
     }
-    if (!isAllowedYouTubeFrameUrl(details.url)) details.preventDefault();
+    if (!isAllowedEmbeddedFrameUrl(details.url)) details.preventDefault();
   };
   mainWindow.webContents.on('will-navigate', rejectUnexpectedNavigation);
   mainWindow.webContents.on('will-redirect', rejectUnexpectedNavigation);
   mainWindow.webContents.on('will-frame-navigate', rejectUnexpectedFrameNavigation);
-
   mainWindow.on('ready-to-show', () => {
     revealWindow();
   });

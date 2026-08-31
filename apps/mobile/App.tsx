@@ -239,6 +239,7 @@ const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
 
 const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v2';
 const MOBILE_ONBOARDING_OFFLINE_MESSAGE = 'Server unavailable right now. Choose a LoomTV server to reconnect.';
+const MOBILE_REPAIR_MESSAGE = 'This device needs approval again. Select the server, then approve this device in LoomTV administration.';
 const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
 const MOBILE_THEME_COLOR_KEY = 'loomtv.mobile-theme-color.v1';
 const MOBILE_SUBTITLE_FONT_SIZE_KEY = 'loomtv.mobile-subtitle-font-size.v1';
@@ -1331,7 +1332,7 @@ function AppRoot() {
     setSearchOpen,
     setSearchScope,
     setSettingsSection,
-  } = useMobileNavigationController({ cancelActiveRequests: mobileLanClient.cancelActiveRequests });
+  } = useMobileNavigationController();
   const {
     appliedOrientationLockRef,
     autoAdvancedEpisodeRef,
@@ -2518,7 +2519,9 @@ function AppRoot() {
         setIsServerOffline(false);
         return true;
       }
-      const connectionError = connectionErrorFor(nextError, 'The paired LoomTV server is unavailable.');
+      const connectionError = connectionErrorFor(nextError, 'The paired LoomTV server is unavailable.', 'MOBILE-RESTORE');
+      if (connectionError.isCancelled) return false;
+      reportNonFatal('connection.restore', nextError);
       if (connectionError.isOffline && await restoreOfflineConnection(saved)) return false;
       returnToOnboarding();
       setIsServerOffline(connectionError.isOffline);
@@ -2620,7 +2623,9 @@ function AppRoot() {
         void hydrateProgress(nextConnection);
       }
     } catch (nextError) {
-      const connectionError = connectionErrorFor(nextError, 'Pairing failed.');
+      const connectionError = connectionErrorFor(nextError, 'Pairing failed.', 'MOBILE-PAIRING');
+      if (connectionError.isCancelled) return;
+      reportNonFatal('connection.pairing', nextError);
       setError(connectionError.isOffline ? '' : connectionError.message);
       setIsServerOffline(preserveOfflineSnapshot || connectionError.isOffline);
     } finally {
@@ -2705,7 +2710,7 @@ function AppRoot() {
         void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
-        setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
+        setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
       if (result.status === 'profile-required') {
@@ -2738,10 +2743,12 @@ function AppRoot() {
         void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
-        setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
+        setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
-      const connectionError = connectionErrorFor(nextError, 'Refresh failed.');
+      const connectionError = connectionErrorFor(nextError, 'Refresh failed.', 'MOBILE-REFRESH');
+      if (connectionError.isCancelled) return;
+      reportNonFatal('connection.refresh', nextError);
       if (connectionError.isOffline && savedConnection && await restoreOfflineConnection(savedConnection)) return;
       if (connectionError.isOffline) returnToOnboarding();
       setError(connectionError.message);
@@ -2780,7 +2787,7 @@ function AppRoot() {
         void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
-        setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
+        setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
       if (result.status === 'profile-required') {
@@ -2815,12 +2822,14 @@ function AppRoot() {
         void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
-        setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
+        setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
-      const connectionError = connectionErrorFor(nextError, MOBILE_ONBOARDING_OFFLINE_MESSAGE);
+      const connectionError = connectionErrorFor(nextError, MOBILE_ONBOARDING_OFFLINE_MESSAGE, 'MOBILE-HEALTH');
+      if (connectionError.isCancelled) return;
+      reportNonFatal('connection.health', nextError);
       if (connectionError.isOffline && savedConnection && await restoreOfflineConnection(savedConnection)) return;
-      returnToOnboarding();
+      setIsServerOffline(connectionError.isOffline);
       setError(connectionError.message);
     } finally {
       connectionHealthCheckRef.current = false;
@@ -3508,6 +3517,8 @@ function PairingScreen({
   onPair: (host?: DiscoveredHost) => Promise<void>;
 }) {
   const { colors: { accent, accentForeground, faint, text }, styles } = useMobileTheme();
+  const { fontScale } = useWindowDimensions();
+  const usesLargeTextLayout = fontScale >= 1.5;
   const canPair = Boolean(baseUrl.trim());
   const [showManual, setShowManual] = useState(false);
   const [connectingHostDeviceId, setConnectingHostDeviceId] = useState<string | null>(null);
@@ -3536,16 +3547,20 @@ function PairingScreen({
         alwaysBounceVertical={false}
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios' && isKeyboardVisible}
         bounces={isKeyboardVisible}
-        contentInsetAdjustmentBehavior="never"
-        contentContainerStyle={[styles.pairingContent, isKeyboardVisible && styles.pairingContentKeyboard]}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[
+          styles.pairingContent,
+          usesLargeTextLayout && styles.pairingContentLargeText,
+          isKeyboardVisible && styles.pairingContentKeyboard,
+        ]}
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         keyboardShouldPersistTaps="handled"
         scrollEnabled
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.pairingHero}>
+        <View style={[styles.pairingHero, usesLargeTextLayout && styles.pairingHeroLargeText]}>
           <LoomLogo width={118} height={33} accent={accent} wordColor={text} />
-          <Text selectable style={styles.pairingSubtitle}>
+          <Text selectable style={[styles.pairingSubtitle, usesLargeTextLayout && styles.pairingSubtitleLargeText]}>
             {savedConnection ? savedConnection.hostDeviceName : 'Finding your LoomTV server…'}
           </Text>
         </View>
@@ -3578,6 +3593,7 @@ function PairingScreen({
                     }}
                     style={({ pressed }) => [
                       styles.hostCard,
+                      usesLargeTextLayout && styles.hostCardLargeText,
                       activeConnectingHostDeviceId === host.deviceId && isConnecting && styles.hostCardSelected,
                       pressed && styles.pressed,
                     ]}
@@ -3587,11 +3603,11 @@ function PairingScreen({
                     accessibilityState={{ busy: isConnecting, disabled: isConnecting }}
                   >
                     <View style={styles.hostCardCopy}>
-                      <Text selectable numberOfLines={1} style={styles.hostName}>{host.deviceName}</Text>
+                      <Text selectable style={styles.hostName}>{host.deviceName}</Text>
                     </View>
                     {activeConnectingHostDeviceId === host.deviceId && isConnecting
                       ? <ActivityIndicator size="small" color={accent} />
-                      : <Text style={styles.hostConnectLabel}>Ready</Text>}
+                      : <Text style={[styles.hostConnectLabel, usesLargeTextLayout && styles.hostConnectLabelLargeText]}>Ready</Text>}
                 </Pressable>
             ))}
             {!discoveredHosts.length ? (
@@ -3683,7 +3699,7 @@ function PairingScreen({
             }}
             style={[styles.helpToggle, isConnecting && styles.disabledButton]}
           >
-            <Text style={styles.helpToggleText}>{showManual ? 'Cancel' : 'Use address and PIN'}</Text>
+            <Text style={styles.helpToggleText}>{showManual ? 'Cancel' : 'Connect manually'}</Text>
           </Pressable>
         </View>
       </ScrollView>

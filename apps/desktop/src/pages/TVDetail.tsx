@@ -1299,7 +1299,7 @@ function EpisodeRow({
       data-shared-highlight-id={`${seasonNum}-${ep.number}`}
       className="group relative z-10 flex w-full items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
       onClick={onPlay}
-      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${episodeAirDate ? `. Released ${episodeAirDate}` : ''}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
+      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${episodeAirDate ? `. Released ${episodeAirDate}` : ''}${episodeRating > 0 ? `. Rating ${episodeRating.toFixed(1)} out of 10` : ''}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
     >
       {/* Thumbnail. Watch state lives here rather than in a right-hand column:
           the still is what the eye lands on when scanning a season. */}

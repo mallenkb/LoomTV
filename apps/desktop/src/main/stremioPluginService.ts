@@ -64,6 +64,7 @@ function filterCompleteCatalogItems(items: ReadonlyArray<StremioCatalogResult['i
 
 export type StremioPluginServiceErrorCode =
   | 'STREMIO_PLUGIN_STORAGE_UNAVAILABLE'
+  | 'STREMIO_PLUGIN_NOT_FOUND'
   | 'STREMIO_PLUGIN_PROFILE_NOT_FOUND'
   | 'STREMIO_PLUGIN_PROFILE_NOT_ALLOWED'
   | 'STREMIO_PLUGIN_ACCESS_DENIED'
@@ -342,6 +343,37 @@ export class StremioPluginService {
       detail: { origin: review.manifestOrigin },
       manifestLastChecked: Date.now(),
     }));
+  }
+
+  reviewInstalled(addonId: string): Promise<StremioManifestReview> {
+    this.deps.authorizeManagement();
+    const id = addonId.trim();
+    const record = id ? this.getRegistry().get(id) : undefined;
+    if (!record) {
+      throw new StremioPluginServiceError(
+        'STREMIO_PLUGIN_NOT_FOUND',
+        'The Stremio add-on is not installed.',
+      );
+    }
+    const persisted = this.deps.loadState();
+    const persistedRecord = persisted && typeof persisted === 'object' && 'addons' in persisted
+      && Array.isArray(persisted.addons)
+      ? persisted.addons.find((candidate): candidate is { addonId: string; manifestUrl: string } => (
+        Boolean(candidate)
+        && typeof candidate === 'object'
+        && 'addonId' in candidate
+        && candidate.addonId === record.addonId
+        && 'manifestUrl' in candidate
+        && typeof candidate.manifestUrl === 'string'
+      ))
+      : undefined;
+    if (!persistedRecord) {
+      throw new StremioPluginServiceError(
+        'STREMIO_PLUGIN_STORAGE_UNAVAILABLE',
+        'The stored add-on endpoint is unavailable.',
+      );
+    }
+    return this.reviewManifestUrl(persistedRecord.manifestUrl, record.addonId);
   }
 
   approve(addonId: string, reviewToken: string): Promise<StremioInstallRecord> {

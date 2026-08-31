@@ -67,6 +67,8 @@ import type {
   OfficialStremioAddon,
   StreamUrlOptions,
   StreamUrlResult,
+  StremioStreamRequest,
+  StremioStreamResult,
   TranscodeOptions,
   TranscodeSession,
   UnifiedDesktopServerState,
@@ -180,6 +182,7 @@ export interface IpcContract {
   'plugins:stremio:official': { args: []; result: StremioPluginIpcResult<OfficialStremioAddon[]> };
   'plugins:stremio:review-official': { args: [officialId: OfficialStremioAddon['id']]; result: StremioPluginIpcResult<StremioPluginReview> };
   'plugins:stremio:review-url': { args: [manifestUrl: string]; result: StremioPluginIpcResult<StremioPluginReview> };
+  'plugins:stremio:review-installed': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginReview> };
   'plugins:stremio:approve': { args: [addonId: string, reviewToken: string]; result: StremioPluginIpcResult<StremioPluginSummary> };
   'plugins:stremio:disable': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginSummary> };
   'plugins:stremio:remove': { args: [addonId: string]; result: StremioPluginIpcResult<boolean> };
@@ -188,6 +191,7 @@ export interface IpcContract {
   'plugins:stremio:catalog': { args: [addonId: string, request: StremioPluginCatalogRequest]; result: StremioPluginIpcResult<StremioPluginCatalogResult> };
   'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
   'plugins:stremio:meta-item': { args: [request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
+  'plugins:stremio:streams': { args: [addonId: string, request: StremioStreamRequest]; result: StremioPluginIpcResult<StremioStreamResult> };
   'plugins:stremio:configuration': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginConfigurationState> };
   'plugins:stremio:save-configuration': { args: [addonId: string, values: Record<string, unknown>]; result: StremioPluginIpcResult<StremioPluginConfigurationState> };
   'plugins:stremio:audit': { args: [addonId: string, limit?: number]; result: StremioPluginIpcResult<readonly StremioPluginAuditEntry[]> };

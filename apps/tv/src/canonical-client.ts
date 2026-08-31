@@ -1,5 +1,12 @@
 export type Credential = { id: string; secret: string; scheme?: 'LoomDevice' | 'LoomInvitation' };
 export type Profile = { id: string; name: string; kind: 'adult' | 'child' | 'guest'; hasPin: boolean };
+export type ProfileListKind = 'watchlist' | 'favorite' | 'watched';
+export type ProfileListEntry = {
+  profileId?: string;
+  mediaId: string;
+  kind: ProfileListKind;
+  createdAt?: number;
+};
 export type LibraryItem = {
   id: string;
   title: string;
@@ -31,6 +38,12 @@ async function payload<T>(response: Response): Promise<T> {
     });
   }
   return document.data;
+}
+
+export function isTvAuthorizationFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const status = Number((error as { status?: unknown }).status);
+  return status === 401 || status === 403;
 }
 
 export class CanonicalTvClient {
@@ -133,9 +146,17 @@ export class CanonicalTvClient {
     ));
   }
 
-  async setListEntry(mediaId: string, kind: 'watchlist' | 'favorite' | 'watched', present: boolean) {
+  async listEntries(kind?: ProfileListKind) {
+    if (!this.activeProfileId) throw new Error('Choose a profile before loading My List.');
+    const query = kind ? `?kind=${encodeURIComponent(kind)}` : '';
+    return payload<{ entries: ProfileListEntry[] }>(await fetch(this.endpoint(
+      `/api/v1/profiles/${encodeURIComponent(this.activeProfileId)}/lists${query}`,
+    ), { headers: this.headers() }));
+  }
+
+  async setListEntry(mediaId: string, kind: ProfileListKind, present: boolean) {
     if (!this.activeProfileId) throw new Error('Choose a profile before changing a list.');
-    return payload<{ entries: unknown[] }>(await fetch(this.endpoint(
+    return payload<{ entries: ProfileListEntry[] }>(await fetch(this.endpoint(
       `/api/v1/profiles/${encodeURIComponent(this.activeProfileId)}/lists/${encodeURIComponent(kind)}/${encodeURIComponent(mediaId)}`,
     ), { method: present ? 'PUT' : 'DELETE', headers: this.headers() }));
   }

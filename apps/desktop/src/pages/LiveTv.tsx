@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
-import { AlertTriangle, Play, RefreshCw, Tv } from 'lucide-react';
+import { AlertTriangle, Play, Tv } from 'lucide-react';
 import LibrarySearch from '@/components/LibrarySearch';
 import ThemeFilterDropdown from '@/components/ThemeFilterDropdown';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { ChannelGridShimmer } from '@/components/ContentShimmer';
 import { useTheme } from '@/components/ThemeProvider';
-import { useProfiles } from '@/contexts/ProfileContext';
-import { useToast } from '@/components/ToastProvider';
 import { desktopApi } from '@/lib/desktopApi';
-import { cn } from '@/lib/utils';
-import { iptvSourceDisplayName, notifyIptvSourcesChanged } from '@/lib/liveTvSources';
+import { iptvSourceDisplayName } from '@/lib/liveTvSources';
 import type { IptvChannelPage, IptvChannelSort, IptvChannelSummary, IptvGeoFilter } from '@/shared/desktopProtocol';
 import { buildIptvPlaybackReference } from '@/shared/iptvPlayback';
 
@@ -131,8 +127,6 @@ function ChannelCard({
 export default function LiveTv({ onPlay }: LiveTvProps) {
   const { sourceId = '' } = useParams<{ sourceId: string }>();
   const { theme } = useTheme();
-  const { activeProfile } = useProfiles();
-  const { showToast } = useToast();
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -144,14 +138,12 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
   const [channels, setChannels] = useState<IptvChannelSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isPaging, setIsPaging] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [nowMs, setNowMs] = useState(() => Date.now());
   const requestTokenRef = useRef(0);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  const isOwner = activeProfile?.type === 'owner';
   const isModern = theme.homeStyle === 'modern';
 
   useEffect(() => {
@@ -205,25 +197,6 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
     void loadChannels(0);
   }, [loadChannels]);
 
-  const handleRefresh = useCallback(async () => {
-    if (!sourceId || isRefreshing) return;
-    setIsRefreshing(true);
-    try {
-      await desktopApi.refreshIptvSource(sourceId);
-      notifyIptvSourcesChanged();
-      await loadChannels(0);
-      showToast({ title: 'Channels refreshed', tone: 'success' });
-    } catch (error) {
-      showToast({
-        title: 'Refresh failed',
-        description: error instanceof Error ? error.message : 'The provider could not be reached.',
-        tone: 'error',
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [isRefreshing, loadChannels, showToast, sourceId]);
-
   const groupOptions = useMemo(
     () => [{ name: ALL_GROUPS, channelCount: page?.total ?? 0 }, ...(page?.groups || [])],
     [page],
@@ -276,10 +249,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
       onScroll={(event) => setIsHeaderScrolled(event.currentTarget.scrollTop > 4)}
     >
       <div className={`${frameClass} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${topPaddingClass}`}>
-        <header className={cn(
-          'loom-library-page-heading sticky top-0 z-40 isolate mb-6 flex min-h-8 shrink-0 flex-wrap items-start justify-between gap-4 border-b border-transparent bg-[var(--loom-bg)] py-3 backdrop-blur-xl transition-[border-color,box-shadow] duration-150',
-          isHeaderScrolled && 'border-[var(--loom-border)] shadow-[0_12px_24px_-22px_rgb(0_0_0_/_0.9)]',
-        )}>
+        <header className={`loom-library-page-heading sticky top-0 z-40 isolate mb-6 flex min-h-8 shrink-0 flex-wrap items-start justify-between gap-4 border-b bg-[var(--loom-bg)] py-3 backdrop-blur-xl transition-[border-color,box-shadow] duration-150 ${isHeaderScrolled ? 'border-[var(--loom-border)] shadow-[0_12px_24px_-22px_rgb(0_0_0_/_0.9)]' : 'border-transparent'}`}>
           <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">
@@ -341,18 +311,6 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                 options={SORT_OPTIONS}
                 onChange={(value) => setSort(value as IptvChannelSort)}
               />
-              {isOwner ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => void handleRefresh()}
-                  disabled={isRefreshing}
-                  className="loom-no-drag h-8 shrink-0 rounded-full px-3 text-sm"
-                >
-                  <RefreshCw className={cn('mr-2 h-4 w-4', isRefreshing && 'animate-spin')} aria-hidden="true" />
-                  {isRefreshing ? 'Refreshing' : 'Refresh'}
-                </Button>
-              ) : null}
             </div>
           </div>
         </header>
@@ -376,18 +334,14 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
         ) : null}
 
         {isLoading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
-            {Array.from({ length: 12 }, (_, index) => (
-              <Skeleton key={index} className="h-28 rounded-xl" />
-            ))}
-          </div>
+          <ChannelGridShimmer />
         ) : channels.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--loom-panel-border)] px-6 py-14 text-center">
             <Tv className="mx-auto mb-3 h-8 w-8 text-[var(--loom-faint)]" aria-hidden="true" />
             <p className="text-sm text-[var(--loom-muted)]">
               {debouncedQuery || group || subcategory || geoFilter !== 'all'
                 ? 'No channels match that search.'
-                : "This source has no channels yet. Refresh it to load the provider's playlist."}
+                : "This source has no channels yet. It will populate after the provider's next playlist sync."}
             </p>
           </div>
         ) : (

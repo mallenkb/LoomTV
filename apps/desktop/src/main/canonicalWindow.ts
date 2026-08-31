@@ -1,6 +1,7 @@
-import { app, BrowserWindow, session, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { registerDefaultSessionRequestHeaderRule } from './requestHeaderPolicy.ts';
 
 const DESKTOP_SETUP_HEADER = 'x-loomtv-desktop-setup';
 
@@ -55,19 +56,14 @@ function allowedHostedUrl(value: string): boolean {
 function installDesktopSetupChannel(): void {
   if (setupChannelInstalled || !desktopSetupToken || !canonicalOrigin) return;
   setupChannelInstalled = true;
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: [`${canonicalOrigin}/api/v1/setup/*`] },
-    (details, callback) => {
-      const sameOrigin = (() => {
-        try { return new URL(details.url).origin === canonicalOrigin; } catch { return false; }
-      })();
-      callback({
-        requestHeaders: sameOrigin
-          ? { ...details.requestHeaders, [DESKTOP_SETUP_HEADER]: desktopSetupToken }
-          : details.requestHeaders,
-      });
-    },
-  );
+  registerDefaultSessionRequestHeaderRule((details, headers) => {
+    const sameOrigin = (() => {
+      try { return new URL(details.url).origin === canonicalOrigin; } catch { return false; }
+    })();
+    if (sameOrigin && new URL(details.url).pathname.startsWith('/api/v1/setup/')) {
+      headers[DESKTOP_SETUP_HEADER] = desktopSetupToken;
+    }
+  });
 }
 
 export function configureDesktopSetupChannel(token: string): void {

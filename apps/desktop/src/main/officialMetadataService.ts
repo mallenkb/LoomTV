@@ -20,6 +20,7 @@ import {
 } from './metadata/helpers.ts';
 import type { ContentRating, EpisodeMeta, MediaItem, StreamingProvider } from './metadata/types.ts';
 import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
+import { tvMazeShowIsEnded } from './metadata/tvmaze.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import type { MetadataProviderIds } from './mediaTags.ts';
@@ -38,6 +39,7 @@ export type OfficialArtworkRefreshResult = {
   cover?: string;
   summary?: string;
   rating?: number;
+  ratingSource?: 'OMDb' | 'TVmaze';
   contentRating?: string;
   trailerUrl?: string;
   runtime?: string;
@@ -98,6 +100,7 @@ export type OfficialMetadataServiceDependencies = {
   fetchJikanMetadataCandidates: typeof import('./metadata/jikan.ts').fetchJikanMetadataCandidates;
   fetchOMDbMetadata: typeof import('./metadata/omdb.ts').fetchOMDbMetadata;
   fetchOMDbMetadataById: typeof import('./metadata/omdb.ts').fetchOMDbMetadataById;
+  fetchOMDbSeasonEpisodes: typeof import('./metadata/omdb.ts').fetchOMDbSeasonEpisodes;
   fetchTMDBMovieMetadata: typeof import('./metadata/tmdb.ts').fetchTMDBMovieMetadata;
   fetchTMDBMovieMetadataById: typeof import('./metadata/tmdb.ts').fetchTMDBMovieMetadataById;
   fetchTMDBMovieMetadataCandidates: typeof import('./metadata/tmdb.ts').fetchTMDBMovieMetadataCandidates;
@@ -244,6 +247,32 @@ function itemNeedsIncompleteMetadata(item: MediaItem): boolean {
   return missingMetadataCategories(item).length > 0;
 }
 
+function localSeasonNumbers(item: MediaItem): number[] {
+  return [...new Set([
+    ...(item.seasons || []).map((season) => season.number),
+    ...(item.episodeFiles || []).map((episode) => episode.season),
+    ...(item.episodes || []).map((episode) => episode.season),
+  ])]
+    .filter((season) => Number.isSafeInteger(season) && season >= 0)
+    .sort((left, right) => left - right);
+}
+
+function mergeSelectedEpisodeRatings(
+  episodes: EpisodeMeta[] | undefined,
+  ratingEpisodes: EpisodeMeta[],
+): EpisodeMeta[] | undefined {
+  if (!episodes?.length) return ratingEpisodes;
+
+  const merged = episodes.map((episode) => {
+    const ratingEpisode = findEpisodeMetadataMatch(episode, ratingEpisodes);
+    return { ...episode, rating: numericRating(ratingEpisode?.rating) };
+  });
+  for (const ratingEpisode of ratingEpisodes) {
+    if (!findEpisodeMetadataMatch(ratingEpisode, episodes)) merged.push(ratingEpisode);
+  }
+  return merged;
+}
+
 const STREAMING_PROVIDER_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const METADATA_REFRESH_INTERVALS: Record<MetadataRefreshCategory, number> = {
@@ -277,6 +306,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     fetchJikanMetadataCandidates,
     fetchOMDbMetadata,
     fetchOMDbMetadataById,
+    fetchOMDbSeasonEpisodes,
     fetchTMDBMovieMetadata,
     fetchTMDBMovieMetadataById,
     fetchTMDBMovieMetadataCandidates,
@@ -335,28 +365,23 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
   }
 
   function movieMetadataRating(
-    tmdbMeta?: Partial<MediaItem> | null,
+    _tmdbMeta?: Partial<MediaItem> | null,
     omdbMeta?: OMDbResponse | null,
-    tvMeta?: { rating?: number } | null,
+    _tvMeta?: { rating?: number } | null,
   ): number {
-    return numericRating(tmdbMeta?.rating)
-      || numericRating(omdbMeta?.imdbRating)
-      || numericRating(tvMeta?.rating);
+    return numericRating(omdbMeta?.imdbRating);
   }
 
   function showMetadataRating(
-    type: 'tv' | 'anime',
-    jikanMeta?: { rating?: number } | null,
-    tmdbMeta?: Partial<MediaItem> | null,
-    tvMeta?: { rating?: number } | null,
+    _type: 'tv' | 'anime',
+    _jikanMeta?: { rating?: number } | null,
+    _tmdbMeta?: Partial<MediaItem> | null,
+    tvMeta?: { rating?: number; showStatus?: string } | null,
     omdbMeta?: OMDbResponse | null,
-    preferOmdbFallback = true,
   ): number {
-    return numericRating(tmdbMeta?.rating)
-      || (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
-      || (preferOmdbFallback
-        ? numericRating(omdbMeta?.imdbRating) || numericRating(tvMeta?.rating)
-        : numericRating(tvMeta?.rating) || numericRating(omdbMeta?.imdbRating));
+    return tvMazeShowIsEnded(tvMeta?.showStatus)
+      ? numericRating(omdbMeta?.imdbRating)
+      : numericRating(tvMeta?.rating);
   }
 
   function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
@@ -795,6 +820,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         cover: backdropCandidates[0] || posterCandidates[0] || '',
         summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
+        ratingSource: 'OMDb',
         trailerUrl: tmdbMeta?.trailerUrl,
         runtime: tmdbMeta?.runtime,
         providerRatings: omdbProviderRatings(omdbMeta),
@@ -856,22 +882,35 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       matchedTVDB?.logo,
       ...officialArtworkOnly(matchedTVDB?.logoCandidates || []),
     );
+    const animeMovie = likelyAnime && item.format?.trim().toUpperCase() === 'MOVIE';
+    const completedSeries = !animeMovie && tvMazeShowIsEnded(matchedTV?.showStatus);
+    const omdbCompletedEpisodes = completedSeries
+      ? await safeMetadataProvider(fetchOMDbSeasonEpisodes(
+        omdbMeta?.imdbID || providerIds.imdbId,
+        localSeasonNumbers(item),
+        omdbApiKey,
+      ), [])
+      : [];
     const hasLocalSpecials = item.episodeFiles?.some((file) => file.season === 0) === true;
     const hasTMDBSpecials = tmdbMeta?.episodes?.some((episode) => episode.season === 0) === true;
-    const episodes = hasLocalSpecials && hasTMDBSpecials
+    const providerEpisodes = hasLocalSpecials && hasTMDBSpecials
       ? tmdbMeta?.episodes
       : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes;
-    const episodeSource = hasLocalSpecials && hasTMDBSpecials
-      ? 'TMDB'
-      : matchedTV?.episodes?.length
-        ? 'TVmaze'
-        : likelyAnime && matchedJikan?.episodes?.length
-          ? 'Jikan'
-          : tmdbMeta?.episodes?.length
-            ? 'TMDB'
-            : matchedTVDB?.episodes?.length
-              ? 'TVDB'
-              : undefined;
+    const selectedRatingEpisodes = completedSeries ? omdbCompletedEpisodes : matchedTV?.episodes || [];
+    const episodes = mergeSelectedEpisodeRatings(providerEpisodes, selectedRatingEpisodes);
+    const episodeSource = completedSeries && omdbCompletedEpisodes.some((episode) => numericRating(episode.rating) > 0)
+      ? 'OMDb'
+      : hasLocalSpecials && hasTMDBSpecials
+        ? 'TMDB'
+        : matchedTV?.episodes?.length
+          ? 'TVmaze'
+          : likelyAnime && matchedJikan?.episodes?.length
+            ? 'Jikan'
+            : tmdbMeta?.episodes?.length
+              ? 'TMDB'
+              : matchedTVDB?.episodes?.length
+                ? 'TVDB'
+                : undefined;
     const fallbackTitle = preferOmdbFallback
       ? omdbMeta?.Title || matchedTV?.title || matchedTVDB?.title
       : matchedTV?.title || omdbMeta?.Title || matchedTVDB?.title;
@@ -900,14 +939,15 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       thumbnail: posterCandidates[0] || '',
       cover: backdropCandidates[0] || posterCandidates[0] || '',
       summary: (likelyAnime ? matchedAniList?.summary : '') || tmdbMeta?.summary || fallbackSummary || matchedJikan?.summary || '',
-      rating: numericRating(tmdbMeta?.rating)
-        || (likelyAnime ? numericRating(matchedAniList?.rating) : 0)
-        || showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta, preferOmdbFallback),
+      rating: animeMovie
+        ? movieMetadataRating(tmdbMeta, omdbMeta, matchedTV)
+        : showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
+      ratingSource: animeMovie || completedSeries ? 'OMDb' : 'TVmaze',
       trailerUrl: tmdbMeta?.trailerUrl || matchedAniList?.trailerUrl || matchedJikan?.trailerUrl,
       runtime: tmdbMeta?.runtime || matchedAniList?.runtime || matchedJikan?.runtime,
       seasonCount: tmdbMeta?.seasonCount || matchedTV?.seasonCount || matchedJikan?.seasonCount || matchedTVDB?.seasonCount,
       episodeCount: tmdbMeta?.episodeCount || matchedTV?.episodeCount || matchedJikan?.episodeCount || matchedTVDB?.episodeCount,
-      providerRatings: omdbProviderRatings(omdbMeta),
+      providerRatings: animeMovie || completedSeries ? omdbProviderRatings(omdbMeta) : undefined,
       genres: (likelyAnime ? matchedAniList?.genres || matchedJikan?.genres : undefined) || tmdbMeta?.genres || fallbackGenres || [],
       seasons: mergeOfficialSeasonMetadata(
         tmdbMeta?.tmdbSeasons,
@@ -1381,8 +1421,13 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         target.providerIds = mergeProviderIds(target.providerIds || {}, refreshed.providerIds);
       }
       if (refreshes('ratings')) {
-        if ((refreshed.rating || 0) > 0) target.rating = refreshed.rating || target.rating;
-        if (hasProviderRatings(refreshed.providerRatings)) target.providerRatings = refreshed.providerRatings;
+        if (refreshed.ratingSource) target.rating = numericRating(refreshed.rating);
+        if (refreshed.ratingSource === 'TVmaze') target.providerRatings = undefined;
+        else if (refreshed.ratingSource === 'OMDb') {
+          target.providerRatings = hasProviderRatings(refreshed.providerRatings)
+            ? refreshed.providerRatings
+            : undefined;
+        }
         if (hasContentRatings(refreshed.contentRatings)) target.contentRatings = refreshed.contentRatings;
       }
       if (refreshes('cast') && refreshed.cast?.length) {

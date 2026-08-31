@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { Archive as ArchivePhosphorIcon } from '@phosphor-icons/react';
 import { Bookmark, Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { normalizeOtherFolderIcon, otherFolderIconPair, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
@@ -16,11 +17,12 @@ import { useToast } from '@/components/ToastProvider';
 import { isCategoryVisible } from '@/components/sidebarNavigation';
 import { iptvSourceDisplayName, liveTvRoute, useIptvSources } from '@/lib/liveTvSources';
 import { liveTvSourceIconPair } from '@/components/LiveTvSourceIcons';
+import { DEFAULT_SIDEBAR_NAV_ORDER, normalizeSidebarNavOrder } from '@/lib/sidebarNavOrder';
 
-type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
-type NavItemId = 'home' | 'my-list' | 'discover' | SidebarNavItemId | 'settings';
+type LibrarySidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
+type NavItemId = 'home' | 'my-list' | 'discover' | LibrarySidebarNavItemId | 'settings';
 type SidebarIcon = React.ComponentType<{ className?: string }>;
-type SidebarNavItem = { id: NavItemId; path: string; label: string; icon: SidebarIcon; activeIcon?: SidebarIcon };
+type SidebarNavItem = { id: string; path: string; label: string; icon: SidebarIcon; activeIcon?: SidebarIcon; kind?: 'link' | 'divider' };
 type ModernCategoryItem = {
   label: string;
   path: string;
@@ -31,7 +33,19 @@ type ModernCategoryItem = {
   iconOnly?: boolean;
 };
 
-const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
+function ArchiveNavIcon({ className }: { className?: string }) {
+  return <ArchivePhosphorIcon className={className} weight="regular" />;
+}
+
+function ArchiveNavSolidIcon({ className }: { className?: string }) {
+  return <ArchivePhosphorIcon className={className} weight="fill" />;
+}
+
+function EmptyNavIcon() {
+  return null;
+}
+
+const librarySidebarNavItemIds: LibrarySidebarNavItemId[] = ['anime', 'tv', 'movies'];
 const modernCategoryItems: readonly ModernCategoryItem[] = [
   { label: 'Home', path: '/', routePrefix: '/', folderKey: null },
   { label: 'Anime', path: '/anime', routePrefix: '/anime', folderKey: 'anime' },
@@ -43,9 +57,10 @@ const modernCategoryItems: readonly ModernCategoryItem[] = [
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
 const myListNavItem: SidebarNavItem = { id: 'my-list', path: '/my-list', label: 'My List', icon: Bookmark, activeIcon: BookmarkSolidIcon };
 const discoverNavItem: SidebarNavItem = { id: 'discover', path: '/discover', label: 'Discover', icon: DiscoverIcon, activeIcon: DiscoverActiveIcon };
+const dividerNavItem: SidebarNavItem = { id: 'divider', path: '', label: 'Divider', icon: EmptyNavIcon, kind: 'divider' };
 const settingsNavItem: SidebarNavItem = { id: 'settings', path: '/settings', label: 'Settings', icon: SettingsNavExactIcon, activeIcon: SettingsNavSolidExactIcon };
 
-const sidebarNavItems: Record<SidebarNavItemId, SidebarNavItem> = {
+const sidebarNavItems: Record<LibrarySidebarNavItemId, SidebarNavItem> = {
   anime: { id: 'anime', path: '/anime', label: 'Anime', icon: AnimeIcon, activeIcon: AnimeSolidIcon },
   tv: { id: 'tv', path: '/tv', label: 'TV Shows', icon: TVNavIcon, activeIcon: TVNavSolidIcon },
   movies: { id: 'movies', path: '/movies', label: 'Movies', icon: FilmNavIcon, activeIcon: FilmNavSolidExactIcon },
@@ -73,21 +88,13 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   if (activePath === '/tv' || activePath.startsWith('/tv/')) return 'tv';
   if (activePath === '/anime' || activePath.startsWith('/anime/')) return 'anime';
   if (activePath === '/others' || activePath.startsWith('/others/')) return 'others';
+  if (activePath.startsWith('/live/')) return null;
   if (activePath === '/settings') return 'settings';
 
   if (pathname.startsWith('/movie/')) return 'movies';
   if (pathname.startsWith('/tv/')) return 'tv';
   if (pathname.startsWith('/anime/')) return 'anime';
   return null;
-}
-
-function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
-  const savedOrder = Array.isArray(order) ? order : [];
-  const uniqueSavedOrder = Array.from(new Set(savedOrder));
-  return [
-    ...uniqueSavedOrder.filter((item): item is SidebarNavItemId => defaultSidebarNavOrder.includes(item as SidebarNavItemId)),
-    ...defaultSidebarNavOrder.filter((item) => !uniqueSavedOrder.includes(item)),
-  ];
 }
 
 function ModernCategoryPill({ pathname }: { pathname: string }) {
@@ -451,7 +458,7 @@ export default function Sidebar() {
     || routeState?.fromDiscover === true
     || sourceRoute?.startsWith('/discover') === true;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
-  const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
+  const [navOrder, setNavOrder] = useState<string[]>(DEFAULT_SIDEBAR_NAV_ORDER);
   const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
@@ -512,23 +519,21 @@ export default function Sidebar() {
     };
   }, [activeProfile?.id]);
 
-  const navItems = useMemo(
+  const primaryNavItems = useMemo(
     () => {
       return [
-      homeNavItem,
-      ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder)
-        .filter((itemId) => itemId !== 'others')
+      ...librarySidebarNavItemIds
         .map((itemId) => sidebarNavItems[itemId])
         .filter((item) => {
           if (desktopApi.isRemoteLibraryMode()) return true;
           const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
           return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
-        }),
-      ...[discoverNavItem],
+      }),
+      discoverNavItem,
       myListNavItem,
       ];
     },
-    [libraryFolderGroups, navOrder],
+    [libraryFolderGroups],
   );
   const mobileNavItems = useMemo(
     () => {
@@ -573,6 +578,23 @@ export default function Sidebar() {
     return [...groupItems, ...folderItems];
   }, [customFolderNames, libraryFolderGroups.others, otherFolderGroups, otherFolderIcon]);
   const { sources: iptvSources } = useIptvSources();
+  const [stremioPlugins, setStremioPlugins] = useState<Awaited<ReturnType<typeof desktopApi.listAvailableStremioPlugins>>>([]);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void desktopApi.listAvailableStremioPlugins().then((plugins) => {
+        if (active) setStremioPlugins(plugins);
+      }).catch(() => {
+        if (active) setStremioPlugins([]);
+      });
+    };
+    refresh();
+    window.addEventListener('loomtv:plugins-changed', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('loomtv:plugins-changed', refresh);
+    };
+  }, []);
   // Each added playlist is its own destination, the way Discover is: a tab in
   // the sidebar pointing at a page that belongs to that source alone.
   const liveTvNavItems = useMemo(
@@ -588,8 +610,23 @@ export default function Sidebar() {
     }),
     [iptvSources],
   );
+  const stremioNavItems = useMemo(
+    () => stremioPlugins
+      .filter((plugin) => plugin.state === 'enabled' && plugin.trusted && plugin.addonId === 'org.archive.clean')
+      .map((plugin) => ({
+        id: `stremio:${plugin.addonId}`,
+        label: plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Archive.org',
+        path: `/addons/stremio/${encodeURIComponent(plugin.addonId)}`,
+        icon: ArchiveNavIcon,
+        activeIcon: ArchiveNavSolidIcon,
+      })),
+    [stremioPlugins],
+  );
   const selectedLiveTvItem = location.pathname.startsWith('/live/')
     ? `live:${decodeURIComponent(location.pathname.slice('/live/'.length))}`
+    : '';
+  const selectedStremioItem = location.pathname.startsWith('/addons/stremio/')
+    ? `stremio:${decodeURIComponent(location.pathname.slice('/addons/stremio/'.length))}`
     : '';
   const selectedOtherItem = location.pathname === '/others'
     ? (() => {
@@ -598,6 +635,25 @@ export default function Sidebar() {
       return group ? `group:${group}` : `folder:${params.get('folder') || ''}`;
     })()
     : '';
+  const reorderableSidebarItems = useMemo(
+    () => [
+      ...primaryNavItems,
+      dividerNavItem,
+      ...liveTvNavItems,
+      ...stremioNavItems,
+      ...customFolderNavItems,
+    ],
+    [customFolderNavItems, liveTvNavItems, primaryNavItems, stremioNavItems],
+  );
+  const orderedSidebarItems = useMemo(() => {
+    const itemById = new Map(reorderableSidebarItems.map((item) => [item.id, item]));
+    return normalizeSidebarNavOrder(
+      navOrder,
+      reorderableSidebarItems.map((item) => item.id),
+    ).map((id) => itemById.get(id)).filter((item): item is SidebarNavItem => Boolean(item));
+  }, [navOrder, reorderableSidebarItems]);
+  const activeSidebarItemId = selectedLiveTvItem || selectedStremioItem || selectedOtherItem || activeNavItemId;
+  const isSidebarItemActive = (itemId: string) => activeSidebarItemId === itemId;
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
 
   useEffect(() => {
@@ -632,7 +688,6 @@ export default function Sidebar() {
     : 'Refresh library';
 
   const isModern = theme.homeStyle === 'modern';
-
   if (isModern) {
     return (
       <>
@@ -640,7 +695,7 @@ export default function Sidebar() {
         <aside className="loom-modern-sidebar loom-no-drag fixed inset-y-0 left-0 z-50 flex w-20 flex-col items-center py-5">
           <nav className="loom-modern-sidebar-desktop-nav mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
             <SharedListHighlight
-              activeId={activeNavItemId}
+              activeId={activeSidebarItemId}
               followPointer={false}
               className="loom-shared-highlight-sidebar-modern flex flex-col items-center gap-3"
             >
@@ -655,31 +710,13 @@ export default function Sidebar() {
               >
                 <Search className="h-6 w-6" />
               </button>
-              {navItems.map((item) => {
-                const isActive = activeNavItemId === item.id;
+              {[homeNavItem, ...orderedSidebarItems].map((item) => {
+                if (item.kind === 'divider') {
+                  return <div key="modern-divider" className="my-1 h-px w-8 bg-[var(--loom-text)] opacity-[0.22]" aria-hidden="true" />;
+                }
+                const isActive = isSidebarItemActive(item.id);
                 const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
-                return (
-                  <Link
-                    key={`modern-${item.path}`}
-                    to={item.path}
-                    title={item.label}
-                    aria-label={item.label}
-                    aria-current={isActive ? 'page' : undefined}
-                    data-shared-highlight-item
-                    data-shared-highlight-id={item.id}
-                    className={cn(
-                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
-                      isActive && 'loom-modern-sidebar-action-active',
-                    )}
-                  >
-                    <Icon className={item.id === 'discover' ? 'h-7 w-7' : 'h-6 w-6'} />
-                  </Link>
-                );
-              })}
-              {liveTvNavItems.length > 0 ? <div className="my-1 h-px w-8 bg-[var(--loom-text)] opacity-[0.22]" aria-hidden="true" /> : null}
-              {liveTvNavItems.map((item) => {
-                const isActive = selectedLiveTvItem === item.id;
-                const Icon = isActive ? item.activeIcon : item.icon;
+                const usesRedActiveIcon = item.id === 'sports' || item.id.startsWith('live:') || item.id.startsWith('stremio:');
                 return (
                   <Link
                     key={`modern-${item.id}`}
@@ -694,29 +731,10 @@ export default function Sidebar() {
                       isActive && 'loom-modern-sidebar-action-active',
                     )}
                   >
-                    <Icon className={cn('h-6 w-6', isActive ? 'text-red-500' : 'text-white')} />
-                  </Link>
-                );
-              })}
-              {customFolderNavItems.length > 0 ? <div className="my-1 h-px w-8 bg-[var(--loom-text)] opacity-[0.22]" aria-hidden="true" /> : null}
-              {customFolderNavItems.map((item) => {
-                const isActive = selectedOtherItem === item.id;
-                const Icon = isActive ? item.activeIcon : item.icon;
-                return (
-                  <Link
-                    key={`modern-other-${item.id}`}
-                    to={item.path}
-                    title={item.label}
-                    aria-label={item.label}
-                    aria-current={isActive ? 'page' : undefined}
-                    data-shared-highlight-item
-                    data-shared-highlight-id={`other:${item.id}`}
-                    className={cn(
-                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
-                      isActive && 'loom-modern-sidebar-action-active',
-                    )}
-                  >
-                    <Icon className="h-6 w-6" />
+                    <Icon className={cn(
+                      item.id === 'discover' ? 'h-7 w-7' : 'h-6 w-6',
+                      usesRedActiveIcon ? (isActive ? 'text-red-500' : 'text-white') : undefined,
+                    )} />
                   </Link>
                 );
               })}
@@ -818,6 +836,7 @@ export default function Sidebar() {
         </aside>
         {!location.pathname.startsWith('/settings')
           && !location.pathname.startsWith('/live/')
+          && !location.pathname.startsWith('/addons/stremio/')
           && !isExploreContext && (
           <ModernCategoryPill pathname={location.pathname} />
         )}
@@ -835,14 +854,18 @@ export default function Sidebar() {
       </div>
       <nav className="flex-1 p-3 pt-0 flex flex-col">
         {libraryActionError ? <span role="alert" className="sr-only">{libraryActionError}</span> : null}
-        <SharedListHighlight activeId={activeNavItemId} className="loom-shared-highlight-sidebar relative">
-          {navItems.map((item) => {
-            const isActive = activeNavItemId === item.id;
+        <SharedListHighlight activeId={activeSidebarItemId} className="loom-shared-highlight-sidebar relative">
+          {[homeNavItem, ...orderedSidebarItems].map((item) => {
+            if (item.kind === 'divider') {
+              return <div key="sidebar-divider" className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" />;
+            }
+            const isActive = isSidebarItemActive(item.id);
             const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
+            const usesRedActiveIcon = item.id === 'sports' || item.id.startsWith('live:') || item.id.startsWith('stremio:');
 
             return (
               <Link
-                key={item.path}
+                key={item.id}
                 to={item.path}
                 aria-current={isActive ? 'page' : undefined}
                 data-shared-highlight-item
@@ -854,49 +877,10 @@ export default function Sidebar() {
                     : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
                 )}
               >
-                <Icon className="w-5 h-5" />
-                <span className="text-sm font-medium">{item.label}</span>
-              </Link>
-            );
-          })}
-          {liveTvNavItems.length > 0 ? <div className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" /> : null}
-          {liveTvNavItems.map((item) => {
-            const isActive = selectedLiveTvItem === item.id;
-            const Icon = isActive ? item.activeIcon : item.icon;
-            return (
-              <Link
-                key={item.id}
-                to={item.path}
-                aria-current={isActive ? 'page' : undefined}
-                data-shared-highlight-item
-                data-shared-highlight-id={item.id}
-                className={cn(
-                  'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
-                  isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
-                )}
-              >
-                <Icon className={cn('h-5 w-5', isActive ? 'text-red-500' : 'text-white')} />
-                <span className="truncate text-sm font-medium">{item.label}</span>
-              </Link>
-            );
-          })}
-          {customFolderNavItems.length > 0 ? <div className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" /> : null}
-          {customFolderNavItems.map((item) => {
-            const isActive = selectedOtherItem === item.id;
-            const Icon = isActive ? item.activeIcon : item.icon;
-            return (
-              <Link
-                key={`other-${item.id}`}
-                to={item.path}
-                aria-current={isActive ? 'page' : undefined}
-                data-shared-highlight-item
-                data-shared-highlight-id={`other:${item.id}`}
-                className={cn(
-                  'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
-                  isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
-                )}
-              >
-                <Icon className="h-5 w-5" />
+                <Icon className={cn(
+                  'h-5 w-5',
+                  usesRedActiveIcon ? (isActive ? 'text-red-500' : 'text-white') : undefined,
+                )} />
                 <span className="truncate text-sm font-medium">{item.label}</span>
               </Link>
             );

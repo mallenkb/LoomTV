@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   StremioAdapterError,
   createStremioAddonRegistry,
+  normalizeStremioManifest,
 } from '../src/stremio-adapter.mjs';
 
 const manifest = {
@@ -33,6 +34,20 @@ function registryFor(route) {
     now: () => 1234,
   });
 }
+
+test('known Stremio Addons signature metadata is accepted and ignored', () => {
+  const normalized = normalizeStremioManifest({
+    ...manifest,
+    stremioAddonsConfig: {
+      issuer: 'https://stremio-addons.net',
+      signature: 'opaque-signature',
+    },
+  }, 'https://catalog.example/manifest.json');
+
+  assert.equal(normalized.id, manifest.id);
+  assert.equal(normalized.compatibilityWarnings.some(({ code }) => code === 'stremio_addons_config_ignored'), true);
+  assert.equal('stremioAddonsConfig' in normalized, false);
+});
 
 test('review is non-enabling and the current review token is required for approval', async () => {
   const registry = registryFor(() => manifest);

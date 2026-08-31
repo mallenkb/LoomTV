@@ -8,6 +8,7 @@ import LibrarySearch from '@/components/LibrarySearch';
 import StremioPosterCard from '@/components/StremioPosterCard';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import TrailerDialog from '@/components/TrailerDialog';
+import { PosterGridShimmer } from '@/components/ContentShimmer';
 import { desktopApi, type StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import type { StreamingProvider } from '@/shared/desktopProtocol';
@@ -1032,45 +1033,6 @@ async function discoverAnime(
     .map(mapAnilistToCatalog);
 }
 
-function insertShimmerStyle() {
-  if (typeof document === 'undefined') return;
-  const existing = document.getElementById('loom-discover-shimmer-style');
-  if (existing) return;
-  const style = document.createElement('style');
-  style.id = 'loom-discover-shimmer-style';
-  style.textContent = `
-    @keyframes discover-shimmer-slide {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(100%); }
-    }
-    .discover-shimmer-wave {
-      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0.08) 60%, transparent 100%);
-      animation: discover-shimmer-slide 1.5s linear infinite;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-function DiscoverShimmerCard() {
-  return (
-    <div className="loom-poster-link block w-full max-w-[200px] [contain-intrinsic-size:200px_340px] [content-visibility:auto]">
-      <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg">
-        <div className="relative h-full w-full overflow-hidden bg-[var(--loom-surface)]">
-          <span className="discover-shimmer-wave pointer-events-none absolute inset-0 block" />
-        </div>
-      </div>
-      <div className="mt-2 space-y-2">
-        <div className="relative h-4 w-4/5 overflow-hidden !rounded-none bg-[var(--loom-surface)]">
-          <span className="discover-shimmer-wave pointer-events-none absolute inset-0 block" />
-        </div>
-        <div className="relative h-3 w-1/2 overflow-hidden !rounded-none bg-[var(--loom-surface)]">
-          <span className="discover-shimmer-wave pointer-events-none absolute inset-0 block" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DiscoverOfflineState({ onRetry, onBrowseLibrary }: { onRetry: () => void; onBrowseLibrary: () => void }) {
   return (
     <div role="status" className="mx-auto mt-16 flex max-w-lg flex-col items-center px-6 pb-12 text-center">
@@ -1380,6 +1342,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     ? initialCachedItems.filter((item) => hasYearMatch(item, initialResolvedYearFilter))
     : []);
   const [loading, setLoading] = useState(() => !initialCachedItems);
+  const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'offline' | 'provider' | 'generic' | null>(null);
   const [trailerItem, setTrailerItem] = useState<StremioPluginCatalogItem | null>(null);
@@ -1511,10 +1474,6 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       }
     };
   }, [location.search, viewStateStorageKey]);
-
-  useEffect(() => {
-    insertShimmerStyle();
-  }, []);
 
   useEffect(() => {
     queryRef.current = query;
@@ -1997,9 +1956,13 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   }, [availabilityRegion, genreFilter, loadCatalog, platformFilter, query, yearFilter]);
 
   return (
-    <div ref={pageRef} className={isHome ? 'mt-10' : 'loom-page loom-library-page h-full overflow-y-auto'}>
+    <div
+      ref={pageRef}
+      className={isHome ? 'mt-10' : 'loom-page loom-library-page h-full overflow-y-auto'}
+      onScroll={isHome ? undefined : (event) => setIsHeaderScrolled(event.currentTarget.scrollTop > 4)}
+    >
       <div className={`${frameClass} ${isHome ? 'rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-5 sm:p-6' : 'loom-library-page-frame page-bottom-safe page-list-bottom-safe'} ${isHome ? 'pt-0' : topPaddingClass}`}>
-        <header className="loom-library-page-heading sticky top-0 z-40 isolate mb-6 flex min-h-8 shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[var(--loom-border)] bg-[var(--loom-bg)] py-3 shadow-[0_12px_24px_-22px_rgb(0_0_0_/_0.9)] backdrop-blur-xl">
+        <header className={`loom-library-page-heading sticky top-0 z-40 isolate mb-6 flex min-h-8 shrink-0 flex-wrap items-start justify-between gap-4 border-b bg-[var(--loom-bg)] py-3 backdrop-blur-xl transition-[border-color,box-shadow] duration-150 ${isHeaderScrolled ? 'border-[var(--loom-border)] shadow-[0_12px_24px_-22px_rgb(0_0_0_/_0.9)]' : 'border-transparent'}`}>
           <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">{isHome ? 'Browse more titles' : 'Discover'}</h1>
@@ -2110,11 +2073,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
         )}
 
         {loading ? (
-          <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
-            {Array.from({ length: 18 }).map((_, index) => (
-              <DiscoverShimmerCard key={index} />
-            ))}
-          </div>
+          <PosterGridShimmer className="mt-4" />
         ) : gridEntries.length === 0 ? (
           errorKind === 'offline' ? (
             <DiscoverOfflineState onRetry={retryCatalog} onBrowseLibrary={() => navigate('/')} />

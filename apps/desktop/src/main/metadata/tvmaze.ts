@@ -50,6 +50,7 @@ interface TVMazeShow {
   premiered?: string;
   language?: string;
   type?: string;
+  status?: string;
   externals?: { imdb?: string; thetvdb?: string | number };
   network?: TVMazePlatform | null;
   webChannel?: TVMazePlatform | null;
@@ -94,6 +95,7 @@ const tvMazeShowSchema: z.ZodType<TVMazeShow> = z.object({
   premiered: nullableString,
   language: nullableString,
   type: z.string().optional(),
+  status: nullableString,
   externals: z.object({
     imdb: nullableString,
     thetvdb: z.union([z.string(), z.number().finite()]).nullable().optional().transform((value) => value ?? undefined),
@@ -109,6 +111,10 @@ const tvMazeShowSchema: z.ZodType<TVMazeShow> = z.object({
   }).optional(),
 });
 const tvMazeSearchSchema: z.ZodType<TVMazeSearchEntry[]> = z.array(z.object({ show: tvMazeShowSchema.optional() }));
+
+export function tvMazeShowIsEnded(status?: string | null): boolean {
+  return status?.trim().toLowerCase() === 'ended';
+}
 
 function originPlatformFromShow(show: TVMazeShow): OriginPlatform | undefined {
   const platform = show.webChannel ?? show.network;
@@ -199,6 +205,7 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
     language: details.language || '',
     country: details.network?.country?.name || details.webChannel?.country?.name || '',
     showType: details.type || '',
+    showStatus: details.status || '',
     originPlatform: originPlatformFromShow(details),
     seasons: seasons.length > 0 ? seasons : undefined,
     episodes,
@@ -259,6 +266,7 @@ export async function fetchTVMetadataCandidates(title: string, localYear?: numbe
         language: show.language || '',
         country: show.network?.country?.name || show.webChannel?.country?.name || '',
         showType: show.type || '',
+        showStatus: show.status || '',
         originPlatform: originPlatformFromShow(show),
       };
     }));

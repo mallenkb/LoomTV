@@ -1,9 +1,14 @@
 import type { AppLoaderStyle } from '@/lib/theme';
 import type { UpdateState } from '@/lib/desktopApi';
+export {
+  DEFAULT_SIDEBAR_NAV_ORDER,
+  SIDEBAR_NAV_LABELS,
+  normalizeSidebarNavOrder,
+  type SidebarNavItemId,
+  type SidebarOrderItem,
+} from '@/lib/sidebarNavOrder';
 
 export type SettingsSection = 'profiles' | 'library' | 'playback' | 'plugins' | 'live-tv' | 'network' | 'metadata' | 'theme' | 'about';
-export type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
-
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'profiles', label: 'Profiles' },
   { id: 'library', label: 'Library' },
@@ -18,20 +23,11 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
 
 export const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';
 
-export const DEFAULT_SIDEBAR_NAV_ORDER: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
-
 export const LOADER_OPTIONS: { id: AppLoaderStyle; label: string; description: string }[] = [
   { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the LoomTV logo.' },
   { id: 'logo-mark', label: 'Logo Only', description: 'Compact logo-only loader for tighter surfaces.' },
   { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full LoomTV wordmark animation for branded screens.' },
 ];
-
-export const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
-  anime: 'Anime',
-  tv: 'TV Shows',
-  movies: 'Movies',
-  others: 'Others',
-};
 
 export const APP_LICENSE = {
   name: 'LoomTV',
@@ -74,9 +70,9 @@ export const THIRD_PARTY_DEPENDENCIES = [
 export const METADATA_ATTRIBUTIONS = [
   { name: 'TMDB', details: 'Movie and TV posters, backdrops, cast data, ratings, and metadata.', url: 'https://www.themoviedb.org/' },
   { name: 'TheTVDB', details: 'TV series, season, episode, and artwork metadata.', url: 'https://thetvdb.com/' },
-  { name: 'TVmaze', details: 'TV show and episode metadata.', url: 'https://www.tvmaze.com/' },
+  { name: 'TVmaze', details: 'Ratings for active anime and TV series, plus show and episode metadata.', url: 'https://www.tvmaze.com/' },
   { name: 'Jikan / MyAnimeList', details: 'Anime posters, ratings, and anime metadata.', url: 'https://jikan.moe/' },
-  { name: 'OMDb API', details: 'Fallback movie and TV metadata.', url: 'https://www.omdbapi.com/' },
+  { name: 'OMDb API', details: 'Ratings for movies and completed series, plus fallback title metadata.', url: 'https://www.omdbapi.com/' },
   { name: 'Fanart.tv', details: 'Clearlogos and media-center artwork.', url: 'https://fanart.tv/' },
 ];
 
@@ -115,13 +111,4 @@ export function getCompactUpdateStatus(updateState: UpdateState | null): string 
 export function isBundledFFmpegPath(pathValue?: string | null): boolean {
   if (!pathValue) return false;
   return /[\\/]ffmpeg[\\/](mac|win|linux)[\\/]/i.test(pathValue);
-}
-
-export function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
-  const savedOrder = Array.isArray(order) ? order : [];
-  const uniqueSavedOrder = Array.from(new Set(savedOrder));
-  return [
-    ...uniqueSavedOrder.filter((item): item is SidebarNavItemId => DEFAULT_SIDEBAR_NAV_ORDER.includes(item as SidebarNavItemId)),
-    ...DEFAULT_SIDEBAR_NAV_ORDER.filter((item) => !uniqueSavedOrder.includes(item)),
-  ];
 }

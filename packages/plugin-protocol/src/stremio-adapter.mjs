@@ -628,7 +628,12 @@ export function normalizeStremioManifest(input, manifestUrl, options = {}) {
     'behaviorHints',
     'addonCatalogs',
     'config',
+    'stremioAddonsConfig',
   ]), '$', issues);
+
+  if (input.stremioAddonsConfig !== undefined && !isRecord(input.stremioAddonsConfig)) {
+    issues.push(createIssue('$.stremioAddonsConfig', 'invalid_type', 'Expected a Stremio Addons configuration metadata object.'));
+  }
 
   const id = addIssueIfInvalidString(input.id, '$.id', issues, {
     required: true,
@@ -710,6 +715,11 @@ export function normalizeStremioManifest(input, manifestUrl, options = {}) {
       code: 'addon_catalogs_ignored',
       path: '$.addonCatalogs',
       message: 'Add-on discovery catalogs are not imported by LoomTV.',
+    }] : []),
+    ...(input.stremioAddonsConfig !== undefined ? [{
+      code: 'stremio_addons_config_ignored',
+      path: '$.stremioAddonsConfig',
+      message: 'External Stremio Addons configuration metadata is not used by LoomTV.',
     }] : []),
   ];
   return deepFreeze({

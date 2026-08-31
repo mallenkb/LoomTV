@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+@keyframes loom-content-shimmer-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.loom-content-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 40%, rgba(255, 255, 255, 0.22) 50%, rgba(255, 255, 255, 0.08) 60%, transparent 100%);
+  animation: loom-content-shimmer-slide 1.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loom-content-shimmer {
+    animation: none;
+  }
+}
+
 /* Initial-paint defaults mirror the default "Black" dark theme on Tailwind's
    Neutral scale; applyTheme() overrides them at runtime. */
 @theme {
@@ -56,10 +72,11 @@
   --loom-active-border: #44403c;
   --loom-control-border: rgb(255 255 255 / 0.05) !important;
   --loom-focus-glow: rgba(255, 255, 255, 0.14);
-  /* applyTheme() overrides this per appearance. The static default matters:
-     until it runs, `outline: 2px solid var(--loom-focus-ring)` would be
-     invalid at computed-value time and render no focus ring at all. */
-  --loom-focus-ring: #78716c;
+  /* Keep focus contrast independent of appearance palette updates. The dark
+     and light Stone values clear 3:1 against their app surfaces; !important
+     prevents applyTheme()'s inline custom properties from lowering that
+     contrast after the first paint. */
+  --loom-focus-ring: #a8a29e !important;
   --loom-body-start: #0a0a0a;
   --loom-body-end: #0a0a0a;
 
@@ -163,7 +180,7 @@
   --loom-hero-ground-tint: rgba(0, 0, 0, 0.66);
   --loom-control-border: rgb(28 25 23 / 0.05) !important;
   --loom-sidebar-active-bg: rgb(28 25 23 / 0.10) !important;
-  --loom-focus-ring: #a8a29e;
+  --loom-focus-ring: #57534e !important;
   --loom-control-veil: rgb(23 23 23 / 0.07);
   /* The header strip carries this tint alone; the expanded episode list stacks
      the veil below on top of it. A dark veil compounded into a heavy grey slab,
@@ -612,18 +629,16 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   color: var(--loom-text);
 }
 
-/* Search fields use the same quiet pill treatment as the modern controls. Keep
-   the readable border, but do not add a second focus ring around the field. */
+/* Search fields use the same quiet pill treatment as the modern controls. The
+   library search input is a child of a control that draws its own focus ring;
+   the standalone dropdown search keeps the shared form-control outline. */
 .loom-library-search-control,
 .loom-dropdown-search-input {
   border-color: var(--loom-panel-border) !important;
 }
 
-.loom-library-search-control:focus-within,
 .loom-library-search-control input:focus,
-.loom-library-search-control input:focus-visible,
-.loom-dropdown-search-input:focus,
-.loom-dropdown-search-input:focus-visible {
+.loom-library-search-control input:focus-visible {
   border-color: var(--loom-panel-border) !important;
   box-shadow: none !important;
   outline: none !important;
@@ -656,6 +671,11 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   background: var(--loom-panel);
   color: var(--loom-text);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.loom-modern-search-control:focus-within {
+  outline: 2px solid var(--loom-focus-ring);
+  outline-offset: 2px;
 }
 
 /* Three layers with different jobs. The horizontal one blends both side edges
@@ -2845,20 +2865,14 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   outline-offset: 2px;
 }
 
-/* Buttons use the app's quiet interaction treatment without a persistent
-   focus ring. Form controls keep their separate focus styling below. */
-.loom-app-shell :where(button, [role="button"]):focus,
-.loom-app-shell :where(button, [role="button"]):focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-}
-
-/* Form controls get one clean, rounded Stone focus treatment. This suppresses
-   the native rectangular outline and any legacy accent-colored utility ring. */
+/* Use a real outline so form focus survives forced-colors mode and cannot be
+   lost when a low-contrast shadow is suppressed. Search composites opt their
+   inner input out only when the containing control draws this outline. */
 .loom-app-shell :where(input, select, textarea):focus-visible {
   border-color: var(--loom-control-border) !important;
-  box-shadow: 0 0 0 2px var(--loom-focus-glow) !important;
-  outline: none !important;
+  box-shadow: none !important;
+  outline: 2px solid var(--loom-focus-ring) !important;
+  outline-offset: 2px;
 }
 
 /* Modern search is already contained by its floating glass control. Keep the
@@ -4056,5 +4070,72 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     max-width: none;
     min-width: 0;
     width: auto;
+  }
+}
+
+/* A 390px phone at 200% browser zoom exposes a roughly 195px CSS viewport.
+   Keep the same controls and reading order, but stop centering rows wider than
+   the viewport because that clips both their beginning and end. */
+@media (max-width: 240px) {
+  :root[data-loom-client="browser"][data-home-style="modern"] {
+    --loom-mobile-gutter: 0.625rem;
+    --loom-mobile-brand-height: 1.5rem;
+    --loom-mobile-avatar: 1.75rem;
+    --loom-mobile-header-height: 6.25rem;
+    --loom-mobile-nav-height: 4rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-brand {
+    max-width: calc(100vw - 3.75rem);
+    margin-inline: var(--loom-mobile-gutter) 3rem;
+  }
+
+  :root[data-loom-client="browser"][data-home-style="modern"] .loom-modern-header {
+    gap: 0.75rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill > .loom-shared-highlight-group {
+    gap: 0.75rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav a {
+    padding-inline: 2px !important;
+    font-size: 0.75rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero {
+    height: 34rem;
+    min-height: 34rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy {
+    align-items: stretch;
+    padding-inline: var(--loom-mobile-gutter) !important;
+    text-align: left;
+    transform: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy > img.object-contain.object-left-bottom {
+    align-self: center;
+    width: auto !important;
+    height: 72px !important;
+    max-height: 72px !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-meta {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap !important;
+    overflow: visible;
+    white-space: normal;
+    text-align: left;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-summary {
+    text-align: left;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-actions {
+    justify-content: flex-start;
   }
 }

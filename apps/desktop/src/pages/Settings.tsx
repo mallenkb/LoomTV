@@ -9,6 +9,7 @@ import SharedListHighlight from '@/components/SharedListHighlight';
 import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
 import {
   DEFAULT_SIDEBAR_NAV_ORDER,
+  SIDEBAR_NAV_LABELS,
   SETTINGS_SECTIONS,
   SETTINGS_SECTION_STORAGE_KEY,
   getCompactUpdateStatus,
@@ -18,6 +19,7 @@ import {
   normalizeSidebarNavOrder,
   type SettingsSection,
   type SidebarNavItemId,
+  type SidebarOrderItem,
 } from './Settings.helpers';
 import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
 import { assignOtherFolderToGroup, createOtherFolderGroup, normalizeOtherFolderGroups, type OtherFolderGroups } from '@/lib/otherFolderGroups';
@@ -38,6 +40,7 @@ import type {
   SharedLibrarySnapshot,
 } from './Settings.types';
 import { parseStoredValue } from '@/lib/desktopDecoders';
+import { iptvSourceDisplayName, useIptvSources } from '@/lib/liveTvSources';
 import { z } from 'zod';
 
 const savedRemoteLibrarySchema = z.object({ baseUrl: z.string() });
@@ -151,11 +154,11 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
     {
       id: 'omdb',
       label: 'OMDb API Key',
-      badge: 'Fallback',
+      badge: 'Movies + completed',
       placeholder: 'OMDb API key',
       description: (
         <>
-          Fallback ratings and movie details. Get a key at{' '}
+          Ratings for movies and completed series, plus fallback title details. Get a key at{' '}
           <button
             type="button"
             onClick={() => openExternal('https://www.omdbapi.com/apikey.aspx')}
@@ -227,12 +230,70 @@ export default function Settings() {
   const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
+  const { sources: iptvSources } = useIptvSources();
+  const [stremioPlugins, setStremioPlugins] = useState<Awaited<ReturnType<typeof desktopApi.listStremioPlugins>>>([]);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
   const [libraryActionError, setLibraryActionError] = useState<{ error: LibraryMutationError; action: LibraryAction } | null>(null);
   const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void desktopApi.listStremioPlugins().then((plugins) => {
+        if (active) setStremioPlugins(plugins);
+      }).catch(() => {
+        if (active) setStremioPlugins([]);
+      });
+    };
+    refresh();
+    window.addEventListener('loomtv:plugins-changed', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('loomtv:plugins-changed', refresh);
+    };
+  }, []);
+
+  const availableSidebarItems = useMemo<SidebarOrderItem[]>(() => {
+    const builtInItems = DEFAULT_SIDEBAR_NAV_ORDER.map((id) => ({
+      id,
+      label: SIDEBAR_NAV_LABELS[id] || id,
+    }));
+    const liveTvItems = iptvSources.map((source) => ({
+      id: `live:${source.id}`,
+      label: `${iptvSourceDisplayName(source.name)} (IPTV)`,
+    }));
+    const addonItems = stremioPlugins
+      .filter((plugin) => plugin.state === 'enabled' && plugin.trusted && plugin.addonId === 'org.archive.clean')
+      .map((plugin) => ({
+        id: `stremio:${plugin.addonId}`,
+        label: `${plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Archive.org'} (Add-on)`,
+      }));
+    const groupedFolders = new Set(Object.values(otherFolderGroups).flatMap((group) => group.folders));
+    const groupItems = Object.entries(otherFolderGroups).map(([groupId, group]) => ({
+      id: `group:${groupId}`,
+      label: group.name,
+    }));
+    const folderItems = (libraryFolderGroups.others || [])
+      .filter((folder) => !groupedFolders.has(folder))
+      .map((folder) => ({
+        id: `folder:${folder}`,
+        label: customFolderNames[folder]?.trim()
+          || folder.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop()
+          || 'Others',
+      }));
+    return [...builtInItems, ...liveTvItems, ...addonItems, ...groupItems, ...folderItems];
+  }, [customFolderNames, iptvSources, libraryFolderGroups.others, otherFolderGroups, stremioPlugins]);
+
+  const sidebarOrderItems = useMemo(() => {
+    const itemById = new Map(availableSidebarItems.map((item) => [item.id, item]));
+    return normalizeSidebarNavOrder(
+      sidebarNavOrder,
+      availableSidebarItems.map((item) => item.id),
+    ).map((id) => itemById.get(id)).filter((item): item is SidebarOrderItem => Boolean(item));
+  }, [availableSidebarItems, sidebarNavOrder]);
   const [isTogglingNetworkSharing, setIsTogglingNetworkSharing] = useState(false);
   const [requireNetworkApproval, setRequireNetworkApproval] = useState(false);
   const [remoteLibraryAddress, setRemoteLibraryAddress] = useState('');
@@ -719,18 +780,25 @@ export default function Settings() {
     window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: nextOrder }));
   };
 
-  const handleSidebarOrderDrop = (targetId: SidebarNavItemId) => {
-    if (!draggedSidebarItem || draggedSidebarItem === targetId) {
+  const handleSidebarOrderDrop = (targetId: SidebarNavItemId, position: 'before' | 'after') => {
+    if (!draggedSidebarItem || draggedSidebarItem === 'divider' || draggedSidebarItem === targetId) {
       setDraggedSidebarItem(null);
       return;
     }
 
-    const currentOrder = sidebarNavOrder.filter((item) => item !== draggedSidebarItem);
-    const targetIndex = currentOrder.indexOf(targetId);
+    const currentOrder = sidebarOrderItems
+      .map((item) => item.id)
+      .filter((item) => item !== draggedSidebarItem);
+    const currentTargetIndex = currentOrder.indexOf(targetId);
+    if (currentTargetIndex < 0) {
+      setDraggedSidebarItem(null);
+      return;
+    }
+    const insertionIndex = position === 'after' ? currentTargetIndex + 1 : currentTargetIndex;
     const nextOrder = [
-      ...currentOrder.slice(0, targetIndex),
+      ...currentOrder.slice(0, insertionIndex),
       draggedSidebarItem,
-      ...currentOrder.slice(targetIndex),
+      ...currentOrder.slice(insertionIndex),
     ];
 
     setDraggedSidebarItem(null);
@@ -738,11 +806,12 @@ export default function Settings() {
   };
 
   const moveSidebarItem = (itemId: SidebarNavItemId, direction: -1 | 1) => {
-    const index = sidebarNavOrder.indexOf(itemId);
+    const currentOrder = sidebarOrderItems.map((item) => item.id);
+    const index = currentOrder.indexOf(itemId);
     const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= sidebarNavOrder.length) return;
+    if (itemId === 'divider' || index < 0 || nextIndex < 0 || nextIndex >= currentOrder.length) return;
 
-    const nextOrder = [...sidebarNavOrder];
+    const nextOrder = [...currentOrder];
     [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
     void saveSidebarNavOrder(nextOrder);
   };
@@ -1172,7 +1241,7 @@ export default function Settings() {
             onEditFolder={editFolder}
             otherFolderIcon={otherFolderIcon}
             onOtherFolderIconChange={changeOtherFolderIcon}
-            sidebarNavOrder={sidebarNavOrder}
+            sidebarOrderItems={sidebarOrderItems}
             draggedSidebarItem={draggedSidebarItem}
             setDraggedSidebarItem={setDraggedSidebarItem}
             onSidebarOrderDrop={handleSidebarOrderDrop}

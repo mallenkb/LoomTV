@@ -17,7 +17,7 @@ import type {
   SettingsSection,
 } from './mobileDomain';
 
-export function useMobileNavigationController({ cancelActiveRequests }: { cancelActiveRequests: () => void }) {
+export function useMobileNavigationController() {
   const [activeKind, setActiveKind] = useState<LibraryKind>('home');
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -48,7 +48,6 @@ export function useMobileNavigationController({ cancelActiveRequests }: { cancel
   }, []);
 
   const navigateToKind = useCallback((kind: LibraryKind) => {
-    cancelActiveRequests();
     if (kind === activeKind) {
       lastDetailByKindRef.current.delete(kind);
       setDetailItem(null);
@@ -73,7 +72,7 @@ export function useMobileNavigationController({ cancelActiveRequests }: { cancel
     setLibraryFilter('all');
     setActiveKind(kind);
     updateHomeHeaderPinned(false);
-  }, [activeKind, cancelActiveRequests, detailItem, updateHomeHeaderPinned]);
+  }, [activeKind, detailItem, updateHomeHeaderPinned]);
 
   const rememberMainScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offset = event.nativeEvent.contentOffset.y;

@@ -43,11 +43,13 @@ const StremioPosterCard = memo(function StremioPosterCard({
   metaLine = '',
   onSelect,
   onPlayTrailer,
+  onPlay,
 }: {
   item: StremioPluginCatalogItem;
   metaLine?: string;
   onSelect: (item: StremioPluginCatalogItem) => void;
   onPlayTrailer?: () => void;
+  onPlay?: (item: StremioPluginCatalogItem) => void;
 }) {
   const { watchedKeys, setWatched } = useProfiles();
   const watchedKey = discoverWatchedKey(item);
@@ -77,13 +79,27 @@ const StremioPosterCard = memo(function StremioPosterCard({
         <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
         <div className={BACKDROP_CLASS} />
         <div className={PLAY_OVERLAY_CLASS}>
-          {onPlayTrailer ? (
+          {onPlay ? (
             <button
               type="button"
               aria-label={`Play ${item.title}`}
               onClick={(event) => {
                 event.stopPropagation();
-                onSelect(item);
+                onPlay(item);
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="loom-poster-play-action inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3.5 text-sm font-semibold text-black shadow-xl transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            >
+              <Play className="h-4 w-4 fill-current" />
+              Play
+            </button>
+          ) : onPlayTrailer ? (
+            <button
+              type="button"
+              aria-label={`Play trailer for ${item.title}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPlayTrailer();
               }}
               onKeyDown={(event) => event.stopPropagation()}
               className="loom-poster-play-action grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl transition-transform duration-200 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"

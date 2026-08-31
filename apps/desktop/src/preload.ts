@@ -148,6 +148,8 @@ const desktopApi = {
     ipcRenderer.invoke('plugins:stremio:review-official', officialId),
   reviewStremioManifestUrl: (manifestUrl: string) =>
     ipcRenderer.invoke('plugins:stremio:review-url', manifestUrl),
+  reviewInstalledStremioAddon: (addonId: string) =>
+    ipcRenderer.invoke('plugins:stremio:review-installed', addonId),
   approveStremioAddon: (addonId: string, reviewToken: string) =>
     ipcRenderer.invoke('plugins:stremio:approve', addonId, reviewToken),
   disableStremioAddon: (addonId: string) =>
@@ -164,6 +166,8 @@ const desktopApi = {
     ipcRenderer.invoke('plugins:stremio:meta', addonId, request),
   getStremioMetaByItem: (request: StremioPluginMetaRequest) =>
     ipcRenderer.invoke('plugins:stremio:meta-item', request),
+  getStremioStreams: (addonId: string, request: import('./shared/desktopProtocol.ts').StremioStreamRequest) =>
+    ipcRenderer.invoke('plugins:stremio:streams', addonId, request),
   getStremioAddonConfiguration: (addonId: string) =>
     ipcRenderer.invoke('plugins:stremio:configuration', addonId),
   saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) =>

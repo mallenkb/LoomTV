@@ -8,8 +8,18 @@ import {
   releaseNativePlaybackDisplaySleep,
   syncNativePlaybackDisplaySleep,
 } from './nativePlaybackPower';
-import { libVlcPlatformBinding, libVlcPlatformVariants } from './libvlcPlatform.ts';
+import {
+  libVlcPlatformBinding,
+  libVlcPlatformVariants,
+  orderWindowsLibVlcChildren,
+} from './libvlcPlatform.ts';
 import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
+import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
+import {
+  captureLibVlcTrackSelection,
+  restoreLibVlcTrackSelection,
+  type LibVlcTrackSelection,
+} from './libvlcSessionState.ts';
 
 /**
  * A koffi type descriptor. `koffi.struct(...)` returns one of these opaque
@@ -85,6 +95,8 @@ type LibVlcApi = {
   videoSetTrack?: DynamicFunction;
   videoGetTrack?: DynamicFunction;
   videoGetTrackDescription?: DynamicFunction;
+  videoSetAspectRatio?: DynamicFunction;
+  videoSetCropGeometry?: DynamicFunction;
   audioSetTrack?: DynamicFunction;
   audioGetTrackDescription?: DynamicFunction;
   subtitleSetTrack?: DynamicFunction;
@@ -356,8 +368,10 @@ function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
     // VLC's plugins.dat. Let the one process-wide instance scan its plugins
     // once during LoomTV's startup splash instead of validating a stale cache
     // every time the user presses Play.
-    const args = ['--no-plugins-cache'];
-    return nativeHandle(runtime.api.newInstance(args.length, args));
+    return nativeHandle(runtime.api.newInstance(
+      LIBVLC_INSTANCE_ARGUMENTS.length,
+      LIBVLC_INSTANCE_ARGUMENTS,
+    ));
   } finally {
     if (previousPluginPath === undefined) delete process.env.VLC_PLUGIN_PATH;
     else process.env.VLC_PLUGIN_PATH = previousPluginPath;
@@ -431,6 +445,8 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         videoSetTrack: optionalBind(library, 'libvlc_video_set_track', 'int', ['void *', 'int']),
         videoGetTrack: optionalBind(library, 'libvlc_video_get_track', 'int', ['void *']),
         videoGetTrackDescription: optionalBind(library, 'libvlc_video_get_track_description', 'void *', ['void *']),
+        videoSetAspectRatio: optionalBind(library, 'libvlc_video_set_aspect_ratio', 'void', ['void *', 'str']),
+        videoSetCropGeometry: optionalBind(library, 'libvlc_video_set_crop_geometry', 'void', ['void *', 'str']),
         audioSetTrack: optionalBind(library, 'libvlc_audio_set_track', 'int', ['void *', 'int']),
         audioGetTrackDescription: optionalBind(library, 'libvlc_audio_get_track_description', 'void *', ['void *']),
         subtitleSetTrack: optionalBind(library, 'libvlc_video_set_spu', 'int', ['void *', 'int']),
@@ -861,14 +877,15 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
   const SW_SHOW = 5;
   const SWP_NOSIZE = 0x0001;
   const SWP_NOMOVE = 0x0002;
+  const SWP_NOZORDER = 0x0004;
   const SWP_NOACTIVATE = 0x0010;
   const SWP_SHOWWINDOW = 0x0040;
   const SWP_NOOWNERZORDER = 0x0200;
   const HWND_BOTTOM = 1n;
 
   const positionFlags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW;
-  const orderBelowRenderer = (windowHandle: NativeDrawable, insertAfter: NativeDrawable | null): void => {
-    setWindowPos(windowHandle, insertAfter, 0, 0, 0, 0, positionFlags | SWP_NOSIZE | SWP_NOMOVE);
+  const moveToBottom = (windowHandle: NativeDrawable): void => {
+    setWindowPos(windowHandle, HWND_BOTTOM, 0, 0, 0, 0, positionFlags | SWP_NOSIZE | SWP_NOMOVE);
   };
 
   let backdrop: NativeDrawable | null = null;
@@ -933,7 +950,7 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
         Math.round(y),
         Math.max(1, Math.round(width)),
         Math.max(1, Math.round(height)),
-        positionFlags,
+        positionFlags | SWP_NOZORDER,
       );
     };
 
@@ -961,8 +978,7 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
       // Child z-order is relative to the top-level Electron client area.
       // Keep the black backdrop at the bottom and the LibVLC child directly
       // above it; Chromium's existing child window remains above both.
-      orderBelowRenderer(backdrop, HWND_BOTTOM);
-      orderBelowRenderer(nativeView, backdrop);
+      orderWindowsLibVlcChildren(nativeView, backdrop, moveToBottom);
       const changed = !attached;
       attached = true;
       return changed;
@@ -1036,6 +1052,12 @@ class LibVlcPlaybackSession {
   private preferredAudioTrackId: number | null;
   private initialAudioSelectionApplied = false;
   private initialAudioSelectionAttempts = 0;
+  private pendingRearmTrackSelection: LibVlcTrackSelection | null = null;
+  private rearmTrackSelectionAttempts = 0;
+  private videoAspect: string | null = null;
+  private videoCrop: string | null = null;
+  private subtitleDelaySeconds: number;
+  private audioDelaySeconds: number;
   private nativeRearmUntil = 0;
   private nativeTracksSignature = '';
   private lastNativeTrackRefreshAt = 0;
@@ -1054,6 +1076,8 @@ class LibVlcPlaybackSession {
     this.preferredAudioTrackId = Number.isFinite(options.audioTrackId)
       ? Number(options.audioTrackId)
       : null;
+    this.subtitleDelaySeconds = finite(options.subtitleDelay, 0);
+    this.audioDelaySeconds = finite(options.audioDelay, 0);
     this.state = {
       sessionId: this.id,
       status: 'starting',
@@ -1152,6 +1176,10 @@ class LibVlcPlaybackSession {
     api.audioSetVolume(player, Math.round((this.state.volume ?? 1) * 100));
     api.audioSetMute(player, this.state.muted ? 1 : 0);
     api.playerSetRate(player, this.state.speed);
+    if (api.videoSetAspectRatio) api.videoSetAspectRatio(player, this.videoAspect);
+    if (api.videoSetCropGeometry) api.videoSetCropGeometry(player, this.videoCrop);
+    if (api.subtitleSetDelay) api.subtitleSetDelay(player, Math.round(this.subtitleDelaySeconds * 1_000_000));
+    if (api.audioSetDelay) api.audioSetDelay(player, Math.round(this.audioDelaySeconds * 1_000_000));
   }
 
   private attachNativeViewListeners(): void {
@@ -1305,6 +1333,18 @@ class LibVlcPlaybackSession {
     const previousPlayer = this.player;
     const previousState = Number(api.playerGetState(previousPlayer));
     const wasPaused = this.requestedPaused || previousState === 4;
+    this.pendingRearmTrackSelection = captureLibVlcTrackSelection({
+      video: {
+        get: api.videoGetTrack ? () => api.videoGetTrack?.(previousPlayer) : undefined,
+      },
+      audio: {
+        get: api.audioGetTrack ? () => api.audioGetTrack?.(previousPlayer) : undefined,
+      },
+      subtitle: {
+        get: api.subtitleGetTrack ? () => api.subtitleGetTrack?.(previousPlayer) : undefined,
+      },
+    });
+    this.rearmTrackSelectionAttempts = 0;
     // LibVLC's macOS vout can keep its old CALayer after an NSView is moved
     // through Electron's fullscreen hierarchy. Rebinding the drawable and
     // calling stop/play is not sufficient: the decoder runs, but the old vout
@@ -1521,6 +1561,31 @@ class LibVlcPlaybackSession {
     if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', this.state);
   }
 
+  private applyPendingRearmTrackSelection(): void {
+    if (!this.pendingRearmTrackSelection || !this.player) return;
+    const api = this.runtime.api;
+    this.rearmTrackSelectionAttempts += 1;
+    const restored = restoreLibVlcTrackSelection(this.pendingRearmTrackSelection, {
+      video: {
+        get: api.videoGetTrack ? () => api.videoGetTrack?.(this.player) : undefined,
+        set: api.videoSetTrack ? (trackId) => api.videoSetTrack?.(this.player, trackId) : undefined,
+      },
+      audio: {
+        get: api.audioGetTrack ? () => api.audioGetTrack?.(this.player) : undefined,
+        set: api.audioSetTrack ? (trackId) => api.audioSetTrack?.(this.player, trackId) : undefined,
+      },
+      subtitle: {
+        get: api.subtitleGetTrack ? () => api.subtitleGetTrack?.(this.player) : undefined,
+        set: api.subtitleSetTrack ? (trackId) => api.subtitleSetTrack?.(this.player, trackId) : undefined,
+      },
+    });
+    if (!restored && this.rearmTrackSelectionAttempts < 8) return;
+    if (!restored) console.warn('[libvlc] native track selection could not be fully restored after fullscreen re-arm.');
+    this.pendingRearmTrackSelection = null;
+    this.rearmTrackSelectionAttempts = 0;
+    this.refreshNativeTracks(true);
+  }
+
   private applyInitialAudioSelection(): void {
     if (this.initialAudioSelectionApplied || this.preferredAudioTrackId === null || !this.player) return;
     const api = this.runtime.api;
@@ -1605,6 +1670,7 @@ class LibVlcPlaybackSession {
       const durationMs = Number(api.playerGetLength(this.player));
       const positionMs = Number(api.playerGetTime(this.player));
       if (status === 'ready') {
+        this.applyPendingRearmTrackSelection();
         this.applyInitialAudioSelection();
         this.refreshNativeTracks();
       }
@@ -1654,22 +1720,26 @@ class LibVlcPlaybackSession {
           api.audioSetMute(this.player, command.muted ? 1 : 0);
           this.emit({ muted: command.muted });
           return true;
-        case 'set-speed': return Number(api.playerSetRate(this.player, clamp(finite(command.speed, 1), 0.25, 3))) >= 0;
+        case 'set-speed': {
+          const speed = clamp(finite(command.speed, 1), 0.25, 3);
+          const applied = Number(api.playerSetRate(this.player, speed)) >= 0;
+          if (applied) this.emit({ speed });
+          return applied;
+        }
         case 'set-video-track': {
           const applied = api.videoSetTrack ? Number(api.videoSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
           if (applied) this.refreshNativeTracks(true);
           return applied;
         }
         case 'set-audio-track': {
-          this.preferredAudioTrackId = command.trackId;
-          this.initialAudioSelectionAttempts = 0;
-          if (!api.audioSetTrack) {
-            this.initialAudioSelectionApplied = command.trackId === null;
-            return false;
-          }
+          if (!api.audioSetTrack) return false;
           const applied = Number(api.audioSetTrack(this.player, command.trackId ?? -1)) >= 0;
-          this.initialAudioSelectionApplied = applied;
-          if (applied) this.refreshNativeTracks(true);
+          if (applied) {
+            this.preferredAudioTrackId = command.trackId;
+            this.initialAudioSelectionApplied = true;
+            this.initialAudioSelectionAttempts = 0;
+            this.refreshNativeTracks(true);
+          }
           return applied;
         }
         case 'set-subtitle-track': {
@@ -1677,8 +1747,31 @@ class LibVlcPlaybackSession {
           if (applied) this.refreshNativeTracks(true);
           return applied;
         }
-        case 'set-subtitle-delay': return api.subtitleSetDelay ? Number(api.subtitleSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0 : false;
-        case 'set-audio-delay': return api.audioSetDelay ? Number(api.audioSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0 : false;
+        case 'set-subtitle-delay': {
+          if (!api.subtitleSetDelay) return false;
+          const applied = Number(api.subtitleSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0;
+          if (applied) this.subtitleDelaySeconds = command.seconds;
+          return applied;
+        }
+        case 'set-audio-delay': {
+          if (!api.audioSetDelay) return false;
+          const applied = Number(api.audioSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0;
+          if (applied) this.audioDelaySeconds = command.seconds;
+          return applied;
+        }
+        case 'set-video-aspect': {
+          if (!api.videoSetAspectRatio) return false;
+          api.videoSetAspectRatio(this.player, command.aspect);
+          this.videoAspect = command.aspect;
+          return true;
+        }
+        case 'set-video-crop': {
+          if (!api.videoSetCropGeometry) return false;
+          api.videoSetCropGeometry(this.player, command.crop);
+          this.videoCrop = command.crop;
+          return true;
+        }
+        case 'set-video-rotation': return command.degrees === 0;
         default: return false;
       }
     } catch {

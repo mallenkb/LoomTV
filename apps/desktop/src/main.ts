@@ -72,6 +72,7 @@ import {
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
+import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
   createWindow,
   getMainWindow,
@@ -248,7 +249,7 @@ import {
 import type {
   MediaItem as MetadataMediaItem,
 } from './main/metadata/types';
-import { fetchOMDbMetadata, fetchOMDbMetadataById } from './main/metadata/omdb';
+import { fetchOMDbMetadata, fetchOMDbMetadataById, fetchOMDbSeasonEpisodes } from './main/metadata/omdb';
 import { fetchTVMetadata, fetchTVMetadataCandidates } from './main/metadata/tvmaze';
 import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates } from './main/metadata/tvdb';
 import {
@@ -600,6 +601,7 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   fetchJikanMetadata: metadataRequestWhenOnline(fetchJikanMetadata, () => null),
   fetchOMDbMetadata: metadataRequestWhenOnline(fetchOMDbMetadata, () => null),
   fetchOMDbMetadataById: metadataRequestWhenOnline(fetchOMDbMetadataById, () => null),
+  fetchOMDbSeasonEpisodes: metadataRequestWhenOnline(fetchOMDbSeasonEpisodes, () => []),
   fetchTMDBMovieMetadata: metadataRequestWhenOnline(fetchTMDBMovieMetadata, () => null),
   fetchTMDBMovieMetadataById: metadataRequestWhenOnline(fetchTMDBMovieMetadataById, () => null),
   fetchTMDBTVMetadata: metadataRequestWhenOnline(fetchTMDBTVMetadata, () => null),
@@ -1377,6 +1379,7 @@ const {
   fetchJikanMetadataCandidates,
   fetchOMDbMetadata,
   fetchOMDbMetadataById,
+  fetchOMDbSeasonEpisodes,
   fetchTMDBMovieMetadata,
   fetchTMDBMovieMetadataById,
   fetchTMDBMovieMetadataCandidates,
@@ -1542,25 +1545,22 @@ function configureRendererSecurityPolicy(): void {
     "form-action 'none'",
   ].join('; ');
 
-  // Packaged renderer pages use file://, which does not provide YouTube with
-  // the HTTPS client identity required by its embedded player (error 153).
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    {
-      urls: [
-        'https://www.youtube-nocookie.com/embed/*',
-        'https://www.youtube.com/embed/*',
-      ],
-      types: ['subFrame'],
-    },
-    (details, callback) => {
-      callback({
-        requestHeaders: {
-          ...details.requestHeaders,
-          Referer: YOUTUBE_EMBED_REFERER,
-        },
-      });
-    },
-  );
+  const youtubeEmbedHosts = new Set(['www.youtube-nocookie.com', 'www.youtube.com']);
+
+  registerDefaultSessionRequestHeaderRule((details, headers) => {
+    let url: URL;
+    try { url = new URL(details.url); } catch { return; }
+
+    // Packaged renderer pages use file://, which does not provide YouTube with
+    // the HTTPS client identity required by its embedded player (error 153).
+    if (details.resourceType === 'subFrame'
+      && youtubeEmbedHosts.has(url.hostname)
+      && url.pathname.startsWith('/embed/')) {
+      headers.Referer = YOUTUBE_EMBED_REFERER;
+      return;
+    }
+
+  });
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const isRendererDocument = details.resourceType === 'mainFrame'
@@ -1871,6 +1871,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
   reviewStremioManifestUrl: async (manifestUrl) => stremioPluginReviewForRenderer(
     await stremioPluginService.reviewManifestUrl(manifestUrl),
   ),
+  reviewInstalledStremioAddon: async (addonId) => stremioPluginReviewForRenderer(
+    await stremioPluginService.reviewInstalled(addonId),
+  ),
   approveStremioAddon: async (addonId, reviewToken) => stremioPluginSummaryForRenderer(
     await stremioPluginService.approve(addonId, reviewToken),
   ),
@@ -1932,6 +1935,27 @@ registerIpcHandlers<LibraryData, AppSettings>({
       }),
       (source) => pluginArtworkDeliveryUrl(itemIdentity.addonId, source),
     );
+  },
+  fetchStremioStreams: async (addonId, request) => {
+    const result = await stremioPluginService.fetchStreams(requireDesktopProfileId(), addonId, {
+      type: request.type,
+      videoId: request.id,
+      ...(request.extra ? { extra: request.extra } : {}),
+    });
+    const playableStreams = result.sources
+      .filter((s): s is typeof s & { url: string } => typeof (s as { url?: string }).url === 'string' && (s as { url: string }).url.startsWith('https://'))
+      .map((s) => ({
+        url: (s as { url: string }).url,
+        title: (s as { title?: string }).title,
+        behaviorHints: (s as { behaviorHints?: Record<string, unknown> }).behaviorHints,
+      }));
+    return {
+      addonId: result.source.addonId,
+      streams: playableStreams,
+      playableCount: result.playableCount,
+      unsupportedPeerToPeerCount: result.unsupportedPeerToPeerCount,
+      rejectedCount: result.rejectedCount,
+    };
   },
   getMediaSegments: skipSegmentService.getSegments,
   saveManualMediaSegment: skipSegmentService.saveManualSegment,

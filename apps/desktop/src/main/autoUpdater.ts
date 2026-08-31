@@ -12,6 +12,7 @@ import { destroyLanDiscovery } from './lanDiscovery';
 import { createUpdateAdapter } from './updateAdapter';
 import { safeFetch } from './safeFetch';
 import { parseRequiredJson } from './runtimeValidation.ts';
+import { openSettingsInWindow } from './openSettings';
 import { z } from 'zod';
 
 const UPDATE_OWNER = 'mallenkb';
@@ -573,6 +574,14 @@ function refreshUpdateMenu() {
 }
 
 export function buildUpdateMenu() {
+  const openSettingsItem: MenuItemConstructorOptions = {
+    id: 'loomtv-open-settings',
+    label: 'Settings...',
+    accelerator: 'CommandOrControl+,',
+    click: () => {
+      openSettingsInWindow(deps.getMainWindow());
+    },
+  };
   const updateItems: MenuItemConstructorOptions[] = [
     {
       id: 'loomtv-check-updates',
@@ -598,6 +607,9 @@ export function buildUpdateMenu() {
           label: app.name,
           submenu: [
             { role: 'about' },
+            { type: 'separator' },
+            openSettingsItem,
+            { type: 'separator' },
             ...updateItems,
             { type: 'separator' },
             { role: 'services' },
@@ -649,6 +661,8 @@ export function buildUpdateMenu() {
         {
           label: 'File',
           submenu: [
+            openSettingsItem,
+            { type: 'separator' },
             ...updateItems,
             { type: 'separator' },
             { role: 'quit' },

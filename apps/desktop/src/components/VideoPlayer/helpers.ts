@@ -395,6 +395,14 @@ export function isBitmapSubtitleCodec(codec?: string): boolean {
   return BITMAP_SUBTITLE_CODECS.some((entry) => normalized.includes(entry));
 }
 
+export function shouldRenderSubtitleNativelyInLibVlc(codec?: string): boolean {
+  const normalized = (codec || '').trim().toLowerCase();
+  return isBitmapSubtitleCodec(normalized)
+    || normalized === 'ass'
+    || normalized === 'ssa'
+    || normalized.includes('substation alpha');
+}
+
 function parseVttTimestamp(value: string): number {
   const parts = value.trim().split(':');
   if (parts.length < 2) return NaN;
@@ -425,4 +433,28 @@ export function parseVttCues(content: string): SubtitleCue[] {
     if (text) cues.push({ start, end, text });
   }
   return cues.sort((a, b) => a.start - b.start);
+}
+
+export function activeSubtitleText(cues: SubtitleCue[], time: number): string {
+  if (!Number.isFinite(time) || cues.length === 0) return '';
+  let low = 0;
+  let high = cues.length - 1;
+  let lastStartedIndex = -1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (cues[middle].start <= time) {
+      lastStartedIndex = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  if (lastStartedIndex < 0) return '';
+  const activeLines = new Set<string>();
+  for (let index = 0; index <= lastStartedIndex; index += 1) {
+    const cue = cues[index];
+    if (time >= cue.start && time < cue.end && cue.text) activeLines.add(cue.text);
+  }
+  return Array.from(activeLines).join('\n');
 }

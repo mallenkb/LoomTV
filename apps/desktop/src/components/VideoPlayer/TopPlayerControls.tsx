@@ -1,14 +1,28 @@
 import { memo } from 'react';
+import { CornersIn, CornersOut } from '@phosphor-icons/react';
 import { ChevronLeft, X } from 'lucide-react';
 
 type TopPlayerControlsProps = {
   visible: boolean;
   label: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
   onBack: () => void;
   onClose: () => void;
 };
 
-function TopPlayerControls({ visible, label, onBack, onClose }: TopPlayerControlsProps) {
+function TopPlayerControls({
+  visible,
+  label,
+  actionLabel,
+  onAction,
+  fullscreen,
+  onToggleFullscreen,
+  onBack,
+  onClose,
+}: TopPlayerControlsProps) {
   const visibilityClass = visible ? 'opacity-100' : 'pointer-events-none opacity-0';
 
   return (
@@ -35,20 +49,55 @@ function TopPlayerControls({ visible, label, onBack, onClose }: TopPlayerControl
         <span className="block truncate">{label}</span>
       </div>
 
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          onClose();
-        }}
-        onDoubleClick={(event) => event.stopPropagation()}
-        className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
-        title="Close player"
-        aria-label="Close player"
-        tabIndex={visible ? 0 : -1}
-      >
-        <X className="h-4 w-4" />
-      </button>
+      <div className="flex items-center gap-2">
+        {actionLabel && onAction ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onAction();
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="loom-player-top-control flex h-10 items-center rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+            tabIndex={visible ? 0 : -1}
+          >
+            {actionLabel}
+          </button>
+        ) : null}
+        {onToggleFullscreen ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFullscreen();
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-pressed={fullscreen}
+            tabIndex={visible ? 0 : -1}
+          >
+            {fullscreen
+              ? <CornersIn className="h-4 w-4" weight="fill" />
+              : <CornersOut className="h-4 w-4" weight="regular" />}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+          className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+          title="Close player"
+          aria-label="Close player"
+          tabIndex={visible ? 0 : -1}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

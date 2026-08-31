@@ -24,6 +24,12 @@ function stateLabel(plugin: StremioPluginSummary): string {
   return 'Disabled';
 }
 
+function hasConfigurationValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 export default function PluginsSettingsSection() {
   const confirm = useConfirm();
   const [installed, setInstalled] = useState<StremioPluginSummary[]>([]);
@@ -91,11 +97,16 @@ export default function PluginsSettingsSection() {
     setBusyKey(`approve:${review.addonId}`);
     setError(null);
     try {
+      const values = configurationValues[review.addonId] || {};
+      if (review.configuration.length > 0 && Object.keys(values).length > 0) {
+        await desktopApi.saveStremioAddonConfiguration(review.addonId, values);
+      }
       await desktopApi.approveStremioAddon(review.addonId, review.reviewToken);
       setReview(null);
       setReviewConfirmed(false);
       setManifestUrl('');
       await refresh();
+      window.dispatchEvent(new Event('loomtv:plugins-changed'));
     } catch (approveError) {
       setError(errorMessage(approveError));
     } finally {
@@ -109,6 +120,7 @@ export default function PluginsSettingsSection() {
     try {
       await desktopApi.disableStremioAddon(plugin.addonId);
       await refresh();
+      window.dispatchEvent(new Event('loomtv:plugins-changed'));
     } catch (disableError) {
       setError(errorMessage(disableError));
     } finally {
@@ -130,6 +142,7 @@ export default function PluginsSettingsSection() {
       await desktopApi.removeStremioAddon(plugin.addonId);
       if (review?.addonId === plugin.addonId) setReview(null);
       await refresh();
+      window.dispatchEvent(new Event('loomtv:plugins-changed'));
     } catch (removeError) {
       setError(errorMessage(removeError));
     } finally {
@@ -182,6 +195,12 @@ export default function PluginsSettingsSection() {
     }));
   };
 
+  const reviewConfigurationComplete = !review
+    || review.configured
+    || review.configuration.every((field) => (
+      !field.required || hasConfigurationValue(configurationValues[review.addonId]?.[field.key])
+    ));
+
   return (
     <div className="space-y-4">
       <Dialog
@@ -219,6 +238,59 @@ export default function PluginsSettingsSection() {
                   </ul>
                 </div>
               )}
+              {review.configuration.length > 0 && !review.configured && (
+                <div className="rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+                  <p className="flex items-center gap-2 font-medium text-white">
+                    <KeyRound className="h-4 w-4 text-[var(--loom-accent)]" />
+                    Add-on configuration
+                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {review.configuration.map((field) => {
+                      const value = configurationValues[review.addonId]?.[field.key];
+                      const label = field.title || field.key;
+                      if (field.type === 'checkbox' || field.type === 'boolean') {
+                        return (
+                          <label key={field.key} className="flex min-h-9 items-center gap-2 text-xs text-[var(--loom-muted)]">
+                            <input
+                              type="checkbox"
+                              checked={value === true}
+                              onChange={(event) => setConfigurationValue(review.addonId, field.key, event.target.checked)}
+                              className="h-4 w-4 accent-[var(--loom-accent)]"
+                            />
+                            {label}{field.required ? ' *' : ''}
+                          </label>
+                        );
+                      }
+                      if (field.type === 'select' && field.options?.length) {
+                        return (
+                          <label key={field.key} className="grid gap-1 text-xs text-[var(--loom-muted)]">
+                            <span>{label}{field.required ? ' *' : ''}</span>
+                            <select
+                              value={typeof value === 'string' ? value : ''}
+                              onChange={(event) => setConfigurationValue(review.addonId, field.key, event.target.value)}
+                              className="h-9 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-2 text-sm text-white"
+                            >
+                              <option value="">Select…</option>
+                              {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          </label>
+                        );
+                      }
+                      return (
+                        <label key={field.key} className="grid gap-1 text-xs text-[var(--loom-muted)]">
+                          <span>{label}{field.required ? ' *' : ''}</span>
+                          <input
+                            type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+                            value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+                            onChange={(event) => setConfigurationValue(review.addonId, field.key, event.target.value)}
+                            className="h-9 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-2 text-sm text-white outline-none focus:border-[var(--loom-accent)]"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <label className="flex items-start gap-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3 text-[var(--loom-muted)]">
                 <input
                   type="checkbox"
@@ -230,7 +302,7 @@ export default function PluginsSettingsSection() {
               </label>
               <div className="flex gap-2 sm:justify-end">
                 <Button variant="ghost" onClick={() => setReview(null)} disabled={busyKey !== null}>Cancel</Button>
-                <Button onClick={() => void approveReview()} disabled={!reviewConfirmed || busyKey !== null}>
+                <Button onClick={() => void approveReview()} disabled={!reviewConfirmed || !reviewConfigurationComplete || busyKey !== null}>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                   {busyKey === `approve:${review.addonId}` ? 'Enabling…' : 'Approve & enable'}
                 </Button>
@@ -245,45 +317,6 @@ export default function PluginsSettingsSection() {
           {error}
         </div>
       )}
-
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <Plug className="h-4 w-4 text-[var(--loom-accent)]" />
-            Official Stremio add-ons
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Review and approve remote HTTPS providers before LoomTV can contact their catalog, metadata, or subtitle endpoints.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {busyKey === 'load' && <p className="text-sm text-[var(--loom-muted)]">Loading add-ons…</p>}
-          {official.map((addon) => {
-            const installedPlugin = installedById.get(addon.addonId);
-            return (
-              <div key={addon.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-white">{addon.name}</p>
-                    <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-xs text-[var(--loom-accent)]">Official</span>
-                    {installedPlugin && <span className="text-xs text-[var(--loom-faint)]">{stateLabel(installedPlugin)}</span>}
-                  </div>
-                  <p className="mt-1 text-sm leading-6 text-[var(--loom-muted)]">{addon.description}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant={installedPlugin?.state === 'enabled' ? 'outline' : 'default'}
-                  disabled={busyKey !== null}
-                  onClick={() => void runReview(`official:${addon.id}`, () => desktopApi.reviewOfficialStremioAddon(addon.id))}
-                >
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                  {busyKey === `official:${addon.id}` ? 'Reviewing…' : installedPlugin ? 'Review again' : 'Review & install'}
-                </Button>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
 
       <Card className="settings-panel">
         <CardHeader>
@@ -321,6 +354,45 @@ export default function PluginsSettingsSection() {
               {busyKey === 'manual' ? 'Reviewing…' : 'Review manifest'}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Plug className="h-4 w-4 text-[var(--loom-accent)]" />
+            Official Stremio add-ons
+          </CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Review and approve remote HTTPS providers before LoomTV can contact their catalog, metadata, or subtitle endpoints.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {busyKey === 'load' && <p className="text-sm text-[var(--loom-muted)]">Loading add-ons…</p>}
+          {official.map((addon) => {
+            const installedPlugin = installedById.get(addon.addonId);
+            return (
+              <div key={addon.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-white">{addon.name}</p>
+                    <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-xs text-[var(--loom-accent)]">Official</span>
+                    {installedPlugin && <span className="text-xs text-[var(--loom-faint)]">{stateLabel(installedPlugin)}</span>}
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-[var(--loom-muted)]">{addon.description}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={installedPlugin?.state === 'enabled' ? 'outline' : 'default'}
+                  disabled={busyKey !== null}
+                  onClick={() => void runReview(`official:${addon.id}`, () => desktopApi.reviewOfficialStremioAddon(addon.id))}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {busyKey === `official:${addon.id}` ? 'Reviewing…' : installedPlugin ? 'Review again' : 'Review & install'}
+                </Button>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
 
@@ -454,6 +526,22 @@ export default function PluginsSettingsSection() {
                 {plugin.state === 'enabled' && (
                   <Button size="sm" variant="outline" disabled={busyKey !== null} onClick={() => void disablePlugin(plugin)}>
                     {busyKey === `disable:${plugin.addonId}` ? 'Disabling…' : 'Disable'}
+                  </Button>
+                )}
+                {plugin.state !== 'enabled' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busyKey !== null}
+                    onClick={() => void runReview(
+                      `enable:${plugin.addonId}`,
+                      () => desktopApi.reviewInstalledStremioAddon(plugin.addonId),
+                    )}
+                  >
+                    <ShieldCheck className="mr-2 h-4 w-4" />
+                    {busyKey === `enable:${plugin.addonId}`
+                      ? 'Reviewing…'
+                      : plugin.state === 'disabled' ? 'Enable' : 'Review again'}
                   </Button>
                 )}
                 <Button size="sm" variant="destructive" disabled={busyKey !== null} onClick={() => void removePlugin(plugin)}>

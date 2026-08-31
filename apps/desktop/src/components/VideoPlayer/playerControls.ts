@@ -13,8 +13,8 @@ export function resolveEngineTrackId({
   type: 'video' | 'audio' | 'subtitle';
   streamIndex: number;
 }): number | null {
-  if (streamIndex < 0) return null;
-  if (engineKind !== 'libvlc') return streamIndex;
+  if (streamIndex === -1) return null;
+  if (engineKind !== 'libvlc') return streamIndex < 0 ? null : streamIndex;
   return tracks.find((track) => track.type === type && track.index === streamIndex)?.nativeId ?? null;
 }
 

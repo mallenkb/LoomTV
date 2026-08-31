@@ -62,23 +62,41 @@ function isLikelyServerOfflineError(error: string): boolean {
   );
 }
 
-export function connectionErrorFor(error: unknown, fallback: string): { message: string; isOffline: boolean } {
+const safeConnectionMessagePattern = /^(?:Connection was not approved|Could not pair with the LoomTV server|Desktop sharing is unavailable|Enter the LoomTV server address|LoomTV requires|Pairing expired|Secure LAN transport requires|The server |Too many failed attempts|Update the LoomTV server|Use the secure HTTPS address)/;
+
+export type MobileConnectionError = {
+  message: string;
+  isCancelled: boolean;
+  isOffline: boolean;
+};
+
+export function connectionErrorFor(
+  error: unknown,
+  fallback: string,
+  reference = 'MOBILE-CONNECTION',
+): MobileConnectionError {
   if (error instanceof Error) {
-    if (error.name === 'AbortError') return { isOffline: true, message: '' };
+    if (error.name === 'AbortError') return { isCancelled: true, isOffline: false, message: '' };
     const isOffline = isLikelyServerOfflineError(error.message);
     return {
+      isCancelled: false,
       isOffline,
       message: isOffline
         ? `Server unavailable. ${serverOfflineHint}`
-        : error.message || fallback,
+        : safeConnectionMessagePattern.test(error.message)
+          ? error.message
+          : `${fallback} Try again. Reference: ${reference}.`,
     };
   }
   const message = typeof error === 'string' ? error : fallback;
   const isOffline = isLikelyServerOfflineError(message);
   return {
+    isCancelled: false,
     isOffline,
     message: isOffline
       ? `Server unavailable. ${serverOfflineHint}`
-      : message,
+      : safeConnectionMessagePattern.test(message)
+        ? message
+        : `${fallback} Try again. Reference: ${reference}.`,
   };
 }

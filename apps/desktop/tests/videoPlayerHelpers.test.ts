@@ -348,6 +348,12 @@ test('LibVLC track selection uses the native runtime ID without changing engines
     streamIndex: 99,
   }), null);
   assert.equal(resolveEngineTrackId({
+    engineKind: 'libvlc',
+    tracks: [...tracks, { index: -1000, nativeId: 14, type: 'subtitle' }],
+    type: 'subtitle',
+    streamIndex: -1000,
+  }), 14);
+  assert.equal(resolveEngineTrackId({
     engineKind: 'mpv',
     tracks,
     type: 'audio',

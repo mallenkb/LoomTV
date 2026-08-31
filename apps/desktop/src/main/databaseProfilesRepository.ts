@@ -430,7 +430,7 @@ function normalizePreferences(value: ProfilePreferences): ProfilePreferences {
     ...(modernHeroModes.has(String(value.appModernHeroMode)) ? { appModernHeroMode: value.appModernHeroMode } : {}),
     ...(typeof value.showProviderRatingBadges === 'boolean' ? { showProviderRatingBadges: value.showProviderRatingBadges } : {}),
     ...(Array.isArray(value.sidebarNavOrder) ? {
-      sidebarNavOrder: [...new Set(value.sidebarNavOrder.map(String).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
+      sidebarNavOrder: [...new Set(value.sidebarNavOrder.map(String).map((item) => item.trim()).filter(Boolean))].slice(0, 256),
     } : {}),
     ...(typeof value.autoplayNextEnabled === 'boolean' ? { autoplayNextEnabled: value.autoplayNextEnabled } : {}),
     ...(seconds(value.playbackSkipBackSeconds) !== undefined ? { playbackSkipBackSeconds: seconds(value.playbackSkipBackSeconds) } : {}),

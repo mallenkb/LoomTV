@@ -63,7 +63,9 @@
     h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
     button, input, select { font: inherit; }
     button { border: 0; }
-    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* Later component rules set `outline: 0` on their resting inputs. Keep the
+       keyboard indicator authoritative when those same controls gain focus. */
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
 
     .page { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: clamp(20px, 4vw, 56px); width: min(1080px, 100%); height: 100dvh; margin: 0 auto; padding: clamp(24px, 5vh, 64px) clamp(20px, 4vw, 40px); overflow: hidden; }
     .rail { display: flex; min-height: 0; flex-direction: column; gap: 28px; overflow: hidden; }
@@ -336,7 +338,7 @@
   </div>
 
   <div class="folder-dialog-backdrop" id="folderDialogBackdrop" hidden>
-    <div class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderDialogTitle">
+    <div class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderDialogTitle" aria-describedby="folderDialogCopy">
       <h2 id="folderDialogTitle">Add folder</h2>
       <p id="folderDialogCopy">Choose a folder on this server.</p>
       <div class="field">
@@ -347,7 +349,7 @@
         </div>
         <p class="field-hint" id="folderBrowseHint">Type the full server path, or use Browse to choose one.</p>
         <p class="field-hint">Unavailable NAS folders stay saved and retry later.</p>
-        <p class="field-error" id="folderDialogError"></p>
+        <p class="field-error" id="folderDialogError" role="alert" aria-live="assertive"></p>
       </div>
       <div class="picker" id="picker" hidden>
         <div class="picker-head">
@@ -395,7 +397,7 @@
         { id: 'tmdb', label: 'TMDB', badge: 'Recommended', description: 'Posters, backdrops, cast, and ratings.', placeholder: 'TMDB key or read token', url: 'https://www.themoviedb.org/settings/api' },
         { id: 'tvdb', label: 'TheTVDB', badge: 'TV metadata', description: 'TV series, episodes, and artwork fallback.', placeholder: 'TheTVDB API key', url: 'https://thetvdb.com/api-information/signup' },
         { id: 'fanart', label: 'Fanart.tv', badge: 'Clearlogos', description: 'Clearlogos shown during playback.', placeholder: 'Fanart.tv API key', url: 'https://fanart.tv/get-an-api-key/#personal' },
-        { id: 'omdb', label: 'OMDb', badge: 'Fallback', description: 'Fallback ratings and movie details.', placeholder: 'OMDb API key', url: 'https://www.omdbapi.com/apikey.aspx' },
+        { id: 'omdb', label: 'OMDb', badge: 'Movies + completed', description: 'Ratings for movies and completed series, plus fallback title details.', placeholder: 'OMDb API key', url: 'https://www.omdbapi.com/apikey.aspx' },
         { id: 'opensubtitles', label: 'OpenSubtitles', badge: 'Subtitles', description: 'Downloads missing subtitles.', placeholder: 'OpenSubtitles API key', url: 'https://www.opensubtitles.com/en/users/consumers' },
       ];
 
@@ -403,7 +405,7 @@
       const state = {
         status: null, step: 'account', sessionMode: 'cookie', bearer: '', csrf: '',
         roots: [], busy: false, finishing: false, resuming: false, pendingStep: '', pickerPath: '', pickerParent: null, pickerSearchTimer: null,
-        metadata: null, pendingRootKind: 'movies',
+        metadata: null, pendingRootKind: 'movies', folderDialogReturnFocus: null,
       };
 
       const setBusy = (busy, label) => {
@@ -679,10 +681,21 @@
         }
         $('rootPath').value = '';
         fieldError('folderDialogError', '');
-        $('picker').hidden = true;
-        $('folderDialogBackdrop').hidden = true;
         $('addRootButton').disabled = false;
         await loadRoots().catch((error) => showError(error.message));
+        closeFolderDialog();
+      }
+
+      function closeFolderDialog() {
+        $('folderDialogBackdrop').hidden = true;
+        $('picker').hidden = true;
+        const previousFocus = state.folderDialogReturnFocus;
+        state.folderDialogReturnFocus = null;
+        window.requestAnimationFrame(() => {
+          const fallback = document.querySelector(`[data-add-kind="${state.pendingRootKind}"]`);
+          const target = previousFocus?.isConnected ? previousFocus : fallback;
+          if (target instanceof HTMLElement) target.focus();
+        });
       }
 
       function showFolderDialog(kind) {
@@ -703,6 +716,7 @@
         fieldError('folderDialogError', '');
         $('picker').hidden = true;
         $('pickerSearch').value = '';
+        state.folderDialogReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         $('folderDialogBackdrop').hidden = false;
         window.setTimeout(() => $('rootPath').focus(), 0);
       }
@@ -879,7 +893,7 @@
       $('backButton').addEventListener('click', () => { void onBack(); });
       $('skipButton').addEventListener('click', () => { void saveMetadata({ skip: true }); });
       $('addRootButton').addEventListener('click', () => { void addRoot(); });
-      $('folderDialogCancel').addEventListener('click', () => { $('folderDialogBackdrop').hidden = true; $('picker').hidden = true; });
+      $('folderDialogCancel').addEventListener('click', closeFolderDialog);
       $('browseButton').addEventListener('click', () => { void openPicker($('rootPath').value.trim()); });
       $('pickerUp').addEventListener('click', () => { if (state.pickerParent) void openPicker(state.pickerParent); });
       $('pickerUse').addEventListener('click', () => { if (state.pickerPath) { $('rootPath').value = state.pickerPath; $('picker').hidden = true; $('rootPath').focus(); } });
@@ -961,6 +975,31 @@
         form.addEventListener('submit', (event) => { event.preventDefault(); void onContinue(); });
       }
       $('rootPath').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void addRoot(); } });
+      document.addEventListener('keydown', (event) => {
+        const backdrop = $('folderDialogBackdrop');
+        if (backdrop.hidden) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeFolderDialog();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const controls = [...backdrop.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+          .filter((element) => element instanceof HTMLElement && element.getClientRects().length > 0);
+        if (!controls.length) { event.preventDefault(); return; }
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!backdrop.contains(document.activeElement)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      });
 
       void boot();
     })();

@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MAX_SUBTITLE_OUTLINE_WIDTH } from './constants';
-import type { SubtitleCue } from './helpers';
+import { activeSubtitleText, type SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
 
 interface SubtitleOverlayProps {
@@ -33,44 +33,6 @@ function fallbackTextOutline(width: number, color: string): string {
   return Array.from(shadows).join(', ');
 }
 
-function findActiveCueIndex(cues: SubtitleCue[], time: number, hintIndex: number): number {
-  const hintedCue = cues[hintIndex];
-  if (hintedCue && time >= hintedCue.start && time < hintedCue.end) return hintIndex;
-
-  if (hintedCue && hintIndex >= 0) {
-    if (time >= hintedCue.end) {
-      for (let index = hintIndex + 1; index < cues.length; index += 1) {
-        const cue = cues[index];
-        if (time < cue.start) return -1;
-        if (time < cue.end) return index;
-      }
-      return -1;
-    }
-
-    for (let index = hintIndex - 1; index >= 0; index -= 1) {
-      const cue = cues[index];
-      if (time >= cue.start && time < cue.end) return index;
-      if (time >= cue.end) return -1;
-    }
-  }
-
-  let low = 0;
-  let high = cues.length - 1;
-  let candidate = -1;
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    if (cues[middle].start <= time) {
-      candidate = middle;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-
-  if (candidate >= 0 && time < cues[candidate].end) return candidate;
-  return -1;
-}
-
 function SubtitleOverlay({
   controlsVisible,
   cues,
@@ -86,7 +48,6 @@ function SubtitleOverlay({
   const [bounds, setBounds] = useState({ blockHeight: 0, viewportHeight: 0 });
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef('');
-  const activeCueIndexRef = useRef(-1);
   const sortedCues = useMemo(
     () => cues.slice().sort((a, b) => a.start - b.start || a.end - b.end),
     [cues],
@@ -95,7 +56,6 @@ function SubtitleOverlay({
   useEffect(() => {
     if (!visible || sortedCues.length === 0) {
       textRef.current = '';
-      activeCueIndexRef.current = -1;
       setText('');
       return;
     }
@@ -112,9 +72,7 @@ function SubtitleOverlay({
         // applied only for a non-seekable transcoded window; subtitle delay is
         // intentionally not added here.
         const time = (video?.currentTime ?? nativeTime ?? 0) + offset;
-        const cueIndex = findActiveCueIndex(sortedCues, time, activeCueIndexRef.current);
-        activeCueIndexRef.current = cueIndex;
-        const next = cueIndex >= 0 ? sortedCues[cueIndex].text : '';
+        const next = activeSubtitleText(sortedCues, time);
         if (next !== textRef.current) {
           textRef.current = next;
           setText(next);

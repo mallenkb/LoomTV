@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import { normalizeOtherFolderIcon, OTHER_FOLDER_ICON_OPTIONS, otherFolderIconPair, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
-import { SIDEBAR_NAV_LABELS, type SidebarNavItemId } from './Settings.helpers';
+import type { SidebarNavItemId, SidebarOrderItem } from './Settings.helpers';
 import type { LibraryFolderSection, LibraryFolderStatus } from './Settings.types';
 import { otherFolderGroupForFolder, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import { desktopApi } from '@/lib/desktopApi';
@@ -31,10 +31,10 @@ type LibrarySettingsSectionProps = {
   onEditFolder: (folder: string, nextFolder: string, name: string, icon: OtherFolderIconId, kind: LibraryFolderSection['key'], groupId: string, newGroupName: string) => Promise<void>;
   otherFolderIcon: OtherFolderIconId;
   onOtherFolderIconChange: (icon: OtherFolderIconId) => void;
-  sidebarNavOrder: SidebarNavItemId[];
+  sidebarOrderItems: SidebarOrderItem[];
   draggedSidebarItem: SidebarNavItemId | null;
   setDraggedSidebarItem: (item: SidebarNavItemId | null) => void;
-  onSidebarOrderDrop: (targetId: SidebarNavItemId) => void;
+  onSidebarOrderDrop: (targetId: SidebarNavItemId, position: 'before' | 'after') => void;
   moveSidebarItem: (itemId: SidebarNavItemId, direction: -1 | 1) => void;
   isScanning: boolean;
   scanProgress: number;
@@ -67,7 +67,7 @@ export default function LibrarySettingsSection({
   onDeleteOtherFolderGroup,
   onEditFolder,
   otherFolderIcon,
-  sidebarNavOrder,
+  sidebarOrderItems,
   draggedSidebarItem,
   setDraggedSidebarItem,
   onSidebarOrderDrop,
@@ -110,6 +110,16 @@ export default function LibrarySettingsSection({
   const [groupActionError, setGroupActionError] = useState('');
   const [busyGroupId, setBusyGroupId] = useState('');
   const [autoSyncMenuOpen, setAutoSyncMenuOpen] = useState(false);
+  const [sidebarDropTarget, setSidebarDropTarget] = useState<{
+    id: SidebarNavItemId;
+    position: 'before' | 'after';
+  } | null>(null);
+
+  const canMoveSidebarItem = (itemId: SidebarNavItemId, direction: -1 | 1) => {
+    const itemIndex = sidebarOrderItems.findIndex((entry) => entry.id === itemId);
+    const nextIndex = itemIndex + direction;
+    return itemId !== 'divider' && itemIndex >= 0 && nextIndex >= 0 && nextIndex < sidebarOrderItems.length;
+  };
 
   const openFolderEditor = (folder: string, kind: LibraryFolderSection['key']) => {
     const defaultName = folder.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || folder;
@@ -488,57 +498,112 @@ export default function LibrarySettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Sidebar Order</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Drag the middle sidebar items into the order you want.
+            Drag sidebar destinations into the order you want. The divider is not draggable.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-2 rounded-lg bg-[var(--loom-surface-2)] p-2">
-            {sidebarNavOrder.map((itemId, index) => (
+            {sidebarOrderItems.map((item, index) => (
               <div
-                key={itemId}
-                draggable
-                onDragStart={() => setDraggedSidebarItem(itemId)}
-                onDragEnd={() => setDraggedSidebarItem(null)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => onSidebarOrderDrop(itemId)}
-                className={`flex cursor-grab items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors active:cursor-grabbing ${
-                  draggedSidebarItem === itemId
-                    ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/10'
-                    : 'border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] hover:border-[var(--loom-accent)]/35'
+                key={item.id}
+                draggable={item.id !== 'divider'}
+                onDragStart={(event) => {
+                  if (item.id === 'divider') {
+                    event.preventDefault();
+                    return;
+                  }
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', item.id);
+                  setDraggedSidebarItem(item.id);
+                }}
+                onDragEnd={() => {
+                  setDraggedSidebarItem(null);
+                  setSidebarDropTarget(null);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const position = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+                  setSidebarDropTarget((current) => current?.id === item.id && current.position === position
+                    ? current
+                    : { id: item.id, position });
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSidebarDropTarget(null);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const position = sidebarDropTarget?.id === item.id ? sidebarDropTarget.position : 'before';
+                  setSidebarDropTarget(null);
+                  onSidebarOrderDrop(item.id, position);
+                }}
+                aria-grabbed={draggedSidebarItem === item.id}
+                aria-disabled={item.id === 'divider'}
+                className={`relative flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-[border-color,background-color,opacity,transform] ${
+                  draggedSidebarItem === item.id
+                    ? 'cursor-grabbing scale-[0.99] border-[var(--loom-accent)] bg-[var(--loom-accent)]/10 opacity-45'
+                    : item.id === 'divider'
+                      ? 'cursor-default select-none border-dashed border-[var(--loom-control-border)] bg-[var(--loom-surface-3)] opacity-50'
+                      : 'cursor-grab border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] hover:border-[var(--loom-accent)]/35 active:cursor-grabbing'
                 }`}
               >
-                <GripVertical className="h-4 w-4 shrink-0 text-[var(--loom-faint)]" />
-                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-xs font-semibold text-[var(--loom-accent)]">
-                  {index + 1}
+                {sidebarDropTarget?.id === item.id && draggedSidebarItem !== item.id ? (
+                  <span
+                    className={`pointer-events-none absolute inset-x-2 z-20 h-0.5 rounded-full bg-[var(--loom-accent)] shadow-[0_0_12px_var(--loom-accent)] ${
+                      sidebarDropTarget.position === 'before' ? '-top-[5px]' : '-bottom-[5px]'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-[var(--loom-accent)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent-foreground)] shadow-lg">
+                      Drop here
+                    </span>
+                  </span>
+                ) : null}
+                {item.id === 'divider' ? (
+                  <>
+                    <span className="block h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span
+                      className="h-6 w-6 shrink-0 rounded-lg bg-[var(--loom-surface-2)] ring-1 ring-inset ring-[var(--loom-control-border)]"
+                      aria-hidden="true"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <GripVertical className="h-4 w-4 shrink-0 text-[var(--loom-faint)]" />
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-xs font-semibold text-[var(--loom-accent)]">
+                      {sidebarOrderItems.slice(0, index + 1).filter((entry) => entry.id !== 'divider').length}
+                    </span>
+                  </>
+                )}
+                <span className={`min-w-0 flex-1 text-sm font-medium ${item.id === 'divider' ? 'text-[var(--loom-muted)]' : 'text-white'}`}>
+                  {item.label}
                 </span>
-                <span className="min-w-0 flex-1 text-sm font-medium text-white">
-                  {SIDEBAR_NAV_LABELS[itemId]}
-                </span>
-                <div className="flex shrink-0 items-center gap-1">
+                {item.id !== 'divider' ? <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => moveSidebarItem(itemId, -1)}
-                    disabled={index === 0}
-                    aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} up`}
+                    onClick={() => moveSidebarItem(item.id, -1)}
+                    disabled={!canMoveSidebarItem(item.id, -1)}
+                    aria-label={`Move ${item.label} up`}
                     className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     <ArrowUp className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => moveSidebarItem(itemId, 1)}
-                    disabled={index === sidebarNavOrder.length - 1}
-                    aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} down`}
+                    onClick={() => moveSidebarItem(item.id, 1)}
+                    disabled={!canMoveSidebarItem(item.id, 1)}
+                    aria-label={`Move ${item.label} down`}
                     className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     <ArrowDown className="h-4 w-4" />
                   </button>
-                </div>
+                </div> : null}
               </div>
             ))}
           </div>
           <p className="mt-3 text-xs text-[var(--loom-faint)]">
-            Home stays pinned first. Settings and refresh stay pinned at the bottom.
+            Home and search stay pinned. Moving an item across the divider shifts the divider naturally in the list. Settings and refresh stay at the bottom.
           </p>
         </CardContent>
       </Card>

@@ -25,6 +25,8 @@ import type {
   StremioPluginMetaResult,
   StremioPluginReview,
   StremioPluginSummary,
+  StremioStreamRequest,
+  StremioStreamResult,
   StoredProgress,
 } from '../shared/desktopProtocol.ts';
 import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
@@ -56,6 +58,7 @@ import { lanProviderRatingsSchema } from '@loom-media-server/lan-protocol';
 import { parseIpcArguments } from './ipcValidation.ts';
 import { metadataProviderRequestSchema } from './metadataProviderGateway.ts';
 import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
+import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
 
 const finiteNumber = z.number().finite();
 const nonEmptyString = z.string().trim().min(1);
@@ -299,6 +302,7 @@ const iptvChannelRequestSchema = z.object({
   limit: finiteNumber.positive().max(200).optional(),
   offset: finiteNumber.nonnegative().max(1_000_000).optional(),
 });
+
 const stremioExtraSchema = z.record(
   z.string(),
   z.union([z.string(), finiteNumber, z.boolean()]),
@@ -314,6 +318,11 @@ const stremioCatalogRequestSchema = z.object({
   extra: stremioExtraSchema.optional(),
 });
 const stremioMetaRequestSchema = z.object({
+  type: nonEmptyString,
+  id: nonEmptyString,
+  extra: stremioExtraSchema.optional(),
+});
+const stremioStreamRequestSchema = z.object({
   type: nonEmptyString,
   id: nonEmptyString,
   extra: stremioExtraSchema.optional(),
@@ -462,6 +471,7 @@ export interface IpcHandlerDependencies<
   listOfficialStremioAddons: () => OfficialStremioAddon[];
   reviewOfficialStremioAddon: (officialId: IpcContract['plugins:stremio:review-official']['args'][0]) => Promise<StremioPluginReview>;
   reviewStremioManifestUrl: (manifestUrl: string) => Promise<StremioPluginReview>;
+  reviewInstalledStremioAddon: (addonId: string) => Promise<StremioPluginReview>;
   approveStremioAddon: (addonId: string, reviewToken: string) => Promise<StremioPluginSummary>;
   disableStremioAddon: (addonId: string) => Promise<StremioPluginSummary>;
   removeStremioAddon: (addonId: string) => Promise<boolean>;
@@ -470,6 +480,7 @@ export interface IpcHandlerDependencies<
   fetchStremioCatalog: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginCatalogResult>;
   fetchStremioMeta: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
   fetchStremioMetaByItem: (request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
+  fetchStremioStreams: (addonId: string, request: StremioStreamRequest) => Promise<StremioStreamResult>;
   getStremioAddonConfiguration: (addonId: string) => StremioPluginConfigurationState;
   saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginConfigurationState>;
   listStremioPluginAudit: (addonId: string, limit?: number) => readonly StremioPluginAuditEntry[];
@@ -910,6 +921,28 @@ export function registerIpcHandlers<
         decisionReason: 'Validated IPTV stream from the selected Live TV source.',
       };
     }
+    const externalReference = parseExternalPlaybackReference(filePath);
+    if (externalReference) {
+      const streamUrl = externalReference.url;
+      let parsed: URL;
+      try {
+        parsed = new URL(streamUrl);
+      } catch {
+        throw new Error('That external stream has an invalid address.');
+      }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('External streams must use http or https.');
+      const isHls = /\.m3u8?(?:$|\?)/i.test(streamUrl);
+      const isYoutube = /youtube-nocookie\.com|youtube\.com|youtu\.be/i.test(parsed.hostname);
+      return {
+        url: streamUrl,
+        contentType: isHls ? 'application/vnd.apple.mpegurl' : isYoutube ? 'text/html' : 'video/mp4',
+        fileName: isYoutube ? 'Trailer' : 'External stream',
+        isTranscoded: false,
+        isRemuxed: false,
+        playbackMode: 'direct' as const,
+        decisionReason: isYoutube ? 'Validated YouTube trailer.' : 'Validated external lawful stream.',
+      };
+    }
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
@@ -969,6 +1002,7 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:official', () => deps.listOfficialStremioAddons(), z.tuple([]));
   handleStremio('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId), z.tuple([z.enum(['cinemeta', 'opensubtitles-v3'])]));
   handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().url()]));
+  handleStremio('plugins:stremio:review-installed', (_event, addonId) => deps.reviewInstalledStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')), z.tuple([nonEmptyString, nonEmptyString]));
   handleStremio('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:remove', (_event, addonId) => deps.removeStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
@@ -981,6 +1015,7 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:catalog', (_event, addonId, request) => deps.fetchStremioCatalog(String(addonId || ''), request), z.tuple([nonEmptyString, stremioCatalogRequestSchema]));
   handleStremio('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request), z.tuple([nonEmptyString, stremioMetaRequestSchema]));
   handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request), z.tuple([stremioMetaRequestSchema]));
+  handleStremio('plugins:stremio:streams', (_event, addonId, request) => deps.fetchStremioStreams(String(addonId || ''), request), z.tuple([nonEmptyString, stremioStreamRequestSchema]));
   handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values), z.tuple([nonEmptyString, z.record(z.string(), z.unknown())]));
   handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit), z.tuple([nonEmptyString, finiteNumber.int().positive().max(1_000).optional()]));
@@ -1046,13 +1081,23 @@ export function registerIpcHandlers<
   });
 
   handle('mpv:start', (event, filePath, options) => {
-    deps.authorizeMediaPath(filePath);
-    deps.assertLocalMediaPath(filePath);
+    const requestedPath = String(filePath || '');
+    const externalReference = parseExternalPlaybackReference(requestedPath);
+    const mediaPath = externalReference?.url || requestedPath;
+    if (externalReference) {
+      const parsedStreamUrl = new URL(mediaPath);
+      if (parsedStreamUrl.protocol !== 'https:' && parsedStreamUrl.protocol !== 'http:') {
+        throw new Error('External streams must use http or https.');
+      }
+    } else {
+      deps.authorizeMediaPath(mediaPath);
+      deps.assertLocalMediaPath(mediaPath);
+    }
     for (const subtitleFile of options?.subtitleFiles || []) {
       deps.authorizeMediaPath(subtitleFile.path);
       deps.assertLocalMediaPath(subtitleFile.path);
     }
-    return startMpvPlayback(event.sender, filePath, options);
+    return startMpvPlayback(event.sender, mediaPath, options);
   }, z.tuple([nonEmptyString, mpvStartOptionsSchema.optional()]));
 
   handle(
@@ -1070,19 +1115,20 @@ export function registerIpcHandlers<
   handleExperimental('libvlc:start', (event, filePath, rawOptions) => {
     const requestedPath = String(filePath || '');
     const iptvReference = parseIptvPlaybackReference(requestedPath);
+    const externalReference = parseExternalPlaybackReference(requestedPath);
     const mediaPath = iptvReference
       ? deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId)
-      : requestedPath;
+      : externalReference?.url || requestedPath;
     if (!mediaPath) throw new Error('That live TV channel is no longer available.');
-    if (iptvReference) {
+    if (iptvReference || externalReference) {
       let parsedStreamUrl: URL;
       try {
         parsedStreamUrl = new URL(mediaPath);
       } catch {
-        throw new Error('That live TV channel has an invalid stream address.');
+        throw new Error('That remote stream has an invalid address.');
       }
       if (parsedStreamUrl.protocol !== 'https:') {
-        throw new Error('That live TV channel does not use a secure stream.');
+        throw new Error('Remote LibVLC streams must use https.');
       }
     } else {
       deps.authorizeMediaPath(mediaPath);
@@ -1095,7 +1141,9 @@ export function registerIpcHandlers<
       deps.assertLocalMediaPath(subtitlePath);
       deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitlePath);
     }
-    return startLibVlcPlayback(event.sender, mediaPath, options, { allowRemoteHttps: Boolean(iptvReference) });
+    return startLibVlcPlayback(event.sender, mediaPath, options, {
+      allowRemoteHttps: Boolean(iptvReference || externalReference),
+    });
   }, z.tuple([nonEmptyString, playbackStartOptionsSchema.optional()]));
 
   handleExperimental('libvlc:command', (_event, sessionId, command) =>

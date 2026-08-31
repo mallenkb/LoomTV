@@ -25,4 +25,5 @@ export interface TVMetadata extends Partial<MediaItem> {
   language?: string;
   country?: string;
   showType?: string;
+  showStatus?: string;
 }

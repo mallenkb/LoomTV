@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { libVlcPlatformBinding, libVlcPlatformVariants } from '../src/main/libvlcPlatform.ts';
+import {
+  libVlcPlatformBinding,
+  libVlcPlatformVariants,
+  orderWindowsLibVlcChildren,
+} from '../src/main/libvlcPlatform.ts';
 
 test('recognizes the canonical Windows bundled-runtime layout', () => {
   assert.deepEqual(libVlcPlatformVariants('win32'), ['win32', 'win', 'windows']);
@@ -25,4 +29,10 @@ test('keeps the existing macOS NSView surface contract', () => {
 
 test('does not advertise an unimplemented Linux LibVLC surface', () => {
   assert.equal(libVlcPlatformBinding('linux'), null);
+});
+
+test('places the Windows backdrop below the video without raising either above Chromium', () => {
+  const movedToBottom: string[] = [];
+  orderWindowsLibVlcChildren('video', 'backdrop', (child) => movedToBottom.push(child));
+  assert.deepEqual(movedToBottom, ['video', 'backdrop']);
 });

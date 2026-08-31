@@ -837,6 +837,26 @@ export interface StremioPluginMetaResult {
   item: StremioPluginCatalogItem | null;
 }
 
+export interface StremioStreamRequest {
+  type: string;
+  id: string;
+  extra?: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface StremioStreamItem {
+  url: string;
+  title?: string;
+  behaviorHints?: Readonly<Record<string, unknown>>;
+}
+
+export interface StremioStreamResult {
+  addonId: string;
+  streams: readonly StremioStreamItem[];
+  playableCount: number;
+  unsupportedPeerToPeerCount: number;
+  rejectedCount: number;
+}
+
 export interface StremioPluginIpcIssue {
   path: string;
   code: string;

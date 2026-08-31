@@ -77,6 +77,7 @@ function createHarness(item: MediaItem, omdbResponse: Record<string, unknown> | 
       if (imdbId) omdbById.push(imdbId);
       return omdbResponse;
     },
+    fetchOMDbSeasonEpisodes: empty,
     fetchTMDBMovieMetadata: none,
     fetchTMDBMovieMetadataById: none,
     fetchTMDBMovieMetadataCandidates: empty,

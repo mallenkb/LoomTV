@@ -270,6 +270,7 @@ export type DesktopBridgeApi = {
       listOfficialStremioAddons?: () => Promise<StremioPluginIpcResult<OfficialStremioAddon[]>>;
       reviewOfficialStremioAddon?: (officialId: OfficialStremioAddon['id']) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
       reviewStremioManifestUrl?: (manifestUrl: string) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
+      reviewInstalledStremioAddon?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
       approveStremioAddon?: (addonId: string, reviewToken: string) => Promise<StremioPluginIpcResult<StremioPluginSummary>>;
       disableStremioAddon?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginSummary>>;
       removeStremioAddon?: (addonId: string) => Promise<StremioPluginIpcResult<boolean>>;
@@ -278,6 +279,7 @@ export type DesktopBridgeApi = {
       getStremioCatalog?: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginIpcResult<StremioPluginCatalogResult>>;
       getStremioMeta?: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
       getStremioMetaByItem?: (request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
+      getStremioStreams?: (addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<import('../shared/desktopProtocol.ts').StremioStreamResult>>;
       getStremioAddonConfiguration?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
       saveStremioAddonConfiguration?: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
       listStremioPluginAudit?: (addonId: string, limit?: number) => Promise<StremioPluginIpcResult<readonly StremioPluginAuditEntry[]>>;
@@ -1369,6 +1371,11 @@ export const desktopApi = {
     throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
   },
 
+  async reviewInstalledStremioAddon(addonId: string): Promise<StremioPluginReview> {
+    if (window.desktopApi?.reviewInstalledStremioAddon) return unwrapStremioPluginResult(await window.desktopApi.reviewInstalledStremioAddon(addonId));
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
   async approveStremioAddon(addonId: string, reviewToken: string): Promise<StremioPluginSummary> {
     if (window.desktopApi?.approveStremioAddon) return unwrapStremioPluginResult(await window.desktopApi.approveStremioAddon(addonId, reviewToken));
     throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
@@ -1407,6 +1414,11 @@ export const desktopApi = {
   async getStremioMetaByItem(request: StremioPluginMetaRequest): Promise<StremioPluginMetaResult> {
     if (window.desktopApi?.getStremioMetaByItem) return unwrapStremioPluginResult(await window.desktopApi.getStremioMetaByItem(request));
     throw new Error('Stremio metadata is currently available only in the LoomTV desktop app.');
+  },
+
+  async getStremioStreams(addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest): Promise<import('../shared/desktopProtocol.ts').StremioStreamResult> {
+    if (window.desktopApi?.getStremioStreams) return unwrapStremioPluginResult(await window.desktopApi.getStremioStreams(addonId, request));
+    throw new Error('Stremio streams are currently available only in the LoomTV desktop app.');
   },
 
   async getStremioAddonConfiguration(addonId: string): Promise<StremioPluginConfigurationState> {

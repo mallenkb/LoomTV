@@ -701,7 +701,7 @@ function validateProfileImport(value: unknown): asserts value is ProfileExportV1
   }
   if (preferences.sidebarNavOrder !== undefined && (
     !Array.isArray(preferences.sidebarNavOrder)
-    || preferences.sidebarNavOrder.length > 32
+    || preferences.sidebarNavOrder.length > 256
     || preferences.sidebarNavOrder.some((entry) => typeof entry !== 'string')
   )) throw new Error('The profile navigation order is invalid.');
   if (preferences.autoplayNextEnabled !== undefined && typeof preferences.autoplayNextEnabled !== 'boolean') {

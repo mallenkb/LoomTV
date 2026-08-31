@@ -215,9 +215,9 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     if (this.sessionId) await desktopApi.libvlc.command(this.sessionId, command);
   }
 
-  private async requiredCommand(command: LibVlcCommand): Promise<void> {
+  private async requiredCommand(command: LibVlcCommand, failureMessage: string): Promise<void> {
     if (!this.sessionId || !await desktopApi.libvlc.command(this.sessionId, command)) {
-      throw new Error('LibVLC could not apply the requested track without restarting playback.');
+      throw new Error(failureMessage);
     }
   }
 
@@ -263,15 +263,24 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   setMuted(muted: boolean): Promise<void> { return this.volumeController.setMuted(muted); }
   setSpeed(speed: number): Promise<void> { return this.command({ type: 'set-speed', speed }); }
   async selectVideo(trackId: number | null): Promise<void> {
-    await this.command({ type: 'set-video-track', trackId });
+    await this.requiredCommand(
+      { type: 'set-video-track', trackId },
+      'LibVLC could not change the video track. Playback was left unchanged.',
+    );
     this.updateSelectedTrack('video', trackId);
   }
   async selectAudio(trackId: number | null): Promise<void> {
-    await this.requiredCommand({ type: 'set-audio-track', trackId });
+    await this.requiredCommand(
+      { type: 'set-audio-track', trackId },
+      'LibVLC could not change the audio track. Playback was left unchanged.',
+    );
     this.updateSelectedTrack('audio', trackId);
   }
   async selectSubtitle(trackId: number | null): Promise<void> {
-    await this.requiredCommand({ type: 'set-subtitle-track', trackId });
+    await this.requiredCommand(
+      { type: 'set-subtitle-track', trackId },
+      'LibVLC could not change the subtitle track. Playback was left unchanged.',
+    );
     this.updateSelectedTrack('subtitle', trackId);
   }
   selectSecondarySubtitle(trackId: number | null): Promise<void> {
@@ -282,9 +291,24 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   setSubtitleStyle(style: { fontSize: number; color: string; borderColor: string; borderWidth: number; backgroundColor: string; position: number }): Promise<void> {
     return this.command({ type: 'set-subtitle-style', ...style });
   }
-  setVideoAspect(aspect: string | null): Promise<void> { return this.command({ type: 'set-video-aspect', aspect }); }
-  setVideoCrop(crop: string | null): Promise<void> { return this.command({ type: 'set-video-crop', crop }); }
-  setVideoRotation(degrees: number): Promise<void> { return this.command({ type: 'set-video-rotation', degrees }); }
+  setVideoAspect(aspect: string | null): Promise<void> {
+    return this.requiredCommand(
+      { type: 'set-video-aspect', aspect },
+      'This LibVLC runtime cannot change the aspect ratio live.',
+    );
+  }
+  setVideoCrop(crop: string | null): Promise<void> {
+    return this.requiredCommand(
+      { type: 'set-video-crop', crop },
+      'This LibVLC runtime cannot crop video live.',
+    );
+  }
+  setVideoRotation(degrees: number): Promise<void> {
+    return this.requiredCommand(
+      { type: 'set-video-rotation', degrees },
+      'LibVLC does not support live video rotation in LoomTV.',
+    );
+  }
 
   async destroy(): Promise<void> {
     this.destroyed = true;

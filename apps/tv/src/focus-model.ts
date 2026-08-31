@@ -1,7 +1,9 @@
-export type TvScreen = 'connect' | 'trust' | 'approval' | 'profiles' | 'library' | 'detail' | 'player';
+export type TvLibraryScreen = 'library' | 'my-list';
+export type TvScreen = 'connect' | 'trust' | 'approval' | 'profiles' | TvLibraryScreen | 'detail' | 'player';
 export type Direction = 'left' | 'right' | 'up' | 'down';
 
 export type FocusGrid = ReadonlyArray<ReadonlyArray<string>>;
+export type FocusCandidate = Readonly<{ id: string; disabled?: boolean }>;
 
 export function moveFocus(grid: FocusGrid, current: string, direction: Direction): string {
   const row = grid.findIndex((entries) => entries.includes(current));
@@ -13,10 +15,22 @@ export function moveFocus(grid: FocusGrid, current: string, direction: Direction
   return grid[nextRow][Math.min(column, grid[nextRow].length - 1)] || current;
 }
 
-export function backDestination(screen: TvScreen): TvScreen | 'exit' {
+export function preferredFocusId(availableIds: readonly string[], previousId?: string): string {
+  if (previousId && availableIds.includes(previousId)) return previousId;
+  return availableIds[0] || '';
+}
+
+export function preferredFocusableId(candidates: readonly FocusCandidate[], previousId?: string): string {
+  return preferredFocusId(
+    candidates.filter((candidate) => !candidate.disabled).map((candidate) => candidate.id),
+    previousId,
+  );
+}
+
+export function backDestination(screen: TvScreen, detailOrigin: TvLibraryScreen = 'library'): TvScreen | 'exit' {
   if (screen === 'player') return 'detail';
-  if (screen === 'detail') return 'library';
-  if (screen === 'library') return 'profiles';
+  if (screen === 'detail') return detailOrigin;
+  if (screen === 'library' || screen === 'my-list') return 'profiles';
   if (screen === 'profiles' || screen === 'approval' || screen === 'trust') return 'connect';
   return 'exit';
 }

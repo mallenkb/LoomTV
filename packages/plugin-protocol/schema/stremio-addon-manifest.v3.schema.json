@@ -110,6 +110,10 @@
       "items": {
         "$ref": "#/$defs/config"
       }
+    },
+    "stremioAddonsConfig": {
+      "type": "object",
+      "description": "Accepted for Stremio Addons compatibility but ignored by LoomTV."
     }
   },
   "$defs": {

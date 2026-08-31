@@ -65,10 +65,12 @@ function SegmentedSetting<T extends string | number>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl bg-white/10">
@@ -79,7 +81,8 @@ function SegmentedSetting<T extends string | number>({
             <button
               type="button"
               onClick={() => onChange(option.value)}
-              className={`min-h-10 whitespace-nowrap px-3 text-sm transition-colors ${value === option.value ? 'rounded-xl bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'text-white/75 hover:text-white'}`}
+              disabled={disabled}
+              className={`min-h-10 whitespace-nowrap px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${value === option.value ? 'rounded-xl bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'text-white/75 hover:text-white'}`}
               aria-pressed={value === option.value}
             >
               {option.label}
@@ -111,6 +114,7 @@ interface PlayerSettingsPanelProps {
   setCropMode: (mode: CropMode) => void;
   rotation: RotationMode;
   setRotation: (rotation: RotationMode) => void;
+  rotationAvailable: boolean;
   playbackRate: number;
   setPlaybackRate: (rate: number) => void;
   displaySleepSettingsAvailable: boolean;
@@ -163,6 +167,7 @@ export default function PlayerSettingsPanel({
   setCropMode,
   rotation,
   setRotation,
+  rotationAvailable,
   playbackRate,
   setPlaybackRate,
   displaySleepSettingsAvailable,
@@ -296,7 +301,17 @@ export default function PlayerSettingsPanel({
 
                 <div>
                   <p className="mb-2 text-xs font-semibold text-white">Rotation</p>
-                  <SegmentedSetting options={ROTATION_OPTIONS} value={rotation} onChange={setRotation} />
+                  <SegmentedSetting
+                    options={ROTATION_OPTIONS}
+                    value={rotation}
+                    onChange={setRotation}
+                    disabled={!rotationAvailable}
+                  />
+                  {!rotationAvailable && (
+                    <p className="mt-2 text-[11px] leading-relaxed text-white/55">
+                      Live rotation is unavailable in LibVLC. Playback stays on the current engine.
+                    </p>
+                  )}
                 </div>
               </div>
 

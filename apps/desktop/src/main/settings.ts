@@ -8,6 +8,7 @@ import { normalizeProviderId } from './metadataKeys';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 import type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 import { z } from 'zod';
+import { normalizeSidebarNavOrder } from '../lib/sidebarNavOrder';
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
@@ -181,12 +182,7 @@ function normalizeSettings(input: unknown): AppSettings {
     ? raw.metadataApiKeys
     : {};
   const autoSyncIntervalHours = Number(raw.autoSyncIntervalHours);
-  const defaultSidebarNavOrder = ['anime', 'tv', 'movies', 'others'];
-  const rawSidebarNavOrder = Array.isArray(raw.sidebarNavOrder) ? raw.sidebarNavOrder : [];
-  const sidebarNavOrder = [
-    ...rawSidebarNavOrder.filter((item) => defaultSidebarNavOrder.includes(item)),
-    ...defaultSidebarNavOrder.filter((item) => !rawSidebarNavOrder.includes(item)),
-  ];
+  const sidebarNavOrder = normalizeSidebarNavOrder(raw.sidebarNavOrder);
 
   for (const [provider, value] of Object.entries(rawKeys)) {
     const providerId = normalizeProviderId(provider);

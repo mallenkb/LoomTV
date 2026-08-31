@@ -20,6 +20,7 @@ import {
 } from '@/lib/desktopApi';
 import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
 import { isIptvPlaybackReference } from '../shared/iptvPlayback.ts';
+import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
@@ -80,6 +81,7 @@ import {
   saveSubtitlesDefaultEnabled,
   saveTrackPreference,
   selectedEmbeddedSubtitle,
+  shouldRenderSubtitleNativelyInLibVlc,
   shouldRestartMissingLocalHls,
   subtitleSource,
   trackPreferenceScope,
@@ -333,6 +335,7 @@ export default function VideoPlayer({
   const [playerState, setPlayerState] = useState<PlayerState>('loading');
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [externalIframeUrl, setExternalIframeUrl] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [nativePlaybackActive, setNativePlaybackActive] = useState(false);
   const [nativeEngineKind, setNativeEngineKind] = useState<PlaybackEngineKind | null>(null);
@@ -482,6 +485,7 @@ export default function VideoPlayer({
   // whatever sits beneath them — in the player, the video. Fade them with the
   // player's own chrome instead of leaving them permanently on the picture,
   // and always restore them when the player unmounts.
+  const activeIframeUrl = externalIframeUrl;
   useEffect(() => {
     void desktopApi.setWindowChromeVisible(showTopControls);
   }, [showTopControls]);
@@ -775,7 +779,7 @@ export default function VideoPlayer({
       const external = visibleSubtitles[-1000 - selectedSubtitleTrackIndex];
       return {
         ordinal: -1,
-        codec: '',
+        codec: external?.format || 'external',
         externalUrl: external?.url || '',
       };
     }
@@ -857,6 +861,7 @@ export default function VideoPlayer({
       // LibVLC reads live-stream subtitle tracks from the network manifest.
       // The local subtitle endpoint only accepts authorized library files.
       if (isIptvPlaybackReference(filePath)) return '';
+      if (nativeEngineKind === 'libvlc' && shouldRenderSubtitleNativelyInLibVlc(embeddedCodec)) return '';
       if (index <= -1000) {
         return externalUrl ? subtitleSource(externalUrl, serverBase) : '';
       }
@@ -890,6 +895,7 @@ export default function VideoPlayer({
     selectedSubtitleCueExternalUrl,
     selectedSubtitleCueOrdinal,
     selectedSubtitleTrackIndex,
+    nativeEngineKind,
     serverBase,
   ]);
 
@@ -959,10 +965,20 @@ export default function VideoPlayer({
     preferencesOverride?: PlaybackTrackPreferences,
   ) => {
     const nextDuration = probeDurationSeconds(data);
-    const nextTracks = [
+    const probedTracks = [
       ...probeTracks(data).map((track) => ({ ...track, source: 'embedded' as const })),
       ...externalSubtitleTracks,
     ];
+    // The native engine may have already paired ffprobe stream indexes with
+    // LibVLC IDs. Keep those IDs when this parallel probe finishes so a late
+    // metadata response cannot make live track switching unavailable again.
+    const currentTracks = probeTracksRef.current;
+    const nextTracks = probedTracks.map((track) => {
+      const nativeTrack = currentTracks.find((candidate) =>
+        candidate.type === track.type && candidate.index === track.index && Number.isFinite(candidate.nativeId),
+      );
+      return nativeTrack ? { ...track, nativeId: nativeTrack.nativeId } : track;
+    });
     const preferences = preferencesOverride ?? sharedTrackPreferencesRef.current;
     const hasSubtitlePreference = preferences.subtitle !== undefined;
     const firstVideo = firstTrackIndex(nextTracks, 'video');
@@ -1013,21 +1029,21 @@ export default function VideoPlayer({
     const preferredSubtitle = preferredTrackIndex(tracks, 'subtitle', preferences.subtitle);
     const selectedSubtitle = preferredSubtitle
       ?? (preferences.subtitle.enabled ? firstSubtitleTrackIndex(tracks) : -1);
-    const subtitlesEnabled = selectedSubtitle >= 0;
+    const subtitlesEnabled = selectedSubtitle >= 0 || selectedSubtitle <= -1000;
     selectedSubtitleTrackIndexRef.current = selectedSubtitle;
     subtitlesDefaultEnabledRef.current = subtitlesEnabled;
     setSelectedSubtitleTrackIndex(selectedSubtitle);
     setSubtitlesDefaultEnabled(subtitlesEnabled);
 
     if (engine.kind === 'libvlc') {
-      // These IDs came from LibVLC's own track event, so they are safe to send
-      // back to LibVLC. Loom renders text subtitles; VLC handles bitmap tracks.
       const selectedTrack = tracks.find((track) =>
         track.type === 'subtitle' && track.index === selectedSubtitle,
       );
       const nativeSubtitleId = engineTrackId(engine, tracks, 'subtitle', selectedSubtitle);
+      const nativeSubtitleRequired = selectedSubtitle <= -1000
+        || Boolean(selectedTrack && shouldRenderSubtitleNativelyInLibVlc(selectedTrack.codec));
       void engine.selectSubtitle(
-        selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? nativeSubtitleId : null,
+        nativeSubtitleRequired ? nativeSubtitleId : null,
       ).catch(() => undefined);
       return;
     }
@@ -1452,7 +1468,7 @@ export default function VideoPlayer({
         const activeEngine = playbackEngineRef.current;
         const nativeVideoId = engineTrackId(activeEngine, nextTracks, 'video', selectedVideo);
         if (activeEngine?.kind !== 'libvlc' || nativeVideoId !== null) {
-          void activeEngine?.selectVideo(nativeVideoId);
+          void activeEngine?.selectVideo(nativeVideoId).catch(() => undefined);
         }
         const initialAudioEngine = playbackEngineRef.current;
         const requestedNativeAudio = engineTrackId(initialAudioEngine, nextTracks, 'audio', requestedAudio);
@@ -1477,15 +1493,14 @@ export default function VideoPlayer({
         }
         const initialSubtitleEngine = playbackEngineRef.current;
         if (initialSubtitleEngine?.kind === 'libvlc') {
-          // `selectedSubtitle` came from LibVLC's own track event. It is a
-          // native SPU ID, unlike an ffprobe stream index, and is safe to send
-          // back. Keep text in Loom's overlay and use VLC only for bitmaps.
           const selectedTrack = nextTracks.find((track) =>
             track.type === 'subtitle' && track.index === selectedSubtitle,
           );
           const nativeSubtitleId = engineTrackId(initialSubtitleEngine, nextTracks, 'subtitle', selectedSubtitle);
+          const nativeSubtitleRequired = selectedSubtitle <= -1000
+            || Boolean(selectedTrack && shouldRenderSubtitleNativelyInLibVlc(selectedTrack.codec));
           void initialSubtitleEngine.selectSubtitle(
-            selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? nativeSubtitleId : null,
+            nativeSubtitleRequired ? nativeSubtitleId : null,
           ).catch(() => undefined);
         } else {
           void initialSubtitleEngine?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null).catch(() => undefined);
@@ -1762,6 +1777,48 @@ export default function VideoPlayer({
     setErrorMessage(null);
     setStreamUrl('');
 
+    const externalRef = parseExternalPlaybackReference(filePath);
+    if (externalRef) {
+      const isYoutube = (() => {
+        try {
+          const host = new URL(externalRef.url).hostname.toLowerCase();
+          return /youtube-nocookie\.com|youtube\.com|youtu\.be|vimeo\.com/i.test(host);
+        } catch {
+          return false;
+        }
+      })();
+      const isHls = /\.m3u8(\?|$)/i.test(externalRef.url);
+      const isDirectVideo = isHls || /\.mp4(\?|$)/i.test(externalRef.url) || /\.webm(\?|$)/i.test(externalRef.url) || /\.mov(\?|$)/i.test(externalRef.url);
+      if (isYoutube || !isDirectVideo) {
+        setExternalIframeUrl(externalRef.url);
+        setNativePlaybackActive(false);
+        setNativeEngineKind(null);
+        setStreamUrl('');
+        const timingAttempt = playbackTimingAttemptRef.current;
+        if (timingAttempt) {
+          timingAttempt.engine = null;
+          timingAttempt.mode = 'direct';
+          if (!timingAttempt.sourceOpenedReported) {
+            timingAttempt.sourceOpenedReported = true;
+            logPlaybackTiming('source_opened');
+          }
+          if (!timingAttempt.firstFrameReported) {
+            timingAttempt.firstFrameReported = true;
+            logPlaybackTiming('first_frame');
+          }
+        }
+        setPlayerState('ready');
+        setStatusMessage('');
+        setErrorMessage(null);
+        setPaused(false);
+        void stopTranscodeSession();
+        return;
+      }
+      setExternalIframeUrl(null);
+    } else {
+      setExternalIframeUrl(null);
+    }
+
     void stopTranscodeSession();
 
     (async () => {
@@ -1825,8 +1882,8 @@ export default function VideoPlayer({
               },
               subtitleFiles: allSubtitleFiles,
               // Start with SPU support available. Once LibVLC reports native
-              // track IDs, Loom disables it for text and keeps it for bitmap
-              // subtitles. This avoids probing the file before playback.
+              // track IDs, Loom keeps ASS, SSA, and bitmap tracks native while
+              // SRT and WebVTT can use the styled Loom overlay.
               nativeSubtitles: engine.kind === 'libvlc'
                 ? subtitlesDefaultEnabledRef.current
                 : subtitlesDefaultEnabledRef.current && selectedSubtitleTrackIndexRef.current !== -1,
@@ -2604,6 +2661,36 @@ export default function VideoPlayer({
     setShowSidebar(true);
   }, [showSidebar]);
 
+  const handleIframeLoad = useCallback(() => {
+    if (!activeIframeUrl) return;
+    const timingAttempt = playbackTimingAttemptRef.current;
+    if (timingAttempt) {
+      timingAttempt.engine = null;
+      timingAttempt.mode = 'direct';
+      if (!timingAttempt.sourceOpenedReported) {
+        timingAttempt.sourceOpenedReported = true;
+        logPlaybackTiming('source_opened');
+      }
+      if (!timingAttempt.firstFrameReported) {
+        timingAttempt.firstFrameReported = true;
+        logPlaybackTiming('first_frame');
+      }
+    }
+    setPlayerState('ready');
+    setStatusMessage('');
+    setPaused(false);
+  }, [logPlaybackTiming, activeIframeUrl]);
+
+  useEffect(() => {
+    if (!activeIframeUrl || playerState !== 'loading') return;
+    const timeout = window.setTimeout(() => {
+      if (playerStateRef.current !== 'loading') return;
+      setErrorMessage('The stream player did not load. Try another source.');
+      setPlayerState('error');
+    }, 20_000);
+    return () => window.clearTimeout(timeout);
+  }, [playerState, activeIframeUrl]);
+
   const openSubtitlesPanel = useCallback(() => {
     if (showMediaPanel && mediaPanelTab === 'subtitles') {
       setShowMediaPanel(false);
@@ -2629,18 +2716,30 @@ export default function VideoPlayer({
   useEffect(() => {
     if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const normalizeRatio = (value: string) => value.replace(/\s*\/\s*/, ':');
-    void playbackEngineRef.current.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode));
+    const engine = playbackEngineRef.current;
+    if (engine.kind === 'libvlc' && aspectMode === 'default') return;
+    void engine.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode)).catch((error) => {
+      setErrorMessage(error instanceof Error ? error.message : 'The video aspect ratio could not be changed.');
+    });
   }, [aspectMode, nativePlaybackActive]);
 
   useEffect(() => {
     if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const crop = cropMode === 'none' || cropMode === 'custom' ? null : cropMode.replace(/\s*\/\s*/, ':');
-    void playbackEngineRef.current.setVideoCrop(crop);
+    const engine = playbackEngineRef.current;
+    if (engine.kind === 'libvlc' && crop === null) return;
+    void engine.setVideoCrop(crop).catch((error) => {
+      setErrorMessage(error instanceof Error ? error.message : 'The video crop could not be changed.');
+    });
   }, [cropMode, nativePlaybackActive]);
 
   useEffect(() => {
-    if (nativePlaybackActive) void playbackEngineRef.current?.setVideoRotation(rotation);
-  }, [nativePlaybackActive, rotation]);
+    const engine = playbackEngineRef.current;
+    if (!nativePlaybackActive || !engine || engine.kind === 'libvlc') return;
+    void engine.setVideoRotation(rotation).catch((error) => {
+      setErrorMessage(error instanceof Error ? error.message : 'The video rotation could not be changed.');
+    });
+  }, [nativeEngineKind, nativePlaybackActive, rotation]);
 
   useEffect(() => {
     if (!nativePlaybackActive || !playbackEngineRef.current) return;
@@ -2875,11 +2974,6 @@ export default function VideoPlayer({
     });
   }, [applyNativeTextTrackVisibility, startBrowserStreamAt, streamUrl]);
 
-  const restartLibVlcForSubtitleFallback = useCallback(() => {
-    if (playbackEngineRef.current?.kind !== 'libvlc') return;
-    setReloadToken((value) => value + 1);
-  }, []);
-
   const selectedSubtitleIsBurnedIn = useCallback(() => {
     const selected = selectedEmbeddedSubtitle(probeTracksRef.current, selectedSubtitleTrackIndexRef.current);
     return streamIsTranscoded && Boolean(selected && isBitmapSubtitleCodec(selected.track.codec));
@@ -2980,10 +3074,25 @@ export default function VideoPlayer({
 
   const selectVideoTrack = useCallback((trackIndex: number) => {
     if (selectedVideoTrackIndexRef.current === trackIndex) return;
+    const previousTrackIndex = selectedVideoTrackIndexRef.current;
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
-    if (playbackEngineRef.current) {
-      void playbackEngineRef.current.selectVideo(trackIndex >= 0 ? trackIndex : null);
+    const engine = playbackEngineRef.current;
+    if (engine) {
+      const requestedTrackId = engineTrackId(engine, probeTracksRef.current, 'video', trackIndex);
+      if (engine.kind === 'libvlc' && trackIndex >= 0 && requestedTrackId === null) {
+        selectedVideoTrackIndexRef.current = previousTrackIndex;
+        setSelectedVideoTrackIndex(previousTrackIndex ?? -1);
+        setErrorMessage('LibVLC has not exposed that video track yet. Playback was left unchanged.');
+        return;
+      }
+      void engine.selectVideo(requestedTrackId).then(() => {
+        setErrorMessage(null);
+      }).catch((error) => {
+        selectedVideoTrackIndexRef.current = previousTrackIndex;
+        setSelectedVideoTrackIndex(previousTrackIndex ?? -1);
+        setErrorMessage(error instanceof Error ? error.message : 'LibVLC could not change the video track.');
+      });
       return;
     }
     restartForTrackChange();
@@ -3048,7 +3157,8 @@ export default function VideoPlayer({
     setSelectedSubtitleTrackIndex(trackIndex);
     const engine = playbackEngineRef.current;
     if (engine?.kind === 'libvlc') {
-      const nativeSubtitleRequired = Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec));
+      const nativeSubtitleRequired = trackIndex <= -1000
+        || Boolean(selectedTrack && shouldRenderSubtitleNativelyInLibVlc(selectedTrack.codec));
       const requestedTrackId = nativeSubtitleRequired
         ? engineTrackId(engine, probeTracksRef.current, 'subtitle', trackIndex)
         : null;
@@ -3545,53 +3655,41 @@ export default function VideoPlayer({
   const selectedSubtitleTrackForSettings = mediaTracks.find((track) =>
     track.type === 'subtitle' && track.index === selectedSubtitleTrackIndex,
   );
-  const subtitleStyleCompatibilityMessage = nativeEngineKind === 'libvlc'
+  const subtitleUsesNativeLibVlc = Boolean(nativeEngineKind === 'libvlc'
     && selectedSubtitleTrackForSettings
-    && isBitmapSubtitleCodec(selectedSubtitleTrackForSettings.codec)
-    ? 'This image-based subtitle is rendered by LibVLC and cannot be restyled live. Choose an SRT, ASS, or WebVTT track to use Loom\'s position, size, outline, and color controls.'
+    && shouldRenderSubtitleNativelyInLibVlc(selectedSubtitleTrackForSettings.codec));
+  const subtitleStyleCompatibilityMessage = subtitleUsesNativeLibVlc
+    ? 'This formatted subtitle is rendered by LibVLC and cannot use Loom\'s live subtitle styling. Choose an SRT or WebVTT track to use Loom\'s position, size, outline, and color controls.'
     : undefined;
   const subtitleIsBurnedIn = streamIsTranscoded
     && Boolean(selectedSubtitleForOverlay && isBitmapSubtitleCodec(selectedSubtitleForOverlay.track.codec));
-  const showSubtitleOverlay = shouldShowSubtitleOverlay({
+  const showSubtitleOverlay = !subtitleUsesNativeLibVlc && shouldShowSubtitleOverlay({
     subtitlesEnabled: subtitlesDefaultEnabled,
     selectedSubtitleTrackIndex,
     cueCount: subtitleCues.length,
     subtitleIsBurnedIn,
   });
 
-  // LibVLC remains a subtitle fallback while Loom's renderer is the primary
-  // surface. Once usable cues are available, disable the native SPU so the
-  // same subtitle is never painted twice. If cue loading fails, leaving the
-  // native track enabled preserves subtitle visibility for bitmap/unsupported
-  // formats.
+  // Keep formatted, bitmap, and cue-less external subtitles on LibVLC's live
+  // native track. Plain text files move to Loom's overlay once cues are ready.
   useEffect(() => {
     const engine = playbackEngineRef.current;
     if (!nativePlaybackActive || nativeEngineKind !== 'libvlc' || engine?.kind !== 'libvlc') return;
-    const selectedTrack = probeTracksRef.current.find((track) =>
+    const selectedTrack = mediaTracks.find((track) =>
       track.type === 'subtitle' && track.index === selectedSubtitleTrackIndex,
     );
-    const nativeFallbackAllowed = Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec));
-    if (!subtitlesDefaultEnabled || selectedSubtitleTrackIndex === -1 || showSubtitleOverlay || !nativeFallbackAllowed) {
-      void engine.selectSubtitle(null).catch(() => undefined);
-    }
-  }, [nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
-
-  useEffect(() => {
-    if (!nativePlaybackActive || nativeEngineKind !== 'libvlc') return;
-    if (!subtitlesDefaultEnabled || selectedSubtitleTrackIndex > -1000 || subtitleCues.length > 0) return;
-    // A sidecar/OpenSubtitles track has an authorized, deterministic file
-    // path. If Loom cannot obtain parseable cues, reopen LibVLC with only that
-    // selected file as a native fallback. Embedded text tracks do not have a
-    // safe SPU-ID mapping here, so they remain on Loom/MPV/browser fallback.
-    if (!visibleSubtitles[-1000 - selectedSubtitleTrackIndex]) return;
-    if (libVlcSubtitleFallbackRef.current) return;
-    const timer = setTimeout(() => {
-      if (libVlcSubtitleFallbackRef.current || playbackEngineRef.current?.kind !== 'libvlc') return;
-      libVlcSubtitleFallbackRef.current = true;
-      restartLibVlcForSubtitleFallback();
-    }, 1_600);
-    return () => clearTimeout(timer);
-  }, [nativeEngineKind, nativePlaybackActive, restartLibVlcForSubtitleFallback, selectedSubtitleTrackIndex, subtitleCues.length, subtitlesDefaultEnabled, visibleSubtitles]);
+    const nativeFallbackAllowed = selectedSubtitleTrackIndex <= -1000
+      || Boolean(selectedTrack && shouldRenderSubtitleNativelyInLibVlc(selectedTrack.codec));
+    const nativeTrackId = nativeFallbackAllowed
+      ? engineTrackId(engine, mediaTracks, 'subtitle', selectedSubtitleTrackIndex)
+      : null;
+    const shouldUseNativeTrack = subtitlesDefaultEnabled
+      && selectedSubtitleTrackIndex !== -1
+      && !showSubtitleOverlay
+      && nativeTrackId !== null;
+    libVlcSubtitleFallbackRef.current = shouldUseNativeTrack;
+    void engine.selectSubtitle(shouldUseNativeTrack ? nativeTrackId : null).catch(() => undefined);
+  }, [mediaTracks, nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
 
   const useNativeSubtitleTracks = shouldUseNativeSubtitleTracks({
     subtitlesEnabled: subtitlesDefaultEnabled,
@@ -3836,17 +3934,42 @@ export default function VideoPlayer({
 
         <TopPlayerControls
           visible={showTopControls && playerState !== 'error'}
-          label={currentEpLabel ?? title}
+          label={activeIframeUrl ? title : (currentEpLabel ?? title)}
+          actionLabel={activeIframeUrl && hasEpisodes ? 'Sources' : undefined}
+          onAction={activeIframeUrl && hasEpisodes ? openEpisodePanel : undefined}
+          fullscreen={fullscreen}
+          onToggleFullscreen={activeIframeUrl ? toggleFullscreen : undefined}
           onBack={handleBack}
           onClose={handleClose}
         />
+
+        {activeIframeUrl && !showTopControls ? (
+          <div
+            className="absolute inset-0 z-[35] cursor-none"
+            aria-hidden="true"
+            onPointerMove={handlePointerMove}
+          />
+        ) : null}
 
         <div
           ref={videoViewportRef}
           className={`loom-player-viewport relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden bg-transparent ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
           style={videoFrameStyle}
         >
-          {!nativePlaybackActive && (
+          {activeIframeUrl ? (
+            <iframe
+              src={activeIframeUrl}
+              title={title}
+              className="h-full w-full border-0 bg-black"
+              allow="autoplay; picture-in-picture; encrypted-media; web-share"
+              referrerPolicy="strict-origin-when-cross-origin"
+              onLoad={handleIframeLoad}
+              onError={() => {
+                setErrorMessage('The stream player could not be loaded. Try another source.');
+                setPlayerState('error');
+              }}
+            />
+          ) : !nativePlaybackActive && (
             <video
               ref={videoRef}
               className="h-full w-full"
@@ -4033,7 +4156,7 @@ export default function VideoPlayer({
 
         {/* Controls overlay */}
         <PlayerControlBar
-          showControls={showControls && playerState !== 'error'}
+          showControls={showControls && playerState !== 'error' && !activeIframeUrl}
           seekSliderRef={seekSliderRef}
           progressFillRef={progressFillRef}
           progressThumbRef={progressThumbRef}
@@ -4098,6 +4221,7 @@ export default function VideoPlayer({
             setCropMode={setCropMode}
             rotation={rotation}
             setRotation={setRotation}
+            rotationAvailable={nativeEngineKind !== 'libvlc'}
             playbackRate={playbackRate}
             setPlaybackRate={setPlaybackRate}
             displaySleepSettingsAvailable={displaySleepSettingsAvailable}
@@ -4138,12 +4262,13 @@ export default function VideoPlayer({
           ref={episodePanelDialogRef}
           role="dialog"
           aria-modal="true"
-          aria-label="Episodes"
+          aria-label={activeIframeUrl ? 'Sources' : 'Episodes'}
           tabIndex={-1}
           data-modal-layer="episode-list"
           className="contents"
         >
           <PlayerEpisodePanel
+            sourceMode={Boolean(activeIframeUrl)}
             episodePanelWidth={episodePanelWidth}
             setEpisodePanelWidth={setEpisodePanelWidth}
             startSidePanelResize={startSidePanelResize}

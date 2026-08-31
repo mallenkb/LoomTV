@@ -39,3 +39,17 @@ export function libVlcPlatformBinding(platform: NodeJS.Platform): LibVlcPlatform
   }
   return null;
 }
+
+/**
+ * Set the video child at the bottom first, then the backdrop. SetWindowPos
+ * moves each target to HWND_BOTTOM, so the second call leaves the backdrop
+ * below the video while Chromium stays above both children.
+ */
+export function orderWindowsLibVlcChildren<T>(
+  video: T,
+  backdrop: T,
+  moveToBottom: (child: T) => void,
+): void {
+  moveToBottom(video);
+  moveToBottom(backdrop);
+}
