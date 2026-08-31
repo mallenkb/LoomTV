@@ -115,6 +115,15 @@ function StartupReadySignal({
     if (!ready || signalledRef.current) return undefined;
     let cancelled = false;
 
+    const signalReady = () => {
+      if (cancelled || signalledRef.current) return;
+      signalledRef.current = true;
+      markReady();
+    };
+    // A poster or logo request can stall independently of the library. Never
+    // keep the whole shell behind the splash just to wait for artwork.
+    const readinessDeadline = window.setTimeout(signalReady, 3_000);
+
     const nextPaint = () => new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve());
     });
@@ -145,13 +154,13 @@ function StartupReadySignal({
       }
       await nextPaint();
 
-      if (!cancelled && !signalledRef.current) {
-        signalledRef.current = true;
-        markReady();
-      }
+      signalReady();
     };
     void settleInitialAssets();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(readinessDeadline);
+    };
   }, [markReady, ready]);
   return null;
 }
@@ -159,59 +168,31 @@ function StartupReadySignal({
 export default function App() {
   const hasDesktopLibVlcBridge = Boolean(window.desktopApi?.libvlc?.refreshAvailability);
   const [contentReady, setContentReady] = useState(false);
-  const [libVlcReady, setLibVlcReady] = useState(!hasDesktopLibVlcBridge);
-  const [startupMessage, setStartupMessage] = useState(
-    hasDesktopLibVlcBridge ? 'Loading LibVLC' : 'Preparing your library',
-  );
-  const startupReady = contentReady && libVlcReady;
+  const startupReady = contentReady;
   const markStartupReady = useCallback(() => setContentReady(true), []);
 
   useEffect(() => {
-    if (!hasDesktopLibVlcBridge) return undefined;
+    if (!hasDesktopLibVlcBridge || !startupReady) return undefined;
     let cancelled = false;
-
-    const loadLibVlc = async () => {
-      const failures: string[] = [];
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        if (cancelled) return;
-        setStartupMessage(`Loading LibVLC (attempt ${attempt} of 3)`);
-        try {
-          const availability = await desktopApi.libvlc.refreshAvailability();
-          if (availability.available && availability.surface === 'composited-window') {
-            console.info('[startup] LibVLC loaded.', {
-              attempt,
+    const timer = window.setTimeout(() => {
+      void desktopApi.libvlc.refreshAvailability()
+        .then((availability) => {
+          if (!cancelled && availability.available) {
+            console.info('[startup] LibVLC is available.', {
               version: availability.version,
               libraryPath: availability.libraryPath,
             });
-            if (!cancelled) {
-              setStartupMessage('Preparing your library');
-              setLibVlcReady(true);
-            }
-            return;
           }
-          failures.push(availability.warning || availability.reason || 'LibVLC reported that it is unavailable.');
-        } catch (error) {
-          failures.push(error instanceof Error ? error.message : 'LibVLC initialization failed.');
-        }
-        console.warn(`[startup] LibVLC initialization attempt ${attempt} of 3 failed:`, failures.at(-1));
-        if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 250));
-      }
-
-      const reason = failures.at(-1) || 'LibVLC could not be loaded.';
-      console.error('[startup] LibVLC failed to load after three attempts. Compatibility playback remains available.', {
-        reason,
-        failures,
-      });
-      if (!cancelled) {
-        setStartupMessage(`LibVLC unavailable: ${reason}`);
-        await new Promise((resolve) => window.setTimeout(resolve, 600));
-        if (!cancelled) setLibVlcReady(true);
-      }
+        })
+        .catch((error) => {
+          if (!cancelled) console.warn('[startup] LibVLC background probe failed:', error);
+        });
+    }, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
     };
-
-    void loadLibVlc();
-    return () => { cancelled = true; };
-  }, [hasDesktopLibVlcBridge]);
+  }, [hasDesktopLibVlcBridge, startupReady]);
 
   return (
     <StartupReadyContext.Provider value={markStartupReady}>
@@ -224,7 +205,7 @@ export default function App() {
             <DesktopBootstrap />
           </HashRouter>
         </MotionConfig>
-        {!startupReady && <StartupSplash message={startupMessage} />}
+        {!startupReady && <StartupSplash />}
       </StartupVisibilityContext.Provider>
     </StartupReadyContext.Provider>
   );
@@ -280,17 +261,6 @@ function DesktopBootstrap() {
           if (!cancelled) setMode(savedMode);
           return;
         }
-      }
-      let remoteSession = null;
-      try {
-        remoteSession = await desktopApi.getPersistedRemoteLibrary();
-      } catch (error) {
-        setSetupMessage(error instanceof Error ? error.message : 'The saved pairing could not be restored. Pair this laptop again.');
-      }
-      if (remoteSession) {
-        desktopApi.activateRemoteLibrary(remoteSession);
-        if (!cancelled) setMode('remote');
-        return;
       }
       try {
         const unified = await desktopApi.getUnifiedDesktopServerState();

@@ -1,0 +1,121 @@
+{
+  "assets": [
+    "index-CRQdtD_D.js",
+    "index-CBgcGntf.css"
+  ],
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0",
+  "modes": {
+    "dark": [
+      {
+        "id": "focusButton",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(168, 162, 158)",
+          "boxShadow": "none"
+        },
+        "container": null
+      },
+      {
+        "id": "focusDropdown",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(168, 162, 158)",
+          "boxShadow": "none"
+        },
+        "container": null
+      },
+      {
+        "id": "focusLibrary",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(255, 255, 255)",
+          "boxShadow": "none"
+        },
+        "container": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(168, 162, 158)",
+          "boxShadow": "none"
+        }
+      },
+      {
+        "id": "focusModern",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(255, 255, 255)",
+          "boxShadow": "none"
+        },
+        "container": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(168, 162, 158)",
+          "boxShadow": "rgba(0, 0, 0, 0.28) 0px 24px 70px 0px"
+        }
+      }
+    ],
+    "light": [
+      {
+        "id": "focusButton",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(87, 83, 78)",
+          "boxShadow": "none"
+        },
+        "container": null
+      },
+      {
+        "id": "focusDropdown",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(87, 83, 78)",
+          "boxShadow": "none"
+        },
+        "container": null
+      },
+      {
+        "id": "focusLibrary",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(255, 255, 255)",
+          "boxShadow": "none"
+        },
+        "container": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(87, 83, 78)",
+          "boxShadow": "none"
+        }
+      },
+      {
+        "id": "focusModern",
+        "focusVisible": true,
+        "direct": {
+          "outlineStyle": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(255, 255, 255)",
+          "boxShadow": "none"
+        },
+        "container": {
+          "outlineStyle": "solid",
+          "outlineWidth": "2px",
+          "outlineColor": "rgb(87, 83, 78)",
+          "boxShadow": "rgba(0, 0, 0, 0.28) 0px 24px 70px 0px"
+        }
+      }
+    ]
+  }
+}

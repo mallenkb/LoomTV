@@ -159,14 +159,15 @@ export function insertIptvSource(
 export function renameIptvSource(
   database: BetterSqlite3.Database,
   sourceId: string,
-  patch: { name?: string; epgUrl?: string; iconId?: IptvSourceIconId },
+  patch: { name?: string; playlistUrl?: string; epgUrl?: string; iconId?: IptvSourceIconId },
 ): IptvSourceRecord | null {
   const existing = getIptvSource(database, sourceId);
   if (!existing) return null;
   database
-    .prepare('UPDATE iptv_sources SET name = ?, epg_url = ?, icon_id = ?, updated_at = ? WHERE id = ?')
+    .prepare('UPDATE iptv_sources SET name = ?, playlist_url = ?, epg_url = ?, icon_id = ?, updated_at = ? WHERE id = ?')
     .run(
       patch.name ?? existing.name,
+      patch.playlistUrl ?? existing.playlistUrl,
       patch.epgUrl ?? existing.epgUrl,
       patch.iconId ?? existing.iconId,
       Date.now(),

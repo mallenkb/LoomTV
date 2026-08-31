@@ -1,0 +1,13 @@
+{
+  "source": "/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/release-evidence/2026-08-13/verification/screenshots/ios-iphone-max-text-contrast.png",
+  "output": "/Users/mallenkb/Documents/Code Projects/LoomTV/.codex-artifacts/loomtv-audit-evidence/mobile/ios-iphone-max-text-contrast-evidence.png",
+  "capture_mode": "capture-tall",
+  "mime_type": "image/png",
+  "original_width": 1206,
+  "original_height": 2622,
+  "output_width": 414,
+  "output_height": 900,
+  "original_bytes": 138353,
+  "output_bytes": 53687,
+  "resized": true
+}

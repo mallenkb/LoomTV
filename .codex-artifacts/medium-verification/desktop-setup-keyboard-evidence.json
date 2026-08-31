@@ -1,0 +1,43 @@
+{
+  "environment": {
+    "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0",
+    "pageUrl": "file:///Users/mallenkb/Documents/Code%20Projects/LoomTV/apps/server/src/setup.html",
+    "viewport": "748x472"
+  },
+  "opened": {
+    "dialogHidden": false,
+    "activeId": "rootPath",
+    "activeText": "",
+    "focusVisible": true,
+    "outlineStyle": "solid",
+    "outlineWidth": "2px",
+    "outlineColor": "rgb(252, 156, 3)"
+  },
+  "wrappedBackward": {
+    "dialogHidden": false,
+    "activeId": "addRootButton",
+    "activeText": "Add folder",
+    "focusVisible": true,
+    "outlineStyle": "solid",
+    "outlineWidth": "2px",
+    "outlineColor": "rgb(252, 156, 3)"
+  },
+  "wrappedForward": {
+    "dialogHidden": false,
+    "activeId": "rootPath",
+    "activeText": "",
+    "focusVisible": true,
+    "outlineStyle": "solid",
+    "outlineWidth": "2px",
+    "outlineColor": "rgb(252, 156, 3)"
+  },
+  "closed": {
+    "dialogHidden": true,
+    "activeId": "keyboardEvidenceOpener",
+    "activeText": "Add folder",
+    "focusVisible": true,
+    "outlineStyle": "solid",
+    "outlineWidth": "2px",
+    "outlineColor": "rgb(252, 156, 3)"
+  }
+}

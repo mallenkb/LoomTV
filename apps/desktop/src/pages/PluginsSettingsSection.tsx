@@ -12,6 +12,7 @@ import {
   type StremioPluginSummary,
   type StremioPluginAuditEntry,
 } from '@/lib/desktopApi';
+import { saveCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The add-on request failed.';
@@ -58,6 +59,7 @@ export default function PluginsSettingsSection() {
       try { return [plugin.addonId, await desktopApi.listStremioPluginAudit(plugin.addonId, 8)] as const; } catch { return [plugin.addonId, []] as const; }
     }));
     setInstalled(nextInstalled);
+    saveCachedSidebarPlugins(nextInstalled);
     setOfficial(nextOfficial);
     setProfiles(grantableProfiles);
     setProfileAccess(Object.fromEntries(accessEntries));

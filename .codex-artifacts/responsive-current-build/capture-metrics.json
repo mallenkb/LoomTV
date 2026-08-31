@@ -1,0 +1,373 @@
+[
+  {
+    "capture": {
+      "name": "phone-390x844",
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 1
+    },
+    "metrics": {
+      "title": "LoomTV",
+      "client": "browser",
+      "readyState": "complete",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "scrollY": 0,
+      "bodyScrollWidth": 390,
+      "homeScroller": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "clientHeight": 766,
+        "scrollHeight": 1755,
+        "scrollTop": 0
+      },
+      "rootChildren": 3,
+      "bodyText": "Home Anime TV Shows Movies Anime · Action · Drama TV TV-MA Called “Juggernaut,” these are the unmanned combat drones developed by the Republic of San Magnolia in answer to the attacks by the autonomous unmanned drones of",
+      "narrowStyles": [
+        {
+          "selector": ".loom-modern-hero-meta",
+          "left": 52.4,
+          "right": 337.6,
+          "width": 285.1,
+          "fontSize": "14.4px",
+          "flexWrap": "nowrap",
+          "justifyContent": "center",
+          "overflow": "hidden",
+          "textAlign": "center",
+          "whiteSpace": "nowrap",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-header nav a",
+          "left": 16,
+          "right": 68.9,
+          "width": 52.9,
+          "fontSize": "16px",
+          "flexWrap": "nowrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "start",
+          "whiteSpace": "nowrap",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-hero-copy",
+          "left": 0,
+          "right": 390,
+          "width": 390,
+          "fontSize": "16px",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "overflow": "visible",
+          "textAlign": "center",
+          "whiteSpace": "normal",
+          "transform": "none"
+        }
+      ],
+      "assets": [
+        "http://127.0.0.1:3847/app/assets/index-CRQdtD_D.js",
+        "http://127.0.0.1:3847/app/assets/index-CBgcGntf.css"
+      ]
+    }
+  },
+  {
+    "capture": {
+      "name": "tablet-768x1024",
+      "width": 768,
+      "height": 1024,
+      "deviceScaleFactor": 1
+    },
+    "metrics": {
+      "title": "LoomTV",
+      "client": "browser",
+      "readyState": "complete",
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "clientWidth": 768,
+      "scrollWidth": 768,
+      "scrollHeight": 1024,
+      "scrollY": 0,
+      "bodyScrollWidth": 768,
+      "homeScroller": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "clientHeight": 946,
+        "scrollHeight": 1916,
+        "scrollTop": 0
+      },
+      "rootChildren": 3,
+      "bodyText": "Home Anime TV Shows Movies Anime · Action · Drama TV TV-MA Called “Juggernaut,” these are the unmanned combat drones developed by the Republic of San Magnolia in answer to the attacks by the autonomous unmanned drones of",
+      "narrowStyles": [
+        {
+          "selector": ".loom-modern-hero-meta",
+          "left": 233.9,
+          "right": 534.1,
+          "width": 300.2,
+          "fontSize": "16px",
+          "flexWrap": "wrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "center",
+          "whiteSpace": "normal",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-header nav a",
+          "left": 195.1,
+          "right": 267.9,
+          "width": 72.8,
+          "fontSize": "14.4px",
+          "flexWrap": "nowrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "start",
+          "whiteSpace": "nowrap",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-hero-copy",
+          "left": 64,
+          "right": 704,
+          "width": 640,
+          "fontSize": "16px",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "overflow": "visible",
+          "textAlign": "center",
+          "whiteSpace": "normal",
+          "transform": "none"
+        }
+      ],
+      "assets": [
+        "http://127.0.0.1:3847/app/assets/index-CRQdtD_D.js",
+        "http://127.0.0.1:3847/app/assets/index-CBgcGntf.css"
+      ]
+    }
+  },
+  {
+    "capture": {
+      "name": "landscape-844x390",
+      "width": 844,
+      "height": 390,
+      "deviceScaleFactor": 1
+    },
+    "metrics": {
+      "title": "LoomTV",
+      "client": "browser",
+      "readyState": "complete",
+      "innerWidth": 844,
+      "innerHeight": 390,
+      "clientWidth": 844,
+      "scrollWidth": 844,
+      "scrollHeight": 390,
+      "scrollY": 0,
+      "bodyScrollWidth": 844,
+      "homeScroller": {
+        "clientWidth": 844,
+        "scrollWidth": 844,
+        "clientHeight": 312,
+        "scrollHeight": 1836,
+        "scrollTop": 0
+      },
+      "rootChildren": 3,
+      "bodyText": "Home Anime TV Shows Movies Anime · Action · Drama TV TV-MA Called “Juggernaut,” these are the unmanned combat drones developed by the Republic of San Magnolia in answer to the attacks by the autonomous unmanned drones of",
+      "narrowStyles": [
+        {
+          "selector": ".loom-modern-hero-meta",
+          "left": 271.9,
+          "right": 572.1,
+          "width": 300.2,
+          "fontSize": "16px",
+          "flexWrap": "wrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "center",
+          "whiteSpace": "normal",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-header nav a",
+          "left": 233.1,
+          "right": 305.9,
+          "width": 72.8,
+          "fontSize": "14.4px",
+          "flexWrap": "nowrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "start",
+          "whiteSpace": "nowrap",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-hero-copy",
+          "left": 102,
+          "right": 742,
+          "width": 640,
+          "fontSize": "16px",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "overflow": "visible",
+          "textAlign": "center",
+          "whiteSpace": "normal",
+          "transform": "none"
+        }
+      ],
+      "assets": [
+        "http://127.0.0.1:3847/app/assets/index-CRQdtD_D.js",
+        "http://127.0.0.1:3847/app/assets/index-CBgcGntf.css"
+      ]
+    }
+  },
+  {
+    "capture": {
+      "name": "zoom-200-phone",
+      "width": 195,
+      "height": 422,
+      "deviceScaleFactor": 2
+    },
+    "metrics": {
+      "title": "LoomTV",
+      "client": "browser",
+      "readyState": "complete",
+      "innerWidth": 195,
+      "innerHeight": 422,
+      "clientWidth": 195,
+      "scrollWidth": 195,
+      "scrollHeight": 422,
+      "scrollY": 0,
+      "bodyScrollWidth": 195,
+      "homeScroller": {
+        "clientWidth": 195,
+        "scrollWidth": 195,
+        "clientHeight": 344,
+        "scrollHeight": 1601,
+        "scrollTop": 0
+      },
+      "rootChildren": 3,
+      "bodyText": "Home Anime TV Shows Movies Anime · Action · Drama TV TV-MA Called “Juggernaut,” these are the unmanned combat drones developed by the Republic of San Magnolia in answer to the attacks by the autonomous unmanned drones of",
+      "narrowStyles": [
+        {
+          "selector": ".loom-modern-hero-meta",
+          "left": 10,
+          "right": 185,
+          "width": 175,
+          "fontSize": "14.4px",
+          "flexWrap": "wrap",
+          "justifyContent": "flex-start",
+          "overflow": "visible",
+          "textAlign": "left",
+          "whiteSpace": "normal",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-header nav a",
+          "left": 10,
+          "right": 48.6,
+          "width": 38.6,
+          "fontSize": "12px",
+          "flexWrap": "nowrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "start",
+          "whiteSpace": "nowrap",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-hero-copy",
+          "left": 0,
+          "right": 195,
+          "width": 195,
+          "fontSize": "16px",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "overflow": "visible",
+          "textAlign": "left",
+          "whiteSpace": "normal",
+          "transform": "none"
+        }
+      ],
+      "assets": [
+        "http://127.0.0.1:3847/app/assets/index-CRQdtD_D.js",
+        "http://127.0.0.1:3847/app/assets/index-CBgcGntf.css"
+      ]
+    }
+  },
+  {
+    "capture": {
+      "name": "zoom-200-phone-scrolled",
+      "width": 195,
+      "height": 422,
+      "deviceScaleFactor": 2,
+      "scrollY": 220
+    },
+    "metrics": {
+      "title": "LoomTV",
+      "client": "browser",
+      "readyState": "complete",
+      "innerWidth": 195,
+      "innerHeight": 422,
+      "clientWidth": 195,
+      "scrollWidth": 195,
+      "scrollHeight": 422,
+      "scrollY": 0,
+      "bodyScrollWidth": 195,
+      "homeScroller": {
+        "clientWidth": 195,
+        "scrollWidth": 195,
+        "clientHeight": 344,
+        "scrollHeight": 1601,
+        "scrollTop": 220
+      },
+      "rootChildren": 3,
+      "bodyText": "Home Anime TV Shows Movies Anime · Action · Drama TV TV-MA Called “Juggernaut,” these are the unmanned combat drones developed by the Republic of San Magnolia in answer to the attacks by the autonomous unmanned drones of",
+      "narrowStyles": [
+        {
+          "selector": ".loom-modern-hero-meta",
+          "left": 10,
+          "right": 185,
+          "width": 175,
+          "fontSize": "14.4px",
+          "flexWrap": "wrap",
+          "justifyContent": "flex-start",
+          "overflow": "visible",
+          "textAlign": "left",
+          "whiteSpace": "normal",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-header nav a",
+          "left": 10,
+          "right": 48.6,
+          "width": 38.6,
+          "fontSize": "12px",
+          "flexWrap": "nowrap",
+          "justifyContent": "center",
+          "overflow": "visible",
+          "textAlign": "start",
+          "whiteSpace": "nowrap",
+          "transform": "none"
+        },
+        {
+          "selector": ".loom-modern-hero-copy",
+          "left": 0,
+          "right": 195,
+          "width": 195,
+          "fontSize": "16px",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "overflow": "visible",
+          "textAlign": "left",
+          "whiteSpace": "normal",
+          "transform": "none"
+        }
+      ],
+      "assets": [
+        "http://127.0.0.1:3847/app/assets/index-CRQdtD_D.js",
+        "http://127.0.0.1:3847/app/assets/index-CBgcGntf.css"
+      ]
+    }
+  }
+]

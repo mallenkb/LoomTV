@@ -192,7 +192,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
       if (findIptvSourceByPlaylistUrl(database, playlistUrl)) {
         throw new IptvSourceError('That playlist has already been added.');
       }
-      const name = input.name?.trim().slice(0, MAX_SOURCE_NAME_LENGTH) || defaultSourceName(playlistUrl);
+      const name = input.name.trim().slice(0, MAX_SOURCE_NAME_LENGTH);
       const created = insertIptvSource(database, {
         id: randomUUID(),
         name,
@@ -213,6 +213,17 @@ export function createIptvService(deps: IptvServiceDependencies) {
 
     updateSource(sourceId: string, patch: IptvSourcePatch): IptvSourceSummary[] {
       const database = deps.getDatabase();
+      const existing = getIptvSource(database, sourceId);
+      if (!existing) throw new IptvSourceError('That live TV source no longer exists.');
+      const playlistUrl = patch.playlistUrl === undefined
+        ? undefined
+        : normalizeIptvUrl(patch.playlistUrl, 'playlist');
+      if (playlistUrl && playlistUrl !== existing.playlistUrl) {
+        const duplicate = findIptvSourceByPlaylistUrl(database, playlistUrl);
+        if (duplicate && duplicate.id !== sourceId) {
+          throw new IptvSourceError('That playlist has already been added.');
+        }
+      }
       const epgUrl = patch.epgUrl === undefined
         ? undefined
         : patch.epgUrl.trim()
@@ -220,10 +231,11 @@ export function createIptvService(deps: IptvServiceDependencies) {
           : '';
       const updated = renameIptvSource(database, sourceId, {
         name: patch.name?.trim().slice(0, MAX_SOURCE_NAME_LENGTH) || undefined,
+        playlistUrl,
         epgUrl,
         iconId: patch.iconId,
       });
-      if (!updated) throw new IptvSourceError('That live TV source no longer exists.');
+      if (!updated) throw new IptvSourceError('That live TV source could not be updated.');
       return listSources();
     },
 
