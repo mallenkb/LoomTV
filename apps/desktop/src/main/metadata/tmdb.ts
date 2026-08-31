@@ -1,8 +1,8 @@
-import { movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers';
-import type { ContentRating, EpisodeMeta, MediaItem, StreamingOfferType, StreamingProvider } from './types';
-import { safeFetch } from '../safeFetch';
+import { movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers.ts';
+import type { ContentRating, EpisodeMeta, MediaItem, StreamingOfferType, StreamingProvider } from './types.ts';
+import { safeFetch } from '../safeFetch.ts';
 import { normalizeContentRating } from './contentRatings.ts';
-import { preferredProviderLogoUrl } from '../../shared/providerLogos';
+import { preferredProviderLogoUrl } from '../../shared/providerLogos.ts';
 import { z } from 'zod';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';

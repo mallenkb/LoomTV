@@ -1,7 +1,7 @@
-import { yearFromDateString } from './helpers';
-import type { EpisodeMeta, OriginPlatform, TVMetadata } from './types';
-import { safeFetch } from '../safeFetch';
-import { preferredProviderLogoUrl } from '../../shared/providerLogos';
+import { yearFromDateString } from './helpers.ts';
+import type { EpisodeMeta, OriginPlatform, TVMetadata } from './types.ts';
+import { safeFetch } from '../safeFetch.ts';
+import { preferredProviderLogoUrl } from '../../shared/providerLogos.ts';
 import { z } from 'zod';
 
 interface TVMazeImage {

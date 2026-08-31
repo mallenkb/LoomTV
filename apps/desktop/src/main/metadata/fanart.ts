@@ -83,4 +83,4 @@ export async function fetchFanartTVLogos(
     return [];
   }
 }
-import { safeFetch } from '../safeFetch';
+import { safeFetch } from '../safeFetch.ts';

@@ -1,4 +1,4 @@
-import type { EpisodeMeta } from './types';
+import type { EpisodeMeta } from './types.ts';
 
 export function parseYearFromText(value?: string): number {
   if (!value) return 0;
