@@ -284,11 +284,12 @@ const iptvSourceIconSchema = z.enum([
 const iptvSourceInputSchema = z.object({
   playlistUrl: nonEmptyString.max(2048),
   epgUrl: z.string().max(2048).optional(),
-  name: z.string().max(120).optional(),
+  name: nonEmptyString.max(120),
   iconId: iptvSourceIconSchema.optional(),
 });
 const iptvSourcePatchSchema = z.object({
   name: z.string().max(120).optional(),
+  playlistUrl: z.string().max(2048).optional(),
   epgUrl: z.string().max(2048).optional(),
   iconId: iptvSourceIconSchema.optional(),
 });

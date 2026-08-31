@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import {
   LIVE_TV_SOURCE_ICON_OPTIONS,
   liveTvSourceIconPair,
@@ -8,11 +8,12 @@ import {
 import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { desktopApi } from '@/lib/desktopApi';
 import { notifyIptvSourcesChanged } from '@/lib/liveTvSources';
 import type { IptvSourceIconId, IptvSourceSummary } from '@/shared/desktopProtocol';
 
-const INPUT_CLASS = 'h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-3 text-sm text-white outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]';
+const INPUT_CLASS = 'h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-3 text-sm text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The live TV request failed.';
@@ -26,10 +27,12 @@ function describeSource(source: IptvSourceSummary): string {
 }
 
 function SourceIconPicker({
+  name,
   value,
   onChange,
   disabled = false,
 }: {
+  name: string;
   value: IptvSourceIconId;
   onChange: (iconId: IptvSourceIconId) => void;
   disabled?: boolean;
@@ -40,24 +43,27 @@ function SourceIconPicker({
         const selected = option.id === value;
         const Icon = selected ? option.solid : option.outline;
         return (
-          <button
+          <label
             key={option.id}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            aria-label={option.label}
             title={option.label}
-            disabled={disabled}
-            onClick={() => onChange(option.id)}
-            className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:opacity-50 ${
+            className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--loom-accent)] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 ${
               selected
-                ? 'border-[var(--loom-accent)] bg-[color-mix(in_srgb,var(--loom-accent)_18%,transparent)] text-[var(--loom-accent)]'
-                : 'border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] text-[var(--loom-muted)] hover:text-white'
+                ? 'border-[var(--loom-accent)] bg-[color-mix(in_srgb,var(--loom-accent)_18%,transparent)] text-[var(--loom-text)]'
+                : 'border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
             }`}
           >
+            <input
+              type="radio"
+              name={name}
+              value={option.id}
+              checked={selected}
+              disabled={disabled}
+              onChange={() => onChange(option.id)}
+              className="sr-only"
+            />
             <Icon className="h-5 w-5" />
             <span>{option.label}</span>
-          </button>
+          </label>
         );
       })}
     </div>
@@ -76,9 +82,14 @@ export default function LiveTvSettingsSection() {
   const [epgUrl, setEpgUrl] = useState('');
   const [name, setName] = useState('');
   const [iconId, setIconId] = useState<IptvSourceIconId>('general');
-  const [editingIconSourceId, setEditingIconSourceId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<IptvSourceSummary | null>(null);
+  const [editPlaylistUrl, setEditPlaylistUrl] = useState('');
+  const [editEpgUrl, setEditEpgUrl] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editIconId, setEditIconId] = useState<IptvSourceIconId>('general');
   const [busyKey, setBusyKey] = useState<string | null>('load');
-  const [error, setError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [editError, setEditError] = useState('');
 
   const applySources = useCallback((next: IptvSourceSummary[]) => {
     setSources(next);
@@ -92,7 +103,7 @@ export default function LiveTvSettingsSection() {
         if (mounted) setSources(next);
       })
       .catch((cause) => {
-        if (mounted) setError(errorMessage(cause));
+        if (mounted) setPageError(errorMessage(cause));
       })
       .finally(() => {
         if (mounted) setBusyKey(null);
@@ -102,14 +113,15 @@ export default function LiveTvSettingsSection() {
 
   const handleAdd = useCallback(async () => {
     const url = playlistUrl.trim();
-    if (!url) return;
+    const sourceName = name.trim();
+    if (!url || !sourceName) return;
     setBusyKey('add');
-    setError('');
+    setPageError('');
     try {
       const next = await desktopApi.addIptvSource({
         playlistUrl: url,
         epgUrl: epgUrl.trim() || undefined,
-        name: name.trim() || undefined,
+        name: sourceName,
         iconId,
       });
       applySources(next);
@@ -118,32 +130,64 @@ export default function LiveTvSettingsSection() {
       setName('');
       setIconId('general');
     } catch (cause) {
-      setError(errorMessage(cause));
+      setPageError(errorMessage(cause));
     } finally {
       setBusyKey(null);
     }
   }, [applySources, epgUrl, iconId, name, playlistUrl]);
 
-  const handleIconChange = useCallback(async (source: IptvSourceSummary, nextIconId: IptvSourceIconId) => {
-    setBusyKey(`icon:${source.id}`);
-    setError('');
+  const openEdit = useCallback((source: IptvSourceSummary) => {
+    setEditingSource(source);
+    setEditPlaylistUrl(source.playlistUrl);
+    setEditEpgUrl(source.epgUrl);
+    setEditName(source.name);
+    setEditIconId(normalizeLiveTvSourceIcon(source.iconId));
+    setEditError('');
+  }, []);
+
+  const handleEditSave = useCallback(async () => {
+    if (!editingSource || busyKey !== null) return;
+    const nextPlaylistUrl = editPlaylistUrl.trim();
+    const nextName = editName.trim();
+    if (!nextPlaylistUrl || !nextName) return;
+    const sourceId = editingSource.id;
+    const urlsChanged = nextPlaylistUrl !== editingSource.playlistUrl
+      || editEpgUrl.trim() !== editingSource.epgUrl;
+    let saved = false;
+    setBusyKey(`edit:${sourceId}`);
+    setEditError('');
+    setPageError('');
     try {
-      applySources(await desktopApi.updateIptvSource(source.id, { iconId: nextIconId }));
-      setEditingIconSourceId(null);
+      applySources(await desktopApi.updateIptvSource(sourceId, {
+        name: nextName,
+        playlistUrl: nextPlaylistUrl,
+        epgUrl: editEpgUrl.trim(),
+        iconId: editIconId,
+      }));
+      saved = true;
+      if (urlsChanged) {
+        try {
+          applySources(await desktopApi.refreshIptvSource(sourceId));
+        } catch (cause) {
+          setPageError(`The source was saved, but its refresh failed: ${errorMessage(cause)}`);
+          await desktopApi.listIptvSources().then(applySources).catch(() => undefined);
+        }
+      }
     } catch (cause) {
-      setError(errorMessage(cause));
+      setEditError(errorMessage(cause));
     } finally {
       setBusyKey(null);
+      if (saved) window.requestAnimationFrame(() => setEditingSource(null));
     }
-  }, [applySources]);
+  }, [applySources, busyKey, editEpgUrl, editIconId, editName, editPlaylistUrl, editingSource]);
 
   const handleRefresh = useCallback(async (sourceId: string) => {
     setBusyKey(`refresh:${sourceId}`);
-    setError('');
+    setPageError('');
     try {
       applySources(await desktopApi.refreshIptvSource(sourceId));
     } catch (cause) {
-      setError(errorMessage(cause));
+      setPageError(errorMessage(cause));
       // The refresh error is also recorded on the source, so re-read the list
       // to show it on the row that failed.
       await desktopApi.listIptvSources().then(applySources).catch(() => undefined);
@@ -161,18 +205,124 @@ export default function LiveTvSettingsSection() {
     });
     if (!confirmed) return;
     setBusyKey(`remove:${source.id}`);
-    setError('');
+    setPageError('');
     try {
       applySources(await desktopApi.removeIptvSource(source.id));
     } catch (cause) {
-      setError(errorMessage(cause));
+      setPageError(errorMessage(cause));
     } finally {
       setBusyKey(null);
     }
   }, [applySources, confirm]);
 
+  const isSavingEdit = Boolean(editingSource && busyKey === `edit:${editingSource.id}`);
+
   return (
     <div className="space-y-6">
+      <Dialog
+        open={Boolean(editingSource)}
+        contentClassName="max-w-[min(92vw,48rem)] border border-[var(--loom-border)] bg-[var(--loom-surface)] p-0 text-[var(--loom-text)] shadow-2xl"
+        onOpenChange={(open) => {
+          if (open || isSavingEdit) return;
+          setEditingSource(null);
+          setEditError('');
+        }}
+      >
+        <DialogContent className="space-y-5 p-6">
+          <DialogHeader>
+            <DialogTitle className="text-[var(--loom-text)]">Edit live TV source</DialogTitle>
+            <DialogDescription className="text-[var(--loom-muted)]">
+              Change how this source appears or where LoomTV loads its playlist and guide.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            aria-busy={isSavingEdit}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleEditSave();
+            }}
+          >
+            <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-source-name">
+              <span>Tab name</span>
+              <input
+                id="edit-iptv-source-name"
+                type="text"
+                required
+                maxLength={60}
+                value={editName}
+                onChange={(event) => setEditName(event.target.value)}
+                disabled={busyKey !== null}
+                className={`${INPUT_CLASS} w-full`}
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-playlist-url">
+              <span>M3U playlist URL</span>
+              <input
+                id="edit-iptv-playlist-url"
+                type="url"
+                inputMode="url"
+                required
+                pattern="https://.*"
+                value={editPlaylistUrl}
+                onChange={(event) => setEditPlaylistUrl(event.target.value)}
+                disabled={busyKey !== null}
+                className={`${INPUT_CLASS} w-full`}
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-epg-url">
+              <span>XMLTV guide URL <span className="text-[var(--loom-faint)]">(optional)</span></span>
+              <input
+                id="edit-iptv-epg-url"
+                type="url"
+                inputMode="url"
+                pattern="https://.*"
+                value={editEpgUrl}
+                onChange={(event) => setEditEpgUrl(event.target.value)}
+                disabled={busyKey !== null}
+                className={`${INPUT_CLASS} w-full`}
+              />
+            </label>
+            <div className="space-y-2">
+              <p className="text-sm text-[var(--loom-muted)]">Sidebar icon</p>
+              <SourceIconPicker
+                name="edit-iptv-source-icon"
+                value={editIconId}
+                onChange={setEditIconId}
+                disabled={busyKey !== null}
+              />
+            </div>
+            {editError ? (
+              <p role="alert" className="text-sm text-red-300">{editError}</p>
+            ) : null}
+            {isSavingEdit ? (
+              <p role="status" className="text-sm text-[var(--loom-muted)]">Saving changes…</p>
+            ) : null}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                aria-disabled={isSavingEdit}
+                onClick={() => {
+                  if (isSavingEdit) return;
+                  setEditingSource(null);
+                  setEditError('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                aria-disabled={isSavingEdit}
+                disabled={!editName.trim() || !editPlaylistUrl.trim()}
+              >
+                {isSavingEdit ? 'Saving…' : 'Save changes'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Card className="settings-panel">
         <CardHeader>
           <CardTitle className="text-white">Add a live TV source</CardTitle>
@@ -190,6 +340,19 @@ export default function LiveTvSettingsSection() {
               void handleAdd();
             }}
           >
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <label className="sr-only" htmlFor="iptv-source-name">Tab name</label>
+              <input
+                id="iptv-source-name"
+                type="text"
+                required
+                maxLength={60}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Tab name"
+                className={INPUT_CLASS}
+              />
+            </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <label className="sr-only" htmlFor="iptv-playlist-url">M3U playlist URL</label>
               <input
@@ -216,26 +379,22 @@ export default function LiveTvSettingsSection() {
                 placeholder="https://provider.example/guide.xml.gz (optional)"
                 className={INPUT_CLASS}
               />
-              <label className="sr-only" htmlFor="iptv-source-name">Tab name</label>
-              <input
-                id="iptv-source-name"
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Tab name (optional)"
-                className={`${INPUT_CLASS} sm:max-w-56`}
-              />
-              <Button type="submit" disabled={busyKey !== null || !playlistUrl.trim()}>
+              <Button type="submit" disabled={busyKey !== null || !name.trim() || !playlistUrl.trim()}>
                 {busyKey === 'add' ? 'Adding…' : 'Add source'}
               </Button>
             </div>
             <div className="space-y-2">
               <p className="text-xs font-medium text-[var(--loom-muted)]">Sidebar icon</p>
-              <SourceIconPicker value={iconId} onChange={setIconId} disabled={busyKey !== null} />
+              <SourceIconPicker
+                name="new-iptv-source-icon"
+                value={iconId}
+                onChange={setIconId}
+                disabled={busyKey !== null}
+              />
             </div>
           </form>
-          {error ? (
-            <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>
+          {pageError ? (
+            <p role="alert" className="mt-3 text-sm text-red-300">{pageError}</p>
           ) : null}
         </CardContent>
       </Card>
@@ -244,7 +403,7 @@ export default function LiveTvSettingsSection() {
         <CardHeader>
           <CardTitle className="text-white">Your live TV sources</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Each source has its own sidebar tab. Select its icon to change it.
+            Each source has its own sidebar tab. Use Edit to change its name, URLs, or icon.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -257,23 +416,17 @@ export default function LiveTvSettingsSection() {
               {sources.map((source) => {
                 const icons = liveTvSourceIconPair(source.iconId);
                 const SourceIcon = icons.outline;
-                const normalizedIconId = normalizeLiveTvSourceIcon(source.iconId);
-                const isEditingIcon = editingIconSourceId === source.id;
                 return (
                 <li
                   key={source.id}
                   className="flex flex-wrap items-start gap-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3"
                 >
-                  <button
-                    type="button"
-                    onClick={() => setEditingIconSourceId(isEditingIcon ? null : source.id)}
-                    disabled={busyKey !== null}
-                    aria-label={`Choose icon for ${source.name}`}
-                    aria-expanded={isEditingIcon}
-                    className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-transparent bg-[var(--loom-surface-3)] text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-control-border)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:opacity-50"
+                  <div
+                    aria-hidden="true"
+                    className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-muted)]"
                   >
                     <SourceIcon className="h-5 w-5" />
-                  </button>
+                  </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-white">{source.name}</p>
                     <p className="truncate text-xs text-[var(--loom-faint)]">{source.playlistUrl}</p>
@@ -291,6 +444,16 @@ export default function LiveTvSettingsSection() {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => openEdit(source)}
+                      disabled={busyKey !== null}
+                      aria-label={`Edit ${source.name}`}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" aria-hidden="true" />
+                      Edit
+                    </Button>
                     <Button
                       type="button"
                       variant="secondary"
@@ -313,16 +476,6 @@ export default function LiveTvSettingsSection() {
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
-                  {isEditingIcon ? (
-                    <div className="w-full border-t border-[var(--loom-border)] pt-3">
-                      <p className="mb-2 text-xs font-medium text-[var(--loom-muted)]">Choose sidebar icon</p>
-                      <SourceIconPicker
-                        value={normalizedIconId}
-                        onChange={(nextIconId) => void handleIconChange(source, nextIconId)}
-                        disabled={busyKey !== null}
-                      />
-                    </div>
-                  ) : null}
                 </li>
                 );
               })}

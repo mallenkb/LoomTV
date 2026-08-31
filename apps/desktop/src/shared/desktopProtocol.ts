@@ -914,12 +914,13 @@ export interface IptvSourceSummary {
 export interface IptvSourceInput {
   playlistUrl: string;
   epgUrl?: string;
-  name?: string;
+  name: string;
   iconId?: IptvSourceIconId;
 }
 
 export interface IptvSourcePatch {
   name?: string;
+  playlistUrl?: string;
   epgUrl?: string;
   iconId?: IptvSourceIconId;
 }

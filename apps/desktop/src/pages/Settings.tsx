@@ -41,6 +41,7 @@ import type {
 } from './Settings.types';
 import { parseStoredValue } from '@/lib/desktopDecoders';
 import { iptvSourceDisplayName, useIptvSources } from '@/lib/liveTvSources';
+import { loadCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
 import { z } from 'zod';
 
 const savedRemoteLibrarySchema = z.object({ baseUrl: z.string() });
@@ -231,7 +232,7 @@ export default function Settings() {
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const { sources: iptvSources } = useIptvSources();
-  const [stremioPlugins, setStremioPlugins] = useState<Awaited<ReturnType<typeof desktopApi.listStremioPlugins>>>([]);
+  const [stremioPlugins, setStremioPlugins] = useState(loadCachedSidebarPlugins);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
@@ -240,20 +241,11 @@ export default function Settings() {
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
 
   useEffect(() => {
-    let active = true;
     const refresh = () => {
-      void desktopApi.listStremioPlugins().then((plugins) => {
-        if (active) setStremioPlugins(plugins);
-      }).catch(() => {
-        if (active) setStremioPlugins([]);
-      });
+      setStremioPlugins(loadCachedSidebarPlugins());
     };
-    refresh();
     window.addEventListener('loomtv:plugins-changed', refresh);
-    return () => {
-      active = false;
-      window.removeEventListener('loomtv:plugins-changed', refresh);
-    };
+    return () => window.removeEventListener('loomtv:plugins-changed', refresh);
   }, []);
 
   const availableSidebarItems = useMemo<SidebarOrderItem[]>(() => {

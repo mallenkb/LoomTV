@@ -18,6 +18,7 @@ import { isCategoryVisible } from '@/components/sidebarNavigation';
 import { iptvSourceDisplayName, liveTvRoute, useIptvSources } from '@/lib/liveTvSources';
 import { liveTvSourceIconPair } from '@/components/LiveTvSourceIcons';
 import { DEFAULT_SIDEBAR_NAV_ORDER, normalizeSidebarNavOrder } from '@/lib/sidebarNavOrder';
+import { loadCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
 
 type LibrarySidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | 'my-list' | 'discover' | LibrarySidebarNavItemId | 'settings';
@@ -578,22 +579,13 @@ export default function Sidebar() {
     return [...groupItems, ...folderItems];
   }, [customFolderNames, libraryFolderGroups.others, otherFolderGroups, otherFolderIcon]);
   const { sources: iptvSources } = useIptvSources();
-  const [stremioPlugins, setStremioPlugins] = useState<Awaited<ReturnType<typeof desktopApi.listAvailableStremioPlugins>>>([]);
+  const [stremioPlugins, setStremioPlugins] = useState(loadCachedSidebarPlugins);
   useEffect(() => {
-    let active = true;
     const refresh = () => {
-      void desktopApi.listAvailableStremioPlugins().then((plugins) => {
-        if (active) setStremioPlugins(plugins);
-      }).catch(() => {
-        if (active) setStremioPlugins([]);
-      });
+      setStremioPlugins(loadCachedSidebarPlugins());
     };
-    refresh();
     window.addEventListener('loomtv:plugins-changed', refresh);
-    return () => {
-      active = false;
-      window.removeEventListener('loomtv:plugins-changed', refresh);
-    };
+    return () => window.removeEventListener('loomtv:plugins-changed', refresh);
   }, []);
   // Each added playlist is its own destination, the way Discover is: a tab in
   // the sidebar pointing at a page that belongs to that source alone.
