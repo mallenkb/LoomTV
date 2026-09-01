@@ -380,7 +380,7 @@ export const officialArtworkResultSchema = z.object({
     episodeCount: nonNegativeNumber,
   })).optional(),
   episodes: z.array(lanEpisodeMetaSchema).optional(),
-  episodeSource: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList']).optional(),
+  episodeSource: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv']).optional(),
   posterCandidates: z.array(z.string()).optional(),
   backdropCandidates: z.array(z.string()).optional(),
   logoCandidates: z.array(z.string()).optional(),
@@ -391,7 +391,7 @@ export const officialArtworkResultSchema = z.object({
 });
 export const officialMetadataCandidateSchema = officialArtworkResultSchema.extend({
   id: z.string(),
-  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList']),
+  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv']),
   title: z.string(),
   year: finiteNumber.optional(),
   genres: z.array(z.string()).optional(),

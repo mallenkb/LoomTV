@@ -23,8 +23,6 @@ export function numericRating(value: unknown): number {
 }
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
-const MAX_TMDB_LOGO_CANDIDATES = 6;
-
 interface TMDBLogoImage {
   file_path?: string;
   iso_639_1?: string | null;
@@ -43,8 +41,7 @@ export function tmdbLogoCandidates(details: unknown): string[] {
       return rightLanguageScore - leftLanguageScore
         || (Number(b.vote_average) || 0) - (Number(a.vote_average) || 0);
     })
-    .map((logo) => `${TMDB_IMAGE_BASE}/original${logo.file_path}`)))
-    .slice(0, MAX_TMDB_LOGO_CANDIDATES);
+    .map((logo) => `${TMDB_IMAGE_BASE}/original${logo.file_path}`)));
 }
 
 export function normalizeTitleForMatch(value?: string | null): string {

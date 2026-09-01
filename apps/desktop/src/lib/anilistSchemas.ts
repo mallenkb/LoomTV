@@ -41,7 +41,6 @@ export const aniListMediaSchema = z.object({
     large: z.string().nullish(),
     medium: z.string().nullish(),
   }).nullish(),
-  bannerImage: z.string().nullish(),
   episodes: z.number().nullish(),
   characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).nullish() }).nullish(),
   trailer: z.object({

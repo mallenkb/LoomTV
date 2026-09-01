@@ -14,10 +14,18 @@ function normalizeFanartKey(value?: string): string {
 
 interface FanartResponse {
   hdmovielogo?: FanartImage[];
-  movielogo?: FanartImage[];
+  movieposter?: FanartImage[];
+  moviebackground?: FanartImage[];
   hdtvlogo?: FanartImage[];
-  clearlogo?: FanartImage[];
+  tvposter?: FanartImage[];
+  showbackground?: FanartImage[];
 }
+
+export type FanartArtwork = {
+  posterCandidates: string[];
+  backdropCandidates: string[];
+  logoCandidates: string[];
+};
 
 const fanartImageSchema: z.ZodType<FanartImage> = z.object({
   url: z.string().optional(),
@@ -26,9 +34,11 @@ const fanartImageSchema: z.ZodType<FanartImage> = z.object({
 });
 const fanartResponseSchema: z.ZodType<FanartResponse> = z.object({
   hdmovielogo: z.array(fanartImageSchema).optional(),
-  movielogo: z.array(fanartImageSchema).optional(),
+  movieposter: z.array(fanartImageSchema).optional(),
+  moviebackground: z.array(fanartImageSchema).optional(),
   hdtvlogo: z.array(fanartImageSchema).optional(),
-  clearlogo: z.array(fanartImageSchema).optional(),
+  tvposter: z.array(fanartImageSchema).optional(),
+  showbackground: z.array(fanartImageSchema).optional(),
 });
 
 async function fetchFanartJson(path: string, apiKey?: string): Promise<FanartResponse | null> {
@@ -56,31 +66,53 @@ function imageUrls(images: FanartImage[]): string[] {
   return Array.from(new Set(sorted.map((image) => String(image.url).replace(/^http:\/\//i, 'https://'))));
 }
 
+export async function fetchFanartMovieArtwork(
+  tmdbId: string | undefined,
+  apiKey?: string,
+): Promise<FanartArtwork> {
+  if (!tmdbId) return { posterCandidates: [], backdropCandidates: [], logoCandidates: [] };
+  try {
+    const data = await fetchFanartJson(`movies/${encodeURIComponent(tmdbId)}`, apiKey);
+    return {
+      posterCandidates: imageUrls(data?.movieposter || []),
+      backdropCandidates: imageUrls(data?.moviebackground || []),
+      logoCandidates: imageUrls(data?.hdmovielogo || []),
+    };
+  } catch (err) {
+    console.error('[Fanart.tv movie artwork]', err);
+    return { posterCandidates: [], backdropCandidates: [], logoCandidates: [] };
+  }
+}
+
+export async function fetchFanartTVArtwork(
+  tvdbId: string | undefined,
+  apiKey?: string,
+): Promise<FanartArtwork> {
+  if (!tvdbId) return { posterCandidates: [], backdropCandidates: [], logoCandidates: [] };
+  try {
+    const data = await fetchFanartJson(`tv/${encodeURIComponent(tvdbId)}`, apiKey);
+    return {
+      posterCandidates: imageUrls(data?.tvposter || []),
+      backdropCandidates: imageUrls(data?.showbackground || []),
+      logoCandidates: imageUrls(data?.hdtvlogo || []),
+    };
+  } catch (err) {
+    console.error('[Fanart.tv TV artwork]', err);
+    return { posterCandidates: [], backdropCandidates: [], logoCandidates: [] };
+  }
+}
+
 export async function fetchFanartMovieLogos(
   tmdbId: string | undefined,
   apiKey?: string,
 ): Promise<string[]> {
-  if (!tmdbId) return [];
-  try {
-    const data = await fetchFanartJson(`movies/${encodeURIComponent(tmdbId)}`, apiKey);
-    return imageUrls([...(data?.hdmovielogo || []), ...(data?.movielogo || [])]);
-  } catch (err) {
-    console.error('[Fanart.tv movie logos]', err);
-    return [];
-  }
+  return (await fetchFanartMovieArtwork(tmdbId, apiKey)).logoCandidates;
 }
 
 export async function fetchFanartTVLogos(
   tvdbId: string | undefined,
   apiKey?: string,
 ): Promise<string[]> {
-  if (!tvdbId) return [];
-  try {
-    const data = await fetchFanartJson(`tv/${encodeURIComponent(tvdbId)}`, apiKey);
-    return imageUrls([...(data?.hdtvlogo || []), ...(data?.clearlogo || [])]);
-  } catch (err) {
-    console.error('[Fanart.tv TV logos]', err);
-    return [];
-  }
+  return (await fetchFanartTVArtwork(tvdbId, apiKey)).logoCandidates;
 }
 import { safeFetch } from '../safeFetch.ts';

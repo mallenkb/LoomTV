@@ -17,7 +17,6 @@ const ANILIST_DETAIL_QUERY = `
       format
       startDate { year }
       coverImage { extraLarge large medium }
-      bannerImage
       characters(page: 1, perPage: 20, sort: [ROLE, FAVOURITES_DESC]) {
         edges {
           node {
@@ -69,7 +68,6 @@ const aniListMediaSchema = z.object({
   format: z.string().nullable().optional(),
   startDate: z.object({ year: z.number().finite().nullable().optional() }).nullable().optional(),
   coverImage: aniListImageSchema.nullable().optional(),
-  bannerImage: z.string().nullable().optional(),
   characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).nullable().optional() }).nullable().optional(),
 });
 
@@ -179,7 +177,7 @@ function mapAniListMedia(media: AniListMedia): AniListAnimeResult {
     title: titles[0] || '',
     year: media.startDate?.year || 0,
     poster,
-    backdrop: secureImageUrl(media.bannerImage) || poster,
+    backdrop: '',
     summary: stripMarkup(media.description),
     rating: typeof media.averageScore === 'number'
       ? Number((media.averageScore / 10).toFixed(1))

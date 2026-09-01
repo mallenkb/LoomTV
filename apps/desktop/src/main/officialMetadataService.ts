@@ -49,7 +49,7 @@ export type OfficialArtworkRefreshResult = {
   genres?: string[];
   seasons?: { number: number; title: string; episodeCount: number }[];
   episodes?: EpisodeMeta[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList';
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList' | 'Fanart.tv';
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logo?: string;
@@ -62,11 +62,11 @@ export type OfficialArtworkRefreshResult = {
 };
 
 export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover' | 'logo';
-export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episodes';
+export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'summary' | 'episodes';
 
 export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   id: string;
-  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList';
+  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList' | 'Fanart.tv';
   title: string;
   year?: number;
   genres?: string[];
@@ -94,8 +94,8 @@ export type OfficialMetadataServiceDependencies = {
   localTitleFromPath: (filePath?: string) => string | null;
   probeMediaFile: (filePath: string) => ProbeMediaFileResult;
   fetchAniListAnimeMetadata: typeof import('./metadata/anilist.ts').fetchAniListAnimeMetadata;
-  fetchFanartMovieLogos: typeof import('./metadata/fanart.ts').fetchFanartMovieLogos;
-  fetchFanartTVLogos: typeof import('./metadata/fanart.ts').fetchFanartTVLogos;
+  fetchFanartMovieArtwork: typeof import('./metadata/fanart.ts').fetchFanartMovieArtwork;
+  fetchFanartTVArtwork: typeof import('./metadata/fanart.ts').fetchFanartTVArtwork;
   fetchJikanMetadata: typeof import('./metadata/jikan.ts').fetchJikanMetadata;
   fetchJikanMetadataCandidates: typeof import('./metadata/jikan.ts').fetchJikanMetadataCandidates;
   fetchOMDbMetadata: typeof import('./metadata/omdb.ts').fetchOMDbMetadata;
@@ -299,8 +299,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     artworkDeliveryUrl,
     artworkDeliveryUrls,
     cacheArtworkNow,
-    fetchFanartMovieLogos,
-    fetchFanartTVLogos,
+    fetchFanartMovieArtwork,
+    fetchFanartTVArtwork,
     fetchAniListAnimeMetadata,
     fetchJikanMetadata,
     fetchJikanMetadataCandidates,
@@ -441,7 +441,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       title,
       year: metadata.year || undefined,
       thumbnail: posterCandidates[0] || '',
-      cover: backdropCandidates[0] || posterCandidates[0] || '',
+      cover: backdropCandidates[0] || '',
       summary: metadata.summary || '',
       rating: numericRating(metadata.rating),
       contentRating: metadata.contentRating,
@@ -478,7 +478,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       year: metadata.Year ? parseInt(String(metadata.Year), 10) : 0,
       providerIds: metadata.imdbID ? { imdbId: metadata.imdbID } : undefined,
       poster,
-      backdrop: poster,
+      backdrop: '',
       summary: metadata.Plot && metadata.Plot !== 'N/A' ? metadata.Plot : '',
       rating: numericRating(metadata.imdbRating),
       providerRatings: omdbProviderRatings(metadata),
@@ -731,23 +731,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
         ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
       ]), title, localTitles);
-      const fanartLogos = await fetchFanartMovieLogos(
+      const fanartArtwork = await fetchFanartMovieArtwork(
         tmdbById?.providerIds?.tmdbId || tmdbBySearch?.providerIds?.tmdbId || providerIds.tmdbId,
         fanartApiKey,
       );
-      const artworkCandidateIndex = candidates.findIndex((candidate) => candidate.source === 'TMDB');
-      if (artworkCandidateIndex >= 0 && fanartLogos.length > 0) {
-        const candidate = candidates[artworkCandidateIndex];
-        candidates[artworkCandidateIndex] = {
-          ...candidate,
-          logo: candidate.logo || fanartLogos[0],
-          logoCandidates: orderedArtworkCandidates(
-            ...(candidate.logoCandidates || []),
-            ...fanartLogos,
-          ),
-        };
-      }
-      return candidates;
+      const fanartCandidate = metadataCandidate('Fanart.tv', (
+        fanartArtwork.posterCandidates.length
+        || fanartArtwork.backdropCandidates.length
+        || fanartArtwork.logoCandidates.length
+      ) ? {
+        title,
+        year,
+        poster: fanartArtwork.posterCandidates[0],
+        posterCandidates: fanartArtwork.posterCandidates,
+        backdrop: fanartArtwork.backdropCandidates[0],
+        backdropCandidates: fanartArtwork.backdropCandidates,
+        logo: fanartArtwork.logoCandidates[0],
+        logoCandidates: fanartArtwork.logoCandidates,
+      } : null, title);
+      return fanartCandidate ? [...candidates, fanartCandidate] : candidates;
     }
 
     const likelyAnime = item.type === 'anime';
@@ -796,7 +798,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       ...animeCandidates,
       ...providerCandidates,
     ]), title, localTitles);
-    const fanartLogos = await fetchFanartTVLogos(
+    const fanartArtwork = await fetchFanartTVArtwork(
       tmdbById?.providerIds?.tvdbId
         || tmdbBySearch?.providerIds?.tvdbId
         || tvdbById?.providerIds?.tvdbId
@@ -804,21 +806,21 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         || providerIds.tvdbId,
       fanartApiKey,
     );
-    const artworkCandidateIndex = candidates.findIndex((candidate) => candidate.source === 'TMDB') >= 0
-      ? candidates.findIndex((candidate) => candidate.source === 'TMDB')
-      : candidates.findIndex((candidate) => candidate.source === 'TVDB');
-    if (artworkCandidateIndex >= 0 && fanartLogos.length > 0) {
-      const candidate = candidates[artworkCandidateIndex];
-      candidates[artworkCandidateIndex] = {
-        ...candidate,
-        logo: candidate.logo || fanartLogos[0],
-        logoCandidates: orderedArtworkCandidates(
-          ...(candidate.logoCandidates || []),
-          ...fanartLogos,
-        ),
-      };
-    }
-    return candidates;
+    const fanartCandidate = metadataCandidate('Fanart.tv', (
+      fanartArtwork.posterCandidates.length
+      || fanartArtwork.backdropCandidates.length
+      || fanartArtwork.logoCandidates.length
+    ) ? {
+      title,
+      year,
+      poster: fanartArtwork.posterCandidates[0],
+      posterCandidates: fanartArtwork.posterCandidates,
+      backdrop: fanartArtwork.backdropCandidates[0],
+      backdropCandidates: fanartArtwork.backdropCandidates,
+      logo: fanartArtwork.logoCandidates[0],
+      logoCandidates: fanartArtwork.logoCandidates,
+    } : null, title);
+    return fanartCandidate ? [...candidates, fanartCandidate] : candidates;
   }
 
   async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
@@ -842,15 +844,22 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const omdbMeta = omdbById || omdbBySearch || null;
       const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
       const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
-      const posterCandidates = officialArtworkOnly([tmdbMeta?.poster, omdbPoster]);
-      const backdropCandidates = officialArtworkOnly([tmdbMeta?.backdrop]);
-      const fanartLogoCandidates = await fetchFanartMovieLogos(
+      const fanartArtwork = await fetchFanartMovieArtwork(
         tmdbMeta?.providerIds?.tmdbId || providerIds.tmdbId,
         fanartApiKey,
       );
+      const posterCandidates = officialArtworkOnly([
+        tmdbMeta?.poster,
+        omdbPoster,
+        ...fanartArtwork.posterCandidates,
+      ]);
+      const backdropCandidates = officialArtworkOnly([
+        tmdbMeta?.backdrop,
+        ...fanartArtwork.backdropCandidates,
+      ]);
       const logoCandidates = orderedArtworkCandidates(
         ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
-        ...fanartLogoCandidates,
+        ...fanartArtwork.logoCandidates,
       );
       return {
         title: tmdbMeta?.title || title,
@@ -858,7 +867,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         providerIds: mergeProviderIds(item.providerIds || {}, tmdbMeta?.providerIds || {}),
         format: 'Movie',
         thumbnail: posterCandidates[0] || '',
-        cover: backdropCandidates[0] || posterCandidates[0] || '',
+        cover: backdropCandidates[0] || '',
         summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
         ratingSource: 'OMDb',
@@ -900,26 +909,33 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const fallbackPosters = preferOmdbFallback
       ? [omdbPoster, matchedTV?.poster, matchedTVDB?.poster]
       : [matchedTV?.poster, omdbPoster, matchedTVDB?.poster];
+    const fanartArtwork = await fetchFanartTVArtwork(
+      tmdbMeta?.providerIds?.tvdbId || matchedTVDB?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
+      fanartApiKey,
+    );
     const posterCandidates = officialArtworkOnly([
       likelyAnime ? matchedAniList?.poster : '',
       tmdbMeta?.poster,
       ...(likelyAnime ? [omdbPoster, matchedTV?.poster, matchedJikan?.poster, matchedTVDB?.poster] : fallbackPosters),
       likelyAnime ? matchedJikan?.poster : '',
+      ...(likelyAnime ? matchedJikan?.posterCandidates || [] : []),
+      ...(matchedTV?.posterCandidates || []),
+      ...fanartArtwork.posterCandidates,
     ]);
     const backdropCandidates = officialArtworkOnly([
       likelyAnime ? matchedAniList?.backdrop : '',
       tmdbMeta?.backdrop,
       likelyAnime ? matchedJikan?.backdrop : '',
       matchedTV?.backdrop,
+      ...(matchedTV?.backdropCandidates || []),
       matchedTVDB?.backdrop,
+      ...fanartArtwork.backdropCandidates,
     ]);
-    const fanartLogoCandidates = await fetchFanartTVLogos(
-      tmdbMeta?.providerIds?.tvdbId || matchedTVDB?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
-      fanartApiKey,
-    );
     const logoCandidates = orderedArtworkCandidates(
       ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
-      ...fanartLogoCandidates,
+      ...fanartArtwork.logoCandidates,
+      matchedTV?.logo,
+      ...officialArtworkOnly(matchedTV?.logoCandidates || []),
       matchedTVDB?.logo,
       ...officialArtworkOnly(matchedTVDB?.logoCandidates || []),
     );
@@ -958,12 +974,22 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const fallbackYear = preferOmdbFallback
       ? Number.parseInt(omdbMeta?.Year || '', 10) || matchedTV?.year || matchedTVDB?.year
       : matchedTV?.year || Number.parseInt(omdbMeta?.Year || '', 10) || matchedTVDB?.year;
-    const fallbackSummary = preferOmdbFallback
-      ? omdbMeta?.Plot || matchedTV?.summary || matchedTVDB?.summary
-      : matchedTV?.summary || omdbMeta?.Plot || matchedTVDB?.summary;
     const fallbackGenres = preferOmdbFallback
       ? (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : matchedTV?.genres || matchedTVDB?.genres)
       : (matchedTV?.genres || (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : matchedTVDB?.genres));
+    const preferredSummary = likelyAnime
+      ? matchedAniList?.summary
+        || matchedJikan?.summary
+        || tmdbMeta?.summary
+        || matchedTV?.summary
+        || matchedTVDB?.summary
+        || omdbMeta?.Plot
+        || ''
+      : tmdbMeta?.summary
+        || matchedTV?.summary
+        || matchedTVDB?.summary
+        || omdbMeta?.Plot
+        || '';
 
     return {
       title: likelyAnime ? matchedAniList?.title || title : tmdbMeta?.title || fallbackTitle || title,
@@ -978,8 +1004,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       ),
       format: likelyAnime ? (matchedAniList?.format || matchedJikan?.format || 'TV') : 'TV',
       thumbnail: posterCandidates[0] || '',
-      cover: backdropCandidates[0] || posterCandidates[0] || '',
-      summary: (likelyAnime ? matchedAniList?.summary : '') || tmdbMeta?.summary || fallbackSummary || matchedJikan?.summary || '',
+      cover: backdropCandidates[0] || '',
+      summary: preferredSummary,
       rating: animeMovie
         ? movieMetadataRating(tmdbMeta, omdbMeta, matchedTV)
         : showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
@@ -1045,6 +1071,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const applyTarget = requestedTarget === 'poster'
       || requestedTarget === 'cover'
       || requestedTarget === 'logo'
+      || requestedTarget === 'summary'
       || requestedTarget === 'episodes'
       ? requestedTarget
       : 'all';
@@ -1052,6 +1079,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const applyPoster = applyAll || applyTarget === 'poster';
     const applyCover = applyAll || applyTarget === 'cover';
     const applyLogo = applyAll || applyTarget === 'logo';
+    const applySummary = applyAll || applyTarget === 'summary';
     const applyEpisodes = applyAll || applyTarget === 'episodes';
     const selectedPoster = candidate.thumbnail || candidate.posterCandidates?.find(Boolean) || '';
     const selectedCover = candidate.cover || candidate.backdropCandidates?.find(Boolean) || '';
@@ -1075,12 +1103,12 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (applyAll && candidate.seasonCount !== undefined) target.seasonCount = candidate.seasonCount;
     if (applyAll && candidate.episodeCount !== undefined) target.episodeCount = candidate.episodeCount;
     if (applyAll) {
-      target.providerIds = mergeProviderIds(candidate.providerIds || {}, target.providerIds || {});
+      target.providerIds = candidate.providerIds || {};
     }
     if (applyPoster && selectedPoster) target.poster = selectedPoster;
     if (applyCover && selectedCover) target.backdrop = selectedCover;
     if (applyLogo && selectedLogo) target.logo = selectedLogo;
-    if (applyAll && candidate.summary) target.summary = candidate.summary;
+    if (applySummary && candidate.summary) target.summary = candidate.summary;
     if (applyAll && candidateRating > 0) target.rating = candidateRating;
     if (applyAll && hasResolvedProviderRatings) {
       target.providerRatings = resolvedProviderRatings;
@@ -1105,29 +1133,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       target.posterCandidates = orderedArtworkCandidates(
         ...(candidate.posterCandidates || []),
         candidate.thumbnail,
-        ...officialArtworkOnly(target.posterCandidates || []),
-        target.poster,
       );
     }
     if (applyCover) {
       target.backdropCandidates = orderedArtworkCandidates(
         ...(candidate.backdropCandidates || []),
         candidate.cover,
-        ...officialArtworkOnly(target.backdropCandidates || []),
-        target.backdrop,
       );
     }
     if (applyLogo) {
       target.logoCandidates = orderedArtworkCandidates(
         ...(candidate.logoCandidates || []),
         candidate.logo,
-        ...officialArtworkOnly(target.logoCandidates || []),
-        target.logo,
       );
     }
     saveLibraryItem(target);
     lockMetadataCategories(mediaId, applyAll
       ? ['core', 'cast', 'artwork', 'ratings', 'episodes']
+      : applyTarget === 'summary'
+        ? ['core']
       : applyTarget === 'episodes'
         ? ['episodes']
         : ['artwork']);

@@ -211,7 +211,7 @@ const manualMediaSegmentSchema = mediaSegmentRequestSchema.extend({
 });
 const artworkCandidateSchema = z.object({
   id: nonEmptyString,
-  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList']),
+  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv']),
   title: z.string(),
   year: finiteNumber.optional(),
   genres: z.array(z.string()).optional(),
@@ -1466,7 +1466,7 @@ export function registerIpcHandlers<
   handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => {
     deps.authorizeSettingsWrite();
     return deps.applyOfficialMetadataCandidate(mediaId, candidate, target);
-  }, z.tuple([nonEmptyString, artworkCandidateSchema, z.enum(['all', 'poster', 'cover', 'logo', 'episodes']).optional()]));
+  }, z.tuple([nonEmptyString, artworkCandidateSchema, z.enum(['all', 'poster', 'cover', 'logo', 'summary', 'episodes']).optional()]));
   handle('artwork:refresh-official', (_event, mediaId: string, target?: OfficialArtworkRefreshTarget) => {
     deps.authorizeSettingsWrite();
     return deps.refreshOfficialArtwork(mediaId, target);

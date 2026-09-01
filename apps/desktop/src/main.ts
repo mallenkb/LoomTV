@@ -266,7 +266,12 @@ import {
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
 import { fetchAniListAnimeMetadata } from './main/metadata/anilist';
-import { fetchFanartMovieLogos, fetchFanartTVLogos } from './main/metadata/fanart';
+import {
+  fetchFanartMovieArtwork,
+  fetchFanartMovieLogos,
+  fetchFanartTVArtwork,
+  fetchFanartTVLogos,
+} from './main/metadata/fanart';
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
 import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinator';
@@ -1379,8 +1384,8 @@ const {
   artworkDeliveryUrls,
   cacheArtworkNow,
   fetchAniListAnimeMetadata,
-  fetchFanartMovieLogos,
-  fetchFanartTVLogos,
+  fetchFanartMovieArtwork,
+  fetchFanartTVArtwork,
   fetchJikanMetadata,
   fetchJikanMetadataCandidates,
   fetchOMDbMetadata,
@@ -1546,7 +1551,7 @@ function configureRendererSecurityPolicy(): void {
     "font-src 'self' file: data:",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src https://www.youtube-nocookie.com https://www.youtube.com https://www.vidking.net",
+    "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
     "frame-ancestors 'none'",
     "form-action 'none'",
   ].join('; ');

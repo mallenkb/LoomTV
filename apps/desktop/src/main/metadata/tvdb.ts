@@ -52,33 +52,6 @@ function normalizeImage(value: unknown): string {
   return `${TVDB_ARTWORK_BASE}/${path}`;
 }
 
-function artworkUrls(series: JsonRecord): string[] {
-  const values: string[] = [];
-  for (const value of [
-    series.image,
-    series.image_url,
-    series.poster,
-    series.thumbnail,
-  ]) {
-    const image = normalizeImage(value);
-    if (image) values.push(image);
-  }
-  for (const value of asArray(series.posters)) {
-    const image = normalizeImage(value);
-    if (image) values.push(image);
-  }
-  for (const artwork of asArray(series.artworks || series.artwork)) {
-    const record = asRecord(artwork);
-    if (!record) continue;
-    values.push(
-      normalizeImage(record.image || record.image_url),
-      normalizeImage(record.thumbnail),
-      normalizeImage(record.url),
-    );
-  }
-  return unique(values);
-}
-
 function artworkType(record: JsonRecord, artworkTypes: Map<string, string>): string {
   const rawType = text(record.type);
   return `${rawType} ${artworkTypes.get(rawType) || ''} ${text(record.artworkType)} ${text(record.name)} ${text(record.slug)}`.toLowerCase();
@@ -101,12 +74,7 @@ function isTransparentLogoUrl(url: string): boolean {
 }
 
 function isCoverArtworkType(type: string): boolean {
-  return !isClearLogoArtworkType(type) && (
-    type.includes('background')
-    || type.includes('backdrop')
-    || type.includes('fanart')
-    || type.includes('banner')
-  );
+  return type.includes('background') && !type.includes('logo');
 }
 
 function typedArtworkUrls(series: JsonRecord, matcher: (type: string) => boolean, artworkTypes = new Map<string, string>()): string[] {
@@ -194,7 +162,6 @@ function tvdbSeriesToMetadata(
     })
     .filter((season) => season.number > 0)
     .map((season) => ({ ...season, title: season.title || `Season ${season.number}` }));
-  const allArtwork = artworkUrls(series);
   const posterCandidates = unique([
     ...typedArtworkUrls(series, isPosterArtworkType, artworkTypes),
     normalizeImage(series.image),
@@ -202,12 +169,11 @@ function tvdbSeriesToMetadata(
     normalizeImage(series.poster),
     ...asArray(series.posters).map(normalizeImage),
   ]);
-  const poster = posterCandidates[0] || allArtwork[0] || '';
+  const poster = posterCandidates[0] || '';
   const backdropCandidates = unique([
     ...typedArtworkUrls(series, isCoverArtworkType, artworkTypes),
-    ...allArtwork.filter((url) => url !== poster && !posterCandidates.includes(url)),
   ]);
-  const backdrop = backdropCandidates[0] || allArtwork.find((url) => url !== poster) || '';
+  const backdrop = backdropCandidates[0] || '';
   const logoCandidates = unique([
     ...typedArtworkUrls(series, isClearLogoArtworkType, artworkTypes),
   ]).filter(isTransparentLogoUrl);
@@ -230,8 +196,8 @@ function tvdbSeriesToMetadata(
     backdrop,
     posterCandidates,
     backdropCandidates,
-    // Some TVDB records include a transparent logo/banner artwork. It is used
-    // only when the preferred TMDB or Fanart logo is unavailable.
+    // Some TVDB records include transparent clear-logo artwork. Keep it in the
+    // logo list so it cannot be presented as a poster or cover.
     logo: logoCandidates[0] || '',
     logoCandidates,
     summary: text(series.overview || series.summary),
@@ -351,7 +317,7 @@ export async function fetchTVDBMetadataCandidates(title: string, localYear?: num
   try {
     const results = await searchTVDB(title, localYear, key);
     const artworkTypes = await fetchTVDBArtworkTypes(key);
-    const candidates = await Promise.all(results.slice(0, 6).map(async (result) => {
+    const candidates = await Promise.all(results.map(async (result) => {
       const id = text(result.id || result.tvdb_id || result.tvdbId);
       return id
         ? fetchTVDBMetadataById(id, key)

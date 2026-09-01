@@ -14,7 +14,6 @@ type DetailHeroActionsProps = {
   canBookmark: boolean;
   inMyList: boolean;
   watched: boolean;
-  onPlayEmbedded?: () => void;
   onPlayTrailer?: () => void;
   onToggleList: () => void;
   onToggleWatched: () => void;
@@ -24,7 +23,6 @@ export default function DetailHeroActions({
   canBookmark,
   inMyList,
   watched,
-  onPlayEmbedded,
   onPlayTrailer,
   onToggleList,
   onToggleWatched,
@@ -66,27 +64,13 @@ export default function DetailHeroActions({
   return (
     <>
       <div className={`loom-detail-hero-actions ${HERO_ACTION_GROUP_CLASS}`}>
-        {onPlayEmbedded && (
-          <>
-            <button
-              type="button"
-              aria-label="Play title"
-              onClick={onPlayEmbedded}
-              className={`flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white ${HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
-            >
-              <Play className="h-5 w-5 fill-current" />
-              <span>Play</span>
-            </button>
-            <span className={HERO_ACTION_DIVIDER_CLASS} />
-          </>
-        )}
         {onPlayTrailer && (
           <>
             <button
               type="button"
               aria-label="Play trailer"
               onClick={onPlayTrailer}
-              className={`flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white ${onPlayEmbedded ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
+              className={`flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white ${HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
             >
               <Play className="h-5 w-5 fill-current" />
               <span>Trailer</span>
@@ -101,7 +85,7 @@ export default function DetailHeroActions({
               aria-label={inMyList ? 'Remove from My List' : 'Add to My List'}
               aria-pressed={inMyList}
               onClick={onToggleList}
-              className={`loom-detail-bookmark grid h-14 w-14 place-items-center text-white ${onPlayEmbedded || onPlayTrailer ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
+              className={`loom-detail-bookmark grid h-14 w-14 place-items-center text-white ${onPlayTrailer ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
               title={inMyList ? 'Remove from My List' : 'Add to My List'}
             >
               <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
@@ -136,20 +120,6 @@ export default function DetailHeroActions({
             aria-label="Title actions"
             className="absolute bottom-full right-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-[var(--loom-control-border)] bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-[0_20px_60px_rgba(0,0,0,0.62)] backdrop-blur-xl"
           >
-            {onPlayEmbedded && (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onPlayEmbedded();
-                }}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-              >
-                <Play className="h-4 w-4 fill-current" />
-                Play
-              </button>
-            )}
             {onPlayTrailer && (
               <button
                 type="button"

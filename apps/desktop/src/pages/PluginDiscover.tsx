@@ -167,7 +167,6 @@ query DiscoverAnime($page: Int, $perPage: Int, $sort: [MediaSort], $search: Stri
         large
         medium
       }
-      bannerImage
       characters(page: 1, perPage: 20, sort: [ROLE, FAVOURITES_DESC]) {
         edges {
           node {
@@ -519,12 +518,7 @@ function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogIte
     media.coverImage?.large,
     media.coverImage?.medium,
   );
-  const backgroundUrl = pickImageUrl(
-    media.bannerImage,
-    media.coverImage?.extraLarge,
-    media.coverImage?.large,
-    media.coverImage?.medium,
-  );
+  const backgroundUrl = '';
   const cast = (media.characters?.edges || [])
     .filter((entry) => (
       (entry.role === 'MAIN' || entry.role === 'SUPPORTING')

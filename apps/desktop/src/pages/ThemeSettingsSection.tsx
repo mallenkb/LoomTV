@@ -7,6 +7,7 @@ import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+  type AppCastCardStyle,
   type AppThemeColor,
   type AppHomeStyle,
   type AppThemeSettings,
@@ -20,6 +21,64 @@ type ThemeSettingsSectionProps = {
   showProviderRatingBadges: boolean;
   setShowProviderRatingBadges: (show: boolean) => Promise<void>;
 };
+
+function AnimeCastCardPreview({ layout }: { layout: AppCastCardStyle }) {
+  const isStandard = layout === 'standard';
+
+  const previewAvatar = (initials: string, className: string) => (
+    <span
+      aria-hidden="true"
+      className={`grid shrink-0 place-items-center rounded-full text-[10px] font-bold tracking-wide ${className}`}
+    >
+      {initials}
+    </span>
+  );
+
+  return (
+    <div
+      aria-label={`${isStandard ? 'Standard' : 'Compact'} anime cast card preview`}
+      className="mt-3 max-w-xl rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3"
+      role="img"
+    >
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--loom-faint)]">Preview</span>
+        <span className="text-xs text-[var(--loom-muted)]">
+          {isStandard ? 'Character and voice actor stacked' : 'Character and voice actor condensed'}
+        </span>
+      </div>
+
+      {isStandard ? (
+        <div className="overflow-hidden rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)]">
+          <div className="flex items-center gap-3 p-3">
+            {previewAvatar('MA', 'h-10 w-10 bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]')}
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-[var(--loom-text)]">Mikasa Ackerman</span>
+              <span className="block text-[11px] text-[var(--loom-muted)]">Character</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-3 border-t border-[var(--loom-border)] bg-[var(--loom-surface-3)] p-3">
+            {previewAvatar('YI', 'h-10 w-10 bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]')}
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-[var(--loom-text)]">Yui Ishikawa</span>
+              <span className="block text-[11px] font-semibold text-[var(--loom-muted)]">Voice actor</span>
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] p-3">
+          <div className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center gap-2">
+            {previewAvatar('MA', 'h-10 w-10 bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]')}
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-[var(--loom-text)]">Mikasa Ackerman</span>
+              <span className="block truncate text-[11px] text-[var(--loom-muted)]">Character · Yui Ishikawa</span>
+            </span>
+            {previewAvatar('YI', 'h-10 w-10 bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]')}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ThemeSettingsSection({
   theme,
@@ -202,6 +261,7 @@ export default function ThemeSettingsSection({
                 );
               })}
             </div>
+            <AnimeCastCardPreview layout={theme.castCardStyle} />
           </div>
 
 

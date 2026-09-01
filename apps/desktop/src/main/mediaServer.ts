@@ -1123,10 +1123,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             requireOwner();
             const candidates = await getOfficialMetadataCandidates(mediaId);
             // Poster and cover choices in the renderer carry a short-lived UI
-            // suffix (for example `candidate:poster:2`) so each image can be
+            // suffix containing its artwork target and URL so each image can be
             // shown as its own choice. Resolve that suffix back to the stable
             // metadata candidate, then apply only the selected image.
-            const baseCandidateId = candidate.id.replace(/:(?:poster|cover):\d+$/, '');
+            const baseCandidateId = candidate.id.split(':', 1)[0];
             const selected = candidates.find((entry) => entry.id === candidate.id || entry.id === baseCandidateId);
             if (!selected) {
               writeJson(res, 400, { error: 'The selected metadata match is no longer available.' });
@@ -1135,11 +1135,20 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
             const isPosterChoice = target === 'poster' && candidate.id !== selected.id;
             const isCoverChoice = target === 'cover' && candidate.id !== selected.id;
-            const requestedArtwork = isPosterChoice ? candidate.thumbnail : isCoverChoice ? candidate.cover : undefined;
+            const isLogoChoice = target === 'logo' && candidate.id !== selected.id;
+            const requestedArtwork = isPosterChoice
+              ? candidate.thumbnail
+              : isCoverChoice
+                ? candidate.cover
+                : isLogoChoice
+                  ? candidate.logo
+                  : undefined;
             if (requestedArtwork) {
               const allowedArtwork = new Set(isPosterChoice
                 ? [selected.thumbnail, ...(selected.posterCandidates || [])]
-                : [selected.cover, ...(selected.backdropCandidates || [])]);
+                : isCoverChoice
+                  ? [selected.cover, ...(selected.backdropCandidates || [])]
+                  : [selected.logo, ...(selected.logoCandidates || [])]);
               if (!allowedArtwork.has(requestedArtwork)) {
                 writeJson(res, 400, { error: 'The selected artwork is not part of this metadata match.' });
                 return;

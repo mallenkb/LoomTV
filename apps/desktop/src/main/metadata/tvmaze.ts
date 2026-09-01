@@ -9,6 +9,21 @@ interface TVMazeImage {
   original?: string;
 }
 
+interface TVMazeGalleryImage {
+  type?: string | null;
+  main?: boolean;
+  resolutions?: {
+    original?: { url?: string; width?: number; height?: number } | null;
+    medium?: { url?: string; width?: number; height?: number } | null;
+  };
+}
+
+type TVMazeArtwork = {
+  posterCandidates: string[];
+  backdropCandidates: string[];
+  logoCandidates: string[];
+};
+
 interface TVMazeEpisode {
   season?: number;
   number?: number;
@@ -64,6 +79,19 @@ interface TVMazeSearchEntry {
 const tvMazeImageSchema: z.ZodType<TVMazeImage> = z.object({
   medium: z.string().optional(),
   original: z.string().optional(),
+});
+const tvMazeGalleryResolutionSchema = z.object({
+  url: z.string().optional(),
+  width: z.number().finite().optional(),
+  height: z.number().finite().optional(),
+});
+const tvMazeGalleryImageSchema: z.ZodType<TVMazeGalleryImage> = z.object({
+  type: z.string().nullable().optional(),
+  main: z.boolean().optional(),
+  resolutions: z.object({
+    original: tvMazeGalleryResolutionSchema.nullable().optional(),
+    medium: tvMazeGalleryResolutionSchema.nullable().optional(),
+  }).optional(),
 });
 const nullableString = z.string().nullable().optional().transform((value) => value ?? undefined);
 const nullableNumber = z.number().finite().nullable().optional().transform((value) => value ?? undefined);
@@ -157,6 +185,36 @@ async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
   return episodes.map(tvmazeEpisodeToMeta).filter((episode) => episode.season > 0 && episode.number > 0);
 }
 
+function uniqueUrls(urls: Array<string | null | undefined>): string[] {
+  return [...new Set(urls.filter((url): url is string => Boolean(url?.trim())))];
+}
+
+async function fetchTVArtworkById(showId: number): Promise<TVMazeArtwork> {
+  try {
+    const response = await safeFetch(`https://api.tvmaze.com/shows/${showId}/images`, {}, {
+      allowedHosts: ['api.tvmaze.com'],
+      retries: 2,
+    });
+    if (!response.ok) return { posterCandidates: [], backdropCandidates: [], logoCandidates: [] };
+
+    const images = z.array(tvMazeGalleryImageSchema).parse(await response.json());
+    const urlsForType = (type: 'poster' | 'background' | 'typography') => uniqueUrls(
+      images
+        .filter((image) => image.type?.toLowerCase() === type)
+        .sort((left, right) => Number(right.main) - Number(left.main))
+        .map((image) => image.resolutions?.original?.url || image.resolutions?.medium?.url),
+    );
+    return {
+      posterCandidates: urlsForType('poster'),
+      backdropCandidates: urlsForType('background'),
+      logoCandidates: urlsForType('typography'),
+    };
+  } catch (error) {
+    console.error('TVmaze artwork fetch error:', error);
+    return { posterCandidates: [], backdropCandidates: [], logoCandidates: [] };
+  }
+}
+
 async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
   const detailRes = await safeFetch(
     `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
@@ -164,9 +222,10 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
     { allowedHosts: ['api.tvmaze.com'], retries: 2 },
   );
   if (!detailRes.ok) return null;
-  const [details, episodes] = await Promise.all([
+  const [details, episodes, artwork] = await Promise.all([
     detailRes.json().then((value) => tvMazeShowSchema.parse(value)),
     fetchTVEpisodesById(showId),
+    fetchTVArtworkById(showId),
   ]);
 
   const seasons = (details._embedded?.seasons || [])
@@ -186,7 +245,12 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
   // TVmaze's medium portrait already exceeds LoomTV's 200px poster card and
   // detail-panel display size. Prefer it so Chromium does not decode the much
   // larger original for the same visible result.
-  const posterUrl = details.image?.medium || details.image?.original || '';
+  const posterCandidates = uniqueUrls([
+    details.image?.original,
+    details.image?.medium,
+    ...artwork.posterCandidates,
+  ]);
+  const posterUrl = posterCandidates[0] || '';
 
   return {
     title: details.name || fallbackTitle,
@@ -196,7 +260,11 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
       tvdbId: details.externals?.thetvdb ? String(details.externals.thetvdb) : undefined,
     },
     poster: posterUrl,
-    backdrop: '',
+    posterCandidates,
+    backdrop: artwork.backdropCandidates[0] || '',
+    backdropCandidates: artwork.backdropCandidates,
+    logo: artwork.logoCandidates[0] || '',
+    logoCandidates: artwork.logoCandidates,
     summary: details.summary ? details.summary.replace(/<[^>]*>/g, '') : '',
     rating: details.rating?.average || 0,
     genres: details.genres || [],
@@ -248,7 +316,7 @@ export async function fetchTVMetadataCandidates(title: string, localYear?: numbe
     const searchData = tvMazeSearchSchema.parse(await searchRes.json());
     if (searchData.length === 0) return [];
 
-    return await Promise.all(searchData.slice(0, 6).map(async (result) => {
+    return await Promise.all(searchData.map(async (result) => {
       const show: TVMazeShow = result.show ?? {};
       if (show.id) {
         const details = await fetchTVMetadataById(show.id, show.name || title, localYear);

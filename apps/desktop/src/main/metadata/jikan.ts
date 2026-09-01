@@ -13,11 +13,15 @@ export interface JikanAnimeResult extends Partial<MediaItem> {
   format?: string;
 }
 
+const jikanImageFormatSchema = z.object({
+  image_url: z.string().optional(),
+  small_image_url: z.string().optional(),
+  large_image_url: z.string().optional(),
+});
+
 const jikanImageSetSchema = z.object({
-  jpg: z.object({
-    image_url: z.string().optional(),
-    large_image_url: z.string().optional(),
-  }).optional(),
+  jpg: jikanImageFormatSchema.optional(),
+  webp: jikanImageFormatSchema.optional(),
 });
 
 const jikanPersonEntrySchema = z.object({
@@ -134,6 +138,25 @@ async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<EpisodeM
     page++;
   }
   return episodes;
+}
+
+async function fetchJikanPosters(malId: number): Promise<string[]> {
+  if (!malId) return [];
+  try {
+    const response = await jikanFetch(
+      `/anime/${malId}/pictures`,
+      jikanListResponseSchema(jikanImageSetSchema),
+    );
+    return [...new Set((response.data || []).flatMap((images) => {
+      const poster = images.webp?.large_image_url
+        || images.jpg?.large_image_url
+        || images.webp?.image_url
+        || images.jpg?.image_url;
+      return poster ? [poster] : [];
+    }))];
+  } catch {
+    return [];
+  }
 }
 
 function jikanHitTitles(hit: JikanAnimeHit): string[] {
@@ -269,7 +292,7 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
     if (!hit) return null;
 
     const malId = hit.mal_id ?? 0;
-    const poster =
+    const primaryPoster =
       hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '';
 
     const cast = await fetchAnimeCast(malId, title);
@@ -278,6 +301,10 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
     try {
       episodes = await fetchJikanEpisodes(malId, 3);
     } catch { /* episodes are optional */ }
+    const posterCandidates = [...new Set([
+      primaryPoster,
+      ...(await fetchJikanPosters(malId)),
+    ].filter(Boolean))];
 
     return {
       malId,
@@ -289,7 +316,8 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
         hit.title_japanese,
         ...(Array.isArray(hit.title_synonyms) ? hit.title_synonyms : []),
       ].filter((alias): alias is string => Boolean(alias)),
-      poster,
+      poster: posterCandidates[0] || '',
+      posterCandidates,
       backdrop: '',
       summary: hit.synopsis || '',
       rating: hit.score ?? 0,
@@ -308,7 +336,7 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
 export async function fetchJikanMetadataCandidates(title: string, localTitles: string[] = []): Promise<JikanAnimeResult[]> {
   try {
     const searchData = await jikanFetch(
-      `/anime?q=${encodeURIComponent(title)}&limit=8&sfw`,
+      `/anime?q=${encodeURIComponent(title)}&sfw`,
       jikanListResponseSchema(jikanAnimeHitSchema),
     );
     const hits = Array.isArray(searchData.data)
@@ -321,6 +349,11 @@ export async function fetchJikanMetadataCandidates(title: string, localTitles: s
       try {
         episodes = await fetchJikanEpisodes(malId, 1);
       } catch { /* candidate episode names are optional */ }
+      const primaryPoster = hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '';
+      const posterCandidates = [...new Set([
+        primaryPoster,
+        ...(await fetchJikanPosters(malId)),
+      ].filter(Boolean))];
       results.push({
         malId,
         format: hit.type,
@@ -331,7 +364,8 @@ export async function fetchJikanMetadataCandidates(title: string, localTitles: s
           hit.title_japanese,
           ...(Array.isArray(hit.title_synonyms) ? hit.title_synonyms : []),
         ].filter((alias): alias is string => Boolean(alias)),
-        poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '',
+        poster: posterCandidates[0] || '',
+        posterCandidates,
         backdrop: '',
         summary: hit.synopsis || '',
         rating: hit.score ?? 0,

@@ -68,39 +68,39 @@ export const DARK_THEMES: Record<AppDarkTheme, {
   bodyStart: string;
   bodyEnd: string;
 }> = {
-  // Dark surfaces sit on Tailwind's Neutral scale (pure grays, no color cast):
+  // Dark surfaces sit on Tailwind's Neutral scale, with a subtly cool canvas:
   // 950 #0a0a0a · 900 #171717 · 800 #262626 · 700 #404040 · 500 #737373 · 400 #a3a3a3.
   black: {
     label: 'Black',
-    description: 'True black-style dark mode built on neutral-950.',
-    bg: '#0a0a0a',
+    description: 'Near-black dark mode with a subtle cool tint.',
+    bg: '#050608',
     surface: '#171717',
     surface2: '#0f0f0f',
     surface3: '#262626',
-    sidebar: '#0a0a0a',
+    sidebar: '#050608',
     muted: '#a3a3a3',
     faint: '#737373',
     border: '#262626',
     panel: 'rgba(23, 23, 23, 0.88)',
     panelBorder: 'rgba(255, 255, 255, 0.10)',
-    bodyStart: '#0a0a0a',
-    bodyEnd: '#0a0a0a',
+    bodyStart: '#050608',
+    bodyEnd: '#050608',
   },
 };
 
 const MODERN_DARK_PALETTE = {
-  bg: '#000000',
+  bg: '#050608',
   surface: '#111111',
   surface2: '#0b0b0c',
   surface3: '#202022',
-  sidebar: '#000000',
+  sidebar: '#050608',
   muted: 'rgba(255, 255, 255, 0.62)',
   faint: 'rgba(255, 255, 255, 0.38)',
   border: 'rgba(255, 255, 255, 0.08)',
   panel: 'rgba(12, 12, 14, 0.72)',
   panelBorder: 'rgba(255, 255, 255, 0.10)',
-  bodyStart: '#000000',
-  bodyEnd: '#000000',
+  bodyStart: '#050608',
+  bodyEnd: '#050608',
 } satisfies Omit<(typeof DARK_THEMES)[AppDarkTheme], 'label' | 'description'>;
 
 export function normalizeThemeMode(value?: string): AppThemeMode {

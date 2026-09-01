@@ -106,7 +106,7 @@ export const httpOperations = {
       logo: z.string().max(4096).optional(),
       logoCandidates: z.array(z.string().max(4096)).optional(),
     }),
-    target: z.enum(['all', 'poster', 'cover', 'logo', 'episodes']).optional(),
+    target: z.enum(['all', 'poster', 'cover', 'logo', 'summary', 'episodes']).optional(),
   }) }),
   lanProfileCreate: operation({ method: 'POST', path: '/api/v2/profiles', owner: 'profiles', scope: 'playback:write', requestSchema: lanProfileCreateRequestSchema }),
   lanProfileSelect: operation({ method: 'POST', path: '/api/v2/profiles/select', owner: 'profiles', scope: 'catalog:read', requestSchema: lanProfileSelectRequestSchema }),

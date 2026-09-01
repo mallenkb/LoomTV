@@ -19,7 +19,7 @@
 /* Initial-paint defaults mirror the default "Black" dark theme on Tailwind's
    Neutral scale; applyTheme() overrides them at runtime. */
 @theme {
-  --color-background: #0a0a0a;
+  --color-background: #050608;
   --color-foreground: #fafafa;
   --color-card: #171717;
   --color-card-foreground: #fafafa;
@@ -45,7 +45,7 @@
 }
 
 :root {
-  --loom-bg: #0a0a0a;
+  --loom-bg: #050608;
   --loom-surface: #171717;
   --loom-surface-2: #0f0f0f;
   --loom-surface-3: #262626;
@@ -53,7 +53,7 @@
   --loom-muted: #a3a3a3;
   --loom-faint: #737373;
   --loom-border: #262626;
-  --loom-sidebar: #0a0a0a;
+  --loom-sidebar: #050608;
   --loom-accent: #FC9C03;
   --loom-accent-hover: #ffd43b;
   --loom-accent-foreground: #0a0a0a;
@@ -77,8 +77,8 @@
      prevents applyTheme()'s inline custom properties from lowering that
      contrast after the first paint. */
   --loom-focus-ring: #a8a29e !important;
-  --loom-body-start: #0a0a0a;
-  --loom-body-end: #0a0a0a;
+  --loom-body-start: #050608;
+  --loom-body-end: #050608;
 
   /* "On media" scale — for content layered over poster and backdrop artwork.
      These stay fixed across themes on purpose: what this content has to read
@@ -197,8 +197,8 @@
 }
 
 :root[data-theme="dark"][data-home-style="modern"] {
-  --loom-bg: #000000;
-  --loom-sidebar: #000000;
+  --loom-bg: #050608;
+  --loom-sidebar: #050608;
   --loom-surface: #111111;
   --loom-surface-2: #0b0b0c;
   --loom-surface-3: #202022;
@@ -2351,6 +2351,39 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
 :root[data-theme="light"] .loom-settings-page {
   --loom-settings-border: rgb(28 25 23 / 0.05);
+}
+
+/* Classic light-theme cards use a clean white surface. Keep this scoped to
+   the card classes so Modern and dark settings retain their existing colors. */
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-panel,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-panel-soft,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-action-tile,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-folder-row,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-network-card {
+  background: #ffffff !important;
+}
+
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page [aria-label="Home layout style"] > button[aria-pressed="false"],
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page [aria-label="Appearance mode"] > button[aria-pressed="false"],
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page [aria-label="Anime cast card style"] > button[aria-pressed="false"] {
+  background: #ffffff !important;
+}
+
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page [aria-label="Home layout style"] > button[aria-pressed="false"]:hover,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page [aria-label="Appearance mode"] > button[aria-pressed="false"]:hover,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page [aria-label="Anime cast card style"] > button[aria-pressed="false"]:hover {
+  background: var(--loom-active-bg) !important;
+}
+
+/* Keep the Classic light-theme active and hovered tabs filled, but use a
+   rounded rectangle instead of the full capsule treatment. */
+:root[data-theme="light"][data-home-style="default"] .loom-settings-tabs::before,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-tabs::after {
+  border-radius: 0.75rem;
+}
+
+:root[data-theme="light"][data-home-style="default"] .loom-settings-tabs button {
+  border-radius: 0.75rem !important;
 }
 
 :root[data-theme="light"] .theme-color-option-label {

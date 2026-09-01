@@ -282,8 +282,7 @@ function tmdbArtworkCandidates(
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   return [...new Set(orderedPaths)]
-    .map((candidate) => `${TMDB_IMAGE_BASE}/original${candidate}`)
-    .slice(0, 20);
+    .map((candidate) => `${TMDB_IMAGE_BASE}/original${candidate}`);
 }
 
 function tmdbPosterCandidates(d: TMDBMedia): string[] {
@@ -503,7 +502,7 @@ export async function fetchTMDBMovieMetadataCandidates(
     const hits: TMDBMedia[] = [];
     for (const searchPath of searchPaths) {
       const searchData = await fetchTMDBJson(searchPath, tmdbSearchResponseSchema, tmdbCredential);
-      hits.push(...tmdbSearchResults(searchData).slice(0, 6));
+      hits.push(...tmdbSearchResults(searchData));
     }
     return uniqueMetadataSearchHits(hits, (hit) => `tmdb-movie:${hit.id}`)
       .map((hit) => tmdbMovieSearchResult(hit, title))
@@ -679,7 +678,7 @@ export async function fetchTMDBTVMetadataCandidates(
     const hits: TMDBMedia[] = [];
     for (const searchPath of searchPaths) {
       const searchData = await fetchTMDBJson(searchPath, tmdbSearchResponseSchema, tmdbCredential);
-      hits.push(...tmdbSearchResults(searchData).slice(0, 6));
+      hits.push(...tmdbSearchResults(searchData));
     }
     return uniqueMetadataSearchHits(hits, (hit) => `tmdb-tv:${hit.id}`)
       .map((hit) => tmdbTVSearchResult(hit, title))
