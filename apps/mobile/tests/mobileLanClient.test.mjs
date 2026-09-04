@@ -22,10 +22,11 @@ test('library requests use the canonical API and device credential scheme', asyn
   const { client, requests } = recordingClient();
   await client.getLibrary('http://192.168.1.20:3847', 'device-token', '"library-etag"');
 
-  assert.equal(requests[0].input, 'http://192.168.1.20:3847/api/v1/library');
-  assert.equal(requests[1].input, 'http://192.168.1.20:3847/api/v1/library/series');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].input, 'http://192.168.1.20:3847/api/v1/library/catalog');
   assert.deepEqual(requests[0].init.headers, {
     Authorization: 'LoomDevice device-token',
+    'If-None-Match': '"library-etag"',
   });
 });
 
