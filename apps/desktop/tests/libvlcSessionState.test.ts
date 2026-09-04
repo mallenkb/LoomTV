@@ -8,7 +8,7 @@ import {
 } from '../src/main/libvlcSessionState.ts';
 
 test('all LibVLC instance paths bypass a stale plugin cache', () => {
-  assert.deepEqual(LIBVLC_INSTANCE_ARGUMENTS, ['--no-plugins-cache']);
+  assert.deepEqual(LIBVLC_INSTANCE_ARGUMENTS, ['--no-plugins-cache', '--quiet']);
 });
 
 test('fullscreen re-arm captures and restores video, audio, and subtitle tracks', () => {
