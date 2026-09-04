@@ -161,9 +161,7 @@ function engineTrackId(
 }
 const NATIVE_SEEK_GUARD_TIMEOUT_MS = 2500;
 const NATIVE_SEEK_LANDING_TOLERANCE_SECONDS = 1.25;
-// Keep the first surface click pending long enough for the macOS double-click
-// interval to deliver its second click. This prevents a slow system double
-// click from pausing before the fullscreen gesture is recognized.
+// Suppress duplicate fullscreen signals from click-count and dblclick events.
 const SURFACE_DOUBLE_CLICK_WINDOW_MS = 500;
 
 type PlaybackTimingAttempt = {
@@ -229,8 +227,6 @@ export default function VideoPlayer({
   const mediaPanelDialogRef = useRef<HTMLDivElement>(null);
   const episodePanelDialogRef = useRef<HTMLDivElement>(null);
   const markerDialogRef = useRef<HTMLElement>(null);
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const surfaceSingleClickActionRef = useRef<{ wasPaused: boolean; executedAt: number } | null>(null);
   const surfaceDoubleClickGuardUntilMsRef = useRef(0);
   const hlsRef = useRef<Hls | null>(null);
   const transcodeSessionIdRef = useRef<string | null>(null);
@@ -312,12 +308,7 @@ export default function VideoPlayer({
   const nativeInitialTracksAppliedRef = useRef(false);
   const applyResolvedNativePreferencesRef = useRef<(preferences: PlaybackTrackPreferences) => void>(() => undefined);
 
-  const cancelPendingSurfaceClick = useCallback((preserveDoubleClickGuard = false) => {
-    if (clickTimerRef.current !== null) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-    surfaceSingleClickActionRef.current = null;
+  const resetSurfaceDoubleClickGuard = useCallback((preserveDoubleClickGuard = false) => {
     if (!preserveDoubleClickGuard) surfaceDoubleClickGuardUntilMsRef.current = 0;
   }, []);
 
@@ -457,17 +448,16 @@ export default function VideoPlayer({
     toggleFullscreen: requestFullscreenToggle,
   } = usePlayerChrome(paused, containerRef, libVlcSurfaceActive, syncNativeViewport);
   const toggleFullscreen = useCallback(() => {
-    cancelPendingSurfaceClick();
+    resetSurfaceDoubleClickGuard();
     requestFullscreenToggle();
-  }, [cancelPendingSurfaceClick, requestFullscreenToggle]);
+  }, [resetSurfaceDoubleClickGuard, requestFullscreenToggle]);
   const startSidePanelResize = useSidePanelResize();
 
-  // Fullscreen can also change through the browser/system lifecycle. Any
-  // pending surface click belongs to the previous gesture and must not pause
-  // or resume playback after that transition has started.
+  // Preserve the guard across fullscreen layout changes so a delayed dblclick
+  // cannot toggle fullscreen a second time for the same gesture.
   useEffect(() => {
-    cancelPendingSurfaceClick(surfaceDoubleClickGuardUntilMsRef.current > Date.now());
-  }, [cancelPendingSurfaceClick, fullscreen]);
+    resetSurfaceDoubleClickGuard(surfaceDoubleClickGuardUntilMsRef.current > Date.now());
+  }, [resetSurfaceDoubleClickGuard, fullscreen]);
 
   // titleBarStyle is 'hiddenInset', so the macOS traffic lights float over
   // whatever sits beneath them — in the player, the video. Fade them with the
@@ -1636,7 +1626,7 @@ export default function VideoPlayer({
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
-    cancelPendingSurfaceClick();
+    resetSurfaceDoubleClickGuard();
     const loadToken = ++loadTokenRef.current;
     let nativeMetadataTimer: ReturnType<typeof setTimeout> | undefined;
     let cancelMetadataWait: (() => void) | undefined;
@@ -1918,7 +1908,7 @@ export default function VideoPlayer({
     };
   }, [
     applyProbeData,
-    cancelPendingSurfaceClick,
+    resetSurfaceDoubleClickGuard,
     filePath,
     handleNativePlaybackState,
     logPlaybackTiming,
@@ -2383,7 +2373,7 @@ export default function VideoPlayer({
   ]);
 
   useEffect(() => () => {
-    cancelPendingSurfaceClick();
+    resetSurfaceDoubleClickGuard();
     if (subtitleStyleApplyTimerRef.current) {
       clearTimeout(subtitleStyleApplyTimerRef.current);
       subtitleStyleApplyTimerRef.current = null;
@@ -2401,7 +2391,7 @@ export default function VideoPlayer({
       clearTimeout(transcodeSeekSafetyRef.current);
       transcodeSeekSafetyRef.current = null;
     }
-  }, [cancelPendingSurfaceClick]);
+  }, [resetSurfaceDoubleClickGuard]);
 
   // Stop transcode session when component closes.
   useEffect(() => () => {
@@ -2450,25 +2440,6 @@ export default function VideoPlayer({
     video.pause();
   }, [playerState]);
 
-  const restorePlaybackStateAfterSurfaceDoubleClick = useCallback(() => {
-    const action = surfaceSingleClickActionRef.current;
-    surfaceSingleClickActionRef.current = null;
-    if (!action || Date.now() - action.executedAt > SURFACE_DOUBLE_CLICK_WINDOW_MS + 750) return;
-
-    userPausedRef.current = action.wasPaused;
-    setPaused(action.wasPaused);
-    const engine = playbackEngineRef.current;
-    if (engine) {
-      void (action.wasPaused ? engine.pause() : engine.play());
-      return;
-    }
-    const video = videoRef.current;
-    if (!video) return;
-    video.autoplay = !action.wasPaused;
-    if (action.wasPaused) video.pause();
-    else void video.play().catch(() => setPaused(true));
-  }, []);
-
   const persistFinalPlaybackProgress = useCallback(async () => {
     if (playbackEngineRef.current) {
       const snapshotPosition = playbackPositionRef.current;
@@ -2497,7 +2468,7 @@ export default function VideoPlayer({
     if (shutdownPromiseRef.current) return shutdownPromiseRef.current;
 
     const request = (async () => {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       playerActiveRef.current = false;
       userPausedRef.current = true;
       loadTokenRef.current += 1;
@@ -2535,7 +2506,7 @@ export default function VideoPlayer({
 
     shutdownPromiseRef.current = request;
     return request;
-  }, [cancelPendingSurfaceClick, clearHls, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
+  }, [resetSurfaceDoubleClickGuard, clearHls, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
 
   useEffect(() => registerPlaybackShutdown(() => {
     const shutdown = shutdownPlayback();
@@ -3195,27 +3166,25 @@ export default function VideoPlayer({
 
   const handleSurfaceClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (isPlayerControlTarget(event.target)) {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       return;
     }
     if (playerState === 'error') {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       return;
     }
     if (showMediaPanel || showSidebar) {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       setShowMediaPanel(false);
       setShowSidebar(false);
       return;
     }
     // Some macOS/Electron input paths report the second press through the
     // click count but do not deliver a reliable `dblclick` event over the
-    // transparent native-video composition. Keep the first click pending for
-    // the full gesture window, then handle that signal while suppressing the
-    // following dblclick so fullscreen toggles exactly once.
+    // transparent native-video composition. Suppress the following dblclick
+    // so fullscreen toggles exactly once. Single clicks never change playback.
     if (event.detail > 1) {
-      restorePlaybackStateAfterSurfaceDoubleClick();
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       if (event.detail === 2) {
         toggleFullscreen();
         surfaceDoubleClickGuardUntilMsRef.current = Date.now() + SURFACE_DOUBLE_CLICK_WINDOW_MS;
@@ -3223,19 +3192,12 @@ export default function VideoPlayer({
       return;
     }
 
-    cancelPendingSurfaceClick();
-    clickTimerRef.current = setTimeout(() => {
-      if (playerState !== 'loading') {
-        surfaceSingleClickActionRef.current = { wasPaused: paused, executedAt: Date.now() };
-      }
-      togglePlay();
-      clickTimerRef.current = null;
-    }, SURFACE_DOUBLE_CLICK_WINDOW_MS);
-  }, [cancelPendingSurfaceClick, paused, playerState, restorePlaybackStateAfterSurfaceDoubleClick, showMediaPanel, showSidebar, toggleFullscreen, togglePlay]);
+    resetSurfaceDoubleClickGuard();
+  }, [resetSurfaceDoubleClickGuard, playerState, showMediaPanel, showSidebar, toggleFullscreen]);
 
   const handleSurfaceDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (isPlayerControlTarget(event.target)) {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       return;
     }
     event.preventDefault();
@@ -3244,18 +3206,17 @@ export default function VideoPlayer({
       surfaceDoubleClickGuardUntilMsRef.current = 0;
       return;
     }
-    restorePlaybackStateAfterSurfaceDoubleClick();
-    cancelPendingSurfaceClick();
+    resetSurfaceDoubleClickGuard();
     if (playerState !== 'error') toggleFullscreen();
-  }, [cancelPendingSurfaceClick, playerState, restorePlaybackStateAfterSurfaceDoubleClick, toggleFullscreen]);
+  }, [resetSurfaceDoubleClickGuard, playerState, toggleFullscreen]);
 
   const handleSurfaceDoubleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (isPlayerControlTarget(event.target)) {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
       return;
     }
     handleSurfaceDoubleClick(event);
-  }, [cancelPendingSurfaceClick, handleSurfaceDoubleClick]);
+  }, [resetSurfaceDoubleClickGuard, handleSurfaceDoubleClick]);
 
   // Dismissing an open side panel must work from anywhere outside it, not only
   // from the video surface. The surface's own click handler never sees a press
@@ -3268,13 +3229,13 @@ export default function VideoPlayer({
     const isControl = isPlayerControlTarget(event.target);
     const isPanel = Boolean(target?.closest?.('.player-side-panel, [data-player-panel-toggle="true"]'));
     if (isControl || isPanel) {
-      cancelPendingSurfaceClick();
+      resetSurfaceDoubleClickGuard();
     }
     if (!showMediaPanel && !showSidebar) return;
     if (isPanel) return;
     setShowMediaPanel(false);
     setShowSidebar(false);
-  }, [cancelPendingSurfaceClick, showMediaPanel, showSidebar]);
+  }, [resetSurfaceDoubleClickGuard, showMediaPanel, showSidebar]);
 
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -3398,7 +3359,19 @@ export default function VideoPlayer({
   }, runMediaSessionCommand);
 
   useEffect(() => {
+    const isPlaybackSpace = (event: KeyboardEvent) => (
+      (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar')
+      && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing
+    );
     const onKey = (e: KeyboardEvent) => {
+      // Space belongs to playback while this player is mounted, regardless of
+      // focus. Capture it before a panel, slider, or button handles the gesture.
+      if (isPlaybackSpace(e)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.repeat && playerStateRef.current !== 'error') togglePlay();
+        return;
+      }
       if (isEditableShortcutTarget(e.target)) return;
       if (playerStateRef.current === 'error') {
         if (e.key === 'Escape') {
@@ -3409,7 +3382,7 @@ export default function VideoPlayer({
       }
       if (
         isPlayerControlTarget(e.target)
-        && [' ', 'Spacebar', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
       ) {
         return;
       }
@@ -3418,18 +3391,16 @@ export default function VideoPlayer({
       const key = e.code === 'Space' ? ' ' : e.key;
       switch (key) {
         case 'Escape':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           if (fullscreen) toggleFullscreen();
           else handleBack();
           break;
-        case ' ':
-        case 'Spacebar':
         case 'k':
         case 'K':
         case 'MediaPlayPause':
           if (hasCommandModifier) break;
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           runMediaSessionCommand({ type: 'toggle' });
           break;
@@ -3437,7 +3408,7 @@ export default function VideoPlayer({
         case 'j':
         case 'J':
         case 'MediaRewind':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
           break;
@@ -3445,121 +3416,130 @@ export default function VideoPlayer({
         case 'l':
         case 'L':
         case 'MediaFastForward':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           seekTo(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
           break;
         case 'MediaPlay':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           if (paused) togglePlay();
           break;
         case 'MediaPause':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           if (!paused) togglePlay();
           break;
         case 'MediaTrackPrevious':
         case 'MediaPreviousTrack':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           runMediaSessionCommand({ type: 'previousItem' });
           break;
         case 'MediaTrackNext':
         case 'MediaNextTrack':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           runMediaSessionCommand({ type: 'nextItem' });
           break;
         case 'ArrowUp':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           changeVolume(0.05);
           break;
         case 'ArrowDown':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           changeVolume(-0.05);
           break;
         case 'm':
         case 'M':
           if (hasCommandModifier) break;
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           toggleMute();
           break;
         case 'Backspace':
           if (e.metaKey || e.ctrlKey || e.altKey) break;
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           handleBack();
           break;
         case 'f':
         case 'F':
           if (hasCommandModifier) break;
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           toggleFullscreen();
           break;
         case '[':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           changePlaybackRate(-0.25);
           break;
         case ']':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           changePlaybackRate(0.25);
           break;
         case 'r':
         case 'R':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           resetPlaybackRate();
           break;
         case 'Home':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           seekTo(0);
           break;
         case 'End':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           seekTo(duration);
           break;
         case 'z':
         case 'Z':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           adjustSubtitleDelay(-(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS));
           break;
         case 'x':
         case 'X':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           adjustSubtitleDelay(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS);
           break;
         case 'c':
         case 'C':
-          cancelPendingSurfaceClick();
+          resetSurfaceDoubleClickGuard();
           e.preventDefault();
           resetSubtitleDelay();
           break;
         default:
           if (/^[0-9]$/.test(e.key) && duration > 0) {
-            cancelPendingSurfaceClick();
+            resetSurfaceDoubleClickGuard();
             e.preventDefault();
             seekTo((Number(e.key) / 10) * duration);
           }
           break;
       }
     };
-    // Capture playback keys before an open panel or focused control consumes
-    // them. Editable fields remain excluded above so typing is unaffected.
+    // Buttons can activate on Space keyup. Consume both halves of the gesture
+    // so the previously focused control cannot also fire a synthetic click.
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!isPlaybackSpace(e)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
   }, [
-    cancelPendingSurfaceClick,
+    resetSurfaceDoubleClickGuard,
     changePlaybackRate,
     changeVolume,
     duration,

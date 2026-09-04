@@ -120,46 +120,17 @@ function StartupReadySignal({
       signalledRef.current = true;
       markReady();
     };
-    // A poster or logo request can stall independently of the library. Never
-    // keep the whole shell behind the splash just to wait for artwork.
+    // `ready` already gates the page's required data. Let that layout paint,
+    // then reveal it without waiting for network artwork or font downloads.
+    // Keep a deadline for windows whose animation frames are throttled.
     const readinessDeadline = window.setTimeout(signalReady, 3_000);
-
-    const nextPaint = () => new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => resolve());
+    let readyFrame = window.requestAnimationFrame(() => {
+      readyFrame = window.requestAnimationFrame(signalReady);
     });
-    const settleInitialAssets = async () => {
-      await nextPaint();
-      await nextPaint();
-      await document.fonts?.ready.catch(() => undefined);
-
-      // Artwork can advance through several fallback candidates. Re-sample the
-      // priority hero after each decode pass so a failed first URL cannot make
-      // the splash disappear while its replacement is still loading. Rail
-      // artwork is deliberately lazy and must never extend startup.
-      for (let pass = 0; pass < 4; pass += 1) {
-        const priorityImages = [...document.querySelectorAll<HTMLImageElement>('img[fetchpriority="high"]')];
-        const sourcesBeforeDecode = priorityImages.map((image) => image.currentSrc || image.src);
-        await Promise.all(priorityImages.map(async (image) => {
-          try {
-            await image.decode();
-          } catch {
-            // The artwork component advances to its next candidate on error.
-          }
-        }));
-        await nextPaint();
-        const sourceChanged = priorityImages.some(
-          (image, index) => (image.currentSrc || image.src) !== sourcesBeforeDecode[index],
-        );
-        if (!sourceChanged) break;
-      }
-      await nextPaint();
-
-      signalReady();
-    };
-    void settleInitialAssets();
     return () => {
       cancelled = true;
       window.clearTimeout(readinessDeadline);
+      window.cancelAnimationFrame(readyFrame);
     };
   }, [markReady, ready]);
   return null;
