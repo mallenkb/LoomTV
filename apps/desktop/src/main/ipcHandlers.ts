@@ -3,6 +3,7 @@ import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue } fro
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createLibraryFolderMutations } from './libraryFolderMutations';
 import { addLocalAccessToken } from './serverSecurity';
 import { publishMediaSessionSnapshot, releaseMediaSession } from './systemMediaKeys.ts';
 import { appendStreamOptionParams } from './transcodeFilters.ts';
@@ -587,6 +588,7 @@ export function registerIpcHandlers<
   TLibraryData,
   TSettings extends NetworkSettings & IpcResult<'settings:get'>,
 >(deps: IpcHandlerDependencies<TLibraryData, TSettings>): void {
+  const folderMutations = createLibraryFolderMutations(deps);
   const handle = <C extends IpcInvokeChannel>(
     channel: C,
     listener: (
@@ -712,11 +714,8 @@ export function registerIpcHandlers<
       message: 'Select a folder to add to your LoomTV library.',
     });
     if (!result.canceled && result.filePaths.length > 0) {
-      const data = deps.loadLibrary();
       const newFolder = result.filePaths[0];
-      const updated = deps.addFolderToLibrary(data, newFolder, safeLibraryFolderKind(kind));
-      deps.saveLibraryMutation(updated);
-      await deps.addUnifiedLibraryRoot(newFolder, safeLibraryFolderKind(kind));
+      await folderMutations.add(newFolder, safeLibraryFolderKind(kind));
       return enqueueLibraryScan(async () => {
         const scanData = deps.loadLibrary();
         const scanVersion = deps.getLibraryMutationVersion();
@@ -752,10 +751,7 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     const normalizedFolderPath = folderPath.trim();
     if (!path.isAbsolute(normalizedFolderPath)) throw new Error('Folder path must be an absolute path.');
-    const data = deps.loadLibrary();
-    const updated = deps.addFolderToLibrary(data, path.resolve(normalizedFolderPath), safeLibraryFolderKind(kind));
-    deps.saveLibraryMutation(updated);
-    await deps.addUnifiedLibraryRoot(normalizedFolderPath, safeLibraryFolderKind(kind));
+    await folderMutations.add(normalizedFolderPath, safeLibraryFolderKind(kind));
     return enqueueLibraryScan(async () => {
       const scanData = deps.loadLibrary();
       const scanVersion = deps.getLibraryMutationVersion();
@@ -781,10 +777,7 @@ export function registerIpcHandlers<
 
   handle('library:remove-folder', async (_event, folderPath: string) => {
     deps.authorizeSettingsWrite();
-    const data = deps.loadLibrary();
-    const updated = deps.removeFolderFromLibrary(data, folderPath);
-    deps.saveLibraryMutation(updated);
-    await deps.removeUnifiedLibraryRoot(folderPath);
+    await folderMutations.remove(folderPath);
     return deps.libraryIndexForRenderer();
   }, z.tuple([nonEmptyString]));
 
@@ -809,16 +802,7 @@ export function registerIpcHandlers<
       return deps.libraryIndexForRenderer();
     }
 
-    const data = deps.loadLibrary();
-    const withoutPreviousFolder = deps.removeFolderFromLibrary(data, folderPath);
-    const updated = deps.addFolderToLibrary(
-      withoutPreviousFolder,
-      path.resolve(normalizedNextFolderPath),
-      safeLibraryFolderKind(kind),
-    );
-    deps.saveLibraryMutation(updated);
-    await deps.removeUnifiedLibraryRoot(folderPath);
-    await deps.addUnifiedLibraryRoot(normalizedNextFolderPath, safeLibraryFolderKind(kind));
+    await folderMutations.update(folderPath, normalizedNextFolderPath, safeLibraryFolderKind(kind));
 
     return enqueueLibraryScan(async () => {
       const scanData = deps.loadLibrary();

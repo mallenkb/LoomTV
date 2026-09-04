@@ -222,9 +222,9 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   }
 
   private setPaused(paused: boolean): Promise<void> {
-    if (this.lastPauseCommand === paused) return Promise.resolve();
+    if (this.lastPauseCommand === paused && this.lastState?.paused === paused) return Promise.resolve();
     this.lastPauseCommand = paused;
-    return this.command({ type: 'set-paused', paused }).catch((error) => {
+    return this.requiredCommand({ type: 'set-paused', paused }, 'Could not change playback state.').catch((error) => {
       this.lastPauseCommand = null;
       throw error;
     });

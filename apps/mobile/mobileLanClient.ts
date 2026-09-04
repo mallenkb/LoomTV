@@ -194,8 +194,7 @@ function catalogRevision(items: unknown[]): number {
   return Math.max(0, ...asRecords(items).map((item) => finiteNumber(item.updatedAt || item.createdAt)));
 }
 
-function compactIndex(items: unknown[]) {
-  const revision = catalogRevision(items);
+function compactIndex(items: unknown[], revision = catalogRevision(items)) {
   const library = legacyLibrary(items);
   const card = (item: JsonRecord): JsonRecord => {
     const episodeFiles = asRecords(item.episodeFiles);
@@ -237,14 +236,25 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
     const selection = await response.json();
     return typeof selection.profileId === 'string' ? selection.profileId : '';
   };
-  const getCanonicalItems = async (baseUrl: string, token: string) => {
+  const getCanonicalItems = async (baseUrl: string, token: string, etag?: string, mediaId?: string) => {
+    const query = mediaId ? `?mediaId=${encodeURIComponent(mediaId)}` : '';
+    const catalogResponse = await request(`${baseUrl}/api/v1/library/catalog${query}`, {
+      headers: deviceHeaders(token, etag && !mediaId ? { 'If-None-Match': etag } : {}),
+    });
+    if (catalogResponse.status === 304) return { response: catalogResponse, payload: {}, items: [], revision: 0 };
+    if (catalogResponse.status !== 404) {
+      const payload = await canonicalPayload(catalogResponse);
+      const data = asRecord(payload.data);
+      return { response: catalogResponse, payload, items: asRecords(data.items), revision: finiteNumber(data.revision) };
+    }
+    // Older servers predate the bounded detail/conditional catalog endpoint.
     const [response, seriesResponse] = await Promise.all([
       request(`${baseUrl}/api/v1/library`, { headers: deviceHeaders(token) }),
       request(`${baseUrl}/api/v1/library/series`, { headers: deviceHeaders(token) }),
     ]);
     const [payload, seriesPayload] = await Promise.all([canonicalPayload(response), canonicalPayload(seriesResponse)]);
-    if (!response.ok || payload.ok === false) return { response, payload, items: [] };
-    if (!seriesResponse.ok || seriesPayload.ok === false) return { response: seriesResponse, payload: seriesPayload, items: [] };
+    if (!response.ok || payload.ok === false) return { response, payload, items: [], revision: 0 };
+    if (!seriesResponse.ok || seriesPayload.ok === false) return { response: seriesResponse, payload: seriesPayload, items: [], revision: 0 };
     const baseItems = asRecords(asRecord(payload.data).items);
     const seriesItems = asRecords(asRecord(seriesPayload.data).series).map((series) => {
       const id = String(series.id || `series:${encodeURIComponent(String(series.title || 'untitled').toLowerCase())}`);
@@ -260,10 +270,12 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       ...seriesItems,
       ...seriesItems.flatMap((series) => asRecords(series.episodes)),
     ];
-    return { response, payload, items };
+    return { response, payload, items, revision: catalogRevision(items) };
   };
 
   return {
+    // The canonical API has no artwork mutation routes yet.
+    supportsArtworkEditing: false,
     cancelActiveRequests() { for (const controller of activeRequests) controller.abort(); },
     async getClientConfig(baseUrl: string, token: string) {
       const response = await request(`${baseUrl}/api/v1/discovery`, { headers: deviceHeaders(token) });
@@ -399,28 +411,30 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       return jsonResponse({ accessToken: refreshToken, accessTokenExpiresAt: now + 24 * 60 * 60 * 1000,
         refreshToken, refreshTokenExpiresAt: now + 365 * 24 * 60 * 60 * 1000 }, 200, response);
     },
-    async getLibrary(baseUrl: string, token: string, _etag?: string) {
-      const { response, payload, items } = await getCanonicalItems(baseUrl, token);
+    async getLibrary(baseUrl: string, token: string, etag?: string) {
+      const { response, payload, items } = await getCanonicalItems(baseUrl, token, etag);
+      if (response.status === 304) return response;
       if (!response.ok || payload.ok === false) return legacyResponse(jsonResponse(payload, response.status, response));
       const headers = new Headers(response.headers);
-      headers.set('ETag', `W/"${catalogRevision(items)}"`);
+      if (!headers.has('ETag')) headers.set('ETag', `W/"${catalogRevision(items)}"`);
       return new Response(JSON.stringify(legacyLibrary(items)), { status: 200, headers });
     },
-    async getLibraryIndex(baseUrl: string, token: string, _etag?: string) {
-      const { response, payload, items } = await getCanonicalItems(baseUrl, token);
+    async getLibraryIndex(baseUrl: string, token: string, etag?: string) {
+      const { response, payload, items, revision } = await getCanonicalItems(baseUrl, token, etag);
+      if (response.status === 304) return response;
       if (!response.ok || payload.ok === false) return legacyResponse(jsonResponse(payload, response.status, response));
-      const index = compactIndex(items);
+      const index = compactIndex(items, revision);
       const headers = new Headers(response.headers);
-      headers.set('ETag', `W/"${index.revision}"`);
+      if (!headers.has('ETag')) headers.set('ETag', `W/"${index.revision}"`);
       return new Response(JSON.stringify(index), { status: 200, headers });
     },
     async getLibraryItem(baseUrl: string, token: string, mediaId: string) {
-      const { response, payload, items } = await getCanonicalItems(baseUrl, token);
+      const { response, payload, items, revision } = await getCanonicalItems(baseUrl, token, undefined, mediaId);
       if (!response.ok || payload.ok === false) return legacyResponse(jsonResponse(payload, response.status, response));
       const library = legacyLibrary(items);
       const item = [...library.movies, ...library.tvShows, ...library.animeShows, ...library.others].find((candidate) => candidate.id === mediaId);
       if (!item) return jsonResponse({ error: 'media_not_found', message: 'Media item was not found.' }, 404, response);
-      return jsonResponse({ catalogVersion: 1, revision: catalogRevision(items), item }, 200, response);
+      return jsonResponse({ catalogVersion: 1, revision, item }, 200, response);
     },
     async pair(baseUrl: string, body: { code?: string; deviceName: string; approvalRequested?: boolean }) {
       return legacyResponse(await request(`${baseUrl}/api/v1/pairing/requests`, {

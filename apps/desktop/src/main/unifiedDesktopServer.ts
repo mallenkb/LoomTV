@@ -337,7 +337,8 @@ function canonicalRootId(folderPath: string): string {
 }
 
 export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others'): Promise<boolean> {
-  if (!state.ready || !identity || !adminToken) return false;
+  if (!state.enabled) return false;
+  if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
   const added = await requestJson<{ root?: { id?: string } }>('/api/v1/library/roots', identity, {
     method: 'POST',
     token: adminToken,
@@ -347,12 +348,17 @@ export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'mo
     method: 'POST',
     token: adminToken,
     body: { mode: 'quick', rootId: added.root?.id || canonicalRootId(folderPath) },
+  }).catch((error) => {
+    // Root persistence succeeded. Scan scheduling is a separate operation;
+    // treating its failure as a failed add would corrupt rollback decisions.
+    console.warn('[unified-server] Library folder saved, but scan scheduling failed. Retry the scan from administration.', error);
   });
   return true;
 }
 
 export async function removeUnifiedDesktopLibraryRoot(folderPath: string): Promise<boolean> {
-  if (!state.ready || !identity || !adminToken) return false;
+  if (!state.enabled) return false;
+  if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
   await requestJson(`/api/v1/library/roots/${canonicalRootId(folderPath)}`, identity, {
     method: 'DELETE',
     token: adminToken,

@@ -1258,7 +1258,14 @@ function saveLibrary(data: LibraryData): boolean {
 function saveLibraryMutation(data: LibraryData): void {
   const previous = loadLibrary();
   advanceLibraryMutationVersion();
-  if (saveLibrary(data)) reconcileSkipAnalysisAfterScan(previous, data);
+  if (!saveLibrary(data)) throw new Error('The library change could not be saved. Check disk space and permissions, then retry.');
+  // Persistence has committed. A background analysis error must not cause a
+  // caller to roll back the server while retaining the saved local change.
+  try {
+    reconcileSkipAnalysisAfterScan(previous, data);
+  } catch (error) {
+    console.warn('Library saved, but skip analysis reconciliation failed:', error);
+  }
 }
 
 function saveLibraryItemMutation(item: MediaItem): void {
@@ -2148,12 +2155,27 @@ export const mediaServerDeps = {
  * cache is swept, and the LAN advertisement goes out.
  */
 async function startBackgroundServices(): Promise<void> {
+  let configuredAdminUrl: string | null = null;
+  if (process.env.LOOMTV_ADMIN_URL?.trim()) {
+    try {
+      const url = new URL(process.env.LOOMTV_ADMIN_URL.trim());
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+        throw new Error('Expected an HTTP(S) URL without embedded credentials.');
+      }
+      configuredAdminUrl = url.href;
+    } catch {
+      console.warn('[tray] LOOMTV_ADMIN_URL must be a valid HTTP(S) admin URL without embedded credentials.');
+    }
+  }
+  const getAdminUrl = () => {
+    const state = getUnifiedDesktopServerState();
+    return state.ready && state.adminUrl ? state.adminUrl : configuredAdminUrl;
+  };
   // The tray comes first: closing the window enters host mode rather than
   // quitting, so until the tray exists there is no way back into the app.
   const trayGlyphPath = getTrayIconPath();
   const trayIconPath = trayGlyphPath || getWindowIconPath();
   if (trayIconPath) {
-    const unifiedServerState = getUnifiedDesktopServerState();
     createServerTray({
       iconPath: trayIconPath,
       iconIsTemplate: Boolean(trayGlyphPath),
@@ -2169,16 +2191,30 @@ async function startBackgroundServices(): Promise<void> {
           console.warn('[tray] Could not open LoomTV in the default browser:', error);
         });
       },
-      onOpenAdmin: unifiedServerState.ready && unifiedServerState.adminUrl
-        ? () => {
-            if (isUpdateInstalling() || isAppShuttingDown) return;
-            void openUnifiedDesktopAdmin().then((opened) => {
-              if (!opened) console.warn('[tray] Server administration is no longer available.');
-            }).catch((error) => {
-              console.warn('[tray] Could not open server administration:', error);
-            });
-          }
-        : undefined,
+      onOpenAdmin: () => {
+        if (isUpdateInstalling() || isAppShuttingDown) return;
+        const adminUrl = getAdminUrl();
+        if (!adminUrl) {
+          void dialog.showMessageBox({
+            type: 'info',
+            title: 'Loom admin is unavailable',
+            message: 'The Loom admin server is not running in this desktop mode.',
+            detail: 'This desktop startup path has not started the built-in admin server. Your existing admin configuration has not been changed.',
+          });
+          return;
+        }
+        void shell.openExternal(adminUrl).catch((error) => {
+          console.warn('[tray] Could not open server administration:', error);
+        });
+      },
+      getServerInfo: () => {
+        const state = getUnifiedDesktopServerState();
+        return {
+          port: state.ready && state.adminUrl ? Number(new URL(state.adminUrl).port) : getMediaServerPort(),
+          ipAddress: getPrimaryLocalNetworkAddress(),
+          adminUrl: getAdminUrl(),
+        };
+      },
       onQuit: () => app.quit(),
       port: getMediaServerPort(),
     });

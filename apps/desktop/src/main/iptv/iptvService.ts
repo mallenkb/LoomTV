@@ -62,17 +62,6 @@ export function normalizeIptvUrl(value: string, label: string): string {
   return parsed.toString();
 }
 
-/** Fall back to the playlist's own filename when a provider gives no name. */
-export function defaultSourceName(playlistUrl: string): string {
-  try {
-    const parsed = new URL(playlistUrl);
-    const lastSegment = parsed.pathname.split('/').filter(Boolean).pop() || '';
-    const stem = lastSegment.replace(/\.(m3u8?|txt)$/i, '').replace(/[_-]+/g, ' ').trim();
-    return (stem || parsed.hostname).slice(0, MAX_SOURCE_NAME_LENGTH);
-  } catch {
-    return 'Live TV';
-  }
-}
 
 async function fetchText(url: string, maxBytes: number, operation: string): Promise<string> {
   const response = await safeFetch(url, {}, {

@@ -35,9 +35,6 @@ function pruneHlsStartBudget(now: number, force = false): void {
   }
 }
 
-export function deleteHlsProfileBinding(sessionId: string): void {
-  hlsProfileBindings.remove(sessionId);
-}
 
 export function bindHlsProfileDisposal(subscribe: SessionDisposalSubscription): () => void {
   return hlsProfileBindings.bindDisposal(subscribe);

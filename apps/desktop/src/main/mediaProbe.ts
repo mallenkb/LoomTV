@@ -11,6 +11,7 @@ import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
 import { parseFfprobeOutput } from './ffprobeValidation.ts';
 
 const execFileAsync = promisify(execFile);
+const pendingProbes = new Map<string, Promise<ProbeResult>>();
 
 function statLocalMediaPath(filePath: string): fs.Stats {
   if (!filePath || typeof filePath !== 'string') throw new Error('A local file path is required.');
@@ -66,7 +67,19 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
   const cacheKey = probeCacheKey(filePath, stats);
   const cached = getSharedProbeResult<ProbeResult>(cacheKey, 'media');
   if (cached !== undefined) return cached;
+  const pending = pendingProbes.get(cacheKey);
+  if (pending) return pending;
 
+  // The player and its native adapter can request the same metadata together.
+  // Share the child process as well as its completed result.
+  const request = probeUncachedMedia(filePath, cacheKey).finally(() => {
+    if (pendingProbes.get(cacheKey) === request) pendingProbes.delete(cacheKey);
+  });
+  pendingProbes.set(cacheKey, request);
+  return request;
+}
+
+async function probeUncachedMedia(filePath: string, cacheKey: string): Promise<ProbeResult> {
   const ffprobe = findFFprobe();
   if (!ffprobe) throw new Error('ffprobe is not available.');
 

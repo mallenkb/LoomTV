@@ -1029,6 +1029,8 @@ class LibVlcPlaybackSession {
   private readonly media: NativeHandle;
   private player: NativeHandle;
   private timer: NodeJS.Timeout | null = null;
+  private readonly startupPollDeadline = Date.now() + 2500;
+  private startupPolling = true;
   private nativeSyncTimer: NodeJS.Timeout | null = null;
   private nativeSyncRetryCount = 0;
   private nativeSyncForceRebind = false;
@@ -1049,6 +1051,7 @@ class LibVlcPlaybackSession {
   private startApplied = false;
   private requestedPaused = false;
   private lastPauseCommand: boolean | null = null;
+  private pauseAcknowledgementDeadline = 0;
   private preferredAudioTrackId: number | null;
   private initialAudioSelectionApplied = false;
   private initialAudioSelectionAttempts = 0;
@@ -1142,8 +1145,7 @@ class LibVlcPlaybackSession {
       // window.
       this.nativeViewHost = createNativeViewHost(loadKoffi(), ownerWindow);
       this.configureNativePlayer(this.player);
-      if (this.startSeconds === 0 && nativeInt(api.playerPlay(this.player)) < 0) throw new Error('LibVLC rejected the authorized local media source.');
-      if (this.startSeconds > 0 && nativeInt(api.playerPlay(this.player)) < 0) throw new Error('LibVLC rejected the authorized local media source.');
+      if (nativeInt(api.playerPlay(this.player)) < 0) throw new Error('LibVLC rejected the authorized local media source.');
     } catch (error) {
       this.clearWindowListeners();
       this.release();
@@ -1159,7 +1161,9 @@ class LibVlcPlaybackSession {
     this.ownerWindow.once('closed', stopForClosedOwner);
     this.windowListeners.push(() => this.ownerWindow.removeListener('closed', stopForClosedOwner));
     this.emit({ status: 'loading' });
-    this.timer = setInterval(() => this.poll(), 250);
+    // Detect initial readiness and apply resume seeks without waiting for the
+    // steady-state progress interval. Bound the faster polling for slow media.
+    this.timer = setInterval(() => this.poll(), 32);
     this.timer.unref();
   }
 
@@ -1194,10 +1198,11 @@ class LibVlcPlaybackSession {
     // Chromium may replace the fullscreen backing surface without changing
     // either the NSWindow contentView or its immediate child pointers. The
     // hierarchy can therefore compare equal while LibVLC remains bound to the
-    // retired surface (audio/subtitles continue, picture turns black). Rebind
-    // the existing drawable after both HTML and native fullscreen events; the
-    // host only reparents its NSView when the hierarchy genuinely changed.
-    const syncHierarchy = () => this.scheduleNativeViewSync(true, 32);
+    // retired surface (audio/subtitles continue, picture turns black). The
+    // final renderer handshake rebinds that drawable once after layout commits.
+    // The renderer handshake owns the final drawable rebind. Native and HTML
+    // events can both fire for the same transition, so only check geometry here.
+    const syncHierarchy = () => this.scheduleNativeViewSync(false, 32);
     const syncVisibility = () => this.syncNativeViewVisibility();
     const restoreNativeSurface = () => {
       this.syncNativeViewVisibility();
@@ -1446,12 +1451,6 @@ class LibVlcPlaybackSession {
     // fullscreen layout. Force LibVLC to acknowledge the current drawable even
     // when AppKit reused the same NSView pointers around the transition.
     const synced = this.syncNativeViewHost(true);
-    // Coalesce one more frame sync after the renderer's layout settles. A
-    // fullscreen transition uses the explicit readiness handshake below to
-    // request the one deliberate drawable rebind.
-    if (!this.nativeFullscreenTransition && !this.awaitingFullscreenViewport) {
-      this.scheduleNativeViewSync(true, 0);
-    }
     return synced;
   }
 
@@ -1666,6 +1665,12 @@ class LibVlcPlaybackSession {
       const api = this.runtime.api;
       const nativeState = Number(api.playerGetState(this.player));
       const status = nativeStateStatus(nativeState);
+      if (this.startupPolling && (status === 'ready' || Date.now() >= this.startupPollDeadline)) {
+        this.startupPolling = false;
+        if (this.timer) clearInterval(this.timer);
+        this.timer = setInterval(() => this.poll(), 250);
+        this.timer.unref();
+      }
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
       const durationMs = Number(api.playerGetLength(this.player));
       const positionMs = Number(api.playerGetTime(this.player));
@@ -1678,11 +1683,15 @@ class LibVlcPlaybackSession {
         api.playerSetTime(this.player, Math.round(this.startSeconds * 1_000));
         this.startApplied = true;
       }
+      const nativePaused = nativeState === 4;
+      if (nativePaused === this.requestedPaused) this.pauseAcknowledgementDeadline = 0;
       this.emit({
         status,
         duration: durationMs > 0 ? durationMs / 1_000 : undefined,
         position: positionMs >= 0 ? positionMs / 1_000 : undefined,
-        paused: nativeState === 4,
+        // set_pause is asynchronous inside VLC. Do not undo the acknowledged
+        // button state with a poll from before the decoder applied the command.
+        paused: Date.now() < this.pauseAcknowledgementDeadline ? this.requestedPaused : nativePaused,
       });
       if (status === 'ended') {
         this.ended = true;
@@ -1703,10 +1712,13 @@ class LibVlcPlaybackSession {
       const api = this.runtime.api;
       switch (command.type) {
         case 'set-paused':
-          if (this.lastPauseCommand === command.paused) return true;
+          if (this.lastPauseCommand === command.paused
+            && (Date.now() < this.pauseAcknowledgementDeadline
+              || (Number(api.playerGetState(this.player)) === 4) === command.paused)) return true;
+          api.playerSetPause(this.player, command.paused ? 1 : 0);
           this.lastPauseCommand = command.paused;
           this.requestedPaused = command.paused;
-          api.playerSetPause(this.player, command.paused ? 1 : 0);
+          this.pauseAcknowledgementDeadline = Date.now() + 750;
           this.emit({ paused: command.paused });
           return true;
         case 'seek': api.playerSetTime(this.player, Math.round(Math.max(0, finite(command.position, 0)) * 1_000)); return true;

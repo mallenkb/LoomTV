@@ -47,7 +47,3 @@ export function parseExternalPlaybackReference(value: string): ExternalPlaybackR
     return null;
   }
 }
-
-export function isExternalPlaybackReference(value: string): boolean {
-  return parseExternalPlaybackReference(value) !== null;
-}

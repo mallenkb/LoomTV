@@ -163,16 +163,6 @@ export function resolveLocalResource(
   return candidate;
 }
 
-export function resolveExternalArtworkResource(id: string): string {
-  pruneExpiredResources();
-  const resource = resources.get(id);
-  if (!resource || resource.kind !== 'external-artwork') throw new Error('Unknown artwork resource.');
-  resources.delete(id);
-  resource.catalogGeneration = currentCatalogGeneration;
-  resource.lastUsedAt = Date.now();
-  resources.set(id, resource);
-  return resource.value;
-}
 
 export function resolveExternalArtworkResourceContext(id: string): { sourceUrl: string; ownerId?: string } {
   pruneExpiredResources();

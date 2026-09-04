@@ -365,7 +365,12 @@ async function startCanonicalDesktop(): Promise<void> {
     iconIsTemplate: Boolean(trayGlyph),
     onOpen: () => openCanonicalWindow('/app/'),
     onOpenWeb: () => { void shell.openExternal(`${canonicalOrigin}/app/`); },
-    onOpenAdmin: () => openCanonicalWindow('/admin/'),
+    onOpenAdmin: () => { void shell.openExternal(`${canonicalOrigin}/admin/`); },
+    getServerInfo: () => ({
+      port: address.port,
+      ipAddress: getLocalNetworkAddresses()[0] ?? null,
+      adminUrl: `${canonicalOrigin}/admin/`,
+    }),
     onQuit: () => app.quit(),
     port: address.port,
   });

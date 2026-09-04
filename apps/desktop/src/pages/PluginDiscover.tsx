@@ -13,7 +13,6 @@ import { desktopApi, type StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import type { StreamingProvider } from '@/shared/desktopProtocol';
 import { preferredProviderLogoUrl } from '@/shared/providerLogos';
-import { normalizeAnimeCast } from '@/shared/animeCast';
 import {
   aniListDiscoverResponseSchema,
   aniListGenreResponseSchema,
@@ -166,30 +165,6 @@ query DiscoverAnime($page: Int, $perPage: Int, $sort: [MediaSort], $search: Stri
         extraLarge
         large
         medium
-      }
-      characters(page: 1, perPage: 20, sort: [ROLE, FAVOURITES_DESC]) {
-        edges {
-          node {
-            name {
-              full
-            }
-            image {
-              medium
-              large
-            }
-          }
-          role
-          voiceActors {
-            name {
-              full
-            }
-            image {
-              medium
-              large
-            }
-            languageV2
-          }
-        }
       }
       trailer {
         id
@@ -412,9 +387,6 @@ function hasYearMatch(item: StremioPluginCatalogItem, yearFilter: string): boole
   return parseYearFromItem(item) === normalizedYear;
 }
 
-function voiceActorLanguagePriority(language?: string | null): number {
-  return language?.trim().toLowerCase() === 'japanese' ? 0 : 1;
-}
 
 function youtubeTrailerUrl(trailer?: { id?: string | null; site?: string | null } | null): string {
   return trailer?.id && trailer.site?.toLowerCase() === 'youtube'
@@ -519,46 +491,6 @@ function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogIte
     media.coverImage?.medium,
   );
   const backgroundUrl = '';
-  const cast = (media.characters?.edges || [])
-    .filter((entry) => (
-      (entry.role === 'MAIN' || entry.role === 'SUPPORTING')
-      && Boolean(entry?.node?.name?.full)
-    ))
-    .slice(0, 20)
-    .flatMap((entry) => {
-      const characterName = entry.node?.name?.full || 'Unknown character';
-      const characterRole = entry.role || '';
-      const characterImage = pickImageUrl(entry.node?.image?.large, entry.node?.image?.medium);
-      const voiceActors = [...(entry.voiceActors || [])]
-        .filter((voiceActor) => Boolean(voiceActor?.name?.full))
-        .sort((left, right) => (
-          voiceActorLanguagePriority(left.languageV2) - voiceActorLanguagePriority(right.languageV2)
-        ));
-
-      if (voiceActors.length === 0) {
-        return [{
-          name: characterName,
-          character: characterRole,
-          image: '',
-          characterName,
-          characterRole,
-          characterImage,
-        }];
-      }
-
-      const voiceActor = voiceActors[0];
-      return [{
-        name: voiceActor.name?.full || 'Unknown voice actor',
-        character: characterRole,
-        image: pickImageUrl(voiceActor.image?.large, voiceActor.image?.medium),
-        characterName,
-        characterRole,
-        characterImage,
-        voiceActorName: voiceActor.name?.full || '',
-        voiceActorImage: pickImageUrl(voiceActor.image?.large, voiceActor.image?.medium),
-        voiceActorLanguage: voiceActor.languageV2 || '',
-      }];
-    });
   return {
     id: String(media.id),
     type: 'anime',
@@ -576,7 +508,8 @@ function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogIte
       : episodeCount !== undefined ? `${episodeCount} eps` : undefined,
     seasonCount: episodeCount !== undefined ? 1 : undefined,
     episodeCount,
-    cast: normalizeAnimeCast(cast),
+    // Cast is loaded on the detail page, not in the grid request.
+    cast: [],
     posterUrl,
     backgroundUrl,
     logoUrl: '',
@@ -985,13 +918,14 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
 async function enrichAnimeCatalogMetadata(
   items: readonly StremioPluginCatalogItem[],
   credential: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<StremioPluginCatalogItem[]> {
   const enrichedItems = [...items];
   let nextIndex = 0;
   const workerCount = Math.min(4, items.length);
 
   await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
+    while (nextIndex < items.length && isCurrent()) {
       const index = nextIndex;
       nextIndex += 1;
       const item = items[index];
@@ -1007,7 +941,20 @@ async function enrichAnimeCatalogMetadata(
   return enrichedItems;
 }
 
-async function discoverAnime(
+const animeCatalogRequests = new Map<string, Promise<readonly StremioPluginCatalogItem[]>>();
+
+function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '') {
+  const key = JSON.stringify([query.trim(), section, genre, year]);
+  const pending = animeCatalogRequests.get(key);
+  if (pending) return pending;
+  const request = fetchAnimeCatalog(query, section, genre, year).finally(() => {
+    if (animeCatalogRequests.get(key) === request) animeCatalogRequests.delete(key);
+  });
+  animeCatalogRequests.set(key, request);
+  return request;
+}
+
+async function fetchAnimeCatalog(
   query: string,
   section: DiscoverSection,
   genre = '',
@@ -1548,10 +1495,19 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       discoverCache.current = { date: today, entries: {} };
     }
 
+    // Refresh insertion order so trimming retains recently updated catalogs.
+    delete discoverCache.current.entries[cacheId];
     discoverCache.current.entries[cacheId] = {
       expiresAt: nextMidnightAt(),
       items: [...nextItems],
     };
+
+    // Search/filter combinations otherwise accumulate until midnight, making
+    // every cache write serialize an ever-growing collection on the UI thread.
+    const cacheIds = Object.keys(discoverCache.current.entries);
+    for (const expiredId of cacheIds.slice(0, Math.max(0, cacheIds.length - 24))) {
+      delete discoverCache.current.entries[expiredId];
+    }
 
     try {
       localStorage.setItem(DISCOVER_CACHE_STORAGE_KEY, JSON.stringify(discoverCache.current));
@@ -1742,7 +1698,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       if ((!isAnime && !isTmdbCatalog) || alreadyHydrated) return;
 
       const metadataRequest = isAnime
-        ? enrichAnimeCatalogMetadata(catalogItems, tmdbCredential)
+        ? enrichAnimeCatalogMetadata(catalogItems, tmdbCredential, () => requestRevision === catalogRequestRevision.current)
         : enrichTmdbCatalogRatings(catalogItems, contentType, tmdbCredential);
       void metadataRequest.then((ratedItems) => {
         if (requestRevision !== catalogRequestRevision.current) return;
@@ -1824,7 +1780,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     searchTimer.current = window.setTimeout(() => {
       searchTimer.current = null;
       void loadCatalog(query, genreFilter, yearFilter, platformFilter, availabilityRegion);
-    }, PROVIDER_SEARCH_DEBOUNCE_MS);
+    }, query.trim() ? PROVIDER_SEARCH_DEBOUNCE_MS : 0);
 
     return () => {
       if (searchTimer.current !== null) {

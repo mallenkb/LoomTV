@@ -1,4 +1,4 @@
-import { Menu, nativeImage, Tray } from 'electron';
+import { clipboard, Menu, nativeImage, Tray } from 'electron';
 
 type ServerTrayOptions = {
   iconPath: string;
@@ -14,9 +14,11 @@ type ServerTrayOptions = {
   onOpenAdmin?: () => void;
   onQuit: () => void;
   port: number;
+  getServerInfo?: () => { port: number; ipAddress: string | null; adminUrl: string | null };
 };
 
 let serverTray: Tray | null = null;
+let trayRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export function createServerTray(options: ServerTrayOptions): Tray | null {
   if (serverTray && !serverTray.isDestroyed()) return serverTray;
@@ -37,11 +39,24 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
 
   serverTray = new Tray(trayIcon);
   serverTray.setToolTip('LoomTV');
-  serverTray.setContextMenu(Menu.buildFromTemplate([
+  let previousServerInfo = '';
+  const refreshMenu = () => {
+    if (!serverTray || serverTray.isDestroyed()) return;
+    const info = options.getServerInfo?.() ?? { port: options.port, ipAddress: null, adminUrl: null };
+    const signature = JSON.stringify(info);
+    if (signature === previousServerInfo) return;
+    previousServerInfo = signature;
+    serverTray.setContextMenu(Menu.buildFromTemplate([
     {
-      label: `Server running on port ${options.port}`,
+      label: `Server running on port ${info.port}`,
       enabled: false,
     },
+    { label: info.ipAddress ? `IP address: ${info.ipAddress}` : 'IP address: 127.0.0.1 (no LAN address)', enabled: false },
+    { label: info.adminUrl ? `Admin URL: ${info.adminUrl}` : 'Admin URL: not configured', enabled: false },
+    ...(info.adminUrl ? [{
+      label: 'Copy admin URL',
+      click: () => { if (info.adminUrl) clipboard.writeText(info.adminUrl); },
+    }] : []),
     { type: 'separator' },
     {
       label: 'Open LoomTV',
@@ -52,7 +67,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
       click: options.onOpenWeb,
     },
     ...(options.onOpenAdmin ? [{
-      label: 'Manage server',
+      label: 'Open Loom admin',
       click: options.onOpenAdmin,
     }] : []),
     { type: 'separator' },
@@ -60,7 +75,12 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
       label: 'Quit LoomTV',
       click: options.onQuit,
     },
-  ]));
+    ]));
+  };
+  refreshMenu();
+  // Server readiness and network interfaces can change after tray creation.
+  trayRefreshTimer = setInterval(refreshMenu, 3000);
+  trayRefreshTimer.unref();
 
   if (process.platform !== 'darwin') {
     serverTray.on('click', options.onOpen);
@@ -70,6 +90,8 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
 }
 
 export function destroyServerTray(): void {
+  if (trayRefreshTimer) clearInterval(trayRefreshTimer);
+  trayRefreshTimer = null;
   if (!serverTray || serverTray.isDestroyed()) return;
   serverTray.destroy();
   serverTray = null;

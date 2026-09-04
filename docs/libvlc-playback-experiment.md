@@ -27,6 +27,12 @@ legacy alias. `LOOMTV_EXPERIMENTAL_LIBVLC=0` and
 and plugin directory can be supplied with `LOOMTV_LIBVLC_PATH` and
 `LOOMTV_LIBVLC_PLUGIN_PATH` for a diagnostic or replacement runtime.
 
+Native VLC console messages are disabled by default. Set
+`LOOMTV_DEBUG_LIBVLC=1` before launching LoomTV to enable verbose VLC logs
+and native surface diagnostics. Restart the app after changing this value,
+since the warmed VLC instance lasts for the process lifetime. This only
+controls logging; playback error states still reach LoomTV's player UI.
+
 Packaged macOS arm64 releases stage the LibVLC payload under
 `resources/libvlc/darwin/arm64`, and Windows x64 releases stage it under
 `resources/libvlc/win32/x64`; both include the library, VLC plugin modules, and

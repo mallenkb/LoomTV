@@ -5,6 +5,7 @@
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePlaybackProgressDisplay } from './VideoPlayer/usePlaybackProgressDisplay';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
 import LoomLoader from '@/components/LoomLoader';
@@ -66,8 +67,6 @@ import {
   externalSubtitleOrdinal,
   firstSubtitleTrackIndex,
   firstTrackIndex,
-  formatTime,
-  seekAccessibilityText,
   getStoredDuration,
   hlsErrorSummary,
   isBitmapSubtitleCodec,
@@ -145,7 +144,6 @@ void MpvPlaybackEngine.available().catch(() => false);
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
-const POSITION_UI_UPDATE_INTERVAL_MS = 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2000;
 
 function engineTrackId(
@@ -202,6 +200,9 @@ export default function VideoPlayer({
   const { activeProfile, openGate } = useProfiles();
   const isLiveStreamRef = useRef(isLiveStream);
   isLiveStreamRef.current = isLiveStream;
+  const playbackPositionRef = useRef(0);
+  const playbackDurationRef = useRef(0);
+  const { position, duration, showRemainingTime, toggleTimeDisplay, updatePlaybackSnapshot, seekSliderRef, progressFillRef, progressThumbRef, scrubTimeHudRef, currentTimeTextRef, durationTimeTextRef } = usePlaybackProgressDisplay(isLiveStreamRef, playbackPositionRef, playbackDurationRef);
   // Every progress write in this component goes through here so a live channel
   // cannot leave a resume point behind, whichever engine reported the position.
   const savePlaybackProgress = useCallback(
@@ -222,19 +223,12 @@ export default function VideoPlayer({
   const isModern = theme.homeStyle === 'modern';
   const containerRef = useRef<HTMLDivElement>(null);
   const videoViewportRef = useRef<HTMLDivElement>(null);
-  const seekSliderRef = useRef<HTMLDivElement>(null);
-  const progressFillRef = useRef<HTMLDivElement>(null);
-  const progressThumbRef = useRef<HTMLDivElement>(null);
-  const scrubTimeHudRef = useRef<HTMLDivElement>(null);
-  const currentTimeTextRef = useRef<HTMLSpanElement>(null);
-  const durationTimeTextRef = useRef<HTMLSpanElement>(null);
   const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
   const errorCloseButtonRef = useRef<HTMLButtonElement>(null);
   const errorDialogRef = useRef<HTMLDivElement>(null);
   const mediaPanelDialogRef = useRef<HTMLDivElement>(null);
   const episodePanelDialogRef = useRef<HTMLDivElement>(null);
   const markerDialogRef = useRef<HTMLElement>(null);
-  const showRemainingTimeRef = useRef(false);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceSingleClickActionRef = useRef<{ wasPaused: boolean; executedAt: number } | null>(null);
   const surfaceDoubleClickGuardUntilMsRef = useRef(0);
@@ -285,10 +279,7 @@ export default function VideoPlayer({
   const subtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
   const audioDelayRef = useRef(0);
   const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
-  const lastPositionUiUpdateRef = useRef(0);
   const lastProgressSaveRef = useRef(0);
-  const playbackPositionRef = useRef(0);
-  const playbackDurationRef = useRef(0);
   const initialResumePositionRef = useRef(0);
   const loadedFilePathRef = useRef('');
   const isScrubbingRef = useRef(false);
@@ -405,9 +396,6 @@ export default function VideoPlayer({
   }, [logPlaybackTiming]);
 
   const [paused, setPaused] = useState(true);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [showRemainingTime, setShowRemainingTime] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -507,67 +495,6 @@ export default function VideoPlayer({
     };
   }, [filePath]);
 
-  const syncPlaybackUi = useCallback((nextPosition: number, nextDuration: number) => {
-    const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
-    const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
-    const livePlayback = isLiveStreamRef.current;
-    const progressRatio = livePlayback
-      ? 1
-      : safeDuration > 0 ? Math.min(1, Math.max(0, safePosition / safeDuration)) : 0;
-    const progressPercent = progressRatio * 100;
-
-    if (progressFillRef.current) {
-      progressFillRef.current.style.transform = `scaleX(${progressRatio})`;
-    }
-    if (progressThumbRef.current) {
-      progressThumbRef.current.style.left = `${progressPercent}%`;
-    }
-    if (scrubTimeHudRef.current) {
-      scrubTimeHudRef.current.style.left = `${progressPercent}%`;
-      scrubTimeHudRef.current.textContent = `${formatTime(safePosition)} / ${formatTime(safeDuration)}`;
-    }
-    if (currentTimeTextRef.current) {
-      const displayTime = showRemainingTimeRef.current
-        ? `-${formatTime(Math.max(0, safeDuration - safePosition))}`
-        : formatTime(safePosition);
-      currentTimeTextRef.current.textContent = displayTime;
-    }
-    if (durationTimeTextRef.current) {
-      durationTimeTextRef.current.textContent = formatTime(safeDuration);
-    }
-    if (seekSliderRef.current) {
-      seekSliderRef.current.setAttribute('aria-disabled', livePlayback || safeDuration <= 0 ? 'true' : 'false');
-      seekSliderRef.current.setAttribute('aria-valuemax', livePlayback ? '100' : String(safeDuration || 0));
-      seekSliderRef.current.setAttribute('aria-valuenow', livePlayback ? '100' : String(Math.min(safePosition, safeDuration || 0)));
-      seekSliderRef.current.setAttribute('aria-valuetext', livePlayback ? 'Live' : seekAccessibilityText(safePosition, safeDuration));
-    }
-  }, []);
-
-  const toggleTimeDisplay = useCallback(() => {
-    const nextShowRemainingTime = !showRemainingTimeRef.current;
-    showRemainingTimeRef.current = nextShowRemainingTime;
-    setShowRemainingTime(nextShowRemainingTime);
-    syncPlaybackUi(playbackPositionRef.current, playbackDurationRef.current);
-  }, [syncPlaybackUi]);
-
-  const updatePlaybackSnapshot = useCallback((
-    nextPosition: number,
-    nextDuration = playbackDurationRef.current,
-    options: { forceReact?: boolean } = {},
-  ) => {
-    const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
-    const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
-    playbackPositionRef.current = safePosition;
-    playbackDurationRef.current = safeDuration;
-    syncPlaybackUi(safePosition, safeDuration);
-
-    const now = performance.now();
-    if (options.forceReact || now - lastPositionUiUpdateRef.current >= POSITION_UI_UPDATE_INTERVAL_MS) {
-      lastPositionUiUpdateRef.current = now;
-      setPosition(safePosition);
-      setDuration(safeDuration);
-    }
-  }, [syncPlaybackUi]);
 
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
   const sharedTrackPreferencesRef = useRef<PlaybackTrackPreferences>({});
@@ -1711,6 +1638,22 @@ export default function VideoPlayer({
   useEffect(() => {
     cancelPendingSurfaceClick();
     const loadToken = ++loadTokenRef.current;
+    let nativeMetadataTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelMetadataWait: (() => void) | undefined;
+    const waitForNativeMetadataWindow = () => new Promise<boolean>((resolve) => {
+      cancelMetadataWait = () => resolve(false);
+      const deadline = performance.now() + 5000;
+      const check = () => {
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return resolve(false);
+        if (playerStateRef.current === 'error') return resolve(false);
+        if (playerStateRef.current === 'ready' || performance.now() >= deadline) {
+          // Give the first frame priority over starting ffprobe. The native
+          // adapter's delayed probe can populate the shared probe cache first.
+          nativeMetadataTimer = setTimeout(() => resolve(true), 300);
+        } else nativeMetadataTimer = setTimeout(check, 50);
+      };
+      check();
+    });
     const loadStartedAtMs = performance.now();
     const source = /^(?:https?|plexserver):/i.test(filePath) || isIptvPlaybackReference(filePath)
       ? 'remote'
@@ -1907,11 +1850,15 @@ export default function VideoPlayer({
               void (async () => {
                 const preferences = await preferencesPromise;
                 if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+                if (engine.kind === 'libvlc' && !await waitForNativeMetadataWindow()) return;
+                if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
                 const probeResult = await desktopApi.media.probe(filePath);
                 if (!playerActiveRef.current || loadToken !== loadTokenRef.current || !probeResult.ok) return;
                 applyProbeData(probeResult.data, preferences);
                 applyResolvedNativePreferencesRef.current(preferences);
-              })();
+              })().catch((error) => {
+                console.warn('[player] Background track metadata unavailable:', error);
+              });
             }
             const openedAttempt = playbackTimingAttemptRef.current;
             if (openedAttempt && !openedAttempt.sourceOpenedReported) {
@@ -1958,6 +1905,8 @@ export default function VideoPlayer({
     })();
 
     return () => {
+      if (nativeMetadataTimer) clearTimeout(nativeMetadataTimer);
+      cancelMetadataWait?.();
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
       browserStreamGenerationRef.current += 1;
@@ -2475,8 +2424,17 @@ export default function VideoPlayer({
       return;
     }
     if (playbackEngineRef.current) {
-      userPausedRef.current = !paused;
-      void (paused ? playbackEngineRef.current.play() : playbackEngineRef.current.pause());
+      const engine = playbackEngineRef.current;
+      const wasPaused = userPausedRef.current;
+      const nextPaused = !wasPaused;
+      userPausedRef.current = nextPaused;
+      setPaused(nextPaused);
+      void (nextPaused ? engine.pause() : engine.play()).catch((error) => {
+        if (playbackEngineRef.current !== engine || userPausedRef.current !== nextPaused) return;
+        userPausedRef.current = wasPaused;
+        setPaused(wasPaused);
+        console.warn('[player] play/pause command failed:', error);
+      });
       return;
     }
     const video = videoRef.current;
@@ -2490,7 +2448,7 @@ export default function VideoPlayer({
     userPausedRef.current = true;
     video.autoplay = false;
     video.pause();
-  }, [paused, playerState]);
+  }, [playerState]);
 
   const restorePlaybackStateAfterSurfaceDoubleClick = useCallback(() => {
     const action = surfaceSingleClickActionRef.current;
@@ -2727,7 +2685,8 @@ export default function VideoPlayer({
     if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const crop = cropMode === 'none' || cropMode === 'custom' ? null : cropMode.replace(/\s*\/\s*/, ':');
     const engine = playbackEngineRef.current;
-    if (engine.kind === 'libvlc' && crop === null) return;
+    // A null crop clears the native crop. Skipping it leaves the previous
+    // ratio active even though the controls now show None.
     void engine.setVideoCrop(crop).catch((error) => {
       setErrorMessage(error instanceof Error ? error.message : 'The video crop could not be changed.');
     });

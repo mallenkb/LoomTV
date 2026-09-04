@@ -680,7 +680,3 @@ export class StremioPluginService {
 export function createStremioPluginService(deps: StremioPluginServiceDependencies): StremioPluginService {
   return new StremioPluginService(deps);
 }
-
-export function isStremioHostError(error: unknown): error is StremioAdapterError | StremioPluginServiceError {
-  return error instanceof StremioAdapterError || error instanceof StremioPluginServiceError;
-}

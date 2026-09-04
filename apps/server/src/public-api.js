@@ -16,6 +16,7 @@ import {
 } from '@loom-media-server/video-contracts';
 import { canonicalPublicError } from './public-error.js';
 import { createCastSessionRegistry } from './cast-session-registry.js';
+import { publicCatalog } from './public-catalog.js';
 
 export const PUBLIC_API_PREFIX = CANONICAL_API_PREFIX;
 export const PUBLIC_API_VERSION = CANONICAL_API_VERSION;
@@ -306,6 +307,8 @@ function discoveryDocument(version, health) {
       profiles: true,
       watchProgress: true,
       library: true,
+      conditionalCatalog: true,
+      artworkEditing: false,
       directStreaming: true,
       hlsTranscoding: Boolean(health.capabilities?.transcoding),
       playbackPlan: true,
@@ -389,6 +392,7 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/setup/step': { post: { summary: 'Record setup progress' } },
     '/api/v1/setup/complete': { post: { summary: 'Finish setup and start the first scan' } },
     '/api/v1/library': { get: { summary: 'List the authenticated catalog' } },
+    '/api/v1/library/catalog': { get: { summary: 'Read a profile-filtered catalog with ETag revalidation, or one title and its episodes using mediaId', parameters: [{ name: 'mediaId', in: 'query', required: false, schema: { type: 'string' } }] } },
     '/api/v1/library/series': { get: { summary: 'List episodes grouped into series and seasons' } },
     '/api/v1/library/roots': { get: { summary: 'List the authenticated library roots' }, post: { summary: 'Add a library root' } },
     '/api/v1/library/roots/{rootId}': { delete: { summary: 'Remove a library root' } },
@@ -457,17 +461,35 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
   if (!service || !clientState || !mediaService || !pairingService || !remotePolicy) throw new Error('createPublicApiHandler requires server services.');
   const desktopChannel = desktopSetupChannel || createDesktopSetupChannel({ clientAddress: (req) => proxyPolicy.clientAddress(req) });
 
-  async function waitForSetupScan(scan, principal) {
+  async function waitForSetupScan(scan, principal, res) {
     if (!scan || scan.state !== 'scanning') return scan;
-    while (true) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const current = await service.getScanStatus(principal);
-      if (current?.id !== scan.id || current.state !== 'scanning') {
-        if (current?.state === 'failed' || current?.state === 'interrupted') {
-          throw requestError(500, 'setup_scan_failed', 'The library scan did not finish. Check the saved folders and retry.');
+    let pollTimer;
+    let stopped = false;
+    let rejectWait;
+    const interrupted = new Promise((_, reject) => { rejectWait = reject; });
+    const disconnect = () => rejectWait(requestError(499, 'request_cancelled', 'The setup client disconnected.'));
+    const deadline = setTimeout(() => rejectWait(requestError(504, 'setup_scan_timeout', 'The library is still scanning. Check scan status and retry setup completion.')), 30_000);
+    res.once('close', disconnect);
+    if (res.destroyed) disconnect();
+    try {
+      return await Promise.race([interrupted, (async () => {
+        while (!stopped) {
+          await new Promise((resolve) => { pollTimer = setTimeout(resolve, 250); });
+          if (stopped) return;
+          const current = await service.getScanStatus(principal);
+          if (current?.id !== scan.id || current.state !== 'scanning') {
+            if (current?.state === 'failed' || current?.state === 'interrupted') {
+              throw requestError(500, 'setup_scan_failed', 'The library scan did not finish. Check the saved folders and retry.');
+            }
+            return current;
+          }
         }
-        return current;
-      }
+      })()]);
+    } finally {
+      stopped = true;
+      clearTimeout(deadline);
+      clearTimeout(pollTimer);
+      res.off('close', disconnect);
     }
   }
 
@@ -998,7 +1020,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       }
       if (resource === 'setup' && segments[1] === 'libraries' && segments.length === 2 && req.method === 'GET') {
         requireSetupService();
-        const principal = await requirePrincipal(req, 'library.read');
+        const principal = await requirePrincipal(req, 'library.manage');
         writeData(res, 200, { roots: await service.listLibraryRoots(principal) });
         return true;
       }
@@ -1148,7 +1170,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           }))
           : Promise.resolve();
         const [completedScan] = await Promise.all([
-          waitForSetupScan(scan, principal),
+          waitForSetupScan(scan, principal, res),
           desktopCompletion,
         ]);
         setup.complete({ scanStarted: Boolean(scan) });
@@ -1249,6 +1271,25 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         await mediaService.revokeDevice?.(deviceId, 'device_revoked');
         remotePolicy.audit('device.revoke', 'revoked', req.__loomRemoteContext, principal, { deviceId });
         writeData(res, 200, revoked);
+        return true;
+      }
+      if (resource === 'library' && segments[1] === 'catalog' && segments.length === 2 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'library.read');
+        // Reauthorize before evaluating conditional requests, including after
+        // profile switches or device revocation.
+        const catalog = publicCatalog(await profileVisibleItems(principal, req), publicLibraryItem);
+        const mediaId = url.searchParams.get('mediaId');
+        const headers = { ETag: catalog.etag, 'Cache-Control': 'private, no-cache', Vary: 'Authorization, Cookie' };
+        if (mediaId) {
+          const item = catalog.items.find((entry) => entry.id === mediaId);
+          if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
+          writeData(res, 200, { revision: catalog.revision, items: [item, ...catalog.items.filter((entry) => entry.seriesId === mediaId)] }, headers);
+        } else if (req.headers['if-none-match']?.split(',').some((tag) => tag.trim().replace(/^W\//, '') === catalog.etag)) {
+          res.writeHead(304, { ...headers, [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+          res.end();
+        } else {
+          writeData(res, 200, { revision: catalog.revision, items: catalog.items }, headers);
+        }
         return true;
       }
       if (resource === 'library' && segments.length === 1 && req.method === 'GET') {
@@ -1738,11 +1779,14 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       writeError(res, 404, 'not_found', 'The requested API resource does not exist.');
       return true;
     } catch (error) {
+      if (res.destroyed) return true;
       const { status, code } = canonicalPublicError(error);
       if (resource === 'auth' || resource === 'pairing' || resource === 'devices') {
         remotePolicy.audit(`api.${resource}`, 'failed', req.__loomRemoteContext, null, { code, status });
       }
-      const message = status >= 500 ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.';
+      const message = error?.code === 'setup_scan_timeout'
+        ? 'The library is still scanning. Check scan status and retry setup completion.'
+        : status >= 500 ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.';
       const retryAfterSeconds = Number.isFinite(error?.retryAfter)
         ? Math.max(1, Math.ceil(error.retryAfter))
         : undefined;

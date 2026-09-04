@@ -361,12 +361,6 @@ export async function extractSeasonsAsync(
   return seasons.sort((left, right) => left.number - right.number);
 }
 
-export function createLibraryScanFiles(probe: MediaFileProbe) {
-  return {
-    extractSeasons: (folderPath: string, folderName: string) => extractSeasons(folderPath, folderName, probe),
-    scanEpisodeFiles: (folderPath: string) => scanEpisodeFiles(folderPath, probe),
-  };
-}
 
 export function createLibraryScanFilesAsync(probe: AsyncMediaFileProbe) {
   const boundedProbe = getBoundedLibraryProbe(probe);

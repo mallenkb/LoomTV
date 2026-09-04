@@ -35,6 +35,8 @@ The desktop and headless versions use the same server, API, accounts, and databa
 
 Some internal package names still use `loom-media-server`. The installed product, application name, and release identity are LoomTV.
 
+See the [platform capability matrix and verification notes](docs/platform-capabilities.md) for client differences and checks that still need device verification.
+
 ## Install a release
 
 Download a build from [GitHub Releases](https://github.com/mallenkb/LoomTV/releases). Choose the installer or archive for your operating system.
