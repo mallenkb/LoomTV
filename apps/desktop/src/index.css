@@ -2904,6 +2904,15 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   outline-offset: 2px;
 }
 
+/* Player buttons retain keyboard focus without drawing focus outlines or
+   utility rings. Preserve their ordinary shadows and selected-state styling. */
+.loom-player-root :is(button, [role="button"]):is(:focus, :focus-visible) {
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-inset-ring-shadow: 0 0 #0000 !important;
+}
+
 /* Use a real outline so form focus survives forced-colors mode and cannot be
    lost when a low-contrast shadow is suppressed. Search composites opt their
    inner input out only when the containing control draws this outline. */

@@ -44,7 +44,8 @@ function PauseOverlay({
           transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
         >
           <motion.div
-            className="absolute inset-0 bg-black/65"
+            className="absolute inset-0"
+            style={{ background: 'linear-gradient(to bottom, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.3) 40%, rgba(0, 0, 0, 0.65) 75%, rgba(0, 0, 0, 0.65) 100%)' }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
