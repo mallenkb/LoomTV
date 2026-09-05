@@ -5,6 +5,7 @@ import { windowChromeOptions } from './windowChrome';
 import { pathToFileURL } from 'node:url';
 import { isExpectedAppUrl } from './trustedIpcSender';
 import { installSettingsShortcut } from './openSettings';
+import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 
 const MAIN_WINDOW_DEV_SERVER_URL = (() => {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
@@ -138,6 +139,7 @@ export function createWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+  recordPlaybackDiagnostic('desktop.window.created');
   installSettingsShortcut(mainWindow);
   const expectedAppUrl = expectedRendererAppUrl();
   mainWindowIpcIdentity = Object.freeze({
@@ -150,8 +152,13 @@ export function createWindow(): void {
   // path, but also reveal on the first completed document load and via a short
   // timeout so the app cannot remain as an invisible process with a live
   // renderer.
+  let revealed = false;
   const revealWindow = (): void => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!revealed) {
+      revealed = true;
+      recordPlaybackDiagnostic('desktop.window.revealed');
+    }
     presentMainWindow(mainWindow);
   };
 

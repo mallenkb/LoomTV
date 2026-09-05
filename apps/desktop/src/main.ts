@@ -13,6 +13,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
+import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
 
 import {
   LOCAL_ACCESS_HEADER,
@@ -2250,6 +2251,7 @@ async function startBackgroundServices(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  recordPlaybackDiagnostic('desktop.ready');
   applyAppIcon();
   prepareDesktopProfileStartup();
 
@@ -2286,11 +2288,13 @@ app.whenReady().then(async () => {
   // renderer builds its artwork and stream URLs from the bound port. It is just
   // a listen() call, so everything genuinely slow is deferred below instead.
   await startMediaServer(mediaServerDeps);
+  recordPlaybackDiagnostic('desktop.media-server.ready');
   const unifiedServerState = await startUnifiedDesktopServer(unifiedDesktopSetupHooks);
   if (unifiedServerState.enabled && !unifiedServerState.ready) {
     console.error('[unified desktop] Canonical server startup failed:', unifiedServerState.error);
   }
   presentPrimaryWindow();
+  recordPlaybackDiagnostic('desktop.window.requested');
 
   void startBackgroundServices().catch((error) => {
     console.error('LoomTV background startup failed:', error);

@@ -2646,7 +2646,6 @@ export default function VideoPlayer({
     if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const normalizeRatio = (value: string) => value.replace(/\s*\/\s*/, ':');
     const engine = playbackEngineRef.current;
-    if (engine.kind === 'libvlc' && aspectMode === 'default') return;
     void engine.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode)).catch((error) => {
       setErrorMessage(error instanceof Error ? error.message : 'The video aspect ratio could not be changed.');
     });
@@ -3362,10 +3361,11 @@ export default function VideoPlayer({
     const isPlaybackSpace = (event: KeyboardEvent) => (
       (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar')
       && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing
+      && !isEditableShortcutTarget(event.target)
     );
     const onKey = (e: KeyboardEvent) => {
-      // Space belongs to playback while this player is mounted, regardless of
-      // focus. Capture it before a panel, slider, or button handles the gesture.
+      // Outside text entry, capture Space before a panel, slider, or button
+      // handles the gesture.
       if (isPlaybackSpace(e)) {
         e.preventDefault();
         e.stopImmediatePropagation();

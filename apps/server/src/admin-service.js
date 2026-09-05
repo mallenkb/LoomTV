@@ -1696,16 +1696,24 @@ export function createHeadlessAdminService(options) {
       return scanner.stop();
     },
 
+    catalogRevision() { return stateStore?.catalogRevision?.() ?? null; },
+
     async listLibraryItems(principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
       const items = await scanner.listItems();
-      const episodeSourcesForSeries = (seriesId) => items
-        .filter((entry) => entry.kind === 'episode' && entry.seriesId === seriesId)
+      const episodesBySeries = new Map();
+      for (const entry of items) {
+        if (entry.kind !== 'episode' || !entry.seriesId) continue;
+        const episodes = episodesBySeries.get(entry.seriesId) || [];
+        episodes.push(entry);
+        episodesBySeries.set(entry.seriesId, episodes);
+      }
+      const episodeSourcesForSeries = (seriesId) => (episodesBySeries.get(seriesId) || [])
         .flatMap((entry) => stateStore?.listMediaSources?.(entry.id)
           || [{ id: entry.sourceId || `${entry.id}:primary`, rootId: entry.rootId, state: entry.available === false ? 'offline' : 'online' }]);
       return items.flatMap((item) => {
         const linkedEpisodes = item.kind === 'series'
-          ? items.filter((entry) => entry.kind === 'episode' && entry.seriesId === item.id)
+          ? episodesBySeries.get(item.id) || []
           : [];
         if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(item.id)
           && !linkedEpisodes.some((entry) => principal.invitationMediaIds.includes(entry.id))) return [];

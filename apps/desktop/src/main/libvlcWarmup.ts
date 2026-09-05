@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
+import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 
 /**
  * Keep one LibVLC instance alive for the lifetime of the desktop process.
@@ -241,18 +242,21 @@ export function warmLibVlcRuntime(): boolean {
   if (warmRuntime) return true;
   if (warmupStarted || !enabled()) return false;
   warmupStarted = true;
+  recordPlaybackDiagnostic('vlc.warmup.start');
   try {
     const koffi = require('koffi') as KoffiRuntime;
     for (const candidate of existingLibraryCandidates()) {
       const loaded = loadCandidate(koffi, candidate);
       if (!loaded) continue;
       warmRuntime = loaded;
+      recordPlaybackDiagnostic('vlc.warmup.ready');
       console.info(`[playback] LibVLC process instance ready (${candidate})`);
       return true;
     }
   } catch {
     // The normal availability path reports a useful failure if playback is requested.
   }
+  recordPlaybackDiagnostic('vlc.warmup.failed');
   return false;
 }
 

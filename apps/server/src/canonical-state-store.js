@@ -1079,6 +1079,8 @@ function downloadLeaseView(row, includeSecretHash = false) {
 export function createCanonicalStateStore({ dataDir }) {
   const databasePath = path.join(path.resolve(dataDir), CANONICAL_STATE_FILENAME);
   let database = null;
+  let generation = 0;
+  let heartbeatChanges = 0;
   let marker = null;
   let availability = { backup: null, report: null };
   const requireDatabase = () => {
@@ -1087,6 +1089,14 @@ export function createCanonicalStateStore({ dataDir }) {
   };
   return {
     databasePath,
+    catalogRevision() {
+      const active = requireDatabase();
+      // Own writes and commits from other connections both invalidate cached
+      // projections, including permission changes and snapshot restores.
+      const own = Number(active.prepare('SELECT total_changes() AS value').get().value) - heartbeatChanges;
+      const external = active.prepare('PRAGMA data_version').get().data_version;
+      return `${generation}:${own}:${external}`;
+    },
     async start() {
       if (database) return redactedMarker(marker, availability);
       await fs.mkdir(path.dirname(databasePath), { recursive: true });
@@ -1116,6 +1126,8 @@ export function createCanonicalStateStore({ dataDir }) {
         ensureRuntimeSchema(next);
         availability = marker.sourceFingerprint === 'fresh-install' ? { backup: null, report: null } : await evidenceAvailability(marker);
         database = next;
+        generation += 1;
+        heartbeatChanges = 0;
         return redactedMarker(marker, availability);
       } catch (error) { next.close(); throw error; }
     },
@@ -1429,8 +1441,13 @@ export function createCanonicalStateStore({ dataDir }) {
       return row?.id || null;
     },
     touchDevice(deviceId, seenAt = Date.now()) {
-      return requireDatabase().prepare(`UPDATE devices SET last_seen_at=?,updated_at=? WHERE id=? AND disabled=0 AND revoked_at IS NULL`)
-        .run(seenAt, seenAt, deviceId).changes === 1;
+      const changed = Number(requireDatabase().prepare(`UPDATE devices SET last_seen_at=?,updated_at=? WHERE id=? AND disabled=0 AND revoked_at IS NULL`)
+        .run(seenAt, seenAt, deviceId).changes);
+      // Authentication updates only these timestamps. It must not discard the
+      // catalog cache on every device request. Revocation/permission writes
+      // still advance the revision normally.
+      heartbeatChanges += changed;
+      return changed === 1;
     },
     revokeDevice(deviceId, reason = 'device_revoked', revokedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {

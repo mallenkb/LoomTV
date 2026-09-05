@@ -2904,13 +2904,17 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   outline-offset: 2px;
 }
 
-/* Player buttons retain keyboard focus without drawing focus outlines or
-   utility rings. Preserve their ordinary shadows and selected-state styling. */
-.loom-player-root :is(button, [role="button"]):is(:focus, :focus-visible) {
+/* Pointer clicks stay visually quiet; keyboard navigation retains its cue. */
+.loom-player-root :is(button, [role="button"]):focus:not(:focus-visible) {
   outline: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
   --tw-inset-ring-shadow: 0 0 #0000 !important;
+}
+
+.loom-player-root :is(button, [role="button"]):focus-visible {
+  outline: 2px solid var(--loom-focus-ring) !important;
+  outline-offset: 2px;
 }
 
 /* Use a real outline so form focus survives forced-colors mode and cannot be

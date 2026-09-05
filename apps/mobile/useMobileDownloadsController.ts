@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Connection, MobileProfile, PlayTarget } from './mobileDomain';
 import { filePathFromUrl } from './mobileLibrary';
@@ -27,35 +27,50 @@ export function useMobileDownloadsController({ activeProfile, client, connection
   connection: Connection | null;
   isServerOffline: boolean;
 }) {
-  const [downloads, setDownloads] = useState<Record<string, MobileDownload>>({});
+  const scope = JSON.stringify([connection?.hostDeviceId, activeProfile?.id]);
+  const [stored, setStored] = useState<{ scope: string; items: Record<string, MobileDownload> }>({ scope, items: {} });
+  const downloads = useMemo(() => stored.scope === scope ? stored.items : {}, [stored, scope]);
+  const generation = useRef(0);
+  const removed = useRef(new Set<string>());
+  const activeOperations = useRef(new Set<string>());
   const [downloadingMediaId, setDownloadingMediaId] = useState('');
 
   useEffect(() => {
+    generation.current += 1;
+    removed.current.clear();
+    setStored({ scope, items: {} });
+    setDownloadingMediaId('');
     let cancelled = false;
     const hostDeviceId = connection?.hostDeviceId;
     const profileId = activeProfile?.id;
     if (!hostDeviceId || !profileId) {
-      setDownloads({});
       return undefined;
     }
     void listMobileDownloads(hostDeviceId, profileId)
       .then((items) => {
-        if (!cancelled) setDownloads(Object.fromEntries(items.map((download) => [download.mediaId, download])));
+        if (!cancelled) setStored((current) => current.scope === scope
+          ? { scope, items: { ...Object.fromEntries(items.filter((download) => !removed.current.has(download.mediaId)).map((download) => [download.mediaId, download])), ...current.items } }
+          : current);
       })
       .catch((error) => {
         if (!cancelled) reportNonFatal('downloads.list', error);
       });
-    return () => { cancelled = true; };
-  }, [activeProfile?.id, connection?.hostDeviceId]);
+    return () => { cancelled = true; generation.current += 1; };
+  }, [activeProfile?.id, connection?.hostDeviceId, scope]);
 
   const targetWithOfflineDownload = useCallback((target: PlayTarget): PlayTarget | null => {
     const download = downloads[mediaIdForPlayTarget(target)];
-    return download ? { ...target, streamPath: download.uri, offlineUri: download.uri, transcode: false } : null;
-  }, [downloads]);
+    return download && download.hostDeviceId === connection?.hostDeviceId && download.profileId === activeProfile?.id
+      ? { ...target, streamPath: download.uri, offlineUri: download.uri, transcode: false } : null;
+  }, [downloads, connection?.hostDeviceId, activeProfile?.id]);
 
   const downloadPlayTarget = useCallback(async (target: PlayTarget): Promise<void> => {
     if (!connection || !activeProfile || isServerOffline) throw new Error('Reconnect to the LoomTV server before downloading.');
     const mediaId = mediaIdForPlayTarget(target);
+    const operation = JSON.stringify([scope, mediaId]);
+    if (activeOperations.current.has(operation)) return;
+    activeOperations.current.add(operation);
+    const startedGeneration = generation.current;
     setDownloadingMediaId(mediaId);
     let capability: MobileDownloadCapability | null = null;
     try {
@@ -72,26 +87,33 @@ export function useMobileDownloadsController({ activeProfile, client, connection
         capability,
         contentUrl: secureLanUrl(new URL(capability.contentUrl, connection.baseUrl).toString()),
       });
-      setDownloads((current) => ({ ...current, [mediaId]: saved }));
+      if (generation.current === startedGeneration) setStored((current) => current.scope === scope
+        ? { scope, items: { ...current.items, [mediaId]: saved } } : current);
     } finally {
       if (capability?.id) {
         await client.revokeOfflineDownload(connection.baseUrl, connection.deviceToken, capability.id).catch(() => undefined);
       }
-      setDownloadingMediaId('');
+      activeOperations.current.delete(operation);
+      if (generation.current === startedGeneration) setDownloadingMediaId((current) => current === mediaId ? '' : current);
     }
-  }, [activeProfile, client, connection, isServerOffline]);
+  }, [activeProfile, client, connection, isServerOffline, scope]);
 
   const removeDownloadedTarget = useCallback(async (target: PlayTarget): Promise<void> => {
     const mediaId = mediaIdForPlayTarget(target);
     const download = downloads[mediaId];
     if (!download) return;
+    const startedGeneration = generation.current;
     await removeMobileDownload(download);
-    setDownloads((current) => {
-      const next = { ...current };
+    if (generation.current !== startedGeneration) return;
+    removed.current.add(mediaId);
+    setStored((current) => {
+      if (current.scope !== scope) return current;
+      if (current.items[mediaId]?.uri !== download.uri) return current;
+      const next = { ...current.items };
       delete next[mediaId];
-      return next;
+      return { scope, items: next };
     });
-  }, [downloads]);
+  }, [downloads, scope]);
 
   return { downloads, downloadingMediaId, downloadPlayTarget, removeDownloadedTarget, targetWithOfflineDownload };
 }

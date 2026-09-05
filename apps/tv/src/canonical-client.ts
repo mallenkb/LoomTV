@@ -113,20 +113,22 @@ export class CanonicalTvClient {
 
   async library() {
     const [library, series] = await Promise.all([
-      payload<{ items: LibraryItem[] }>(await fetch(this.endpoint('/api/v1/library'), { headers: this.headers() })),
-      payload<{ series: Array<LibraryItem & { seasons: Array<{ episodes: LibraryItem[] }> }> }>(
-        await fetch(this.endpoint('/api/v1/library/series'), { headers: this.headers() }),
-      ),
+      fetch(this.endpoint('/api/v1/library'), { headers: this.headers() })
+        .then((response) => payload<{ items: LibraryItem[] }>(response)),
+      fetch(this.endpoint('/api/v1/library/series'), { headers: this.headers() })
+        .then((response) => payload<{ series: Array<LibraryItem & { seasons: Array<{ episodes: LibraryItem[] }> }> }>(response)),
     ]);
     const seriesItems = series.series.map((entry) => ({
       ...entry,
       id: entry.id || `series:${encodeURIComponent(entry.title.toLowerCase())}`,
       kind: 'series' as const,
-      available: true,
+      available: entry.seasons.some((season) => season.episodes.some((episode) => episode.available)),
       episodes: entry.seasons.flatMap((season) => season.episodes),
     }));
     const episodeIds = new Set(seriesItems.flatMap((entry) => entry.episodes.map((episode) => episode.id)));
-    return { items: [...library.items.filter((item) => item.kind !== 'episode' || !episodeIds.has(item.id)), ...seriesItems] };
+    const seriesIds = new Set(seriesItems.map((entry) => entry.id));
+    return { items: [...library.items.filter((item) => !seriesIds.has(item.id)
+      && (item.kind !== 'episode' || !episodeIds.has(item.id))), ...seriesItems] };
   }
 
   async progress(mediaId: string) {
@@ -169,7 +171,7 @@ export class CanonicalTvClient {
       directExpiresAt?: number;
       transcodeUrl: string | null;
       plan: { mode: 'direct' | 'remux' | 'transcode' };
-      probe: { tracks: Array<{ id: string; kind: string; language?: string; title?: string }> };
+      probe: { durationSeconds?: number; tracks: Array<{ id: string; kind: string; language?: string; title?: string }> };
     }>(await fetch(this.endpoint(`/api/v1/media/${encodeURIComponent(mediaId)}/playback-plan`), {
       method: 'POST',
       headers: this.headers(true),

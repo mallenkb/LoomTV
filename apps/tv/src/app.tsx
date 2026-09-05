@@ -50,6 +50,7 @@ type ActivePlayback = {
   sessionId?: string;
   expiresAt?: number;
   startSeconds: number;
+  durationSeconds?: number;
 };
 type PlaybackTrack = { id: string; kind: string; language?: string; title?: string };
 
@@ -122,45 +123,54 @@ function Player({ playback, client, onClose, onError }: {
   onError: (message: string) => void;
 }) {
   const [expiresAt, setExpiresAt] = useState(playback.expiresAt || 0);
+  const sourceOffset = playback.action === 'hls' ? playback.startSeconds : 0;
   const player = useVideoPlayer(playback.url, (instance) => {
-    instance.currentTime = playback.startSeconds;
+    instance.currentTime = playback.action === 'hls' ? 0 : playback.startSeconds;
     instance.timeUpdateEventInterval = 5;
     instance.play();
   });
 
   useEffect(() => {
-    let lastSaved = playback.startSeconds;
+    let lastSaved = playback.startSeconds - sourceOffset;
     const update = player.addListener('timeUpdate', ({ currentTime }) => {
       if (Math.abs(currentTime - lastSaved) < 15) return;
       lastSaved = currentTime;
-      void client.saveProgress(playback.item.id, currentTime, player.duration, false).catch(() => undefined);
+      const duration = playback.durationSeconds || (Number.isFinite(player.duration) ? sourceOffset + player.duration : 0);
+      void client.saveProgress(playback.item.id, sourceOffset + currentTime, duration, false).catch(() => undefined);
     });
     const ended = player.addListener('playToEnd', () => {
-      void client.saveProgress(playback.item.id, player.duration, player.duration, true).catch(() => undefined);
+      const duration = playback.durationSeconds || sourceOffset + player.currentTime;
+      void client.saveProgress(playback.item.id, duration, duration, true).catch(() => undefined);
     });
     return () => { update.remove(); ended.remove(); };
-  }, [client, playback.item.id, playback.startSeconds, player]);
+  }, [client, playback.item.id, playback.startSeconds, playback.durationSeconds, sourceOffset, player]);
 
   useEffect(() => {
     if (!expiresAt || !playback.sessionId) return undefined;
+    let cancelled = false;
     const delay = Math.max(1_000, expiresAt - Date.now() - 60_000);
     const timer = setTimeout(() => {
-      const position = player.currentTime;
       void client.renewPlayback(playback.item.id, playback.action, playback.sessionId as string).then(async (renewed) => {
+        if (cancelled) return;
+        const position = player.currentTime;
+        const wasPlaying = player.playing;
         await player.replaceAsync(renewed.url);
+        if (cancelled) return;
         player.currentTime = position;
-        player.play();
+        if (wasPlaying) player.play();
+        else player.pause();
         setExpiresAt(renewed.expiresAt);
-      }).catch((error) => onError(error instanceof Error ? error.message : 'Playback authorization expired.'));
+      }).catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : 'Playback authorization expired.'); });
     }, delay);
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [client, expiresAt, onError, playback.action, playback.item.id, playback.sessionId, player]);
 
   return (
     <View style={styles.playerScreen}>
       <VideoView accessibilityLabel={`Playing ${playback.item.title}`} contentFit="contain" nativeControls player={player} style={styles.video} />
       <View style={styles.playerClose}><TvButton label="Back to details" onPress={() => {
-        void client.saveProgress(playback.item.id, player.currentTime, player.duration, false).catch(() => undefined);
+        const duration = playback.durationSeconds || (Number.isFinite(player.duration) ? sourceOffset + player.duration : 0);
+        void client.saveProgress(playback.item.id, sourceOffset + player.currentTime, duration, false).catch(() => undefined);
         onClose();
       }} preferred /></View>
     </View>
@@ -458,7 +468,7 @@ function TvApp() {
       if (plan.directUrl) {
         setPlayback({
           item, url: client.absoluteUrl(plan.directUrl), action: 'direct',
-          sessionId: plan.directSessionId, expiresAt: plan.directExpiresAt, startSeconds,
+          sessionId: plan.directSessionId, expiresAt: plan.directExpiresAt, startSeconds, durationSeconds: plan.probe.durationSeconds,
         });
         setScreen('player');
         return;
@@ -467,7 +477,7 @@ function TvApp() {
       const started = await client.startTranscode(plan.transcodeUrl);
       setPlayback({
         item, url: started.playlistUrl, action: 'hls', sessionId: started.sessionId,
-        expiresAt: started.expiresAt, startSeconds,
+        expiresAt: started.expiresAt, startSeconds, durationSeconds: plan.probe.durationSeconds,
       });
       setScreen('player');
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : 'Playback could not start.'); }
@@ -508,13 +518,14 @@ function TvApp() {
   const showBrowseNavigation = Boolean(client && (screen === 'library' || screen === 'my-list' || screen === 'detail'));
 
   if (screen === 'player' && playback && client) return <Player
+    key={playback.sessionId || playback.url}
     client={client}
     onClose={() => {
       void client.stopPlayback(playback.item.id, playback.sessionId).catch(() => undefined);
       setPlayback(null);
       setScreen('detail');
     }}
-    onError={(message) => setError(message)}
+    onError={setError}
     playback={playback}
   />;
 

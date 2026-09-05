@@ -15,6 +15,7 @@ import {
 } from './libvlcPlatform.ts';
 import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
+import { playbackDiagnostics, recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 import {
   captureLibVlcTrackSelection,
   restoreLibVlcTrackSelection,
@@ -1555,6 +1556,10 @@ class LibVlcPlaybackSession {
   }
 
   private emit(patch: Partial<LibVlcPlaybackState>): void {
+    if (patch.status && patch.status !== this.state.status) {
+      recordPlaybackDiagnostic('vlc.status', patch.status);
+      if (patch.status === 'error') console.error('[playback] Recent state transitions', playbackDiagnostics());
+    }
     this.state = { ...this.state, ...patch };
     syncNativePlaybackDisplaySleep(this.id, this.state);
     if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', this.state);
@@ -1708,6 +1713,7 @@ class LibVlcPlaybackSession {
 
   command(command: LibVlcCommand): boolean {
     if (this.stopped) return false;
+    recordPlaybackDiagnostic('vlc.command', command.type);
     try {
       const api = this.runtime.api;
       switch (command.type) {

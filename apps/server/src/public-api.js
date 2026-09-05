@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { hasPermission } from './auth-policy.js';
@@ -652,6 +652,34 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     return active;
   }
 
+  const catalogCache = new Map();
+  async function profileCatalog(principal, req) {
+    // Always authenticate and unlock the active profile before looking up a
+    // projection. Never reuse data across changed identities/restrictions.
+    const context = await playbackProfileContext(principal, req);
+    const revision = service.catalogRevision?.();
+    const key = revision == null ? null : createHash('sha256')
+      .update(JSON.stringify([revision, principal, context])).digest('hex');
+    if (key && catalogCache.has(key)) return catalogCache.get(key);
+    const catalog = publicCatalog(await profileVisibleItems(principal, req), publicLibraryItem);
+    const byId = new Map(catalog.items.map((item) => [item.id, item]));
+    const episodes = new Map();
+    for (const item of catalog.items) {
+      if (!item.seriesId) continue;
+      const children = episodes.get(item.seriesId) || [];
+      children.push(item);
+      episodes.set(item.seriesId, children);
+    }
+    const result = { ...catalog, byId, episodes };
+    const currentContext = await playbackProfileContext(principal, req);
+    if (key && catalog.items.length <= 25_000 && revision === service.catalogRevision?.()
+      && JSON.stringify(context) === JSON.stringify(currentContext)) {
+      catalogCache.set(key, result);
+      while (catalogCache.size > 4) catalogCache.delete(catalogCache.keys().next().value);
+    }
+    return result;
+  }
+
   async function profileVisibleItems(principal, req) {
     await playbackProfileContext(principal, req);
     const visible = [];
@@ -1277,13 +1305,13 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const principal = await requirePrincipal(req, 'library.read');
         // Reauthorize before evaluating conditional requests, including after
         // profile switches or device revocation.
-        const catalog = publicCatalog(await profileVisibleItems(principal, req), publicLibraryItem);
+        const catalog = await profileCatalog(principal, req);
         const mediaId = url.searchParams.get('mediaId');
         const headers = { ETag: catalog.etag, 'Cache-Control': 'private, no-cache', Vary: 'Authorization, Cookie' };
         if (mediaId) {
-          const item = catalog.items.find((entry) => entry.id === mediaId);
+          const item = catalog.byId.get(mediaId);
           if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
-          writeData(res, 200, { revision: catalog.revision, items: [item, ...catalog.items.filter((entry) => entry.seriesId === mediaId)] }, headers);
+          writeData(res, 200, { revision: catalog.revision, items: [item, ...(catalog.episodes.get(mediaId) || [])] }, headers);
         } else if (req.headers['if-none-match']?.split(',').some((tag) => tag.trim().replace(/^W\//, '') === catalog.etag)) {
           res.writeHead(304, { ...headers, [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
           res.end();
