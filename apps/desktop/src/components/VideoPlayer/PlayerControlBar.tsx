@@ -223,7 +223,7 @@ export default function PlayerControlBar({
           aria-valuemax={isLiveStream ? 100 : duration || 0}
           aria-valuenow={isLiveStream ? 100 : Math.min(position, duration || 0)}
           aria-valuetext={isLiveStream ? 'Live' : seekAccessibilityText(position, duration)}
-          aria-keyshortcuts={isLiveStream ? undefined : 'ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End'}
+          aria-keyshortcuts={isLiveStream ? undefined : 'ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight PageUp PageDown Home End'}
           onPointerDown={isLiveStream ? undefined : handleProgressPointerDown}
           onKeyDown={isLiveStream ? undefined : handleProgressKeyDown}
           className={`group relative h-6 min-w-0 flex-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isLiveStream ? 'cursor-default' : 'cursor-pointer'}`}
@@ -305,7 +305,7 @@ export default function PlayerControlBar({
             type="range"
             min={0}
             max={1}
-            step={0.01}
+            step={0.05}
             value={visibleVolume}
             onChange={handleVolumeChange}
             onPointerDown={(event) => event.stopPropagation()}

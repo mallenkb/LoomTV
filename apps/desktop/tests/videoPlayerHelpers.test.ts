@@ -38,7 +38,7 @@ class MockElement {
   }
 }
 
-class MockInputElement extends MockElement {}
+class MockInputElement extends MockElement { type = 'text'; }
 class MockTextAreaElement extends MockElement {}
 class MockSelectElement extends MockElement {}
 
@@ -66,10 +66,18 @@ globalThis.localStorage = {
   },
 } as Storage;
 
-test('editable shortcut targets include inputs textareas selects and contenteditable nodes', () => {
+test('only text entry keeps keys from universal player shortcuts', () => {
   assert.equal(isEditableShortcutTarget(new MockInputElement() as unknown as EventTarget), true);
   assert.equal(isEditableShortcutTarget(new MockTextAreaElement() as unknown as EventTarget), true);
-  assert.equal(isEditableShortcutTarget(new MockSelectElement() as unknown as EventTarget), true);
+  assert.equal(isEditableShortcutTarget(new MockSelectElement() as unknown as EventTarget), false);
+  for (const type of ['range', 'checkbox', 'radio', 'button']) {
+    const control = new MockInputElement();
+    control.type = type;
+    assert.equal(isEditableShortcutTarget(control as unknown as EventTarget), false);
+  }
+  const numericInput = new MockInputElement();
+  numericInput.type = 'number';
+  assert.equal(isEditableShortcutTarget(numericInput as unknown as EventTarget), true);
 
   const editable = new MockElement();
   editable.isContentEditable = true;

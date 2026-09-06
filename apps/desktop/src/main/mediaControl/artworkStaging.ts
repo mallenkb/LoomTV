@@ -53,9 +53,35 @@ export function createArtworkStaging(options: ArtworkStagingOptions): ArtworkSta
   const { cacheDirectory, logWarning } = options;
   const fetchImage = options.fetchImage ?? (async (url: string) => {
     const response = await fetch(url);
-    if (!response.ok) return null;
-    const buffer = await response.arrayBuffer();
-    return buffer.byteLength > MAX_ARTWORK_BYTES ? null : buffer;
+    if (!response.ok || Number(response.headers.get('content-length')) > MAX_ARTWORK_BYTES) {
+      await response.body?.cancel();
+      return null;
+    }
+    if (!response.body) return null;
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > MAX_ARTWORK_BYTES) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+      const image = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        image.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return image.buffer;
+    } finally {
+      reader.releaseLock();
+    }
   });
 
   const staged = new Map<string, string>();

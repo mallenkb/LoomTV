@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0a0a0a">
-  <title>LoomTV · Server control</title>
+  <title>Loom admin</title>
   <style>
     :root {
       color-scheme: dark;
@@ -67,6 +67,7 @@
       font-synthesis: none;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html, body { height: 100%; overflow: hidden; }
     body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-size: var(--fs-body); line-height: 1.5; -webkit-font-smoothing: antialiased; }
     h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
@@ -79,7 +80,6 @@
     .brand { display: grid; gap: 6px; padding: 4px 10px 16px; border-bottom: 1px solid var(--line); }
     .brand-logo { display: block; width: 104px; height: 29px; }
     .brand-caption { margin: 0; color: var(--faint); font-size: var(--fs-tiny); }
-    .eyebrow { margin: 0; color: var(--faint); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
     .nav { display: grid; gap: 2px; }
     .nav button { display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 10px; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: var(--fs-body); font-weight: 500; text-align: left; cursor: pointer; transition: background .15s ease, color .15s ease; }
     .nav button:hover { background: var(--loom-sidebar-active-bg); color: var(--loom-active-text); }
@@ -121,6 +121,7 @@
     .button.subtle.danger:hover { background: rgba(239,127,127,.14); color: var(--negative); }
     .button.danger:hover { background: rgba(239,127,127,.20); color: var(--negative); }
     .button:disabled { opacity: .45; cursor: not-allowed; }
+    .page { display: none; max-width: 1180px; margin: 0 auto; }
     .page.active { display: block; }
 
     /* Panels are the desktop Card: flat surface, hairline border, 12px radius. */
@@ -146,8 +147,9 @@
     .metric-value { font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; }
     .metric-note { color: var(--faint); font-size: var(--fs-tiny); }
     .status-badge { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
-    .section-grid { display: grid; align-items: start; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 12px; margin-top: 12px; }
-    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 20px 0; }
+    .section-grid { display: grid; align-items: start; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 20px; margin-top: 20px; }
+    .section-grid > .panel:first-child { grid-row: span 2; }
+    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 20px 20px 0; }
     .panel-head h2 { margin: 0; font-size: 15px; }
     .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-small); }
     .panel-body { padding: 12px 20px 20px; }
@@ -161,7 +163,7 @@
     .pill.online, .pill.pass, .pill.healthy { background: rgba(103,211,145,.12); color: var(--positive); }
     .pill.warn, .pill.degraded, .pill.scanning { background: rgba(248,193,92,.13); color: var(--warning); }
     .pill.offline, .pill.fail, .pill.failed { background: rgba(239,127,127,.13); color: var(--negative); }
-    .callout { display: grid; gap: 10px; margin-top: 10px; }
+    .callout { display: grid; gap: 10px; margin-top: 0; }
     .callout h3 { margin: 0; font-size: 15px; }
     .callout p { margin: 0; color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
     .callout .button { justify-self: start; }
@@ -218,7 +220,8 @@
     .backups-table col.c-sum { width: 150px; }
     th, td { padding: 12px 20px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
     tbody tr:last-child td { border-bottom: 0; }
-    th { color: var(--faint); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+    th { color: var(--muted); font-size: var(--fs-tiny); font-weight: 600; }
+    .status-badge, .pill { text-transform: none; letter-spacing: normal; }
     td { color: var(--muted); font-size: var(--fs-small); }
     td strong { display: block; color: var(--text); font-size: var(--fs-small); font-weight: 500; }
     td small { display: block; margin-top: 2px; color: var(--faint); font-size: var(--fs-micro); }
@@ -367,6 +370,7 @@
           <span class="topbar-divider" aria-hidden="true"></span>
           <button class="button subtle icon-only" id="refreshButton" type="button" title="Refresh data" aria-label="Refresh data"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg></button>
           <button class="button" id="authButton" type="button">Unlock admin</button>
+          <button class="button subtle" id="changePasswordButton" type="button" hidden>Change password</button>
         </div>
       </header>
       <div class="notice" id="errorNotice" role="alert"></div>
@@ -376,7 +380,7 @@
           <div class="status-head">
             <div class="status-copy">
               <div class="status-badge"><span class="dot" id="healthDot"></span><span id="healthBadge">Checking health</span></div>
-              <h2 id="healthHeadline">Your library is waking up.</h2>
+              <h2 id="healthHeadline">Checking server status</h2>
             </div>
             <div class="fact-list" id="healthFacts"><span class="fact"><span class="fact-label">Status</span><span class="fact-value">Waiting for the server</span></span></div>
           </div>
@@ -388,15 +392,13 @@
         </article>
         <div class="section-grid">
           <article class="panel">
-            <div class="panel-head"><div><h2>Readiness checks</h2><p>What keeps this host dependable overnight.</p></div><div class="toolbar-actions"><button type="button" class="button" id="diagnosticsButton">Run diagnostics</button><button type="button" class="button" data-go="library">Manage roots</button></div></div>
+            <div class="panel-head"><div><h2>Server checks</h2><p>Storage, media access, and playback support.</p></div><div class="toolbar-actions"><button type="button" class="button" id="diagnosticsButton">Run diagnostics</button><button type="button" class="button" data-go="library">Manage folders</button></div></div>
             <div class="panel-body"><ul class="check-list" id="checkList"><li><div class="check-copy"><strong>Loading checks</strong><span>Waiting for the server snapshot.</span></div><span class="pill">Pending</span></li></ul></div>
           </article>
           <article class="panel pad">
-            <p class="eyebrow">Next useful action</p>
             <div class="callout" id="nextAction"><h3>Connect a library root</h3><p>Add the mounted folder where your films, shows, or anime live. Existing records stay safe when a NAS share is unavailable.</p><button type="button" class="button primary" data-go="library">Open library setup</button></div>
           </article>
           <article class="panel pad">
-            <p class="eyebrow">Browser security</p>
             <div class="callout" style="margin-top:12px" id="certificateAction">
               <h3>Remove the browser warning</h3>
               <p>Download LoomTV's certificate, then trust it on this device.</p>
@@ -434,6 +436,19 @@
     </main>
   </div>
 
+  <div class="modal-backdrop" id="passwordModal" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+    <div class="modal">
+      <h2 id="passwordTitle">Change admin password</h2>
+      <p>This changes your web admin password only. Your desktop profile is unchanged.</p>
+      <form id="passwordForm" class="form-grid">
+        <div class="field full"><label for="currentAdminPassword">Current password</label><input id="currentAdminPassword" type="password" autocomplete="current-password" required maxlength="256"></div>
+        <div class="field full"><label for="newAdminPassword">New password</label><input id="newAdminPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="256" aria-describedby="newPasswordHint"><p class="field-hint" id="newPasswordHint">Use at least 8 characters.</p></div>
+        <div class="field full"><label for="confirmAdminPassword">Confirm new password</label><input id="confirmAdminPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="256"></div>
+        <p class="auth-error" id="passwordError" role="alert"></p>
+        <div class="form-actions"><button class="button subtle" id="cancelPasswordButton" type="button">Cancel</button><button class="button primary" id="savePasswordButton" type="submit">Save password</button></div>
+      </form>
+    </div>
+  </div>
   <div class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
     <div class="modal">
       <h2 id="authTitle">Unlock server control</h2>
@@ -447,7 +462,7 @@
           <div class="field full">
             <label for="ownerPassword">Password</label>
             <div class="password-control">
-              <input id="ownerPassword" type="password" autocomplete="current-password" required minlength="8" placeholder="Enter your password" aria-describedby="passwordHint">
+              <input id="ownerPassword" type="password" autocomplete="current-password" required minlength="1" maxlength="256" placeholder="Enter your password" aria-describedby="passwordHint">
               <button class="password-toggle" id="toggleOwnerPassword" type="button" aria-label="Show password" title="Show password" aria-pressed="false">
                 <svg class="icon password-icon" viewBox="0 0 24 24" aria-hidden="true"><use id="passwordIconUse" href="/admin/lucide-icons.svg#eye"></use></svg>
               </button>
@@ -479,6 +494,8 @@
       const state = { token: sessionStorage.getItem('loomtv.adminToken') || '', deviceId: storedDeviceId || generatedDeviceId, bootstrap: null, page: 'overview', userEditing: null, logOffset: 0, logPage: null };
       if (!storedDeviceId) localStorage.setItem('loomtv.deviceId', state.deviceId);
       const rootPickerState = { path: '', parentPath: null };
+      const pendingReads = new Map();
+      let logRequestId = 0;
       const LIBRARY_TYPES = [
         { kind: 'movies', title: 'Movies', description: 'Folders added here always scan into Movies.' },
         { kind: 'tvShows', title: 'TV Shows', description: 'Folders added here always scan into TV Shows.' },
@@ -505,20 +522,40 @@
       const setToken = (token) => { state.token = token || ''; if (state.token) sessionStorage.setItem('loomtv.adminToken', state.token); else sessionStorage.removeItem('loomtv.adminToken'); updateAuthButton(); applyPermissionUi(state.token ? new Set(state.bootstrap?.user?.permissions || []) : new Set()); };
       const updateAuthButton = () => { const button = $('authButton'); const authenticated = Boolean(state.token); button.textContent = authenticated ? 'Sign out' : state.bootstrap?.ownerConfigured === false ? 'Set up owner' : 'Unlock admin'; button.title = authenticated ? 'Sign out and revoke this admin session' : ''; button.setAttribute('aria-label', authenticated ? 'Sign out of server control' : button.textContent); button.classList.toggle('primary', !authenticated); };
 
-      async function request(path, options = {}) {
+      function request(path, options = {}) {
+        if (options.method && options.method !== 'GET') return sendRequest(path, options);
+        const key = `${state.token}:${path}`;
+        if (pendingReads.has(key)) return pendingReads.get(key);
+        const pending = sendRequest(path, options).finally(() => {
+          if (pendingReads.get(key) === pending) pendingReads.delete(key);
+        });
+        pendingReads.set(key, pending);
+        return pending;
+      }
+      async function sendRequest(path, options = {}) {
         const { suppressAuthPrompt = false, ...fetchOptions } = options;
+        const requestToken = state.token;
         const headers = { Accept: 'application/json', 'X-Loom-Device-Id': state.deviceId, ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(state.token ? { Authorization: `Bearer ${state.token}`, 'X-Loom-Admin-Token': state.token } : {}) };
-        const response = await fetch(`${API}${path}`, { ...fetchOptions, headers: { ...headers, ...(options.headers || {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), options.method && options.method !== 'GET' ? 300_000 : 30_000);
+        let response;
         let payload = null;
-        try { payload = await response.json(); } catch (_) { /* empty response */ }
-        if (response.status === 401) {
+        try {
+          response = await fetch(`${API}${path}`, { ...fetchOptions, signal: controller.signal, headers: { ...headers, ...(options.headers || {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
+          try { payload = await response.json(); } catch (_) { /* empty response */ }
+        } catch (err) {
+          if (controller.signal.aborted) throw new Error('The server took too long to respond. Refresh to check the result before retrying an action.');
+          throw err;
+        } finally { window.clearTimeout(timer); }
+        if (state.token !== requestToken) throw new Error('Your sign-in changed. Refresh this page.');
+        if (response.status === 401 && !(path === '/session' && options.method === 'POST')) {
           const expiredToken = Boolean(state.token);
           setToken('');
           if (path === '/bootstrap' && expiredToken) return request(path, options);
           if (!suppressAuthPrompt) openAuth(false);
           throw new Error('Admin authentication is required.');
         }
-        if (!response.ok) throw new Error(payload?.message || payload?.error || `Request failed (${response.status}).`);
+        if (!response.ok) throw new Error(payload?.message || payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : '') || `Request failed (${response.status}).`);
         return payload;
       }
 
@@ -548,14 +585,10 @@
           if (payload.ownerConfigured === false) { applyPermissionUi(new Set()); return; }
           const permissions = new Set(payload.user?.permissions || []);
           const allowed = (permission) => permissions.has('*') || permissions.has(permission);
-          await Promise.all([
-            allowed('library.read') ? loadRoots() : Promise.resolve(),
-            allowed('sessions.read') ? loadSessions() : Promise.resolve(),
-            allowed('logs.read') ? loadLogs() : Promise.resolve(),
-            allowed('backup.read') ? loadBackup() : Promise.resolve(),
-            allowed('users.read') ? loadUsers() : Promise.resolve(),
-          ]);
+          if (allowed('library.read')) renderRoots(payload.library?.roots || []);
+          else $('rootGroups').textContent = 'Sign in with library access to view folders.';
           applyPermissionUi(permissions);
+          await loadPageData(state.page);
         } catch (err) { error(err.message || 'Could not reach the LoomTV server.'); }
       }
       function formatUptime(seconds) {
@@ -595,9 +628,14 @@
         $('sideDot').className = `dot ${status === 'healthy' ? 'online' : status === 'degraded' ? 'warn' : 'offline'}`;
         text('connectionText', status === 'healthy' ? 'Server online' : status === 'degraded' ? 'Server degraded' : 'Server unavailable');
         text('versionText', `LoomTV ${payload.app?.version || ''}`.trim());
-        const roots = payload.library?.roots || []; const sessions = payload.sessions || [];
-        text('rootCount', roots.length); text('rootNote', roots.length ? `${roots.filter((root) => root.state === 'online').length} available` : 'Add your first root');
-        text('sessionCount', sessions.length); text('sessionNote', sessions.length ? 'Active across your clients' : 'No active sessions');
+        const roots = payload.library?.roots || [];
+        const permissions = payload.user?.permissions || [];
+        const canRead = (permission) => permissions.includes('*') || permissions.includes(permission);
+        $('nextAction').closest('article').hidden = !canRead('library.manage') || roots.length > 0;
+        text('rootCount', canRead('library.read') ? roots.length : 'Locked');
+        text('rootNote', canRead('library.read') ? roots.length ? `${roots.filter((root) => root.state === 'online').length} available` : 'No folders configured' : 'Sign in to view folders');
+        text('sessionCount', canRead('sessions.read') ? 'Loading' : 'Locked');
+        text('sessionNote', canRead('sessions.read') ? 'Checking active playback' : 'Sign in to view playback');
         renderChecks(health, roots, payload.backup);
         renderScan(payload.library?.scan || {});
         renderBackup(payload.backup || {});
@@ -612,6 +650,8 @@
           if (button) button.hidden = !allowed(permission);
         });
         $('scanButton').hidden = !allowed('library.manage');
+        $('changePasswordButton').hidden = !state.token || !allowed('account.password');
+        $('scanSummary').closest('article').hidden = !allowed('library.read');
         $('backupButton').hidden = !allowed('backup.create');
         $('backupDestination').disabled = !allowed('backup.create');
         $('restoreButton').hidden = !allowed('backup.create');
@@ -647,6 +687,7 @@
         return root.isNetworkLike ? 'Reconnect NAS share' : 'Folder unavailable';
       }
       function renderRoots(roots) {
+        if (state.bootstrap) state.bootstrap.library = { ...state.bootstrap.library, roots };
         $('rootGroups').innerHTML = LIBRARY_TYPES.map((section) => {
           const sectionRoots = roots.filter((root) => root.kind === section.kind);
           const rows = sectionRoots.length
@@ -655,14 +696,34 @@
           return `<article class="panel folder-card"><div class="folder-card-head"><div><h3>${escapeHtml(section.title)}</h3><p>${escapeHtml(section.description)}</p></div><button class="button subtle" type="button" data-add-root-kind="${escapeHtml(section.kind)}"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-plus"></use></svg>Add</button></div><div class="folder-card-list">${rows}</div></article>`;
         }).join('');
         $('rootCount').textContent = roots.length; $('rootNote').textContent = roots.length ? `${roots.filter((root) => root.state === 'online').length} available` : 'Add your first root';
+        applyPermissionUi(new Set(state.bootstrap?.user?.permissions || []));
+        if (roots.length) $('nextAction').closest('article').hidden = true;
       }
       async function loadSessions() { try { const result = await request('/sessions'); renderSessions(result.sessions || []); } catch (err) { error(err.message); } }
       function renderSessions(sessions) { $('sessionsTable').innerHTML = sessions.length ? sessions.map((session) => `<tr><td><strong>${escapeHtml(session.clientName)}</strong><small>${escapeHtml(session.profileName || session.clientType || 'Unknown client')}</small></td><td>${escapeHtml(session.mediaTitle || 'Nothing playing')}</td><td><span class="pill ${session.state === 'transcoding' ? 'scanning' : session.state === 'playing' ? 'online' : ''}">${escapeHtml(session.state)}</span></td><td>${escapeHtml(formatDate(session.connectedAt))}</td><td>${session.bitrateKbps ? `${escapeHtml(session.bitrateKbps)} kbps` : 'Direct play'}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">No clients are connected right now.</td></tr>'; text('sessionCount', sessions.length); text('sessionNote', sessions.length ? 'Active across your clients' : 'No active sessions'); }
-      async function loadLogs(reset = true) { try { if (reset) state.logOffset = 0; const query = new URLSearchParams({ limit: '100', offset: String(state.logOffset) }); const level = $('logLevelFilter').value; const source = $('logSourceFilter').value.trim(); const search = $('logSearchFilter').value.trim(); if (level) query.set('level', level); if (source) query.set('source', source); if (search) query.set('search', search); const result = await request(`/logs?${query}`); state.logPage = result.page || null; renderLogs(result.logs || []); $('logsNextButton').disabled = !result.page?.hasMore; } catch (err) { error(err.message); } }
+      async function loadLogs(reset = true) {
+        const requestId = ++logRequestId;
+        $('logsNextButton').disabled = true;
+        try {
+          if (reset) state.logOffset = 0;
+          const query = new URLSearchParams({ limit: '100', offset: String(state.logOffset) });
+          const level = $('logLevelFilter').value;
+          const source = $('logSourceFilter').value.trim();
+          const search = $('logSearchFilter').value.trim();
+          if (level) query.set('level', level);
+          if (source) query.set('source', source);
+          if (search) query.set('search', search);
+          const result = await request(`/logs?${query}`);
+          if (requestId !== logRequestId) return;
+          state.logPage = result.page || null;
+          renderLogs(result.logs || []);
+          $('logsNextButton').disabled = !result.page?.hasMore;
+        } catch (err) { if (requestId === logRequestId) error(err.message); }
+      }
       function renderLogs(logs) { $('logsTable').innerHTML = logs.length ? logs.map((entry) => `<tr><td>${escapeHtml(formatDate(entry.timestamp))}</td><td><span class="pill ${entry.level === 'error' ? 'failed' : entry.level === 'warn' ? 'warn' : entry.level === 'info' ? 'pass' : ''}">${escapeHtml(entry.level)}</span></td><td>${escapeHtml(entry.source)}</td><td>${escapeHtml(entry.message)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">No log entries match the selected filters.</td></tr>'; }
       async function loadBackup() { try { renderBackup(await request('/backup')); } catch (err) { error(err.message); } }
       function renderBackup(backup) { const status = backup?.state || 'never'; text('backupState', status === 'never' ? 'No backup yet' : `Backup ${status}`); text('backupSummary', backup?.lastBackupAt ? `Last snapshot ${formatDate(backup.lastBackupAt)}${backup.sizeBytes ? ` · ${formatBytes(backup.sizeBytes)}` : ''}${backup.checksum ? ` · ${backup.checksum.slice(0, 12)}…` : ''}` : backup?.error || 'Create a snapshot of your server state.'); text('backupPill', titleCase(status)); $('backupPill').className = `pill ${status === 'failed' ? 'failed' : status === 'running' ? 'scanning' : status === 'completed' || status === 'restored' ? 'pass' : ''}`; const history = backup?.history || []; $('backupHistoryTable').innerHTML = history.length ? history.map((entry) => `<tr><td>${escapeHtml(formatDate(entry.createdAt))}</td><td>${escapeHtml(entry.kind || 'backup')}</td><td>${escapeHtml(entry.status || 'completed')}</td><td title="${escapeHtml(entry.destination || entry.source || '')}">${escapeHtml(entry.destination || entry.source || '—')}</td><td><code>${escapeHtml((entry.checksum || '').slice(0, 16) || '—')}</code></td></tr>`).join('') : '<tr><td colspan="5" class="empty">No backup history yet.</td></tr>'; }
-      async function loadUsers() { try { const result = await request('/users'); renderUsers(result.users || []); } catch (err) { renderUsers([]); if (!/authentication|permission|not allowed/i.test(err.message || '')) error(err.message); } }
+      async function loadUsers() { try { const result = await request('/users'); if (state.bootstrap) state.bootstrap.users = result.users || []; renderUsers(result.users || []); } catch (err) { if (!/authentication|permission|not allowed/i.test(err.message || '')) error(err.message); } }
       function renderUsers(users) {
         const roots = state.bootstrap?.library?.roots || [];
         $('usersGrid').innerHTML = users.length ? users.map((user) => {
@@ -735,34 +796,113 @@
       }
       function closeRootPicker() { $('rootPicker').hidden = true; }
       function setAuthError(message = '') { text('authError', message); show('authError', Boolean(message)); }
-      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || Boolean($('ownerName').value.trim())); $('authSubmit').disabled = !ready; }
+      function updateAuthSubmitState() {
+        const form = $('authForm');
+        $('ownerPassword').minLength = form.dataset.firstRun === 'true' ? 8 : 1;
+        // Native form validation also handles password-manager autofill,
+        // which does not always dispatch an input event.
+        $('authSubmit').disabled = form.dataset.busy === 'true';
+      }
       function setPasswordVisibility(visible) { const input = $('ownerPassword'); const toggle = $('toggleOwnerPassword'); input.type = visible ? 'text' : 'password'; toggle.setAttribute('aria-label', visible ? 'Hide password' : 'Show password'); toggle.title = visible ? 'Hide password' : 'Show password'; toggle.setAttribute('aria-pressed', String(visible)); $('passwordIconUse').setAttribute('href', `/admin/lucide-icons.svg#${visible ? 'eye-off' : 'eye'}`); }
-      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Create the owner account used to protect this browser control plane.' : 'Use your LoomTV account password to open server control. Sign out when you are done.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
+      function openAuth(firstRun) {
+        const name = $('ownerName');
+        const password = $('ownerPassword');
+        $('authModal').classList.add('show');
+        $('ownerNameField').style.display = 'grid';
+        name.required = firstRun;
+        name.placeholder = firstRun ? 'Your name' : 'Leave blank for the owner account';
+        text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)');
+        password.autocomplete = firstRun ? 'new-password' : 'current-password';
+        password.placeholder = firstRun ? 'Choose a password' : 'Enter your admin password';
+        text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'The admin password is separate from your desktop profile PIN.');
+        text('authTitle', firstRun ? 'Set up Loom admin' : 'Unlock Loom admin');
+        text('authCopy', firstRun ? 'Create an owner account to manage this server.' : 'Use your server admin account. Leave the account name blank to sign in as the owner.');
+        text('authSubmit', firstRun ? 'Create owner' : 'Unlock');
+        password.value = '';
+        setAuthError();
+        setPasswordVisibility(false);
+        $('authForm').dataset.firstRun = firstRun ? 'true' : 'false';
+        updateAuthSubmitState();
+        (firstRun ? name : password).focus();
+      }
       function closeAuth() { $('authModal').classList.remove('show'); }
       function openRoot(kind) { $('rootModal').classList.add('show'); closeRootPicker(); if (kind) $('rootKind').value = kind; $('rootPath').focus(); }
       function closeRoot() { closeRootPicker(); $('rootModal').classList.remove('show'); }
       const PAGES = {
-        overview: ['Overview', 'Server health, library reach, and the next thing worth doing.'],
+        overview: ['Overview', 'Server status, library folders, and active playback.'],
         library: ['Library folders', 'Add local folders or OS-mounted NAS shares. Unavailable folders stay saved until you reconnect or remove them.'],
-        sessions: ['Active sessions', 'See who is watching and whether a transcode is in flight.'],
+        sessions: ['Active sessions', 'Current playback and transcoding activity.'],
         logs: ['Server logs', 'Recent operational events, retained for 30 days and filterable by level, source, or text.'],
         backups: ['Backups', 'Protect metadata, profiles, watch progress, and scan state.'],
         users: ['User accounts', 'Control library scope, streaming, transcoding, and server administration.'],
       };
+      async function loadPageData(page) {
+        const permissions = new Set(state.bootstrap?.user?.permissions || []);
+        const allowed = (permission) => permissions.has('*') || permissions.has(permission);
+        if ((page === 'overview' || page === 'sessions') && allowed('sessions.read')) return loadSessions();
+        if (page === 'library' && allowed('library.read')) return Promise.all([loadRoots(), refreshScan()]);
+        if (page === 'logs' && allowed('logs.read')) return loadLogs();
+        if (page === 'backups' && allowed('backup.read')) return loadBackup();
+        if (page === 'users' && allowed('users.read')) return loadUsers();
+      }
       function setPage(page) {
+        if (!Object.hasOwn(PAGES, page)) page = 'overview';
+        const changed = state.page !== page;
         state.page = page;
         $('mainContent').dataset.page = page;
         const [title, subtitle] = PAGES[page] || PAGES.overview;
         text('pageTitle', title); text('pageSubtitle', subtitle);
-        document.querySelectorAll('[data-page-content]').forEach((node) => node.classList.toggle('active', node.dataset.pageContent === page));
+        document.querySelectorAll('[data-page-content]').forEach((node) => {
+          node.hidden = node.dataset.pageContent !== page;
+          node.classList.toggle('active', !node.hidden);
+        });
         document.querySelectorAll('[data-page-actions]').forEach((node) => node.classList.toggle('active', node.dataset.pageActions === page));
         document.querySelectorAll('.nav button').forEach((node) => node.setAttribute('aria-current', node.dataset.page === page ? 'page' : 'false'));
+        if (changed) {
+          clearError();
+          $('mainContent').scrollTop = 0;
+          void loadPageData(page);
+        }
       }
 
       document.querySelectorAll('.nav button').forEach((button) => button.addEventListener('click', () => setPage(button.dataset.page)));
       document.querySelectorAll('[data-go]').forEach((button) => button.addEventListener('click', () => setPage(button.dataset.go)));
       $('refreshButton').addEventListener('click', loadBootstrap);
       $('authButton').addEventListener('click', () => { void signOutAdmin(); });
+      const closePassword = () => {
+        $('passwordModal').classList.remove('show');
+        $('passwordForm').reset();
+        show('passwordError', false);
+        $('changePasswordButton').focus();
+      };
+      $('changePasswordButton').addEventListener('click', () => {
+        $('passwordModal').classList.add('show');
+        $('currentAdminPassword').focus();
+      });
+      $('cancelPasswordButton').addEventListener('click', closePassword);
+      $('passwordForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = $('savePasswordButton');
+        if (button.disabled) return;
+        const newPassword = $('newAdminPassword').value;
+        show('passwordError', false);
+        if (newPassword !== $('confirmAdminPassword').value) {
+          text('passwordError', 'The new passwords do not match.');
+          show('passwordError', true);
+          return;
+        }
+        button.disabled = true;
+        try {
+          const result = await request('/account/password', { method: 'POST', body: { currentPassword: $('currentAdminPassword').value, newPassword } });
+          setToken(result.adminToken || '');
+          closePassword();
+          toast('Admin password changed.');
+          await loadBootstrap();
+        } catch (err) {
+          text('passwordError', err.message);
+          show('passwordError', true);
+        } finally { button.disabled = false; }
+      });
       $('toggleOwnerPassword').addEventListener('click', () => setPasswordVisibility($('ownerPassword').type === 'password'));
       $('ownerName').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('ownerPassword').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
@@ -821,10 +961,38 @@
       document.querySelectorAll('[data-refresh="sessions"]').forEach((button) => button.addEventListener('click', loadSessions));
       document.querySelectorAll('[data-refresh="logs"]').forEach((button) => button.addEventListener('click', loadLogs));
       $('logFilterButton').addEventListener('click', () => { void loadLogs(true); });
-      $('logsNextButton').addEventListener('click', () => { if (state.logPage?.nextOffset !== null) { state.logOffset = state.logPage.nextOffset; void loadLogs(false); } });
+      $('logsNextButton').addEventListener('click', () => { if (state.logPage?.hasMore && Number.isFinite(state.logPage.nextOffset)) { state.logOffset = state.logPage.nextOffset; void loadLogs(false); } });
       $('rootForm').addEventListener('submit', async (event) => { event.preventDefault(); try { await request('/library/roots', { method: 'POST', body: { path: $('rootPath').value.trim(), kind: $('rootKind').value } }); closeRoot(); $('rootPath').value = ''; toast('Library root added.'); await loadRoots(); await loadBootstrap(); } catch (err) { error(err.message); } });
-      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
+      $('authForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        if (form.dataset.busy === 'true') return;
+        const firstRun = form.dataset.firstRun === 'true';
+        const password = $('ownerPassword').value;
+        const name = $('ownerName').value.trim();
+        form.dataset.busy = 'true';
+        setAuthError();
+        updateAuthSubmitState();
+        text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…');
+        try {
+          const result = firstRun
+            ? await request('/onboarding/owner', { method: 'POST', body: { name, password } })
+            : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } });
+          if (!result?.adminToken) throw new Error('The server did not return an admin session. Try signing in again.');
+          setToken(result.adminToken);
+          closeAuth();
+          toast(firstRun ? 'Owner account created.' : 'Signed in.');
+          await loadBootstrap();
+        } catch (err) { setAuthError(err.message); }
+        finally {
+          form.dataset.busy = 'false';
+          text('authSubmit', firstRun ? 'Create owner' : 'Unlock');
+          updateAuthSubmitState();
+        }
+      });
       updateAuthButton();
+      applyPermissionUi(new Set());
+      setPage('overview');
       loadBootstrap();
     })();
   </script>

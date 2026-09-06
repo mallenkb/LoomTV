@@ -1209,10 +1209,12 @@ export function createHeadlessAdminService(options) {
       const canReadAdmin = Boolean(principal && hasPermission(principal, 'admin.read'));
       const canReadLibrary = Boolean(principal && hasPermission(principal, 'library.read'));
       const health = await this.getHealth(principal, { summary: !canReadAdmin });
-      const roots = await Promise.all(state.roots.map(rootView));
       const visibleRootIds = principal && !isOwnerPrincipal(principal) && principal.rootIds !== null
         ? new Set(principal.rootIds)
         : null;
+      const roots = canReadLibrary
+        ? await Promise.all(state.roots.filter((root) => !visibleRootIds || visibleRootIds.has(root.id)).map(rootView))
+        : [];
       const visibleCatalog = visibleRootIds
         ? state.catalog.filter((item) => visibleRootIds.has(item.rootId))
         : state.catalog;
@@ -1855,7 +1857,7 @@ export function createHeadlessAdminService(options) {
         ? (transcoderHealth.hardwareAcceleration ? 'available' : 'limited')
         : 'unavailable';
       const runtimeState = mediaState !== 'online'
-        ? 'offline'
+        ? 'degraded'
         : transcoderState === 'unavailable' ? 'degraded' : 'healthy';
       const backendLabel = transcoderHealth.recommendedBackend && transcoderHealth.recommendedBackend !== 'software'
         ? ` Recommended backend: ${transcoderHealth.recommendedBackend}.`
@@ -1868,8 +1870,8 @@ export function createHeadlessAdminService(options) {
         : runtimeState;
       const latestBackup = normalizeBackupHistory(currentState.backup?.history).find((entry) => entry.kind === 'backup' && entry.status === 'completed');
       const checks = [
-        { name: 'Headless runtime', state: 'pass', message: 'The server is running without Electron.' },
-        { name: 'Headless catalog', state: 'pass', message: `${catalogCount} media records and scan checkpoints are available without Electron.` },
+        { name: 'Server process', state: 'pass', message: runtime.deploymentMode === 'desktop-hosted' ? 'Running inside the Loom desktop app.' : 'Running as a standalone server.' },
+        { name: 'Catalog', state: 'pass', message: `${catalogCount} media records are available.` },
         { name: 'Media root', state: mediaState === 'online' ? 'pass' : 'warn', message: runtime.media?.path && !summaryOnly ? `${runtime.media.path} is ${mediaState}.` : `Media root is ${mediaState}.` },
         { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : transcoderState === 'limited' ? 'warn' : 'fail', message: transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
       ];

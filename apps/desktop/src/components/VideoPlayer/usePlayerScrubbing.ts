@@ -175,14 +175,9 @@ export function usePlayerScrubbing({
 
   const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!duration) return;
-    const step = event.shiftKey ? 60 : 5;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-      event.preventDefault();
-      seekTo(playbackPositionRef.current - step);
-    } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      seekTo(playbackPositionRef.current + step);
-    } else if (event.key === 'PageDown') {
+    // Arrow keys are handled once by the player's window capture listener.
+    if (event.metaKey || event.ctrlKey || event.altKey || event.nativeEvent.isComposing) return;
+    if (event.key === 'PageDown') {
       event.preventDefault();
       seekTo(playbackPositionRef.current - duration * 0.1);
     } else if (event.key === 'PageUp') {

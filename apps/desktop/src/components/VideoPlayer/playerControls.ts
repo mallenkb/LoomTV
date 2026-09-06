@@ -90,9 +90,20 @@ export function playbackProgressForExit({
 
 export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
-    return true;
+  if (target instanceof HTMLInputElement) {
+    // Player sliders and toggles do not own playback shortcuts. Preserve keys
+    // only for inputs where the user can type, including numeric settings.
+    switch (target.type) {
+      case 'range': case 'checkbox': case 'radio': case 'button':
+      case 'submit': case 'reset': case 'color': case 'file':
+      case 'image': case 'hidden':
+        return false;
+      default:
+        return true;
+    }
   }
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLSelectElement) return false;
   return target.isContentEditable || Boolean(target.closest('[contenteditable="true"], [role="textbox"]'));
 }
 

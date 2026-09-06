@@ -880,13 +880,25 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;
-    const refreshRemote = () => void loadPrimaryCatalog(beginLibraryMutation('catalog'))
-      .catch((error) => {
+    let pending = false;
+    let disposed = false;
+    const refreshRemote = async () => {
+      if (pending || disposed || document.hidden) return;
+      pending = true;
+      try {
+        await loadPrimaryCatalog(beginLibraryMutation('catalog'));
+      } catch (error) {
         const mutationError = toLibraryMutationError('refresh', error);
         console.warn(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
-      });
+      } finally { pending = false; }
+    };
     const intervalId = window.setInterval(refreshRemote, 30_000);
-    return () => window.clearInterval(intervalId);
+    document.addEventListener('visibilitychange', refreshRemote);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshRemote);
+    };
   }, [activeProfile, beginLibraryMutation, loadPrimaryCatalog]);
 
   return (

@@ -5,6 +5,7 @@
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Volume2, VolumeX } from 'lucide-react';
 import { usePlaybackProgressDisplay } from './VideoPlayer/usePlaybackProgressDisplay';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
@@ -216,7 +217,8 @@ export default function VideoPlayer({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const { state: libraryState } = useLibrary();
-  const playbackActivityKeyRef = useRef(`desktop-player:${crypto.randomUUID()}`);
+  const [playbackActivityKey] = useState(() => `desktop-player:${crypto.randomUUID()}`);
+  const playbackActivityKeyRef = useRef(playbackActivityKey);
   const { theme } = useTheme();
   const isModern = theme.homeStyle === 'modern';
   const containerRef = useRef<HTMLDivElement>(null);
@@ -271,8 +273,10 @@ export default function VideoPlayer({
   const audioReapplyAttemptsRef = useRef(0);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitleSelectionExplicitRef = useRef(false);
-  const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
-  const subtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
+  const [initialSubtitlesDefaultEnabled] = useState(loadSubtitlesDefaultEnabled);
+  const subtitlesDefaultEnabledRef = useRef(initialSubtitlesDefaultEnabled);
+  const [initialSubtitleStyle] = useState(loadSubtitleStyle);
+  const subtitleStyleRef = useRef<SubtitleStyleSettings>(initialSubtitleStyle);
   const audioDelayRef = useRef(0);
   const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
   const lastProgressSaveRef = useRef(0);
@@ -329,6 +333,7 @@ export default function VideoPlayer({
   // LoomTV takes the session back after another app has held it.
   const [mediaSessionStopped, setMediaSessionStopped] = useState(false);
   const nativePlaybackEndedRef = useRef(false);
+  const libVlcEofReachedRef = useRef(false);
   const libVlcSurfaceActive = nativePlaybackActive && nativeEngineKind === 'libvlc';
 
   // The renderer is transparent only while a live native surface is expected
@@ -389,6 +394,28 @@ export default function VideoPlayer({
   const [paused, setPaused] = useState(true);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [volumeIndicatorVisible, setVolumeIndicatorVisible] = useState(false);
+  const [volumeIndicatorPercent, setVolumeIndicatorPercent] = useState(100);
+  const volumeCommandRef = useRef<number | null>(null);
+  const volumeIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showVolumeIndicator = useCallback((value: number) => {
+    if (volumeIndicatorTimerRef.current) clearTimeout(volumeIndicatorTimerRef.current);
+    setVolumeIndicatorPercent(Math.round(Math.max(0, Math.min(1, value)) * 100));
+    setVolumeIndicatorVisible(true);
+    volumeIndicatorTimerRef.current = setTimeout(() => {
+      volumeIndicatorTimerRef.current = null;
+      volumeCommandRef.current = null;
+      setVolumeIndicatorVisible(false);
+    }, 1000);
+  }, []);
+  useEffect(() => {
+    setVolumeIndicatorVisible(false);
+    return () => {
+      if (volumeIndicatorTimerRef.current) clearTimeout(volumeIndicatorTimerRef.current);
+      volumeIndicatorTimerRef.current = null;
+      volumeCommandRef.current = null;
+    };
+  }, [filePath]);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
   const [episodePanelWidth, setEpisodePanelWidth] = useState(DEFAULT_EPISODE_PANEL_WIDTH);
@@ -1272,7 +1299,7 @@ export default function VideoPlayer({
       const seekExpectedToEnd = reportedDuration > 0
         && reportedDuration - seekGuard.target <= NATIVE_SEEK_LANDING_TOLERANCE_SECONDS;
       const staleEndedState = state.status === 'ended' && !seekExpectedToEnd;
-      if (landed || (state.status === 'ended' && seekExpectedToEnd)) {
+      if ((landed && state.status === 'ready') || (state.status === 'ended' && seekExpectedToEnd)) {
         nativeSeekGuardRef.current = null;
       } else if (expired) {
         nativeSeekGuardRef.current = null;
@@ -1496,13 +1523,15 @@ export default function VideoPlayer({
       }
       nativePlaybackEndedRef.current = true;
       const endedEngine = playbackEngineRef.current;
-      playbackEngineRef.current = null;
-      void endedEngine?.destroy();
-      // LibVLC releases its child surface at EOF. Restore the opaque renderer
-      // layer so the completed player cannot expose the transparent window.
-      setNativePlaybackActive(false);
-      setNativeEngineKind(null);
-      document.documentElement.classList.remove('loom-native-active');
+      if (endedEngine?.kind === 'libvlc') libVlcEofReachedRef.current = true;
+      userPausedRef.current = true;
+      if (endedEngine?.kind !== 'libvlc') {
+        playbackEngineRef.current = null;
+        void endedEngine?.destroy();
+        setNativePlaybackActive(false);
+        setNativeEngineKind(null);
+        document.documentElement.classList.remove('loom-native-active');
+      }
       setPlayerState('ready');
       setStatusMessage('');
       setErrorMessage(null);
@@ -1532,6 +1561,13 @@ export default function VideoPlayer({
       setNativePlaybackActive(false);
       setNativeEngineKind(null);
       document.documentElement.classList.remove('loom-native-active');
+      if (failedEngineKind === 'libvlc' && libVlcEofReachedRef.current) {
+        setPlayerState('error');
+        setPaused(true);
+        setStatusMessage('');
+        setErrorMessage(state.error || 'LibVLC could not resume this video. Retry playback.');
+        return;
+      }
       void (async () => {
         if (failedEngineKind === 'libvlc' && await MpvPlaybackEngine.available().catch(() => false)) {
           nativeAutoplayIssuedRef.current = false;
@@ -1595,6 +1631,7 @@ export default function VideoPlayer({
     setNativePlaybackActive(false);
     setNativeEngineKind(null);
     nativePlaybackEndedRef.current = false;
+    libVlcEofReachedRef.current = false;
     nativeAutoplayIssuedRef.current = false;
     document.documentElement.classList.remove('loom-native-active');
     setSelectedSecondarySubtitleTrackIndex(-1);
@@ -1693,6 +1730,8 @@ export default function VideoPlayer({
     browserStreamGenerationRef.current += 1;
     streamIsSeekableRef.current = false;
     streamUsesBrowserPipelineRef.current = false;
+    libVlcEofReachedRef.current = false;
+    nativePlaybackEndedRef.current = false;
     setStreamIsTranscoded(false);
     setNativePlaybackActive(false);
     setNativeEngineKind(null);
@@ -2406,7 +2445,7 @@ export default function VideoPlayer({
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
-    if (nativePlaybackEndedRef.current) {
+    if (nativePlaybackEndedRef.current && playbackEngineRef.current?.kind !== 'libvlc') {
       nativePlaybackEndedRef.current = false;
       setPlayerState('loading');
       setStatusMessage('Preparing stream...');
@@ -2415,6 +2454,7 @@ export default function VideoPlayer({
     }
     if (playbackEngineRef.current) {
       const engine = playbackEngineRef.current;
+      nativePlaybackEndedRef.current = false;
       const wasPaused = userPausedRef.current;
       const nextPaused = !wasPaused;
       userPausedRef.current = nextPaused;
@@ -2699,6 +2739,7 @@ export default function VideoPlayer({
     }
 
     if (playbackEngineRef.current) {
+      nativePlaybackEndedRef.current = false;
       const seekGuard = {
         target: nextPosition,
         expiresAt: performance.now() + NATIVE_SEEK_GUARD_TIMEOUT_MS,
@@ -2869,6 +2910,8 @@ export default function VideoPlayer({
 
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
+    volumeCommandRef.current = v;
+    showVolumeIndicator(v);
     setVolume(v);
     setMuted(v === 0);
     if (playbackEngineRef.current) {
@@ -2880,16 +2923,17 @@ export default function VideoPlayer({
     if (!video) return;
     video.volume = v;
     video.muted = v === 0;
-  }, []);
+  }, [showVolumeIndicator]);
 
   const toggleMute = useCallback(() => {
+    showVolumeIndicator(muted ? volume : 0);
     if (playbackEngineRef.current) {
       void playbackEngineRef.current.setMuted(!muted);
       return;
     }
     const video = videoRef.current;
     if (video) video.muted = !video.muted;
-  }, [muted]);
+  }, [muted, volume, showVolumeIndicator]);
 
   const restartForTrackChange = useCallback(() => {
     if (playbackEngineRef.current) return;
@@ -3138,8 +3182,13 @@ export default function VideoPlayer({
   }, []);
 
   const changeVolume = useCallback((delta: number) => {
-    const currentVolume = playbackEngineRef.current ? volume : videoRef.current?.volume ?? volume;
-    const nextVolume = Math.min(1, Math.max(0, currentVolume + delta));
+    // Repeated keys build on the last requested value, not a delayed native
+    // snapshot. Keep each step exact in percentage points.
+    const currentVolume = volumeCommandRef.current
+      ?? (playbackEngineRef.current ? volume : videoRef.current?.volume ?? volume);
+    const nextVolume = Math.min(100, Math.max(0, Math.round(currentVolume * 100) + Math.round(delta * 100))) / 100;
+    volumeCommandRef.current = nextVolume;
+    showVolumeIndicator(nextVolume);
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
 
@@ -3153,7 +3202,7 @@ export default function VideoPlayer({
     if (!video) return;
     video.volume = nextVolume;
     video.muted = nextVolume === 0;
-  }, [volume]);
+  }, [volume, showVolumeIndicator]);
 
   const changePlaybackRate = useCallback((delta: number) => {
     setPlaybackRate((value) => Math.min(3, Math.max(0.25, value + delta)));
@@ -3372,7 +3421,23 @@ export default function VideoPlayer({
         if (!e.repeat && playerStateRef.current !== 'error') togglePlay();
         return;
       }
-      if (isEditableShortcutTarget(e.target)) return;
+      const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
+      if (!hasCommandModifier && !e.isComposing
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)
+        && !isEditableShortcutTarget(e.target)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (playerStateRef.current === 'error') return;
+        resetSurfaceDoubleClickGuard();
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          changeVolume(e.key === 'ArrowUp' ? 0.05 : -0.05);
+        } else {
+          const step = e.shiftKey ? 30 : 10;
+          seekTo(playbackPositionRef.current + (e.key === 'ArrowRight' ? step : -step));
+        }
+        return;
+      }
+      if (isEditableShortcutTarget(e.target) || e.isComposing) return;
       if (playerStateRef.current === 'error') {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -3386,7 +3451,6 @@ export default function VideoPlayer({
       ) {
         return;
       }
-      const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
 
       const key = e.code === 'Space' ? ' ' : e.key;
       switch (key) {
@@ -3404,7 +3468,6 @@ export default function VideoPlayer({
           e.preventDefault();
           runMediaSessionCommand({ type: 'toggle' });
           break;
-        case 'ArrowLeft':
         case 'j':
         case 'J':
         case 'MediaRewind':
@@ -3412,7 +3475,6 @@ export default function VideoPlayer({
           e.preventDefault();
           seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
           break;
-        case 'ArrowRight':
         case 'l':
         case 'L':
         case 'MediaFastForward':
@@ -3441,16 +3503,6 @@ export default function VideoPlayer({
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
           runMediaSessionCommand({ type: 'nextItem' });
-          break;
-        case 'ArrowUp':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          changeVolume(0.05);
-          break;
-        case 'ArrowDown':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          changeVolume(-0.05);
           break;
         case 'm':
         case 'M':
@@ -3870,6 +3922,25 @@ export default function VideoPlayer({
         onDoubleClickCapture={handleSurfaceDoubleClickCapture}
       >
         <div className="loom-player-drag-region" aria-hidden="true" />
+
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-hidden={!volumeIndicatorVisible}
+          className={`pointer-events-none absolute right-6 top-1/2 z-40 w-20 -translate-y-1/2 px-3 py-4 text-white transition-opacity duration-150 motion-reduce:transition-none ${volumeIndicatorVisible ? 'opacity-100' : 'opacity-0'}`}
+        >
+          <div
+            aria-hidden="true"
+            className="absolute -inset-5"
+            style={{ background: 'radial-gradient(ellipse closest-side, rgba(0,0,0,0.55), rgba(0,0,0,0.28) 45%, transparent 100%)' }}
+          />
+          <div className="relative flex flex-col items-center gap-2 text-base drop-shadow-md">
+            {volumeIndicatorPercent === 0 ? <VolumeX size={20} aria-hidden="true" /> : <Volume2 size={20} aria-hidden="true" />}
+            <span className="sr-only">Volume </span>
+            <span className="font-medium tabular-nums">{volumeIndicatorPercent}%</span>
+          </div>
+        </div>
 
         <TopPlayerControls
           visible={showTopControls && playerState !== 'error'}

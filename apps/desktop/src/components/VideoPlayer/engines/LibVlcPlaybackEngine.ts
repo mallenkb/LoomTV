@@ -31,6 +31,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   private nativeTracks: PlaybackTrack[] = [];
   private probedTracks: MediaTrack[] = [];
   private externalSubtitleTracks: MediaTrack[] = [];
+  private mergedTracks: PlaybackTrack[] | null = null;
   private pendingMetadataFilePath: string | null = null;
   private metadataProbeTimer: ReturnType<typeof setTimeout> | null = null;
   private metadataProbeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,6 +72,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
       title: subtitle.path.split(/[\\/]/).pop() || `Subtitle ${index + 1}`,
       source: subtitle.source,
     }));
+    this.mergedTracks = null;
     const result = await desktopApi.libvlc.start(filePath, options);
     if (result.ok && result.sessionId && result.surface === 'composited-window') {
       this.sessionId = result.sessionId;
@@ -98,8 +100,11 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
 
   private emitState(state: LibVlcPlaybackState): void {
     if (this.destroyed || !this.sessionId) return;
-    this.lastState = state;
-    if (state.tracks) this.nativeTracks = state.tracks;
+    this.lastState = { ...state, tracks: undefined };
+    if (state.tracks && state.tracks !== this.nativeTracks) {
+      this.nativeTracks = state.tracks;
+      this.mergedTracks = null;
+    }
     if (state.status === 'ready') this.beginMetadataProbe();
     const tracks = this.effectiveTracks();
     this.listener({
@@ -110,6 +115,10 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   }
 
   private effectiveTracks(): PlaybackTrack[] {
+    return this.mergedTracks ??= this.buildEffectiveTracks();
+  }
+
+  private buildEffectiveTracks(): PlaybackTrack[] {
     if (this.nativeTracks.length > 0) return this.mergeTrackMetadata(this.nativeTracks);
     const metadataTracks = [...this.probedTracks, ...this.externalSubtitleTracks];
     if (metadataTracks.length === 0) return [];
@@ -192,6 +201,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
             || !result.ok
           ) return;
           this.probedTracks = probeTracks(result.data);
+          this.mergedTracks = null;
           if (this.lastState) this.emitState(this.lastState);
         })
         .catch(() => undefined);
@@ -208,6 +218,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
         track.type === type ? { ...track, selected: trackId !== null && track.id === trackId } : track
       ));
     }
+    this.mergedTracks = null;
     if (this.lastState) this.emitState(this.lastState);
   }
 
@@ -232,7 +243,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
 
   private reflectSeek(position: number): void {
     if (!this.lastState) return;
-    this.emitState({ ...this.lastState, position });
+    this.emitState({ ...this.lastState, status: 'loading', position });
   }
 
   private sendSeek(position: number): Promise<void> {
@@ -329,6 +340,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     this.nativeTracks = [];
     this.probedTracks = [];
     this.externalSubtitleTracks = [];
+    this.mergedTracks = null;
     const sessionId = this.sessionId;
     this.sessionId = null;
     if (sessionId) await desktopApi.libvlc.stop(sessionId);

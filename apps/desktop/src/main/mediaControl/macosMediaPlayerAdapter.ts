@@ -382,6 +382,7 @@ export function createMacOsMediaSessionAdapter(
   let lastSnapshot: MediaSessionSnapshot | null = null;
   let lastArtworkPath: string | null = null;
   let artworkObject: ObjcPointer = null;
+  let artworkImage: ObjcPointer = null;
   const infoKeys = new Map<string, ObjcPointer>();
 
   const warn = (message: string, error?: unknown) => logWarning?.(message, error);
@@ -444,6 +445,20 @@ export function createMacOsMediaSessionAdapter(
     install('skipForwardCommand', snapshot.skipForwardSeconds);
   };
 
+  const releaseArtwork = () => {
+    const objc = objcOrThrow();
+    const previousArtwork = artworkObject;
+    const previousImage = artworkImage;
+    artworkObject = null;
+    artworkImage = null;
+    lastArtworkPath = null;
+    try {
+      if (previousArtwork) objc.sendVoid(previousArtwork, objc.sel('release'));
+    } finally {
+      if (previousImage) objc.sendVoid(previousImage, objc.sel('release'));
+    }
+  };
+
   /**
    * Artwork is a file path LoomTV already has on disk, so this is one NSImage
    * load. No thumbnail generation, no network fetch, no metadata provider.
@@ -452,8 +467,7 @@ export function createMacOsMediaSessionAdapter(
     const objc = objcOrThrow();
     const filePath = snapshot.artworkPath || null;
     if (!filePath) {
-      lastArtworkPath = null;
-      artworkObject = null;
+      releaseArtwork();
       return null;
     }
     if (filePath === lastArtworkPath && artworkObject) return artworkObject;
@@ -462,24 +476,32 @@ export function createMacOsMediaSessionAdapter(
     const artworkClass = objc.cls('MPMediaItemArtwork');
     if (!imageClass || !artworkClass) return null;
 
-    const allocatedImage = asPointer(objc.sendPointer(imageClass, objc.sel('alloc')));
     const pathString = objc.nsString(filePath);
-    if (!allocatedImage || !pathString) return null;
+    if (!pathString) return null;
+    const allocatedImage = asPointer(objc.sendPointer(imageClass, objc.sel('alloc')));
+    if (!allocatedImage) return null;
     const image = asPointer(
       objc.sendPointerWithPointer(allocatedImage, objc.sel('initWithContentsOfFile:'), pathString),
     );
     if (!image) return null;
 
-    const allocatedArtwork = asPointer(objc.sendPointer(artworkClass, objc.sel('alloc')));
-    const artwork = allocatedArtwork
-      ? asPointer(objc.sendPointerWithPointer(allocatedArtwork, objc.sel('initWithImage:'), image))
-      : null;
-    if (!artwork) return null;
+    try {
+      const allocatedArtwork = asPointer(objc.sendPointer(artworkClass, objc.sel('alloc')));
+      const artwork = allocatedArtwork
+        ? asPointer(objc.sendPointerWithPointer(allocatedArtwork, objc.sel('initWithImage:'), image))
+        : null;
+      if (!artwork) return null;
 
-    objc.sendPointer(artwork, objc.sel('retain'));
-    lastArtworkPath = filePath;
-    artworkObject = artwork;
-    return artwork;
+      // alloc/init already owns both objects. Keep the current pair warm and
+      // release it when replaced or cleared, without an extra retain.
+      releaseArtwork();
+      lastArtworkPath = filePath;
+      artworkObject = artwork;
+      artworkImage = image;
+      return artwork;
+    } finally {
+      if (artworkImage !== image) objc.sendVoid(image, objc.sel('release'));
+    }
   };
 
   const infoKey = (name: string): ObjcPointer => {
@@ -649,6 +671,11 @@ export function createMacOsMediaSessionAdapter(
       } catch (error) {
         warn('[media-session] Releasing the macOS media session failed.', error);
       } finally {
+        try {
+          releaseArtwork();
+        } catch (error) {
+          warn('[media-session] Releasing Now Playing artwork failed.', error);
+        }
         activeDispatch = null;
         started = false;
         lastSnapshot = null;

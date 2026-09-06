@@ -1,0 +1,1232 @@
+<!doctype html>
+<!--
+  WORK REPORT · AUDIT TEMPLATE v2  (DesignOS build)
+  Sample only — content is illustrative. Structure and classes are the proposal.
+
+  What is unchanged from the shipped template: the canonical reading order
+  (breadcrumb → cover → overview → evidence → brief → summary → ledger →
+  decision → footer), capture-tall / capture-wide, pin classes, ledger bands,
+  score lifts, path table, validation gate.
+
+  What is new:
+  A. Evidence-quality strip on the overview band — Visible / Inferred /
+     Needs-verification counts and audit confidence, using dos-badge.
+  B. Live observation filters (severity + category) with a running count.
+  C. Two-way pin ↔ observation linking on hover and focus.
+  D. Attention cross-check card — predicted first-fixation order vs intended
+     priority, fed by the attention-map tool. Mismatches are flagged.
+  E. Severity / effort / confidence meta row on every observation.
+  F. Dimension lift cards under the ledger.
+  G. Priority matrix (impact × effort) with the same finding numbers.
+  H. Owner column on the path table.
+  All tags, buttons, alerts and controls are DesignOS components (.dos-*).
+-->
+<html lang="en" data-color-mode="light" data-radius="normal" data-surface="website">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Sample UX/UI audit in the Work Report v2 format, built on DesignOS components.">
+<meta name="generator" content="Work Report">
+<title>LoomTV codebase audit · September 5, 2026</title>
+<style>
+/* GENERATED from design-os/tokens.css — do not edit.
+   DesignOS semantic tokens, Light Mode, plus the added roles.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+:root {
+  --text-primary:#0a0a0a;
+  --text-secondary:#404040;
+  --text-tertiary:#525252;
+  --text-quarternary:#737373;
+  --text-disabled:#a3a3a3;
+  --text-error:#b91c1c;
+  --text-error-secondary:#f87171;
+  --text-warning:#b45309;
+  --text-warning-secondary:#fbbf24;
+  --text-success:#047857;
+  --text-brand:#171717;
+  --text-brand-secondary:#a3a3a3;
+  --border-primary:#f0f0f0;
+  --border-secondary:#e5e5e5;
+  --border-tertiary:#d4d4d4;
+  --border-disabled:#f0f0f0;
+  --border-error:#dc2626;
+  --border-error-secondary:#fecaca;
+  --border-warning:#b45309;
+  --border-warning-secondary:#fde68a;
+  --border-success:#059669;
+  --border-brand:#171717;
+  --border-brand-secondary:#e5e5e5;
+  --icon-primary:#171717;
+  --icon-secondary:#525252;
+  --icon-tertiary:#737373;
+  --icon-disabled:#a3a3a3;
+  --icon-error:#dc2626;
+  --icon-error-secondary:#f87171;
+  --icon-warning:#b45309;
+  --icon-warning-secondary:#fbbf24;
+  --icon-success:#059669;
+  --icon-brand:#171717;
+  --icon-brand-secondary:#a3a3a3;
+  --bg-primary:#ffffff;
+  --bg-primary_hover:#f7f7f7;
+  --bg-secondary:#f7f7f7;
+  --bg-tertiary:#f0f0f0;
+  --bg-quarternary:#e5e5e5;
+  --bg-disabled:#f7f7f7;
+  --bg-error:#fef2f2;
+  --bg-error-secondary:#fee2e2;
+  --bg-warning:#fffbeb;
+  --bg-warning-secondary:#fef3c7;
+  --bg-success:#ecfdf5;
+  --bg-brand-primary:#f7f7f7;
+  --bg-brand-secondary:#f0f0f0;
+  --bg-alt:#171717;
+  --opacity-light-10:#ffffff1a;
+  --opacity-light-20:#ffffff33;
+  --opacity-light-30:#ffffff4d;
+  --opacity-light-40:#ffffff66;
+  --opacity-light-50:#ffffff80;
+  --opacity-light-60:#ffffff99;
+  --opacity-light-70:#ffffffb2;
+  --opacity-light-80:#ffffffcc;
+  --opacity-light-90:#ffffffe5;
+  --opacity-dark-10:#0000001a;
+  --opacity-dark-20:#00000033;
+  --opacity-dark-30:#0000004d;
+  --opacity-dark-40:#00000066;
+  --opacity-dark-50:#00000080;
+  --opacity-dark-60:#00000099;
+  --opacity-dark-70:#000000b2;
+  --opacity-dark-80:#000000cc;
+  --opacity-dark-90:#000000e5;
+  --bg-error-solid:#b91c1c;
+  --bg-success-secondary:#d1fae5;
+  --bg-success-solid:#059669;
+  --bg-warning-solid:#f59e0b;
+  --bg-brand-primary_hover:#f0f0f0;
+  --bg-brand-solid:#0a0a0a;
+  --icon-success-secondary:#34d399;
+  --border-success-secondary:#a7f3d0;
+  --text-alt:#ffffff;
+  --text-placeholder:#a3a3a3;
+  --text-placeholder-alt:#d4d4d4;
+  --icon-dark:#0a0a0a;
+  --icon-white:#ffffff;
+  --bg-primary_press:#f0f0f0;
+  --text-success-secondary:#34d399;
+  --border-white:#ffffff;
+  --bg-dark:#171717;
+  --bg-white:#ffffff;
+  --text-white:#ffffff;
+  --text-dark:#000000;
+  --icon-alt:#ffffff;
+  --bg-info:#eff6ff;
+  --bg-info-secondary:#dbeafe;
+  --bg-info-solid:#1d4ed8;
+  --text-info:#1d4ed8;
+  --text-info-secondary:#60a5fa;
+  --border-info:#2563eb;
+  --border-info-secondary:#bfdbfe;
+  --icon-info:#2563eb;
+  --icon-info-secondary:#60a5fa;
+  --border-alt:#ffffff;
+  --alpha-brand-accent-85:#0a0a0ad9;
+  --border-alt-2:#000000;
+  --alpha-brand-accent-10:#0a0a0a1a;
+  --alpha-brand-accent-40:#0a0a0a66;
+  --alpha-brand-accent-60:#0a0a0a99;
+  --alpha-brand-accent-20:#0a0a0a33;
+  --alpha-neutral-accent-10:#0a0a0a1a;
+  --alpha-neutral-accent-20:#0a0a0a33;
+  --alpha-neutral-accent-40:#0a0a0a66;
+  --alpha-neutral-accent-60:#0a0a0a99;
+  --alpha-neutral-accent-85:#0a0a0ad9;
+  --alpha-success-accent-10:#0596691a;
+  --alpha-success-accent-20:#05966933;
+  --alpha-success-accent-40:#05966966;
+  --alpha-success-accent-60:#05966999;
+  --alpha-success-accent-85:#059669d9;
+  --alpha-warning-accent-10:#f59e0b1a;
+  --alpha-warning-accent-20:#f59e0b33;
+  --alpha-warning-accent-40:#f59e0b66;
+  --alpha-warning-accent-60:#f59e0b99;
+  --alpha-warning-accent-85:#f59e0bd9;
+  --alpha-blue-accent-10:#2563eb1a;
+  --alpha-blue-accent-20:#2563eb33;
+  --alpha-blue-accent-40:#2563eb66;
+  --alpha-blue-accent-60:#2563eb99;
+  --alpha-blue-accent-85:#2563ebd9;
+  --alpha-error-accent-10:#dc26261a;
+  --alpha-error-accent-20:#dc262633;
+  --alpha-error-accent-40:#dc262666;
+  --alpha-error-accent-60:#dc262699;
+  --alpha-error-accent-85:#dc2626d9;
+  --chart-blue:#3b82f6;
+  --chart-orange:#fb923c;
+  --chart-green:#16a34a;
+  --chart-red:#dc2626;
+  --chart-purple:#a855f7;
+  --chart-yellow:#facc15;
+  --chart-pink:#ec4899;
+  --chart-dark:#525252;
+  --chart-lime:#65a30d;
+  --chart-cyan:#06b6d4;
+  --chart-success:#10b981;
+  --chart-success-light:#6ee7b7;
+  --icon-quarternary:#a3a3a3;
+  --bg-secondary_hover:#f0f0f0;
+  --bg-secondary_press:#e5e5e5;
+  --bg-brand-hover:#262626;
+  --bg-brand-press:#404040;
+  --black:#000000;
+  --white:#ffffff;
+  --bg-brand-primary_press:#e5e5e5;
+  --icon-quinary:#d4d4d4;
+  --spacing-0:0px;
+  --spacing-2:2px;
+  --spacing-4:4px;
+  --spacing-6:6px;
+  --spacing-8:8px;
+  --spacing-12:12px;
+  --spacing-16:16px;
+  --spacing-20:20px;
+  --spacing-24:24px;
+  --spacing-32:32px;
+  --spacing-40:40px;
+  --spacing-48:48px;
+  --spacing-56:56px;
+  --spacing-64:64px;
+  --spacing-96:96px;
+  --spacing-128:128px;
+  --spacing-160:160px;
+  --spacing-192:192px;
+  --spacing-224:224px;
+  --spacing-256:256px;
+  --spacing-320:320px;
+  --spacing-384:384px;
+  --spacing-480:480px;
+  --spacing-560:560px;
+  --spacing-640:640px;
+  --spacing-720:720px;
+  --spacing-768:768px;
+  --spacing-960:960px;
+  --spacing-1280:1280px;
+  --spacing-1440:1440px;
+  --spacing-1920:1920px;
+  --screen-size:1440px;
+  --padding-padding:24px;
+  --spacing-1024:1024px;
+  --spacing-80:80px;
+  --spacing-1080:1080px;
+  --gap-gap:24px;
+  --spacing-72:72px;
+  --font-size-display:72px;
+  --font-size-header-h1:60px;
+  --font-size-header-h2:48px;
+  --font-size-header-h3:36px;
+  --font-size-header-h4:30px;
+  --font-size-header-h5:24px;
+  --font-size-header-h6:20px;
+  --font-size-paragraph-lg:18px;
+  --font-size-paragraph-md:16px;
+  --font-size-paragraph-sm:14px;
+  --font-size-caption-md:12px;
+  --font-size-caption-sm:10px;
+  --radius-none:0px;
+  --radius-xxs:2px;
+  --radius-xs:4px;
+  --radius-sm:6px;
+  --radius-md:8px;
+  --radius-lg:12px;
+  --radius-xl:16px;
+  --radius-2xl:20px;
+  --radius-3xl:24px;
+  --radius-4xl:32px;
+  --radius-full:100000px;
+  --width-xxs:320px;
+  --width-xs:384px;
+  --width-sm:480px;
+  --width-md:560px;
+  --width-lg:640px;
+  --width-xl:768px;
+  --width-2xl:1024px;
+  --width-3xl:1080px;
+  --width-4xl:1280px;
+  --width-5xl:1440px;
+  --width-6xl:1920px;
+  --width-xxxs:256px;
+  --family-display:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --weight-regular:400;
+  --family-heading:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --family-text:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --family-caption:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --weight-bold:700;
+  --weight-medium:500;
+  --weight-semibold:600;
+  --text-on-error-solid:#ffffff;
+  --text-on-warning-solid:#0a0a0a;
+  --text-on-success-solid:#0a0a0a;
+  --text-on-info-solid:#ffffff;
+  --bg-error-solid_hover:#b91c1c;
+  --bg-error-solid_press:#991b1b;
+  --bg-error_press:#fecaca;
+  --focus-ring-width:3px;
+  --focus-ring:var(--alpha-neutral-accent-20);
+  --focus-ring-error:var(--alpha-error-accent-20);
+  --border-control:#8d8d8d;
+  --border-focus-ring:#171717;
+  --shadow-xs:0 4px 6px -3px rgba(10,10,10,.06);
+  --shadow-sm:0 1px 2px -1px rgba(10,10,10,.1);
+  --shadow-md:0 4px 12px -2px rgba(10,10,10,.08);
+  --shadow-lg:0 12px 16px -4px rgba(10,10,10,.08),0 4px 6px -2px rgba(10,10,10,.03);
+  --shadow-card:0 4px 24px rgba(10,10,10,.05);
+  --shadow-evidence:0 24px 60px rgba(10,10,10,.14);
+  --ring-offset:var(--bg-primary);
+  --ring-brand:rgba(10,10,10,0.12);
+  --ring-error:rgba(255,0,0,0.12);
+  --motion-state:160ms;
+  --motion-ease:cubic-bezier(.2,0,0,1);
+  --line-height-paragraph-md:1.5;
+  --line-height-paragraph-sm:1.4286;
+  --line-height-caption-md:1.5;
+  --button:100000px;
+  --modal:32px;
+  --modal-inner-container:20px;
+  --input:8px;
+  --calendar-header:100000px;
+  --pagination:100000px;
+  --card:12px;
+  --nav-item:12px;
+  /* Template-only aliases and page-level values. Not DesignOS tokens — these
+     name things the document shell needs, in terms of DesignOS roles. */
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --family-text:var(--font-sans);--family-caption:var(--font-sans);
+  --weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;
+  --font-size-caption-md:12px;--font-size-paragraph-sm:14px;--font-size-paragraph-md:16px;
+  --line-height-caption-md:1.5;--line-height-paragraph-sm:1.4286;--line-height-paragraph-md:1.5;
+  --canvas:var(--bg-secondary);--surface-header:var(--canvas);
+  --ink:var(--text-primary);--charcoal:var(--text-secondary);--stone:var(--text-tertiary);
+  --brand:var(--text-brand);--border:var(--border-secondary);--border-soft:var(--border-primary);--sand:var(--border-secondary);
+  --content:1180px;
+}
+html[data-radius="full"]{--button:100000px;--modal:32px;--modal-inner-container:20px;--input:8px;--calendar-header:100000px;--pagination:100000px;--card:12px;--nav-item:12px;}
+html[data-radius="normal"]{--button:8px;--modal:16px;--modal-inner-container:12px;--input:8px;--calendar-header:12px;--pagination:10px;--card:8px;--nav-item:8px;}
+html[data-radius="sharp"]{--button:0px;--modal:0px;--modal-inner-container:0px;--input:0px;--calendar-header:0px;--pagination:0px;--card:0px;--nav-item:0px;}
+html[data-radius="slightly-rounded"]{--button:12px;--modal:20px;--modal-inner-container:16px;--input:12px;--calendar-header:16px;--pagination:14px;--card:12px;--nav-item:8px;}
+html[data-color-mode="dark"]{
+/* GENERATED from design-os/tokens.css — do not edit.
+   Dark Mode overrides. Bare declarations — the caller supplies the wrapper.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+  --text-primary:#ffffff;
+  --text-secondary:#d4d4d4;
+  --text-tertiary:#a3a3a3;
+  --text-quarternary:#a3a3a3;
+  --text-disabled:#737373;
+  --text-error:#fee2e2;
+  --text-warning:#fef3c7;
+  --text-warning-secondary:#f59e0b;
+  --text-success:#d1fae5;
+  --text-brand:#fcfcfc;
+  --text-brand-secondary:#f7f7f7;
+  --border-primary:#262626;
+  --border-secondary:#262626;
+  --border-tertiary:#404040;
+  --border-disabled:#404040;
+  --border-error:#dc262666;
+  --border-error-secondary:#7f1d1d;
+  --border-warning:#f59e0b66;
+  --border-warning-secondary:#78350f;
+  --border-success:#05966966;
+  --border-brand:#e5e5e5;
+  --border-brand-secondary:#525252;
+  --icon-primary:#ffffff;
+  --icon-secondary:#d4d4d4;
+  --icon-disabled:#737373;
+  --icon-error:#fee2e2;
+  --icon-warning:#fef3c7;
+  --icon-success:#d1fae5;
+  --icon-brand:#f7f7f7;
+  --bg-primary:#0a0a0a;
+  --bg-primary_hover:#262626;
+  --bg-secondary:#171717;
+  --bg-tertiary:#262626;
+  --bg-quarternary:#404040;
+  --bg-disabled:#262626;
+  --bg-error:#dc262666;
+  --bg-error-secondary:#dc262633;
+  --bg-warning:#f59e0b66;
+  --bg-warning-secondary:#f59e0b33;
+  --bg-success:#05966966;
+  --bg-brand-primary:#171717;
+  --bg-brand-secondary:#525252;
+  --bg-alt:#ffffff;
+  --opacity-light-10:#0e0f111a;
+  --opacity-light-20:#0e0f1133;
+  --opacity-light-30:#0e0f114d;
+  --opacity-light-40:#0e0f1166;
+  --opacity-light-50:#0e0f1180;
+  --opacity-light-60:#0e0f1199;
+  --opacity-light-70:#0e0f11b2;
+  --opacity-light-80:#0e0f11cc;
+  --opacity-light-90:#0e0f11e5;
+  --opacity-dark-10:#ffffff1a;
+  --opacity-dark-20:#ffffff33;
+  --opacity-dark-30:#ffffff4d;
+  --opacity-dark-40:#ffffff66;
+  --opacity-dark-50:#ffffff80;
+  --opacity-dark-60:#ffffff99;
+  --opacity-dark-70:#ffffffb2;
+  --opacity-dark-80:#ffffffcc;
+  --opacity-dark-90:#ffffffe5;
+  --bg-error-solid:#dc2626;
+  --bg-success-secondary:#05966933;
+  --bg-warning-solid:#d97706;
+  --bg-brand-primary_hover:#262626;
+  --bg-brand-solid:#ffffff;
+  --border-success-secondary:#064e3b;
+  --text-alt:#000000;
+  --text-placeholder:#737373;
+  --text-placeholder-alt:#404040;
+  --bg-primary_press:#404040;
+  --text-success-secondary:#10b981;
+  --icon-alt:#000000;
+  --bg-info:#2563eb1a;
+  --bg-info-secondary:#2563eb;
+  --bg-info-solid:#2563eb;
+  --text-info:#dbeafe;
+  --border-info:#3b82f6;
+  --border-info-secondary:#1e3a8a;
+  --icon-info:#dbeafe;
+  --border-alt:#000000;
+  --alpha-brand-accent-85:#ffffffd9;
+  --border-alt-2:#ffffff;
+  --alpha-brand-accent-10:#0000001a;
+  --alpha-brand-accent-40:#00000066;
+  --alpha-brand-accent-60:#00000099;
+  --alpha-brand-accent-20:#00000033;
+  --alpha-neutral-accent-10:#ffffff;
+  --alpha-neutral-accent-20:#ffffff;
+  --alpha-neutral-accent-40:#ffffff;
+  --alpha-neutral-accent-60:#ffffff;
+  --alpha-neutral-accent-85:#ffffff;
+  --alpha-success-accent-10:#ffffff;
+  --alpha-success-accent-20:#ffffff;
+  --alpha-success-accent-40:#ffffff;
+  --alpha-success-accent-60:#ffffff;
+  --alpha-success-accent-85:#ffffff;
+  --alpha-warning-accent-10:#ffffff;
+  --alpha-warning-accent-20:#ffffff;
+  --alpha-warning-accent-40:#ffffff;
+  --alpha-warning-accent-60:#ffffff;
+  --alpha-warning-accent-85:#ffffff;
+  --alpha-error-accent-10:#ffffff;
+  --alpha-error-accent-20:#ffffff;
+  --alpha-error-accent-40:#ffffff;
+  --alpha-error-accent-60:#ffffff;
+  --alpha-error-accent-85:#ffffff;
+  --chart-blue:#60a5fa;
+  --chart-orange:#fdba74;
+  --chart-green:#22c55e;
+  --chart-red:#ef4444;
+  --chart-purple:#d8b4fe;
+  --chart-yellow:#fde047;
+  --chart-pink:#f472b6;
+  --chart-dark:#a3a3a3;
+  --chart-lime:#a3e635;
+  --chart-cyan:#22d3ee;
+  --chart-success:#34d399;
+  --icon-quarternary:#737373;
+  --bg-secondary_hover:#262626;
+  --bg-secondary_press:#404040;
+  --bg-brand-hover:#f7f7f7;
+  --bg-brand-press:#f0f0f0;
+  --bg-brand-primary_press:#262626;
+  --icon-quinary:#737373;
+  --focus-ring:rgba(229,229,229,0.24);
+  --focus-ring-error:rgba(239,68,68,0.32);
+  --ring-brand:rgba(229,229,229,0.16);
+  --ring-error:rgba(239,68,68,0.24);
+  --border-control:#646464;
+  --border-focus-ring:#e5e5e5;
+}
+@media(prefers-color-scheme:dark){html:not([data-color-mode="light"]){
+/* GENERATED from design-os/tokens.css — do not edit.
+   Dark Mode overrides. Bare declarations — the caller supplies the wrapper.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+  --text-primary:#ffffff;
+  --text-secondary:#d4d4d4;
+  --text-tertiary:#a3a3a3;
+  --text-quarternary:#a3a3a3;
+  --text-disabled:#737373;
+  --text-error:#fee2e2;
+  --text-warning:#fef3c7;
+  --text-warning-secondary:#f59e0b;
+  --text-success:#d1fae5;
+  --text-brand:#fcfcfc;
+  --text-brand-secondary:#f7f7f7;
+  --border-primary:#262626;
+  --border-secondary:#262626;
+  --border-tertiary:#404040;
+  --border-disabled:#404040;
+  --border-error:#dc262666;
+  --border-error-secondary:#7f1d1d;
+  --border-warning:#f59e0b66;
+  --border-warning-secondary:#78350f;
+  --border-success:#05966966;
+  --border-brand:#e5e5e5;
+  --border-brand-secondary:#525252;
+  --icon-primary:#ffffff;
+  --icon-secondary:#d4d4d4;
+  --icon-disabled:#737373;
+  --icon-error:#fee2e2;
+  --icon-warning:#fef3c7;
+  --icon-success:#d1fae5;
+  --icon-brand:#f7f7f7;
+  --bg-primary:#0a0a0a;
+  --bg-primary_hover:#262626;
+  --bg-secondary:#171717;
+  --bg-tertiary:#262626;
+  --bg-quarternary:#404040;
+  --bg-disabled:#262626;
+  --bg-error:#dc262666;
+  --bg-error-secondary:#dc262633;
+  --bg-warning:#f59e0b66;
+  --bg-warning-secondary:#f59e0b33;
+  --bg-success:#05966966;
+  --bg-brand-primary:#171717;
+  --bg-brand-secondary:#525252;
+  --bg-alt:#ffffff;
+  --opacity-light-10:#0e0f111a;
+  --opacity-light-20:#0e0f1133;
+  --opacity-light-30:#0e0f114d;
+  --opacity-light-40:#0e0f1166;
+  --opacity-light-50:#0e0f1180;
+  --opacity-light-60:#0e0f1199;
+  --opacity-light-70:#0e0f11b2;
+  --opacity-light-80:#0e0f11cc;
+  --opacity-light-90:#0e0f11e5;
+  --opacity-dark-10:#ffffff1a;
+  --opacity-dark-20:#ffffff33;
+  --opacity-dark-30:#ffffff4d;
+  --opacity-dark-40:#ffffff66;
+  --opacity-dark-50:#ffffff80;
+  --opacity-dark-60:#ffffff99;
+  --opacity-dark-70:#ffffffb2;
+  --opacity-dark-80:#ffffffcc;
+  --opacity-dark-90:#ffffffe5;
+  --bg-error-solid:#dc2626;
+  --bg-success-secondary:#05966933;
+  --bg-warning-solid:#d97706;
+  --bg-brand-primary_hover:#262626;
+  --bg-brand-solid:#ffffff;
+  --border-success-secondary:#064e3b;
+  --text-alt:#000000;
+  --text-placeholder:#737373;
+  --text-placeholder-alt:#404040;
+  --bg-primary_press:#404040;
+  --text-success-secondary:#10b981;
+  --icon-alt:#000000;
+  --bg-info:#2563eb1a;
+  --bg-info-secondary:#2563eb;
+  --bg-info-solid:#2563eb;
+  --text-info:#dbeafe;
+  --border-info:#3b82f6;
+  --border-info-secondary:#1e3a8a;
+  --icon-info:#dbeafe;
+  --border-alt:#000000;
+  --alpha-brand-accent-85:#ffffffd9;
+  --border-alt-2:#ffffff;
+  --alpha-brand-accent-10:#0000001a;
+  --alpha-brand-accent-40:#00000066;
+  --alpha-brand-accent-60:#00000099;
+  --alpha-brand-accent-20:#00000033;
+  --alpha-neutral-accent-10:#ffffff;
+  --alpha-neutral-accent-20:#ffffff;
+  --alpha-neutral-accent-40:#ffffff;
+  --alpha-neutral-accent-60:#ffffff;
+  --alpha-neutral-accent-85:#ffffff;
+  --alpha-success-accent-10:#ffffff;
+  --alpha-success-accent-20:#ffffff;
+  --alpha-success-accent-40:#ffffff;
+  --alpha-success-accent-60:#ffffff;
+  --alpha-success-accent-85:#ffffff;
+  --alpha-warning-accent-10:#ffffff;
+  --alpha-warning-accent-20:#ffffff;
+  --alpha-warning-accent-40:#ffffff;
+  --alpha-warning-accent-60:#ffffff;
+  --alpha-warning-accent-85:#ffffff;
+  --alpha-error-accent-10:#ffffff;
+  --alpha-error-accent-20:#ffffff;
+  --alpha-error-accent-40:#ffffff;
+  --alpha-error-accent-60:#ffffff;
+  --alpha-error-accent-85:#ffffff;
+  --chart-blue:#60a5fa;
+  --chart-orange:#fdba74;
+  --chart-green:#22c55e;
+  --chart-red:#ef4444;
+  --chart-purple:#d8b4fe;
+  --chart-yellow:#fde047;
+  --chart-pink:#f472b6;
+  --chart-dark:#a3a3a3;
+  --chart-lime:#a3e635;
+  --chart-cyan:#22d3ee;
+  --chart-success:#34d399;
+  --icon-quarternary:#737373;
+  --bg-secondary_hover:#262626;
+  --bg-secondary_press:#404040;
+  --bg-brand-hover:#f7f7f7;
+  --bg-brand-press:#f0f0f0;
+  --bg-brand-primary_press:#262626;
+  --icon-quinary:#737373;
+  --focus-ring:rgba(229,229,229,0.24);
+  --focus-ring-error:rgba(239,68,68,0.32);
+  --ring-brand:rgba(229,229,229,0.16);
+  --ring-error:rgba(239,68,68,0.24);
+  --border-control:#646464;
+  --border-focus-ring:#e5e5e5;
+}}
+/* ── Document shell: type scale, header contract, sheet, cover, memo, footer ── */
+*{box-sizing:border-box}
+/* `clip` rather than `hidden`: hidden turns the root into a scroll container,
+   which stops in-page anchor links from scrolling at all in Chromium. */
+html{overflow-x:clip;background:var(--canvas);scroll-behavior:smooth}
+/* Every anchor target clears the 56px fixed header instead of landing under it. */
+[id]{scroll-margin-top:76px}
+body{margin:0;min-width:0;overflow-x:clip;color:var(--ink);background:var(--canvas);
+  font-family:var(--font-sans);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--border-brand);outline-offset:2px}
+h1,h2,h3,h4,p{margin-top:0}
+img{max-width:100%}
+.sheet{width:min(calc(100% - 40px),var(--content));margin-inline:auto}
+
+/* Header — the shared 56px contract from the report library */
+.folio-bar{position:fixed;inset:0 0 auto;z-index:50;border-bottom:1px solid transparent;
+  background:color-mix(in srgb,var(--surface-header) 82%,transparent);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);transition:border-color 120ms ease}
+.folio-bar.is-scrolled{border-bottom-color:var(--border-primary)}
+.folio-inner{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.folio{display:flex;align-items:center;gap:8px;min-width:0;color:var(--stone);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.folio .home-link{display:inline-flex;align-items:center;gap:7px;color:var(--ink);font-size:15px;font-weight:500;letter-spacing:0;text-transform:none;text-decoration:none}
+.folio .home-link svg{width:18px;height:18px}
+.folio .separator{color:var(--icon-quarternary)}
+.folio .category-link{color:var(--stone);text-decoration:none}
+.folio .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folio-meta{display:flex;align-items:center;gap:0;margin-left:auto}
+.folio-links{display:flex;gap:8px}
+.folio-links a{min-height:42px;display:inline-flex;align-items:center;padding-inline:10px;border-radius:var(--nav-item);
+  color:var(--olive,var(--text-tertiary));font-size:11px;letter-spacing:.06em;text-transform:uppercase;text-decoration:none}
+.folio-links a:hover{background:var(--bg-primary-hover);color:var(--text-primary)}
+.theme-toggle{display:inline-grid;width:42px;min-height:42px;flex:0 0 42px;place-items:center;padding:0;border:0;
+  border-radius:var(--nav-item);background:transparent;color:var(--icon-secondary);cursor:pointer}
+.theme-toggle svg{width:18px;height:18px}
+.theme-toggle [data-theme-icon="moon"]{display:none}
+html[data-color-mode="dark"] .theme-toggle [data-theme-icon="sun"]{display:none}
+html[data-color-mode="dark"] .theme-toggle [data-theme-icon="moon"]{display:block}
+.theme-toggle:hover{background:var(--bg-primary-hover);color:var(--icon-primary)}
+.report{padding-top:52px}
+
+/* Cover */
+.cover{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:70px;padding:76px 0 58px;border-bottom:1px solid var(--border-primary)}
+.kicker{margin:0 0 14px;color:var(--brand);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+h1{max-width:820px;margin-bottom:22px;font-size:clamp(42px,6.4vw,72px);font-weight:500;letter-spacing:-.045em;line-height:1}
+.deck{max-width:720px;margin-bottom:0;color:var(--charcoal);font-size:19px;line-height:1.55}
+.cover-meta{display:flex;flex-wrap:wrap;gap:7px 24px;margin-top:32px;color:var(--stone);
+  font-size:11px;line-height:1.4;letter-spacing:.04em;text-transform:uppercase}
+.cover-meta span::before{content:"—";margin-right:7px;color:var(--brand)}
+.stamp{align-self:start;padding:24px;border:0;border-radius:var(--radius-xl);
+  background:var(--bg-warning-secondary);box-shadow:var(--shadow-card)}
+.stamp-small{color:var(--text-warning);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+.stamp-score{margin-top:12px;color:var(--text-warning);font-size:62px;font-variant-numeric:tabular-nums;line-height:.9}
+.stamp-score span{font-size:19px}
+.stamp p{margin:10px 0 0;color:var(--text-warning);font-size:12px;line-height:1.45}
+
+/* Chapters */
+.chapter{padding:62px 0}
+/* Eyebrow on its own row, heading and lead stacked beneath it — one rhythm for
+   every section head in every template. */
+.chapter-head{display:grid;grid-template-columns:minmax(0,1fr);gap:0;margin-bottom:30px}
+.chapter-head .kicker{margin-bottom:16px}
+.chapter-head h2{max-width:820px;margin:0;font-size:clamp(28px,3.8vw,42px);font-weight:500;letter-spacing:-.03em;line-height:1.08}
+.chapter-head .lead{max-width:720px;margin:12px 0 0;color:var(--stone)}
+
+/* Memo bands */
+.memo{display:grid;grid-template-columns:repeat(4,1fr);gap:28px}
+.memo-block{padding:28px 0 30px}
+.label{margin-bottom:8px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.memo-block h2{margin-bottom:7px;font-size:19px;font-weight:500;line-height:1.25}
+.memo-block p{margin:0;color:var(--stone);font-size:13px;line-height:1.5}
+.audit-brief{border-top:1px solid var(--sand);border-bottom:1px solid var(--sand)}
+
+/* Footer */
+footer{padding:28px 0 38px}
+.footer-inner{display:flex;justify-content:space-between;gap:20px;color:var(--stone);font-size:13px}
+.footer-inner p{margin:0}
+.footer-meta{display:grid;gap:2px;font-size:11px;text-align:right}
+.footer-meta strong{color:var(--ink);font-weight:600}
+
+@media(max-width:900px){
+  .cover{grid-template-columns:minmax(0,1fr);gap:32px;padding:48px 0 40px}
+  .memo{grid-template-columns:repeat(2,1fr);gap:0 24px}
+  .footer-inner{flex-direction:column}
+  .footer-meta{text-align:left}
+}
+@media(max-width:640px){
+  .memo{grid-template-columns:minmax(0,1fr)}
+  .folio-links{display:none}
+  .chapter{padding:44px 0}
+}
+@media print{
+  .folio-bar,.theme-toggle,.no-print{display:none!important}
+  .report{padding-top:0}
+  body{background:var(--bg-white)}
+  .chapter,.decision{break-inside:avoid}
+  .observation,.overview-card,.memo-block,.score-lift,.path-row,.validation,.quick-win,.ledger-row{break-inside:avoid}
+}
+
+[hidden]{display:none!important}
+
+/* Work Report contract: every table cell is vertically centred, whatever the
+   table. Stated once, globally, so a new table cannot opt out by accident. */
+table th, table td{vertical-align:middle}
+/* ── DesignOS components (subset, verbatim contracts from design-os/*.css) ── */
+.dos-status--brand   {--st-soft:var(--bg-brand-primary);--st-soft-2:var(--bg-brand-primary);   --st-solid:var(--bg-brand-solid);  --st-border:var(--border-brand);   --st-content:var(--text-brand);  --st-on-solid:var(--text-alt)}
+.dos-status--success {--st-soft:var(--bg-success);      --st-soft-2:var(--bg-success-secondary);--st-solid:var(--bg-success-solid);--st-border:var(--border-success); --st-content:var(--text-success);--st-on-solid:var(--text-white)}
+.dos-status--warning {--st-soft:var(--bg-warning);      --st-soft-2:var(--bg-warning-secondary);--st-solid:var(--bg-warning-solid);--st-border:var(--border-warning); --st-content:var(--text-warning);--st-on-solid:var(--text-primary)}
+.dos-status--error   {--st-soft:var(--bg-error);        --st-soft-2:var(--bg-error-secondary);  --st-solid:var(--bg-error-solid);  --st-border:var(--border-error);   --st-content:var(--text-error);  --st-on-solid:var(--text-white)}
+.dos-status--info    {--st-soft:var(--bg-info);         --st-soft-2:var(--bg-info-secondary);   --st-solid:var(--bg-info-solid);   --st-border:var(--border-info);    --st-content:var(--text-info);   --st-on-solid:var(--text-white)}
+.dos-status--neutral {--st-soft:var(--bg-secondary);    --st-soft-2:var(--bg-tertiary);         --st-solid:var(--bg-dark);         --st-border:var(--border-secondary);--st-content:var(--text-primary);--st-on-solid:var(--text-white)}
+
+.dos-badge{display:inline-flex;align-items:center;gap:var(--spacing-0);height:var(--dos-badge-height,28px);
+  padding:var(--spacing-4) var(--spacing-6);border:1px solid transparent;border-radius:var(--button);
+  background:var(--st-soft-2);color:var(--st-content);font-family:var(--family-caption);
+  font-size:var(--font-size-caption-md);line-height:var(--line-height-caption-md);
+  font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden}
+.dos-badge--sm{--dos-badge-height:24px;font-size:11px}
+.dos-badge__label{display:inline-flex;align-items:center;justify-content:center;gap:var(--spacing-4);padding:0 var(--spacing-4)}
+.dos-badge__icon{display:block;flex:none;width:12px;height:12px}
+.dos-badge__dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--st-solid)}
+/* Outline is part of the DesignOS contract but unused by these templates —
+   badges here are Light (no modifier) or Solid only. */
+.dos-badge--outline{background:var(--bg-primary);border-color:var(--st-border)}
+.dos-badge--solid{background:var(--st-solid);color:var(--st-on-solid);border-color:transparent}
+
+.dos-btn{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand);--dos-btn-border:transparent;--dos-btn-border-width:0;
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:var(--spacing-4);
+  height:var(--dos-btn-height,40px);padding:var(--dos-btn-pad-y,10px) var(--dos-btn-pad-x,12px);
+  border:var(--dos-btn-border-width) solid var(--dos-btn-border);border-radius:var(--button);
+  background-color:var(--dos-btn-bg);color:var(--dos-btn-fg);font-family:var(--family-text);
+  font-size:var(--dos-btn-font-size,14px);line-height:1.4286;font-weight:var(--weight-medium);
+  white-space:nowrap;cursor:pointer;appearance:none;-webkit-appearance:none;
+  transition:background-color var(--motion-state) var(--motion-ease),border-color var(--motion-state) var(--motion-ease),color var(--motion-state) var(--motion-ease)}
+.dos-btn__label{display:inline-flex;align-items:center;padding:0 var(--spacing-4)}
+.dos-btn__icon{display:block;flex:none;width:var(--dos-btn-icon-size,16px);height:var(--dos-btn-icon-size,16px)}
+.dos-btn:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring);z-index:10}
+.dos-btn--sm{--dos-btn-height:32px;--dos-btn-pad-y:var(--spacing-6);--dos-btn-pad-x:var(--spacing-12)}
+.dos-btn--lg{--dos-btn-height:48px;--dos-btn-pad-y:14px;--dos-btn-pad-x:var(--spacing-16);--dos-btn-icon-size:20px}
+.dos-btn--xl{--dos-btn-height:56px;--dos-btn-pad-y:var(--spacing-16);--dos-btn-pad-x:var(--spacing-24);--dos-btn-font-size:16px;--dos-btn-icon-size:20px}
+.dos-btn--icon-only{width:var(--dos-btn-height,40px);padding:0}
+.dos-btn--default{--dos-btn-bg:var(--bg-brand-solid);--dos-btn-fg:var(--text-alt)}
+.dos-btn--secondary{--dos-btn-bg:var(--bg-secondary);--dos-btn-fg:var(--text-primary)}
+.dos-btn--outline{--dos-btn-bg:var(--bg-primary);--dos-btn-fg:var(--text-brand);--dos-btn-border:var(--border-brand-secondary);--dos-btn-border-width:1px}
+.dos-btn--ghost{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand)}
+.dos-btn--link{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand);height:auto;padding:0;border-radius:0;text-decoration:underline;text-underline-offset:3px}
+.dos-btn--default:hover{--dos-btn-bg:var(--bg-brand-hover)}
+.dos-btn--secondary:hover{--dos-btn-bg:var(--bg-secondary-hover)}
+.dos-btn--outline:hover,.dos-btn--ghost:hover{--dos-btn-bg:var(--bg-brand-primary-hover)}
+.dos-btn--default:active{--dos-btn-bg:var(--bg-brand-press)}
+.dos-btn--secondary:active{--dos-btn-bg:var(--bg-secondary-press)}
+.dos-btn--outline:active,.dos-btn--ghost:active{--dos-btn-bg:var(--bg-brand-primary-press)}
+.dos-btn:disabled{--dos-btn-bg:var(--bg-disabled);--dos-btn-fg:var(--text-disabled);cursor:not-allowed}
+
+.dos-btn-group{display:inline-flex;align-items:center;width:fit-content;max-width:100%;align-self:flex-start;
+  gap:var(--spacing-0);padding:var(--spacing-0);border:1px solid var(--border-primary);
+  border-radius:var(--button);overflow:hidden}
+.dos-btn-group__item{display:flex;align-items:center;justify-content:center;gap:var(--spacing-0);flex:none;
+  height:44px;padding:var(--spacing-8) var(--spacing-12);border:0;background:var(--bg-primary);
+  color:var(--text-primary);font-family:var(--family-text);font-size:var(--font-size-paragraph-sm);
+  line-height:var(--line-height-paragraph-sm);font-weight:var(--weight-medium);white-space:nowrap;cursor:pointer}
+.dos-btn-group--sm .dos-btn-group__item{height:32px}
+.dos-btn-group__item+.dos-btn-group__item{border-left:1px solid var(--border-primary)}
+.dos-btn-group__item:hover{background:var(--bg-primary-hover)}
+.dos-btn-group__item[aria-pressed="true"],.dos-btn-group__item.is-active{background:var(--bg-brand-primary-press);color:var(--text-primary)}
+.dos-btn-group__item:focus-visible{outline:none;box-shadow:inset 0 0 0 var(--focus-ring-width) var(--focus-ring)}
+/* Icon Only = True: a fixed square, glyph centred, name carried by aria-label. */
+.dos-btn-group__item--icon{width:40px;padding:0}
+.dos-btn-group--sm .dos-btn-group__item--icon{width:34px}
+.dos-btn-group__item--icon svg{display:block;width:18px;height:18px}
+
+.dos-alert{position:relative;display:flex;align-items:flex-start;gap:var(--spacing-16);
+  padding:var(--spacing-20) var(--spacing-16);border:0;border-radius:var(--card);
+  background:var(--st-soft);color:var(--text-primary);font-family:var(--family-text);
+  font-size:var(--font-size-paragraph-sm);line-height:var(--line-height-paragraph-sm);
+  box-shadow:var(--shadow-xs)}
+.dos-alert--default{background:var(--bg-primary);border:1px solid var(--border-primary);
+  padding:var(--spacing-16);box-shadow:var(--shadow-md)}
+.dos-alert--solid{background:var(--st-solid);border:0;padding:var(--spacing-16);color:var(--st-on-solid);
+  box-shadow:var(--shadow-md)}
+.dos-alert--solid .dos-alert__icon,.dos-alert--solid .dos-alert__title{color:var(--st-on-solid)}
+.dos-alert__icon{display:block;flex:none;width:20px;height:20px;color:var(--st-content)}
+.dos-alert__body{display:flex;flex:1 0 0;min-width:0;flex-direction:column;gap:var(--spacing-8)}
+.dos-alert__title{margin:0;font-size:15px;font-weight:var(--weight-semibold)}
+.dos-alert__text{margin:0;color:var(--text-secondary);font-size:13px;line-height:1.5}
+.dos-alert--small{align-items:center;min-height:48px;padding:var(--spacing-12) var(--spacing-16);
+  gap:var(--spacing-12);box-shadow:none}
+.dos-alert--small .dos-alert__title{color:inherit}
+.dos-alert--small.dos-alert--default{box-shadow:var(--shadow-sm)}
+.dos-alert--small .dos-alert__icon{width:16px;height:16px}
+
+.dos-toggle{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:calc(var(--tg-h,20px)*1.8);
+  height:var(--tg-h,20px);border-radius:var(--radius-full);background:var(--bg-quarternary);cursor:pointer;
+  transition:background-color var(--motion-state) var(--motion-ease)}
+.dos-toggle--sm{--tg-h:18px}
+.dos-toggle::after{content:"";position:absolute;top:2px;left:2px;width:calc(var(--tg-h,20px) - 4px);height:calc(var(--tg-h,20px) - 4px);
+  border-radius:50%;background:var(--bg-primary);transition:transform var(--motion-state) var(--motion-ease)}
+.dos-toggle:checked{background:var(--bg-brand-solid)}
+.dos-toggle:checked::after{transform:translateX(calc(var(--tg-h,20px)*.8))}
+.dos-toggle:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+
+.dos-choice{display:flex;align-items:flex-start;gap:var(--spacing-8);cursor:pointer}
+.dos-choice__box{appearance:none;-webkit-appearance:none;flex:none;width:18px;height:18px;margin:1px 0 0;
+  border:1px solid var(--border-control);border-radius:var(--radius-sm);background:var(--bg-primary);cursor:pointer}
+.dos-choice__box:checked{background:var(--bg-brand-solid);border-color:var(--bg-brand-solid);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size:100% 100%}
+html[data-color-mode="dark"] .dos-choice__box:checked{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.dos-choice__box:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.dos-choice__title{font-size:14px;font-weight:var(--weight-medium);color:var(--text-primary)}
+.dos-choice__subtext{font-size:12px;color:var(--text-quarternary)}
+
+.dos-field{display:flex;flex-direction:column;gap:var(--spacing-4);width:100%;font-family:var(--family-text)}
+.dos-field__label{display:flex;align-items:center;gap:var(--spacing-4);font-size:var(--font-size-caption-md);
+  font-weight:var(--weight-medium);color:var(--text-primary)}
+.dos-field__required{color:var(--text-error)}
+.dos-field__hint{font-size:var(--font-size-caption-md);color:var(--text-quarternary)}
+.dos-field.is-error .dos-field__hint{color:var(--text-error)}
+.dos-input{display:flex;align-items:center;gap:var(--spacing-8);height:var(--dos-input-height,40px);width:100%;
+  padding:var(--spacing-8) var(--spacing-12);border:1px solid var(--border-primary);border-radius:var(--input);
+  background:var(--bg-primary);color:var(--text-primary);overflow:hidden;
+  transition:border-color var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.dos-field--lg .dos-input{--dos-input-height:48px}
+.dos-input__field{flex:1 0 0;min-width:0;border:0;background:transparent;color:inherit;font:inherit;outline:none}
+.dos-input__field::placeholder{color:var(--text-placeholder)}
+.dos-input__icon{flex:none;width:18px;height:18px;color:var(--icon-tertiary)}
+.dos-input:focus-within{border-color:var(--border-control);box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.dos-field.is-error .dos-input{border-color:var(--border-error)}
+
+.dos-divider{display:flex;align-items:center;width:100%;color:var(--text-quarternary);font-size:12px}
+.dos-divider::before,.dos-divider::after{content:"";flex:1 0 0;height:1px;background:var(--border-primary)}
+.dos-divider>span{padding:0 var(--spacing-12)}
+.dos-divider--line{gap:0}
+.dos-divider--line::after{display:none}
+
+.dos-tooltip{position:relative;display:inline-flex}
+.dos-tooltip__bubble{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(4px);
+  z-index:40;width:max-content;max-width:240px;padding:var(--spacing-8) var(--spacing-12);border-radius:var(--radius-md);
+  background:var(--bg-alt);color:var(--text-alt);font-size:12px;line-height:1.45;text-align:left;
+  opacity:0;pointer-events:none;transition:opacity var(--motion-state) var(--motion-ease),transform var(--motion-state) var(--motion-ease);
+  box-shadow:var(--shadow-card)}
+.dos-tooltip:hover .dos-tooltip__bubble,.dos-tooltip:focus-within .dos-tooltip__bubble{opacity:1;transform:translateX(-50%) translateY(0)}
+.dos-tooltip__title{display:block;font-weight:var(--weight-semibold)}
+
+.dos-loader{display:inline-block;width:20px;height:20px;border:2px solid var(--border-secondary);
+  border-top-color:var(--icon-primary);border-radius:50%;animation:dos-spin 700ms linear infinite}
+@keyframes dos-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.dos-choice__box--radio{border-radius:var(--radius-full)}
+.dos-choice__box--radio:checked{background-image:none;box-shadow:inset 0 0 0 4px var(--bg-primary)}
+
+/* A badge used as a filter control. Same anatomy, same status family; the
+   pressed state is the Solid style, so nothing new is invented. */
+button.dos-badge{--dos-badge-height:32px;border:1px solid transparent;background:var(--st-soft);
+  color:var(--st-content);font-family:var(--family-text);font-weight:var(--weight-medium);cursor:pointer;
+  transition:background-color var(--motion-state) var(--motion-ease),color var(--motion-state) var(--motion-ease)}
+button.dos-badge:hover{background:var(--st-solid);color:var(--st-on-solid)}
+button.dos-badge[aria-pressed="true"]{background:var(--st-solid);color:var(--st-on-solid)}
+button.dos-badge:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+button.dos-badge .count{opacity:.62;font-variant-numeric:tabular-nums}
+button.dos-badge[aria-pressed="true"] .count{opacity:.72}
+/* ── Impact x effort priority matrix (shared) ── */
+.matrix-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:40px;align-items:start}
+.matrix{position:relative;aspect-ratio:1/.78;border:1px solid var(--border-secondary);border-radius:var(--radius-xl);
+  background:var(--bg-primary);overflow:visible}
+.matrix::before,.matrix::after{content:"";position:absolute;background:var(--border-primary)}
+.matrix::before{left:50%;top:0;bottom:0;width:1px}
+.matrix::after{top:50%;left:0;right:0;height:1px}
+.quad-label{position:absolute;color:var(--text-quarternary);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.quad-tl{top:14px;left:16px}.quad-tr{top:14px;right:16px}.quad-bl{bottom:14px;left:16px}.quad-br{bottom:14px;right:16px}
+.dot{position:absolute;width:30px;height:30px;display:grid;place-items:center;border:2px solid var(--bg-primary);border-radius:50%;
+  transform:translate(-50%,-50%);color:var(--text-alt);background:var(--bg-brand-solid);font-size:12px;font-weight:700;
+  text-decoration:none;box-shadow:var(--shadow-pin)}
+.dot.status-high{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.dot.status-medium{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.dot:hover,.dot:focus-visible{transform:translate(-50%,-50%) scale(1.15);z-index:31}
+/* The dot says which finding it is on hover — a numbered dot alone makes the
+   reader hold a legend in their head while reading the chart. */
+.dot::after{content:attr(data-name);position:absolute;bottom:calc(100% + 10px);left:50%;z-index:30;
+  width:max-content;max-width:190px;padding:7px 10px;border-radius:var(--radius-md);
+  background:var(--bg-alt);color:var(--text-alt);font-size:11px;font-weight:500;line-height:1.4;
+  text-align:center;opacity:0;pointer-events:none;box-shadow:var(--shadow-card);
+  transform:translateX(-50%) translateY(4px);
+  transition:opacity var(--motion-state) var(--motion-ease),transform var(--motion-state) var(--motion-ease)}
+.dot:hover::after,.dot:focus-visible::after{opacity:1;transform:translateX(-50%) translateY(0)}
+.axis{color:var(--stone);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.axis-x{display:flex;justify-content:space-between;margin-top:10px}
+.matrix-side .dos-alert{margin-bottom:14px}
+.matrix-key{margin:0;padding:0;list-style:none}
+.matrix-key li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--border-primary);
+  color:var(--stone);font-size:13px;line-height:1.4}
+.matrix-key li:first-child{border-top:0}
+.matrix-key b{color:var(--ink);font-weight:500}
+.key-no{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:var(--bg-brand-solid);
+  color:var(--text-alt);font-size:11px;font-weight:700}
+.key-no.status-high{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.key-no.status-medium{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.key-no.status-working{background:var(--bg-success-solid);color:var(--text-white)}
+
+@media(max-width:1080px){.matrix-wrap{grid-template-columns:minmax(0,1fr)}}
+/* ── Audit report — sections beyond the shell ── */
+.overview{padding:30px 0;border-bottom:1px solid var(--border)}
+.overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.overview-card{display:flex;flex-direction:column;min-height:134px;padding:20px;border:1px solid var(--border);
+  border-radius:var(--radius-lg);background:var(--bg-primary)}
+.overview-score{display:flex;align-items:baseline;gap:7px;font-size:30px;font-weight:750;line-height:1;font-variant-numeric:tabular-nums}
+.overview-score span{color:var(--stone);font-size:13px;font-weight:650}
+.overview-label{margin-top:10px;color:var(--stone);font-size:13px;line-height:1.35}
+.overview-bar{position:relative;height:6px;margin-top:auto;border-radius:99px;background:var(--sand)}
+.overview-bar i{display:block;height:100%;border-radius:inherit;background:var(--bg-brand-solid)}
+.overview-bar .tick{position:absolute;top:-3px;width:2px;height:11px;border-radius:2px;background:var(--ink);opacity:.4;transform:translateX(-1px)}
+.state-critical .overview-score{color:var(--text-error)}
+.state-critical .overview-bar i{background:var(--bg-error-solid)}
+.state-warning .overview-score{color:var(--text-warning)}
+.state-warning .overview-bar i{background:var(--bg-warning-solid)}
+.state-good .overview-score{color:var(--text-success)}
+.state-good .overview-bar i{background:var(--bg-success-solid)}
+
+/* Evidence quality strip — new: makes the claim-strength of the audit legible */
+.evidence-strip{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:12px;padding:14px 18px;
+  border:1px solid var(--border-primary);border-radius:var(--radius-lg);background:var(--bg-primary)}
+.evidence-strip .strip-label{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.evidence-strip .spacer{flex:1 0 12px}
+
+.evidence-layout{display:grid;grid-template-columns:380px minmax(0,1fr);gap:56px;align-items:start}
+.capture-tall .evidence-layout{grid-template-columns:380px minmax(0,1fr)}
+.capture-wide .evidence-layout{grid-template-columns:minmax(0,1fr)}
+/* The capture is the context every observation refers to, so it holds position
+   while the observations scroll past it. It is sized by the viewport height,
+   not by the column width, so the whole screen stays visible instead of the
+   column scrolling inside itself. Pins are percentages of .capture-inner,
+   which hugs the image exactly, so they track any scale. */
+/* Never `auto`: an internally scrollable pinned column gets hijacked by the
+   wheel and pushes the top of the capture out of view. `clip` holds that line
+   but, unlike `hidden`, takes an overflow-clip-margin — so the device shadow
+   still paints outside the box instead of being sheared off at the edges. */
+.capture-col{position:sticky;top:68px;align-self:start;max-height:calc(100vh - 84px);
+  overflow:hidden;overflow:clip;overflow-clip-margin:44px}
+.capture-sticky{position:static}
+.capture{width:min(100%,calc((100vh - 220px) * 390 / 844));margin-inline:auto;
+  border:1px solid var(--border-tertiary);border-radius:var(--radius-3xl);background:var(--bg-primary);
+  box-shadow:var(--shadow-card);overflow:hidden}
+.capture-inner{position:relative;line-height:0;border-radius:inherit}
+/* aspect-ratio keeps the element box equal to the drawing when max-width clamps
+   the height — without it the SVG letterboxes and every pin drifts. */
+.capture .shot,.capture img{display:block;aspect-ratio:390/844;width:100%;height:auto;border-radius:inherit}
+.capture-wide .capture{width:100%}
+.capture-wide .capture .shot,.capture-wide .capture img{aspect-ratio:auto;width:100%;height:auto;max-height:none}
+
+.pin{position:absolute;width:27px;height:27px;display:grid;place-items:center;border:2px solid var(--bg-primary);
+  border-radius:50%;transform:translate(-50%,-50%);color:var(--text-alt);background:var(--bg-brand-solid);
+  font-size:12px;font-weight:700;line-height:1;text-decoration:none;box-shadow:var(--shadow-pin);
+  transition:transform var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.pin.status-high{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.pin.status-medium{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.pin.status-working{background:var(--bg-success-solid);color:var(--text-white)}
+.pin.is-linked,.pin:hover,.pin:focus-visible{transform:translate(-50%,-50%) scale(1.22);box-shadow:var(--shadow-evidence);z-index:5}
+.pin.is-dimmed{opacity:.28}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;color:var(--stone);font-size:11px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:50%}
+.legend i.status-high{background:var(--bg-error-solid)}
+.legend i.status-medium{background:var(--bg-warning-solid)}
+.legend i.status-working{background:var(--bg-success-solid)}
+.capture-note{margin:13px 0 0;color:var(--stone);font-size:11px;line-height:1.5}
+
+/* Attention cross-check — pairs the audit with the predictive attention tool */
+.attention-card{margin-top:14px;padding:12px 16px;border:1px solid var(--border-primary);
+  border-radius:var(--radius-lg);background:var(--bg-primary)}
+.attention-card summary{cursor:pointer;font-size:13px;font-weight:600;list-style:none}
+.attention-card summary::-webkit-details-marker{display:none}
+.attention-card summary::after{content:"+";float:right;color:var(--text-quarternary);font-weight:400}
+.attention-card[open] summary{margin-bottom:8px}
+.attention-card[open] summary::after{content:"\2013"}
+.attention-card summary:focus-visible{outline:2px solid var(--border-brand);outline-offset:3px;border-radius:4px}
+.attention-card .note{margin:0 0 12px;color:var(--stone);font-size:11px;line-height:1.45}
+.attn-row{display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:10px;align-items:center;margin-bottom:9px;font-size:12px}
+.attn-row .attn-name{color:var(--charcoal);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.attn-track{grid-column:1/-1;height:5px;border-radius:99px;background:var(--bg-quarternary)}
+.attn-track i{display:block;height:100%;border-radius:99px;background:var(--bg-brand-solid)}
+.attn-row .attn-val{text-align:right;color:var(--stone);font-variant-numeric:tabular-nums}
+.attn-row.is-mismatch .attn-name{color:var(--text-error)}
+.attn-row.is-mismatch .attn-track i{background:var(--bg-error-solid)}
+
+/* Observation filters */
+.obs-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:18px}
+.obs-count{margin-left:auto;color:var(--stone);font-size:12px}
+
+.observations{min-width:0}
+.finding-group{margin:26px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border-primary);
+  color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.finding-group:first-child{margin-top:0}
+.observation{display:grid;grid-template-columns:31px minmax(0,1fr);gap:16px;margin:0 0 10px;padding:18px;
+  border:1px solid transparent;border-radius:var(--radius-2xl);background:var(--bg-primary);
+  transition:border-color var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.observation.is-linked{border-color:var(--border-tertiary);box-shadow:var(--shadow-card)}
+.observation.is-target{border-color:var(--border-brand);box-shadow:var(--shadow-card)}
+.observation[hidden]{display:none}
+/* Solid, and the same fill as the pin it answers to — the number on the card
+   and the number on the capture read as one object. */
+.obs-no{width:31px;height:31px;display:grid;place-items:center;border:0;border-radius:50%;
+  background:var(--bg-brand-solid);color:var(--text-alt);font-size:12px;font-weight:700;line-height:1}
+.observation.status-high .obs-no{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.observation.status-medium .obs-no{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.observation.status-working .obs-no{background:var(--bg-success-solid);color:var(--text-white)}
+.observation h3{margin:2px 0 10px;font-size:21px;font-weight:500;letter-spacing:-.015em;line-height:1.2}
+.observation p{margin:0;color:var(--text-tertiary);font-size:14px}
+.observation p+p{margin-top:10px}
+.observation b{color:var(--ink);font-weight:500}
+.obs-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.obs-meta{display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-primary);
+  color:var(--stone);font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.obs-meta b{color:var(--ink);font-weight:600}
+.quick-win{display:block;width:fit-content;max-width:100%;margin-top:12px;padding:8px 11px;border:0;border-radius:10px;
+  color:var(--text-success);background:var(--bg-success);font-size:13px;line-height:1.45;white-space:normal;
+  overflow-wrap:anywhere;word-break:normal;box-shadow:none}
+.quick-win b{color:var(--text-success);font-weight:650}
+
+/* Score ledger */
+.ledger{width:100%;table-layout:fixed;border-collapse:collapse;border-top:2px solid var(--brand)}
+.ledger th,.ledger td{padding:14px 7px;border-bottom:1px solid var(--border-primary);vertical-align:middle;text-align:left}
+.ledger-head th{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.ledger-no{width:48px;color:var(--brand);font-size:12px;font-variant-numeric:tabular-nums}
+.ledger-title{font-size:16px;font-weight:500;line-height:1.25}
+.ledger-score{width:86px;text-align:right;font-size:18px;font-variant-numeric:tabular-nums}
+.ledger-score.band-good{color:var(--text-success)}
+.ledger-score.band-med{color:var(--text-warning)}
+.ledger-score.band-high{color:var(--text-error)}
+.ledger-score.na{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.08em}
+.ledger-copy{color:var(--stone);font-size:13px;line-height:1.4}
+.ledger-total th,.ledger-total td{padding-top:16px;font-weight:600}
+.dimension-lifts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:26px}
+.dimension{padding:16px;border:1px solid var(--border-primary);border-radius:var(--radius-lg);background:var(--bg-primary)}
+.dimension .dim-name{font-size:13px;font-weight:600}
+.dimension .dim-jump{margin:6px 0 10px;color:var(--stone);font-size:12px;font-variant-numeric:tabular-nums}
+.dimension .dim-bar{position:relative;height:6px;border-radius:99px;background:var(--bg-quarternary)}
+.dimension .dim-bar i{display:block;height:100%;border-radius:99px;background:var(--bg-warning-solid)}
+.dimension.weak .dim-bar i{background:var(--bg-error-solid)}
+.dimension.strong .dim-bar i{background:var(--bg-success-solid)}
+.dimension .dim-bar .tick{position:absolute;top:-3px;width:2px;height:12px;border-radius:2px;background:var(--ink);opacity:.4}
+
+/* Decision */
+.decision{padding:68px 0;background:var(--bg-secondary)}
+.decision h2{max-width:800px;margin-bottom:16px;font-size:clamp(32px,4.6vw,50px);font-weight:500;letter-spacing:-.035em;line-height:1.05}
+.decision-intro{max-width:730px;margin-bottom:0;color:var(--text-secondary);font-size:17px}
+.score-lifts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:34px}
+.score-lift{padding:20px;border:1px solid var(--border-primary);border-radius:var(--radius-lg);background:var(--bg-primary)}
+.score-lift-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
+.score-lift-name{font-size:17px;font-weight:600}
+.score-lift-jump{color:var(--stone);font-size:15px;font-weight:650;white-space:nowrap;font-variant-numeric:tabular-nums}
+.score-lift-jump em{color:var(--text-brand);font-style:normal}
+.score-lift-bar{position:relative;height:6px;margin:14px 0 4px;border-radius:99px;background:var(--bg-quarternary)}
+.score-lift-bar i{display:block;height:100%;border-radius:99px;background:var(--bg-warning-solid)}
+.score-lift.weak .score-lift-bar i{background:var(--bg-error-solid)}
+.score-lift-bar .tick{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);border-radius:2px;background:var(--ink);opacity:.42}
+.score-lift ul{margin:14px 0 0;padding:0;list-style:none}
+.score-lift li{position:relative;padding:9px 0 9px 18px;border-top:1px solid var(--border-soft);color:var(--text-tertiary);font-size:14px}
+.score-lift li:first-child{border-top:0}
+.score-lift li::before{content:"\203A";position:absolute;left:2px;color:var(--text-brand);font-weight:800}
+.score-ref{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:99px;color:var(--text-brand);
+  background:var(--bg-brand-primary-hover);font-size:10px;font-weight:650;white-space:nowrap}
+.score-ceiling{margin-top:12px;padding:9px 11px;border:1px dashed var(--border-tertiary);border-radius:var(--radius-sm);
+  color:var(--stone);background:var(--bg-tertiary);font-size:12px;line-height:1.45}
+.path{width:100%;margin-top:38px;table-layout:fixed;border-collapse:collapse;border-top:1px solid var(--border-tertiary)}
+.path th{padding:10px 0;border-bottom:1px solid var(--border-primary);color:var(--stone);font-size:10px;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;text-align:left}
+.path td{padding:18px 0;border-bottom:1px solid var(--border-primary);vertical-align:middle;text-align:left}
+.path-step{width:76px;color:var(--text-secondary);font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+.path-title{width:200px;font-size:16px;font-weight:500}
+.path-copy{color:var(--text-tertiary);font-size:13px}
+.path-owner{width:120px;color:var(--stone);font-size:12px}
+.validation{margin-top:24px;padding:15px 17px;border:1px dashed var(--border-tertiary);border-radius:var(--radius-sm);
+  color:var(--text-secondary);font-size:12px;line-height:1.5}
+.validation b{color:var(--ink)}
+
+@media(max-width:1080px){
+  .evidence-layout,.capture-tall .evidence-layout{grid-template-columns:minmax(0,1fr);gap:32px}
+  .capture-col{position:static;max-height:none;overflow:visible;max-width:420px}
+  .matrix-wrap{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:900px){
+  .overview-grid,.dimension-lifts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .score-lifts{grid-template-columns:minmax(0,1fr)}
+  .path-title{width:auto}
+  .path-owner{display:none}
+}
+@media(max-width:640px){
+  .overview-grid,.dimension-lifts{grid-template-columns:minmax(0,1fr)}
+  .observation{grid-template-columns:minmax(0,1fr)}
+  .obs-no{display:none}
+}
+
+/* Work Report contract, stated under the canonical selectors so the validator
+   and the stylesheet agree on one spelling.
+   Decision-path cells stay left-aligned — a numeric right-align would break the
+   step / title / copy / owner reading order. */
+.path-row td{text-align:left}
+/* A wide capture puts the shot above the findings, so the observations must
+   collapse from the two-column evidence grid into one vertical stack. */
+.report.capture-wide .observations{display:block}
+</style>
+<style>.ha-table{overflow-x:auto}.ha-refs{overflow-wrap:anywhere}.ha-table th,.ha-table td{text-align:left;vertical-align:middle}.observations{min-width:0}.quick-win{overflow-wrap:anywhere}</style></head>
+<body><div class="report capture-wide" data-report-depth="full" id="top">  <header class="folio-bar">
+    <div class="sheet folio-inner">
+      <div class="folio">
+        <a class="home-link" href="#top">
+          <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M2.75 5.5h5l1.5 1.75h8v8.5a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>Report</a>
+        <span class="separator" aria-hidden="true">/</span>
+        <a class="category-link" href="#evidence">Code</a>
+        <span class="separator" aria-hidden="true">/</span>
+        <span class="title">01 · LoomTV · Codebase audit</span>
+      </div>
+      <div class="folio-meta">
+        <nav class="folio-links" aria-label="Report navigation">
+          <a href="#evidence">Evidence</a><a href="#score">Score</a><a href="#priority">Priority</a><a href="#decision">Decision</a>
+        </nav>
+        <button class="theme-toggle" data-theme-toggle type="button" aria-pressed="false" aria-label="Switch to dark mode" title="Switch to dark mode">
+          <svg data-theme-icon="sun" aria-hidden="true" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3.25" stroke="currentColor" stroke-width="1.4"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <svg data-theme-icon="moon" aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M15.8 12.8A6.8 6.8 0 0 1 7.2 4.2 6.8 6.8 0 1 0 15.8 12.8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+<main>
+<section class="sheet cover"><div><p class="kicker">LoomTV · Static codebase audit</p><h1>The main risk is inconsistent ownership across clients.</h1><p class="deck">The project has substantial playback, security and release infrastructure. The most important remaining defects concern which server starts, which profile owns async results, and which timeline a client reports. Resolve those contracts before more visual polish.</p><div class="cover-meta"><span>Revision 8a0167d1 · v1.0.146</span><span>12 observations</span><span>No tests run</span><span>September 5, 2026</span></div></div><aside class="stamp"><div class="stamp-small">Heuristic readiness, not measured quality</div><div class="stamp-score">5.4<span> / 10 → 9.0</span></div><p>Provisional mean of 9 applicable categories. Native performance and device behavior remain unverified.</p></aside></section>
+<section class="overview"><div class="sheet"><div class="overview-grid"><article class="overview-card"><div class="overview-score">5.4 → 9.0</div><div class="overview-label">Overall</div></article><article class="overview-card"><div class="overview-score">5 → 9.0</div><div class="overview-label">Ledger 02 · Real world and mental model</div></article><article class="overview-card"><div class="overview-score">5 → 9.0</div><div class="overview-label">Ledger 03 · User control and reversibility</div></article><article class="overview-card"><div class="overview-score">5 → 9.0</div><div class="overview-label">Ledger 07 · Flexibility and efficiency</div></article></div><p>Visible means mechanically inspected source, not observed device behavior. Inferred findings need the stated reproductions. Critical indicates a release-relevant failure path, not a CVSS rating.</p></div></section>
+<section class="chapter" id="evidence"><div class="sheet"><h2>Findings and source evidence</h2><p class="lead">Static audit across desktop, server, mobile, TV, shared contracts/migration code and build workflows. Source paths refer to this checkout. No screenshots are used as proof of current behavior.</p><div class="observations"><article class="observation status-high" id="observation-1" data-obs="1"><span class="obs-no">1</span><div><h3>Desktop admin is not part of the default startup</h3><div class="obs-tags"><span class="tag category">Architecture</span><span class="tag status-high">Critical</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> The shipping build selects src/main.ts. Its unified server requires LOOMTV_UNIFIED_DESKTOP and an explicit data directory. The alternate canonical-main.ts contains the integrated server and admin startup, but is not the build entry.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/vite.main.config.ts:14">apps/desktop/vite.main.config.ts:14</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/unifiedDesktopServer.ts:39">apps/desktop/src/main/unifiedDesktopServer.ts:39</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/canonical-main.ts:363">apps/desktop/src/canonical-main.ts:363</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/README.md:34">README.md:34</a></p><p><b>Problem.</b> The tray and README promise integrated administration while the default startup can only report that admin is unavailable. Recent URL and label changes did not restore that service.</p><p><b>Why it matters.</b> People cannot reliably reach the administration workflow described by the product. This is a wiring and deployment-mode problem, not evidence that their data disappeared.</p><div class="quick-win"><b>Action.</b> Choose and document one production startup contract. Integrate administration with an explicit migration and rollback plan; do not blindly switch entry points or create a second database.</div><p><b>Acceptance.</b> On a copy of an existing installation, open admin from a clean normal launch and verify the same users, folders and library. Verify upgrade and rollback before changing the default.</p></div></article>
+<article class="observation status-high" id="observation-2" data-obs="2"><span class="obs-no">2</span><div><h3>Offline download state can cross a profile boundary</h3><div class="obs-tags"><span class="tag category">Privacy and async state</span><span class="tag status-high">Critical</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> Switching between two valid profiles leaves the old download map visible until the replacement query resolves. Download completion merges into the current map without checking the host/profile that started it. Offline lookup uses only mediaId.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/useMobileDownloadsController.ts:33">apps/mobile/useMobileDownloadsController.ts:33</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/useMobileDownloadsController.ts:51">apps/mobile/useMobileDownloadsController.ts:51</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/useMobileDownloadsController.ts:75">apps/mobile/useMobileDownloadsController.ts:75</a></p><p><b>Problem.</b> An old profile operation can populate the new profile state. A failing replacement query can leave the previous map in place indefinitely.</p><p><b>Why it matters.</b> Downloaded file references are profile-sensitive. A late completion can offer or select the wrong profile or host copy when media IDs overlap. End-to-end exposure depends on the selected title, but the state-isolation defect is direct.</p><div class="quick-win"><b>Action.</b> Key state by host and profile, clear it on identity changes, and guard every async completion with an identity generation. Check the stored download identity before returning an offline URI.</div><p><b>Acceptance.</b> Switch profile and server during listing, download and removal. Late results must never enter the active map; offline playback must match the active host/profile.</p></div></article>
+<article class="observation status-high" id="observation-3" data-obs="3"><span class="obs-no">3</span><div><h3>TV resume mixes source time with transcoded stream time</h3><div class="obs-tags"><span class="tag category">Playback timeline</span><span class="tag status-high">Critical</span><span class="tag evidence">Inferred</span></div><p><b>Evidence.</b> TV sends startSeconds to the playback plan. The server puts that value into FFmpeg input -ss. TV then applies the same startSeconds to the returned HLS player, and saves player.currentTime as source progress.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/tv/src/app.tsx:125">apps/tv/src/app.tsx:125</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/tv/src/app.tsx:454">apps/tv/src/app.tsx:454</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/tv/src/app.tsx:468">apps/tv/src/app.tsx:468</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/media-service.js:397">apps/server/src/media-service.js:397</a></p><p><b>Problem.</b> Direct-file and newly generated HLS timelines share one code path without a source-time offset. The HLS source has already skipped the resume interval.</p><p><b>Why it matters.</b> Resuming a transcoded title can seek twice, seek outside the current playlist, or save incorrect progress. The exact native HLS behavior needs device verification.</p><div class="quick-win"><b>Action.</b> Track source offset and stream-local position separately. Start a resume-offset HLS stream at local zero; translate progress and duration back into source coordinates.</div><p><b>Acceptance.</b> Resume direct and HLS playback at 10 minutes, seek, exit, renew the lease and reopen. Both paths must retain the same source timestamp within tolerance.</p></div></article>
+<article class="observation status-medium" id="observation-4" data-obs="4"><span class="obs-no">4</span><div><h3>TV lease renewal resumes paused video</h3><div class="obs-tags"><span class="tag category">Playback lifecycle</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> The renewal callback replaces the source, restores a captured position and unconditionally calls player.play(). Cleanup cancels only the timer, not an already running renewal.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/tv/src/app.tsx:144">apps/tv/src/app.tsx:144</a></p><p><b>Problem.</b> Renewal ignores pause intent and can finish after the player has been left. Position is also captured before the network request rather than at replacement.</p><p><b>Why it matters.</b> A paused TV can start playing without user input. Slow renewals can rewind playback by the request duration.</p><div class="quick-win"><b>Action.</b> Preserve current playback intent and position at replacement, cancel or invalidate stale callbacks, and avoid source replacement when renewing authorization does not require it.</div><p><b>Acceptance.</b> Renew while paused, playing, seeking and leaving the screen, with a delayed response. Pause and the current position must survive.</p></div></article>
+<article class="observation status-medium" id="observation-5" data-obs="5"><span class="obs-no">5</span><div><h3>TV library merging duplicates canonical series</h3><div class="obs-tags"><span class="tag category">Catalog correctness</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> The server library endpoint includes canonical series. The TV client filters only matching episodes before appending grouped series from a second endpoint.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/tv/src/canonical-client.ts:121">apps/tv/src/canonical-client.ts:121</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-api.js:1295">apps/server/src/public-api.js:1295</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-api.js:1304">apps/server/src/public-api.js:1304</a></p><p><b>Problem.</b> Existing series are retained and then appended again, potentially with the same ID but different episode data.</p><p><b>Why it matters.</b> TV can show duplicate titles and ambiguous item identity. The enriched series is also marked available regardless of episode availability.</p><div class="quick-win"><b>Action.</b> Merge by stable series ID or consume the canonical catalog endpoint. Prefer the episode-enriched record and derive availability from its visible episodes.</div><p><b>Acceptance.</b> A canonical series with two episodes appears once; an offline-only series remains unavailable. Include legacy title-only series in the fixture.</p></div></article>
+<article class="observation status-medium" id="observation-6" data-obs="6"><span class="obs-no">6</span><div><h3>Default aspect ratio never clears the VLC override</h3><div class="obs-tags"><span class="tag category">Desktop playback</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> The aspect effect returns early when the engine is libvlc and aspectMode is default, before calling setVideoAspect(null).</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/components/VideoPlayer.tsx:2645">apps/desktop/src/components/VideoPlayer.tsx:2645</a></p><p><b>Problem.</b> Selecting Default changes React state but leaves the previous native aspect override active.</p><p><b>Why it matters.</b> This is the same reset-command omission previously fixed for Crop None, in a neighboring setting.</p><div class="quick-win"><b>Action.</b> Send the native null reset for Default. Keep CSS and native geometry consistent when a new session is created.</div><p><b>Acceptance.</b> Change to 4:3 and 16:9, then Default, in windowed and fullscreen playback. The original aspect must return without restarting the video.</p></div></article>
+<article class="observation status-medium" id="observation-7" data-obs="7"><span class="obs-no">7</span><div><h3>Download failure cleanup deletes the shared destination</h3><div class="obs-tags"><span class="tag category">Data integrity</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> Downloads write directly into a deterministic host/profile/media directory with idempotent overwrite. A failure deletes the whole directory. The controller has no per-media in-flight guard.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/mobileDownloads.ts:114">apps/mobile/mobileDownloads.ts:114</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/mobileDownloads.ts:124">apps/mobile/mobileDownloads.ts:124</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/mobileDownloads.ts:131">apps/mobile/mobileDownloads.ts:131</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/useMobileDownloadsController.ts:56">apps/mobile/useMobileDownloadsController.ts:56</a></p><p><b>Problem.</b> A retry or overlapping call can overwrite a valid copy, and one failed request can remove another request&#39;s completed data. SQLite failure after the file download also leaves an unregistered file.</p><p><b>Why it matters.</b> The failure path is not isolated from previously saved content. UI disabling reduces ordinary overlap but does not make the persistence operation safe.</p><div class="quick-win"><b>Action.</b> Use a unique staging destination, deduplicate per identity/media, verify the completed file and commit metadata deliberately. Delete only staging files owned by the failed attempt.</div><p><b>Acceptance.</b> Interrupt a download, retry it concurrently and fail the DB write. An existing valid download must survive and partial files must be recoverable or cleaned up.</p></div></article>
+<article class="observation status-medium" id="observation-8" data-obs="8"><span class="obs-no">8</span><div><h3>Conditional catalog reads still rebuild the whole library</h3><div class="obs-tags"><span class="tag category">Server performance</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> Each catalog request filters all library items, serializes them and hashes the complete JSON before evaluating ETag or mediaId. listLibraryItems repeatedly scans the item list for each series.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-api.js:656">apps/server/src/public-api.js:656</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-api.js:1276">apps/server/src/public-api.js:1276</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-catalog.js:6">apps/server/src/public-catalog.js:6</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/admin-service.js:1699">apps/server/src/admin-service.js:1699</a></p><p><b>Problem.</b> A 304 saves transfer bytes but not catalog computation. Single-title details also pay the full-catalog cost; series aggregation adds repeated work as the library grows.</p><p><b>Why it matters.</b> Large libraries and multiple clients can spend substantial server CPU on unchanged reads. Actual latency has not been measured.</p><div class="quick-win"><b>Action.</b> Index episodes by series once per revision. Cache serialized projections by catalog revision and authorization/profile context, with invalidation on permission changes. Make detail lookups targeted.</div><p><b>Acceptance.</b> Measure small and large catalogs, unchanged revalidation and parallel clients. Verify revocation and profile switching before returning cached data.</p></div></article>
+<article class="observation status-medium" id="observation-9" data-obs="9"><span class="obs-no">9</span><div><h3>Global Space and hidden focus are deliberate accessibility tradeoffs</h3><div class="obs-tags"><span class="tag category">Interaction and accessibility</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> The recently requested Space handler runs before editable-target exclusion and consumes keydown/keyup. Player button focus outlines and rings are explicitly suppressed.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/components/VideoPlayer.tsx:3362">apps/desktop/src/components/VideoPlayer.tsx:3362</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/index.css:2909">apps/desktop/src/index.css:2909</a></p><p><b>Problem.</b> Typing a space into a player text field toggles playback instead. Keyboard users can move between buttons without a visible focus cue.</p><p><b>Why it matters.</b> These behaviors follow the requested interaction choices, so they are not accidental regressions. They still make text entry and keyboard-only operation harder.</p><div class="quick-win"><b>Action.</b> Consider keeping universal Space for buttons and panels but excluding actual text entry. Consider showing focus only for keyboard navigation. Do not change these product choices without agreement.</div><p><b>Acceptance.</b> Verify Space behavior in the marker editor inputs and navigate all player buttons without a mouse. Record an explicit decision for any retained limitation.</p></div></article>
+<article class="observation status-medium" id="observation-10" data-obs="10"><span class="obs-no">10</span><div><h3>Startup and native smoothness still lack measured verification</h3><div class="obs-tags"><span class="tag category">Performance and maintainability</span><span class="tag status-medium">Medium</span><span class="tag evidence">Needs verification</span></div><p><b>Evidence.</b> VLC initialization remains synchronous on Electron ready and the plugin cache remains disabled. The recent splash change removed artwork waits, not native initialization. Desktop VideoPlayer has 4,232 lines; mobile App has 6,603.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/libvlcWarmup.ts:240">apps/desktop/src/main/libvlcWarmup.ts:240</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/libvlcWarmup.ts:281">apps/desktop/src/main/libvlcWarmup.ts:281</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/libvlcRuntimeConfig.ts:5">apps/desktop/src/main/libvlcRuntimeConfig.ts:5</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/components/VideoPlayer.tsx:1">apps/desktop/src/components/VideoPlayer.tsx:1</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/mobile/App.tsx:1">apps/mobile/App.tsx:1</a></p><p><b>Risk.</b> There is no measured result in this audit proving launch, first frame, fullscreen or pause latency. Large coordinating components make ordering changes hard to review.</p><p><b>Why verify.</b> Optimizing startup by deferring VLC can shift the wait onto first playback. Source-level checks alone cannot establish native animation quality.</p><div class="quick-win"><b>Action.</b> Measure process start, first window, usable page, VLC ready and first rendered frame separately. Extract session transitions and player input into focused units before further timing changes.</div><p><b>Acceptance.</b> Compare cold/warm launches and an immediate Play click on representative macOS/Windows hardware. Require no regression in first-frame latency. Tests and profiling need separate approval.</p></div></article>
+<article class="observation status-medium" id="observation-11" data-obs="11"><span class="obs-no">11</span><div><h3>Quiet mode hides all native VLC diagnostics</h3><div class="obs-tags"><span class="tag category">Diagnostics</span><span class="tag status-medium">Medium</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> Normal VLC instances receive --quiet. LOOMTV_DEBUG_LIBVLC=1 restores verbose output. Application playback error states still propagate.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/libvlcRuntimeConfig.ts:1">apps/desktop/src/main/libvlcRuntimeConfig.ts:1</a></p><p><b>Problem.</b> The previous timestamp-message change suppressed native logging rather than correcting timestamp conversion. It also suppresses unrelated native diagnostics.</p><p><b>Why it matters.</b> The terminal is quieter, as requested, but intermittent decoder, audio or output problems lose detailed context unless the user relaunches in debug mode.</p><div class="quick-win"><b>Action.</b> Keep normal console output quiet but consider a bounded diagnostic capture with opt-in export and redaction. Label logging changes separately from decoder fixes.</div><p><b>Acceptance.</b> Verify a failed open still reports a useful user error and an opt-in diagnostic report captures native detail without leaking media URLs or credentials.</p></div></article>
+<article class="observation status-working" id="observation-12" data-obs="12"><span class="obs-no">12</span><div><h3>Security boundaries and release checks have useful defenses</h3><div class="obs-tags"><span class="tag category">Security and build</span><span class="tag status-working">Working well</span><span class="tag evidence">Visible</span></div><p><b>Evidence.</b> Inspected code enables Electron sandboxing and context isolation, validates IPC sender identity, protects cookie mutations with CSRF checks, and serves contained media through checked descriptors. CI pins actions and defines validation and dependency-audit jobs.</p><p class="ha-refs"><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/windowManager.ts:129">apps/desktop/src/main/windowManager.ts:129</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/desktop/src/main/trustedIpcSender.ts:61">apps/desktop/src/main/trustedIpcSender.ts:61</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-api.js:94">apps/server/src/public-api.js:94</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/public-api.js:510">apps/server/src/public-api.js:510</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/apps/server/src/media-path-guard.js:184">apps/server/src/media-path-guard.js:184</a><br><a href="/Users/mallenkb/Documents/Code Projects/LoomTV/.github/workflows/validate.yml:1">.github/workflows/validate.yml:1</a></p><p><b>Why it works.</b> These are concrete defenses rather than an assumption that LAN deployment is trusted.</p><p><b>What to preserve.</b> Keep authorization before conditional reads, descriptor-based containment, credential redaction and the release gates. This sample is not a penetration test or a proof of complete security.</p><div class="quick-win"><b>Checks.</b> Workspace typecheck and lint passed. The production audit passed with zero actionable moderate-or-higher records and two scoped image-size waivers expiring 2026-11-06.</div><p><b>Acceptance.</b> Retest security boundaries when changing catalog caching, admin startup or migration. No test suites were executed during this audit.</p></div></article></div></div></section>
+<section class="sheet memo audit-brief" aria-label="Audit brief"><article class="memo-block"><div class="label">Goal</div><h2>Reliable local media across clients</h2><p>Follow launch, administration, catalog selection, profile isolation, playback and persistence. Prioritize user-impacting logic defects.</p></article><article class="memo-block"><div class="label">Evidence</div><h2>Static implementation audit</h2><p>Revision 8a0167d1. Source inspections plus workspace typecheck, lint and production dependency-policy audit. Existing loomtv-review.html was left untouched.</p></article><article class="memo-block"><div class="label">Scope</div><h2>Broad coverage, sampled depth</h2><p>Desktop runtime/player, headless auth/catalog/media, mobile downloads, TV catalog/player, migration rollback, shared package boundaries and CI. This is not a line-by-line certification of every file.</p></article><article class="memo-block"><div class="label">Limits</div><h2>No runtime claims</h2><p>No test suites, builds, migrations, live-account actions, benchmarks, device playback, penetration testing, screen-reader or visual checks were performed. No application source was changed.</p></article></section>
+<section class="sheet memo" aria-label="Executive summary"><article class="memo-block"><div class="label">First</div><h2>Fix identity and time ownership</h2><p>Prioritize observations 1–3. They affect administration, profile-sensitive offline state and reliable resume.</p></article><article class="memo-block"><div class="label">Then</div><h2>Repair local state transitions</h2><p>Observations 4–7 have bounded fixes. Add regressions around renewal, catalog merging, default reset and interrupted downloads once test execution is authorized.</p></article><article class="memo-block"><div class="label">Preserve</div><h2>Do not weaken the security model</h2><p>Observation 12 identifies useful existing boundaries. Cache authorization context deliberately and keep migration rollback recoverable.</p></article><article class="memo-block"><div class="label">Recent work</div><h2>Some changes were tradeoffs</h2><p>Universal Space and focus removal were explicitly requested. Quiet mode hid diagnostics. Removing the artwork splash wait did not move VLC warmup. These distinctions matter when judging results.</p></article></section>
+<section class="chapter" id="score"><div class="sheet"><h2>Readiness ledger</h2><p>These scores are prioritization aids derived from the findings, not security certification, user research or measured performance. Target 9.0 requires runtime evidence; this audit cannot establish it.</p><div class="ha-table"><table class="ledger"><thead><tr><th>Category</th><th>Area</th><th>Current → target</th><th>Evidence</th></tr></thead><tbody><tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">System status feedback</td><td class="ledger-score band-high">6 / 10 → 9.0</td><td class="ledger-copy">TV renewal can contradict pause intent; VLC details require debug mode. Observations 4, 11.</td></tr><tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Real world and mental model</td><td class="ledger-score band-high">5 / 10 → 9.0</td><td class="ledger-copy">Integrated admin promise disagrees with normal startup. Observation 1.</td></tr><tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">User control and reversibility</td><td class="ledger-score band-high">5 / 10 → 9.0</td><td class="ledger-copy">Profile transitions, download replacement and playback renewal need safer ownership. Observations 2, 4, 7.</td></tr><tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Consistency and navigation</td><td class="ledger-score band-high">6 / 10 → 9.0</td><td class="ledger-copy">TV catalog merging and desktop ratio reset diverge from expected state. Observations 5, 6.</td></tr><tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention</td><td class="ledger-score band-high">6 / 10 → 9.0</td><td class="ledger-copy">Security checks exist, but async identity and download staging gaps remain. Observations 2, 7, 12.</td></tr><tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Recognition rather than recall</td><td class="ledger-score na">N/O</td><td class="ledger-copy">N/O. No live navigation or comprehension evaluation performed.</td></tr><tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">Flexibility and efficiency</td><td class="ledger-score band-high">5 / 10 → 9.0</td><td class="ledger-copy">Full-catalog work and startup synchronization remain. Observations 8, 10.</td></tr><tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and information architecture</td><td class="ledger-score band-high">6 / 10 → 9.0</td><td class="ledger-copy">Two desktop entry paths and large coordinator files increase change risk. Observations 1, 10.</td></tr><tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-high">5 / 10 → 9.0</td><td class="ledger-copy">Native log suppression and download failure cleanup impede recovery. Observations 7, 11.</td></tr><tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Help and documentation</td><td class="ledger-score band-high">5 / 10 → 9.0</td><td class="ledger-copy">README startup claims exceed the default desktop wiring. Observation 1.</td></tr></tbody><tfoot><tr><th colspan="2">Overall</th><td>5.4 / 10 → 9.0</td><td>Mean of 9 rows; N/O excluded. Below the 5.9 cap for multiple blocking Critical findings.</td></tr></tfoot></table></div></div></section>
+<section class="chapter" id="priority"><div class="sheet"><h2>Verification results and coverage gaps</h2><ul><li>PASS: corepack pnpm typecheck, covering every configured workspace typecheck.</li><li>PASS: corepack pnpm lint.</li><li>PASS with exceptions: production dependency audit. Zero actionable moderate-or-higher advisories; two image-size advisories waived until November 6, 2026. A policy pass is not zero vulnerabilities.</li><li>NOT RUN: all test suites, native builds and runtime/visual checks, following your instructions.</li><li>Review priority for the next pass: web/admin browser interactions, device codec negotiation, background/foreground recovery, migration interruption and filesystem failure injection.</li></ul><p>Maintainability: the inspected source count is 4,232 lines for desktop VideoPlayer.tsx and 6,603 for mobile App.tsx, including blank lines. Split by state ownership, not arbitrary file length.</p><p>The package manager performed automatic dependency reconciliation before the checks. No tracked application-source changes resulted. Local install state is not a production build.</p></div></section>
+<section class="decision" id="decision"><div class="sheet"><h2>Fix the contracts, then verify the devices</h2><div class="score-lifts"><article class="score-lift"><div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">5.4 → 9.0</span></div><p>Close the critical findings and preserve security checks.</p><span class="score-ref">Observations 1–12</span></article><article class="score-lift"><div class="score-lift-top"><span class="score-lift-name">Flow &amp; IA</span><span class="score-lift-jump">5 → 9.0</span></div><p>Make server, catalog and playback state consistent.</p><span class="score-ref">Observations 1–8</span></article><article class="score-lift"><div class="score-lift-top"><span class="score-lift-name">Clarity &amp; Copy</span><span class="score-lift-jump">5 → 9.0</span></div><p>Describe the actual startup mode and distinguish logging suppression from fixes.</p><span class="score-ref">Observations 1, 11</span></article><article class="score-lift"><div class="score-lift-top"><span class="score-lift-name">Accessibility</span><span class="score-lift-jump">5 → 9.0</span></div><p>Agree on text-entry and keyboard-focus exceptions before changing requested behavior.</p><span class="score-ref">Observations 9</span></article></div><div class="ha-table"><table class="path"><thead><tr><th>Step</th><th>Action</th><th>Acceptance</th></tr></thead><tbody><tr class="path-row"><td class="path-step">1</td><td class="path-title">Decide the production desktop/server contract</td><td class="path-copy">Observation 1. Validate existing data and migration before changing the entry point.</td></tr><tr class="path-row"><td class="path-step">2</td><td class="path-title">Isolate async identity and file commits</td><td class="path-copy">Observations 2, 7. Profile/host switching and interrupted downloads must not leak state or delete a valid copy.</td></tr><tr class="path-row"><td class="path-step">3</td><td class="path-title">Unify playback time and lifecycle semantics</td><td class="path-copy">Observations 3–6. HLS resume, paused renewal, series identity and native resets must agree.</td></tr><tr class="path-row"><td class="path-step">4</td><td class="path-title">Reduce repeated work and retain useful diagnostics</td><td class="path-copy">Observations 8, 10, 11. Measure catalog/launch/first-frame timings and capture bounded native diagnostics.</td></tr><tr class="path-row"><td class="path-step">5</td><td class="path-title">Verify and record deliberate tradeoffs</td><td class="path-copy">Observations 9, 12. Run approved regressions and representative native-device checks; retain security boundaries.</td></tr></tbody></table></div><div class="validation"><b>Release gate.</b> No stale profile result can select another profile's offline file; admin opens against the intended database; TV direct/HLS resume and paused renewal preserve intent; VLC default aspect resets; measured first-frame time does not regress. Obtain permission before running tests. Keep any unresolved limitation explicit.</div></div></section>
+</main><footer><div class="sheet footer-inner"><p>LoomTV codebase audit · DesignOS Work Report<br>Report-specific tables use the template's token-based styling. No new DesignOS component contract was introduced.</p><div class="footer-meta"><span>Generated <time datetime="2026-09-05T00:35:52.952Z">Sep 5, 2026, 12:35:52 AM UTC</time></span><span>Last updated <time datetime="2026-09-05T00:35:52.952Z">Sep 5, 2026, 12:35:52 AM UTC</time></span><span>Static report structure validated. Browser checks not run under the no-runtime-verification scope.</span></div></div></footer></div>
+<script>
+/* One theme runtime per document: bootstrap + controller + scroll state. */
+(function () {
+  var root = document.documentElement;
+  var KEY = 'work-report-theme';
+  var stored = null;
+  try { stored = localStorage.getItem(KEY); } catch (e) {}
+  if (stored === 'light' || stored === 'dark') root.setAttribute('data-color-mode', stored);
+  function sync() {
+    var dark = root.getAttribute('data-color-mode') === 'dark';
+    document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
+      btn.setAttribute('aria-pressed', String(dark));
+      var label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+      btn.setAttribute('aria-label', label);
+      btn.setAttribute('title', label);
+    });
+  }
+  document.addEventListener('click', function (event) {
+    var btn = event.target.closest('[data-theme-toggle]');
+    if (!btn) return;
+    var next = root.getAttribute('data-color-mode') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-color-mode', next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+  });
+  var bar = document.querySelector('.folio-bar');
+  if (bar) {
+    var onScroll = function () { bar.classList.toggle('is-scrolled', window.scrollY > 8); };
+    addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+  sync();
+})();
+/* Pin ↔ observation linking, and live filtering. */
+(function () {
+  var pins = Array.prototype.slice.call(document.querySelectorAll('.pin'));
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.observation'));
+  var pinFor = function (n) { return document.querySelector('.pin[data-pin="' + n + '"]'); };
+
+  function link(n, on) {
+    var pin = pinFor(n), card = document.getElementById('observation-' + n);
+    if (pin) pin.classList.toggle('is-linked', on);
+    if (card) card.classList.toggle('is-linked', on);
+  }
+  /* Clicking a pin (or a matrix dot) scrolls to the observation and marks it. */
+  function target(id) {
+    var card = document.getElementById(id);
+    if (!card) return;
+    if (card.hidden) {
+      var all = document.querySelector('[data-filter="all"]');
+      if (all) all.click();
+    }
+    cards.forEach(function (c) { c.classList.toggle('is-target', c === card); });
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  document.addEventListener('click', function (event) {
+    var link = event.target.closest('a[href^="#observation-"]');
+    if (!link) return;
+    event.preventDefault();
+    var id = link.getAttribute('href').slice(1);
+    history.replaceState(null, '', '#' + id);
+    target(id);
+  });
+  if (location.hash.indexOf('#observation-') === 0) target(location.hash.slice(1));
+
+  pins.forEach(function (pin) {
+    var n = pin.dataset.pin;
+    ['mouseenter', 'focus'].forEach(function (e) { pin.addEventListener(e, function () { link(n, true); }); });
+    ['mouseleave', 'blur'].forEach(function (e) { pin.addEventListener(e, function () { link(n, false); }); });
+  });
+  cards.forEach(function (card) {
+    var n = card.dataset.obs;
+    ['mouseenter', 'focusin'].forEach(function (e) { card.addEventListener(e, function () { link(n, true); }); });
+    ['mouseleave', 'focusout'].forEach(function (e) { card.addEventListener(e, function () { link(n, false); }); });
+  });
+
+  var chips = Array.prototype.slice.call(document.querySelectorAll('[data-filter]'));
+  var counter = document.querySelector('[data-obs-count]');
+  chips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var filter = chip.dataset.filter;
+      chips.forEach(function (c) { c.setAttribute('aria-pressed', String(c === chip)); });
+      var shown = 0;
+      cards.forEach(function (card) {
+        var match = filter === 'all' || card.classList.contains(filter);
+        card.hidden = !match;
+        if (match) shown++;
+        var pin = pinFor(card.dataset.obs);
+        if (pin) pin.classList.toggle('is-dimmed', !match);
+      });
+      document.querySelectorAll('.finding-group').forEach(function (group) {
+        group.hidden = filter !== 'all';
+      });
+      if (counter) counter.textContent = 'Showing ' + shown + ' of ' + cards.length;
+    });
+  });
+})();
+</script>
+</body>
+</html>

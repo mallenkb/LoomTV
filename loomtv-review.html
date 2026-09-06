@@ -1,0 +1,1076 @@
+<!doctype html>
+<html lang="en" data-color-mode="light" data-surface="website"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LoomTV project review</title>
+<style>
+/* GENERATED from design-os/tokens.css — do not edit.
+   DesignOS semantic tokens, Light Mode, plus the added roles.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+:root {
+  --text-primary:#0a0a0a;
+  --text-secondary:#404040;
+  --text-tertiary:#525252;
+  --text-quarternary:#737373;
+  --text-disabled:#a3a3a3;
+  --text-error:#b91c1c;
+  --text-error-secondary:#f87171;
+  --text-warning:#b45309;
+  --text-warning-secondary:#fbbf24;
+  --text-success:#047857;
+  --text-brand:#171717;
+  --text-brand-secondary:#a3a3a3;
+  --border-primary:#f0f0f0;
+  --border-secondary:#e5e5e5;
+  --border-tertiary:#d4d4d4;
+  --border-disabled:#f0f0f0;
+  --border-error:#dc2626;
+  --border-error-secondary:#fecaca;
+  --border-warning:#b45309;
+  --border-warning-secondary:#fde68a;
+  --border-success:#059669;
+  --border-brand:#171717;
+  --border-brand-secondary:#e5e5e5;
+  --icon-primary:#171717;
+  --icon-secondary:#525252;
+  --icon-tertiary:#737373;
+  --icon-disabled:#a3a3a3;
+  --icon-error:#dc2626;
+  --icon-error-secondary:#f87171;
+  --icon-warning:#b45309;
+  --icon-warning-secondary:#fbbf24;
+  --icon-success:#059669;
+  --icon-brand:#171717;
+  --icon-brand-secondary:#a3a3a3;
+  --bg-primary:#ffffff;
+  --bg-primary_hover:#f7f7f7;
+  --bg-secondary:#f7f7f7;
+  --bg-tertiary:#f0f0f0;
+  --bg-quarternary:#e5e5e5;
+  --bg-disabled:#f7f7f7;
+  --bg-error:#fef2f2;
+  --bg-error-secondary:#fee2e2;
+  --bg-warning:#fffbeb;
+  --bg-warning-secondary:#fef3c7;
+  --bg-success:#ecfdf5;
+  --bg-brand-primary:#f7f7f7;
+  --bg-brand-secondary:#f0f0f0;
+  --bg-alt:#171717;
+  --opacity-light-10:#ffffff1a;
+  --opacity-light-20:#ffffff33;
+  --opacity-light-30:#ffffff4d;
+  --opacity-light-40:#ffffff66;
+  --opacity-light-50:#ffffff80;
+  --opacity-light-60:#ffffff99;
+  --opacity-light-70:#ffffffb2;
+  --opacity-light-80:#ffffffcc;
+  --opacity-light-90:#ffffffe5;
+  --opacity-dark-10:#0000001a;
+  --opacity-dark-20:#00000033;
+  --opacity-dark-30:#0000004d;
+  --opacity-dark-40:#00000066;
+  --opacity-dark-50:#00000080;
+  --opacity-dark-60:#00000099;
+  --opacity-dark-70:#000000b2;
+  --opacity-dark-80:#000000cc;
+  --opacity-dark-90:#000000e5;
+  --bg-error-solid:#b91c1c;
+  --bg-success-secondary:#d1fae5;
+  --bg-success-solid:#059669;
+  --bg-warning-solid:#f59e0b;
+  --bg-brand-primary_hover:#f0f0f0;
+  --bg-brand-solid:#0a0a0a;
+  --icon-success-secondary:#34d399;
+  --border-success-secondary:#a7f3d0;
+  --text-alt:#ffffff;
+  --text-placeholder:#a3a3a3;
+  --text-placeholder-alt:#d4d4d4;
+  --icon-dark:#0a0a0a;
+  --icon-white:#ffffff;
+  --bg-primary_press:#f0f0f0;
+  --text-success-secondary:#34d399;
+  --border-white:#ffffff;
+  --bg-dark:#171717;
+  --bg-white:#ffffff;
+  --text-white:#ffffff;
+  --text-dark:#000000;
+  --icon-alt:#ffffff;
+  --bg-info:#eff6ff;
+  --bg-info-secondary:#dbeafe;
+  --bg-info-solid:#1d4ed8;
+  --text-info:#1d4ed8;
+  --text-info-secondary:#60a5fa;
+  --border-info:#2563eb;
+  --border-info-secondary:#bfdbfe;
+  --icon-info:#2563eb;
+  --icon-info-secondary:#60a5fa;
+  --border-alt:#ffffff;
+  --alpha-brand-accent-85:#0a0a0ad9;
+  --border-alt-2:#000000;
+  --alpha-brand-accent-10:#0a0a0a1a;
+  --alpha-brand-accent-40:#0a0a0a66;
+  --alpha-brand-accent-60:#0a0a0a99;
+  --alpha-brand-accent-20:#0a0a0a33;
+  --alpha-neutral-accent-10:#0a0a0a1a;
+  --alpha-neutral-accent-20:#0a0a0a33;
+  --alpha-neutral-accent-40:#0a0a0a66;
+  --alpha-neutral-accent-60:#0a0a0a99;
+  --alpha-neutral-accent-85:#0a0a0ad9;
+  --alpha-success-accent-10:#0596691a;
+  --alpha-success-accent-20:#05966933;
+  --alpha-success-accent-40:#05966966;
+  --alpha-success-accent-60:#05966999;
+  --alpha-success-accent-85:#059669d9;
+  --alpha-warning-accent-10:#f59e0b1a;
+  --alpha-warning-accent-20:#f59e0b33;
+  --alpha-warning-accent-40:#f59e0b66;
+  --alpha-warning-accent-60:#f59e0b99;
+  --alpha-warning-accent-85:#f59e0bd9;
+  --alpha-blue-accent-10:#2563eb1a;
+  --alpha-blue-accent-20:#2563eb33;
+  --alpha-blue-accent-40:#2563eb66;
+  --alpha-blue-accent-60:#2563eb99;
+  --alpha-blue-accent-85:#2563ebd9;
+  --alpha-error-accent-10:#dc26261a;
+  --alpha-error-accent-20:#dc262633;
+  --alpha-error-accent-40:#dc262666;
+  --alpha-error-accent-60:#dc262699;
+  --alpha-error-accent-85:#dc2626d9;
+  --chart-blue:#3b82f6;
+  --chart-orange:#fb923c;
+  --chart-green:#16a34a;
+  --chart-red:#dc2626;
+  --chart-purple:#a855f7;
+  --chart-yellow:#facc15;
+  --chart-pink:#ec4899;
+  --chart-dark:#525252;
+  --chart-lime:#65a30d;
+  --chart-cyan:#06b6d4;
+  --chart-success:#10b981;
+  --chart-success-light:#6ee7b7;
+  --icon-quarternary:#a3a3a3;
+  --bg-secondary_hover:#f0f0f0;
+  --bg-secondary_press:#e5e5e5;
+  --bg-brand-hover:#262626;
+  --bg-brand-press:#404040;
+  --black:#000000;
+  --white:#ffffff;
+  --bg-brand-primary_press:#e5e5e5;
+  --icon-quinary:#d4d4d4;
+  --spacing-0:0px;
+  --spacing-2:2px;
+  --spacing-4:4px;
+  --spacing-6:6px;
+  --spacing-8:8px;
+  --spacing-12:12px;
+  --spacing-16:16px;
+  --spacing-20:20px;
+  --spacing-24:24px;
+  --spacing-32:32px;
+  --spacing-40:40px;
+  --spacing-48:48px;
+  --spacing-56:56px;
+  --spacing-64:64px;
+  --spacing-96:96px;
+  --spacing-128:128px;
+  --spacing-160:160px;
+  --spacing-192:192px;
+  --spacing-224:224px;
+  --spacing-256:256px;
+  --spacing-320:320px;
+  --spacing-384:384px;
+  --spacing-480:480px;
+  --spacing-560:560px;
+  --spacing-640:640px;
+  --spacing-720:720px;
+  --spacing-768:768px;
+  --spacing-960:960px;
+  --spacing-1280:1280px;
+  --spacing-1440:1440px;
+  --spacing-1920:1920px;
+  --screen-size:1440px;
+  --padding-padding:24px;
+  --spacing-1024:1024px;
+  --spacing-80:80px;
+  --spacing-1080:1080px;
+  --gap-gap:24px;
+  --spacing-72:72px;
+  --font-size-display:72px;
+  --font-size-header-h1:60px;
+  --font-size-header-h2:48px;
+  --font-size-header-h3:36px;
+  --font-size-header-h4:30px;
+  --font-size-header-h5:24px;
+  --font-size-header-h6:20px;
+  --font-size-paragraph-lg:18px;
+  --font-size-paragraph-md:16px;
+  --font-size-paragraph-sm:14px;
+  --font-size-caption-md:12px;
+  --font-size-caption-sm:10px;
+  --radius-none:0px;
+  --radius-xxs:2px;
+  --radius-xs:4px;
+  --radius-sm:6px;
+  --radius-md:8px;
+  --radius-lg:12px;
+  --radius-xl:16px;
+  --radius-2xl:20px;
+  --radius-3xl:24px;
+  --radius-4xl:32px;
+  --radius-full:100000px;
+  --width-xxs:320px;
+  --width-xs:384px;
+  --width-sm:480px;
+  --width-md:560px;
+  --width-lg:640px;
+  --width-xl:768px;
+  --width-2xl:1024px;
+  --width-3xl:1080px;
+  --width-4xl:1280px;
+  --width-5xl:1440px;
+  --width-6xl:1920px;
+  --width-xxxs:256px;
+  --family-display:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --weight-regular:400;
+  --family-heading:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --family-text:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --family-caption:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --weight-bold:700;
+  --weight-medium:500;
+  --weight-semibold:600;
+  --text-on-error-solid:#ffffff;
+  --text-on-warning-solid:#0a0a0a;
+  --text-on-success-solid:#0a0a0a;
+  --text-on-info-solid:#ffffff;
+  --bg-error-solid_hover:#b91c1c;
+  --bg-error-solid_press:#991b1b;
+  --bg-error_press:#fecaca;
+  --focus-ring-width:3px;
+  --focus-ring:var(--alpha-neutral-accent-20);
+  --focus-ring-error:var(--alpha-error-accent-20);
+  --border-control:#8d8d8d;
+  --border-focus-ring:#171717;
+  --shadow-xs:0 4px 6px -3px rgba(10,10,10,.06);
+  --shadow-sm:0 1px 2px -1px rgba(10,10,10,.1);
+  --shadow-md:0 4px 12px -2px rgba(10,10,10,.08);
+  --shadow-lg:0 12px 16px -4px rgba(10,10,10,.08),0 4px 6px -2px rgba(10,10,10,.03);
+  --shadow-card:0 4px 24px rgba(10,10,10,.05);
+  --shadow-evidence:0 24px 60px rgba(10,10,10,.14);
+  --ring-offset:var(--bg-primary);
+  --ring-brand:rgba(10,10,10,0.12);
+  --ring-error:rgba(255,0,0,0.12);
+  --motion-state:160ms;
+  --motion-ease:cubic-bezier(.2,0,0,1);
+  --line-height-paragraph-md:1.5;
+  --line-height-paragraph-sm:1.4286;
+  --line-height-caption-md:1.5;
+  --button:100000px;
+  --modal:32px;
+  --modal-inner-container:20px;
+  --input:8px;
+  --calendar-header:100000px;
+  --pagination:100000px;
+  --card:12px;
+  --nav-item:12px;
+  /* Template-only aliases and page-level values. Not DesignOS tokens — these
+     name things the document shell needs, in terms of DesignOS roles. */
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --family-text:var(--font-sans);--family-caption:var(--font-sans);
+  --weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;
+  --font-size-caption-md:12px;--font-size-paragraph-sm:14px;--font-size-paragraph-md:16px;
+  --line-height-caption-md:1.5;--line-height-paragraph-sm:1.4286;--line-height-paragraph-md:1.5;
+  --canvas:var(--bg-secondary);--surface-header:var(--canvas);
+  --ink:var(--text-primary);--charcoal:var(--text-secondary);--stone:var(--text-tertiary);
+  --brand:var(--text-brand);--border:var(--border-secondary);--border-soft:var(--border-primary);--sand:var(--border-secondary);
+  --content:1180px;
+}
+html[data-radius="full"]{--button:100000px;--modal:32px;--modal-inner-container:20px;--input:8px;--calendar-header:100000px;--pagination:100000px;--card:12px;--nav-item:12px;}
+html[data-radius="normal"]{--button:8px;--modal:16px;--modal-inner-container:12px;--input:8px;--calendar-header:12px;--pagination:10px;--card:8px;--nav-item:8px;}
+html[data-radius="sharp"]{--button:0px;--modal:0px;--modal-inner-container:0px;--input:0px;--calendar-header:0px;--pagination:0px;--card:0px;--nav-item:0px;}
+html[data-radius="slightly-rounded"]{--button:12px;--modal:20px;--modal-inner-container:16px;--input:12px;--calendar-header:16px;--pagination:14px;--card:12px;--nav-item:8px;}
+html[data-color-mode="dark"]{
+/* GENERATED from design-os/tokens.css — do not edit.
+   Dark Mode overrides. Bare declarations — the caller supplies the wrapper.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+  --text-primary:#ffffff;
+  --text-secondary:#d4d4d4;
+  --text-tertiary:#a3a3a3;
+  --text-quarternary:#a3a3a3;
+  --text-disabled:#737373;
+  --text-error:#fee2e2;
+  --text-warning:#fef3c7;
+  --text-warning-secondary:#f59e0b;
+  --text-success:#d1fae5;
+  --text-brand:#fcfcfc;
+  --text-brand-secondary:#f7f7f7;
+  --border-primary:#262626;
+  --border-secondary:#262626;
+  --border-tertiary:#404040;
+  --border-disabled:#404040;
+  --border-error:#dc262666;
+  --border-error-secondary:#7f1d1d;
+  --border-warning:#f59e0b66;
+  --border-warning-secondary:#78350f;
+  --border-success:#05966966;
+  --border-brand:#e5e5e5;
+  --border-brand-secondary:#525252;
+  --icon-primary:#ffffff;
+  --icon-secondary:#d4d4d4;
+  --icon-disabled:#737373;
+  --icon-error:#fee2e2;
+  --icon-warning:#fef3c7;
+  --icon-success:#d1fae5;
+  --icon-brand:#f7f7f7;
+  --bg-primary:#0a0a0a;
+  --bg-primary_hover:#262626;
+  --bg-secondary:#171717;
+  --bg-tertiary:#262626;
+  --bg-quarternary:#404040;
+  --bg-disabled:#262626;
+  --bg-error:#dc262666;
+  --bg-error-secondary:#dc262633;
+  --bg-warning:#f59e0b66;
+  --bg-warning-secondary:#f59e0b33;
+  --bg-success:#05966966;
+  --bg-brand-primary:#171717;
+  --bg-brand-secondary:#525252;
+  --bg-alt:#ffffff;
+  --opacity-light-10:#0e0f111a;
+  --opacity-light-20:#0e0f1133;
+  --opacity-light-30:#0e0f114d;
+  --opacity-light-40:#0e0f1166;
+  --opacity-light-50:#0e0f1180;
+  --opacity-light-60:#0e0f1199;
+  --opacity-light-70:#0e0f11b2;
+  --opacity-light-80:#0e0f11cc;
+  --opacity-light-90:#0e0f11e5;
+  --opacity-dark-10:#ffffff1a;
+  --opacity-dark-20:#ffffff33;
+  --opacity-dark-30:#ffffff4d;
+  --opacity-dark-40:#ffffff66;
+  --opacity-dark-50:#ffffff80;
+  --opacity-dark-60:#ffffff99;
+  --opacity-dark-70:#ffffffb2;
+  --opacity-dark-80:#ffffffcc;
+  --opacity-dark-90:#ffffffe5;
+  --bg-error-solid:#dc2626;
+  --bg-success-secondary:#05966933;
+  --bg-warning-solid:#d97706;
+  --bg-brand-primary_hover:#262626;
+  --bg-brand-solid:#ffffff;
+  --border-success-secondary:#064e3b;
+  --text-alt:#000000;
+  --text-placeholder:#737373;
+  --text-placeholder-alt:#404040;
+  --bg-primary_press:#404040;
+  --text-success-secondary:#10b981;
+  --icon-alt:#000000;
+  --bg-info:#2563eb1a;
+  --bg-info-secondary:#2563eb;
+  --bg-info-solid:#2563eb;
+  --text-info:#dbeafe;
+  --border-info:#3b82f6;
+  --border-info-secondary:#1e3a8a;
+  --icon-info:#dbeafe;
+  --border-alt:#000000;
+  --alpha-brand-accent-85:#ffffffd9;
+  --border-alt-2:#ffffff;
+  --alpha-brand-accent-10:#0000001a;
+  --alpha-brand-accent-40:#00000066;
+  --alpha-brand-accent-60:#00000099;
+  --alpha-brand-accent-20:#00000033;
+  --alpha-neutral-accent-10:#ffffff;
+  --alpha-neutral-accent-20:#ffffff;
+  --alpha-neutral-accent-40:#ffffff;
+  --alpha-neutral-accent-60:#ffffff;
+  --alpha-neutral-accent-85:#ffffff;
+  --alpha-success-accent-10:#ffffff;
+  --alpha-success-accent-20:#ffffff;
+  --alpha-success-accent-40:#ffffff;
+  --alpha-success-accent-60:#ffffff;
+  --alpha-success-accent-85:#ffffff;
+  --alpha-warning-accent-10:#ffffff;
+  --alpha-warning-accent-20:#ffffff;
+  --alpha-warning-accent-40:#ffffff;
+  --alpha-warning-accent-60:#ffffff;
+  --alpha-warning-accent-85:#ffffff;
+  --alpha-error-accent-10:#ffffff;
+  --alpha-error-accent-20:#ffffff;
+  --alpha-error-accent-40:#ffffff;
+  --alpha-error-accent-60:#ffffff;
+  --alpha-error-accent-85:#ffffff;
+  --chart-blue:#60a5fa;
+  --chart-orange:#fdba74;
+  --chart-green:#22c55e;
+  --chart-red:#ef4444;
+  --chart-purple:#d8b4fe;
+  --chart-yellow:#fde047;
+  --chart-pink:#f472b6;
+  --chart-dark:#a3a3a3;
+  --chart-lime:#a3e635;
+  --chart-cyan:#22d3ee;
+  --chart-success:#34d399;
+  --icon-quarternary:#737373;
+  --bg-secondary_hover:#262626;
+  --bg-secondary_press:#404040;
+  --bg-brand-hover:#f7f7f7;
+  --bg-brand-press:#f0f0f0;
+  --bg-brand-primary_press:#262626;
+  --icon-quinary:#737373;
+  --focus-ring:rgba(229,229,229,0.24);
+  --focus-ring-error:rgba(239,68,68,0.32);
+  --ring-brand:rgba(229,229,229,0.16);
+  --ring-error:rgba(239,68,68,0.24);
+  --border-control:#646464;
+  --border-focus-ring:#e5e5e5;
+}
+@media(prefers-color-scheme:dark){html:not([data-color-mode="light"]){
+/* GENERATED from design-os/tokens.css — do not edit.
+   Dark Mode overrides. Bare declarations — the caller supplies the wrapper.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+  --text-primary:#ffffff;
+  --text-secondary:#d4d4d4;
+  --text-tertiary:#a3a3a3;
+  --text-quarternary:#a3a3a3;
+  --text-disabled:#737373;
+  --text-error:#fee2e2;
+  --text-warning:#fef3c7;
+  --text-warning-secondary:#f59e0b;
+  --text-success:#d1fae5;
+  --text-brand:#fcfcfc;
+  --text-brand-secondary:#f7f7f7;
+  --border-primary:#262626;
+  --border-secondary:#262626;
+  --border-tertiary:#404040;
+  --border-disabled:#404040;
+  --border-error:#dc262666;
+  --border-error-secondary:#7f1d1d;
+  --border-warning:#f59e0b66;
+  --border-warning-secondary:#78350f;
+  --border-success:#05966966;
+  --border-brand:#e5e5e5;
+  --border-brand-secondary:#525252;
+  --icon-primary:#ffffff;
+  --icon-secondary:#d4d4d4;
+  --icon-disabled:#737373;
+  --icon-error:#fee2e2;
+  --icon-warning:#fef3c7;
+  --icon-success:#d1fae5;
+  --icon-brand:#f7f7f7;
+  --bg-primary:#0a0a0a;
+  --bg-primary_hover:#262626;
+  --bg-secondary:#171717;
+  --bg-tertiary:#262626;
+  --bg-quarternary:#404040;
+  --bg-disabled:#262626;
+  --bg-error:#dc262666;
+  --bg-error-secondary:#dc262633;
+  --bg-warning:#f59e0b66;
+  --bg-warning-secondary:#f59e0b33;
+  --bg-success:#05966966;
+  --bg-brand-primary:#171717;
+  --bg-brand-secondary:#525252;
+  --bg-alt:#ffffff;
+  --opacity-light-10:#0e0f111a;
+  --opacity-light-20:#0e0f1133;
+  --opacity-light-30:#0e0f114d;
+  --opacity-light-40:#0e0f1166;
+  --opacity-light-50:#0e0f1180;
+  --opacity-light-60:#0e0f1199;
+  --opacity-light-70:#0e0f11b2;
+  --opacity-light-80:#0e0f11cc;
+  --opacity-light-90:#0e0f11e5;
+  --opacity-dark-10:#ffffff1a;
+  --opacity-dark-20:#ffffff33;
+  --opacity-dark-30:#ffffff4d;
+  --opacity-dark-40:#ffffff66;
+  --opacity-dark-50:#ffffff80;
+  --opacity-dark-60:#ffffff99;
+  --opacity-dark-70:#ffffffb2;
+  --opacity-dark-80:#ffffffcc;
+  --opacity-dark-90:#ffffffe5;
+  --bg-error-solid:#dc2626;
+  --bg-success-secondary:#05966933;
+  --bg-warning-solid:#d97706;
+  --bg-brand-primary_hover:#262626;
+  --bg-brand-solid:#ffffff;
+  --border-success-secondary:#064e3b;
+  --text-alt:#000000;
+  --text-placeholder:#737373;
+  --text-placeholder-alt:#404040;
+  --bg-primary_press:#404040;
+  --text-success-secondary:#10b981;
+  --icon-alt:#000000;
+  --bg-info:#2563eb1a;
+  --bg-info-secondary:#2563eb;
+  --bg-info-solid:#2563eb;
+  --text-info:#dbeafe;
+  --border-info:#3b82f6;
+  --border-info-secondary:#1e3a8a;
+  --icon-info:#dbeafe;
+  --border-alt:#000000;
+  --alpha-brand-accent-85:#ffffffd9;
+  --border-alt-2:#ffffff;
+  --alpha-brand-accent-10:#0000001a;
+  --alpha-brand-accent-40:#00000066;
+  --alpha-brand-accent-60:#00000099;
+  --alpha-brand-accent-20:#00000033;
+  --alpha-neutral-accent-10:#ffffff;
+  --alpha-neutral-accent-20:#ffffff;
+  --alpha-neutral-accent-40:#ffffff;
+  --alpha-neutral-accent-60:#ffffff;
+  --alpha-neutral-accent-85:#ffffff;
+  --alpha-success-accent-10:#ffffff;
+  --alpha-success-accent-20:#ffffff;
+  --alpha-success-accent-40:#ffffff;
+  --alpha-success-accent-60:#ffffff;
+  --alpha-success-accent-85:#ffffff;
+  --alpha-warning-accent-10:#ffffff;
+  --alpha-warning-accent-20:#ffffff;
+  --alpha-warning-accent-40:#ffffff;
+  --alpha-warning-accent-60:#ffffff;
+  --alpha-warning-accent-85:#ffffff;
+  --alpha-error-accent-10:#ffffff;
+  --alpha-error-accent-20:#ffffff;
+  --alpha-error-accent-40:#ffffff;
+  --alpha-error-accent-60:#ffffff;
+  --alpha-error-accent-85:#ffffff;
+  --chart-blue:#60a5fa;
+  --chart-orange:#fdba74;
+  --chart-green:#22c55e;
+  --chart-red:#ef4444;
+  --chart-purple:#d8b4fe;
+  --chart-yellow:#fde047;
+  --chart-pink:#f472b6;
+  --chart-dark:#a3a3a3;
+  --chart-lime:#a3e635;
+  --chart-cyan:#22d3ee;
+  --chart-success:#34d399;
+  --icon-quarternary:#737373;
+  --bg-secondary_hover:#262626;
+  --bg-secondary_press:#404040;
+  --bg-brand-hover:#f7f7f7;
+  --bg-brand-press:#f0f0f0;
+  --bg-brand-primary_press:#262626;
+  --icon-quinary:#737373;
+  --focus-ring:rgba(229,229,229,0.24);
+  --focus-ring-error:rgba(239,68,68,0.32);
+  --ring-brand:rgba(229,229,229,0.16);
+  --ring-error:rgba(239,68,68,0.24);
+  --border-control:#646464;
+  --border-focus-ring:#e5e5e5;
+}}
+/* ── Document shell: type scale, header contract, sheet, cover, memo, footer ── */
+*{box-sizing:border-box}
+/* `clip` rather than `hidden`: hidden turns the root into a scroll container,
+   which stops in-page anchor links from scrolling at all in Chromium. */
+html{overflow-x:clip;background:var(--canvas);scroll-behavior:smooth}
+/* Every anchor target clears the 56px fixed header instead of landing under it. */
+[id]{scroll-margin-top:76px}
+body{margin:0;min-width:0;overflow-x:clip;color:var(--ink);background:var(--canvas);
+  font-family:var(--font-sans);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--border-brand);outline-offset:2px}
+h1,h2,h3,h4,p{margin-top:0}
+img{max-width:100%}
+.sheet{width:min(calc(100% - 40px),var(--content));margin-inline:auto}
+
+/* Header — the shared 56px contract from the report library */
+.folio-bar{position:fixed;inset:0 0 auto;z-index:50;border-bottom:1px solid transparent;
+  background:color-mix(in srgb,var(--surface-header) 82%,transparent);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);transition:border-color 120ms ease}
+.folio-bar.is-scrolled{border-bottom-color:var(--border-primary)}
+.folio-inner{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.folio{display:flex;align-items:center;gap:8px;min-width:0;color:var(--stone);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.folio .home-link{display:inline-flex;align-items:center;gap:7px;color:var(--ink);font-size:15px;font-weight:500;letter-spacing:0;text-transform:none;text-decoration:none}
+.folio .home-link svg{width:18px;height:18px}
+.folio .separator{color:var(--icon-quarternary)}
+.folio .category-link{color:var(--stone);text-decoration:none}
+.folio .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folio-meta{display:flex;align-items:center;gap:0;margin-left:auto}
+.folio-links{display:flex;gap:8px}
+.folio-links a{min-height:42px;display:inline-flex;align-items:center;padding-inline:10px;border-radius:var(--nav-item);
+  color:var(--olive,var(--text-tertiary));font-size:11px;letter-spacing:.06em;text-transform:uppercase;text-decoration:none}
+.folio-links a:hover{background:var(--bg-primary-hover);color:var(--text-primary)}
+.theme-toggle{display:inline-grid;width:42px;min-height:42px;flex:0 0 42px;place-items:center;padding:0;border:0;
+  border-radius:var(--nav-item);background:transparent;color:var(--icon-secondary);cursor:pointer}
+.theme-toggle svg{width:18px;height:18px}
+.theme-toggle [data-theme-icon="moon"]{display:none}
+html[data-color-mode="dark"] .theme-toggle [data-theme-icon="sun"]{display:none}
+html[data-color-mode="dark"] .theme-toggle [data-theme-icon="moon"]{display:block}
+.theme-toggle:hover{background:var(--bg-primary-hover);color:var(--icon-primary)}
+.report{padding-top:52px}
+
+/* Cover */
+.cover{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:70px;padding:76px 0 58px;border-bottom:1px solid var(--border-primary)}
+.kicker{margin:0 0 14px;color:var(--brand);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+h1{max-width:820px;margin-bottom:22px;font-size:clamp(42px,6.4vw,72px);font-weight:500;letter-spacing:-.045em;line-height:1}
+.deck{max-width:720px;margin-bottom:0;color:var(--charcoal);font-size:19px;line-height:1.55}
+.cover-meta{display:flex;flex-wrap:wrap;gap:7px 24px;margin-top:32px;color:var(--stone);
+  font-size:11px;line-height:1.4;letter-spacing:.04em;text-transform:uppercase}
+.cover-meta span::before{content:"—";margin-right:7px;color:var(--brand)}
+.stamp{align-self:start;padding:24px;border:0;border-radius:var(--radius-xl);
+  background:var(--bg-warning-secondary);box-shadow:var(--shadow-card)}
+.stamp-small{color:var(--text-warning);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+.stamp-score{margin-top:12px;color:var(--text-warning);font-size:62px;font-variant-numeric:tabular-nums;line-height:.9}
+.stamp-score span{font-size:19px}
+.stamp p{margin:10px 0 0;color:var(--text-warning);font-size:12px;line-height:1.45}
+
+/* Chapters */
+.chapter{padding:62px 0}
+/* Eyebrow on its own row, heading and lead stacked beneath it — one rhythm for
+   every section head in every template. */
+.chapter-head{display:grid;grid-template-columns:minmax(0,1fr);gap:0;margin-bottom:30px}
+.chapter-head .kicker{margin-bottom:16px}
+.chapter-head h2{max-width:820px;margin:0;font-size:clamp(28px,3.8vw,42px);font-weight:500;letter-spacing:-.03em;line-height:1.08}
+.chapter-head .lead{max-width:720px;margin:12px 0 0;color:var(--stone)}
+
+/* Memo bands */
+.memo{display:grid;grid-template-columns:repeat(4,1fr);gap:28px}
+.memo-block{padding:28px 0 30px}
+.label{margin-bottom:8px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.memo-block h2{margin-bottom:7px;font-size:19px;font-weight:500;line-height:1.25}
+.memo-block p{margin:0;color:var(--stone);font-size:13px;line-height:1.5}
+.audit-brief{border-top:1px solid var(--sand);border-bottom:1px solid var(--sand)}
+
+/* Footer */
+footer{padding:28px 0 38px}
+.footer-inner{display:flex;justify-content:space-between;gap:20px;color:var(--stone);font-size:13px}
+.footer-inner p{margin:0}
+.footer-meta{display:grid;gap:2px;font-size:11px;text-align:right}
+.footer-meta strong{color:var(--ink);font-weight:600}
+
+@media(max-width:900px){
+  .cover{grid-template-columns:minmax(0,1fr);gap:32px;padding:48px 0 40px}
+  .memo{grid-template-columns:repeat(2,1fr);gap:0 24px}
+  .footer-inner{flex-direction:column}
+  .footer-meta{text-align:left}
+}
+@media(max-width:640px){
+  .memo{grid-template-columns:minmax(0,1fr)}
+  .folio-links{display:none}
+  .chapter{padding:44px 0}
+}
+@media print{
+  .folio-bar,.theme-toggle,.no-print{display:none!important}
+  .report{padding-top:0}
+  body{background:var(--bg-white)}
+  .chapter,.decision{break-inside:avoid}
+  .observation,.overview-card,.memo-block,.score-lift,.path-row,.validation,.quick-win,.ledger-row{break-inside:avoid}
+}
+
+[hidden]{display:none!important}
+
+/* Work Report contract: every table cell is vertically centred, whatever the
+   table. Stated once, globally, so a new table cannot opt out by accident. */
+table th, table td{vertical-align:middle}
+/* ── DesignOS components (subset, verbatim contracts from design-os/*.css) ── */
+.dos-status--brand   {--st-soft:var(--bg-brand-primary);--st-soft-2:var(--bg-brand-primary);   --st-solid:var(--bg-brand-solid);  --st-border:var(--border-brand);   --st-content:var(--text-brand);  --st-on-solid:var(--text-alt)}
+.dos-status--success {--st-soft:var(--bg-success);      --st-soft-2:var(--bg-success-secondary);--st-solid:var(--bg-success-solid);--st-border:var(--border-success); --st-content:var(--text-success);--st-on-solid:var(--text-white)}
+.dos-status--warning {--st-soft:var(--bg-warning);      --st-soft-2:var(--bg-warning-secondary);--st-solid:var(--bg-warning-solid);--st-border:var(--border-warning); --st-content:var(--text-warning);--st-on-solid:var(--text-primary)}
+.dos-status--error   {--st-soft:var(--bg-error);        --st-soft-2:var(--bg-error-secondary);  --st-solid:var(--bg-error-solid);  --st-border:var(--border-error);   --st-content:var(--text-error);  --st-on-solid:var(--text-white)}
+.dos-status--info    {--st-soft:var(--bg-info);         --st-soft-2:var(--bg-info-secondary);   --st-solid:var(--bg-info-solid);   --st-border:var(--border-info);    --st-content:var(--text-info);   --st-on-solid:var(--text-white)}
+.dos-status--neutral {--st-soft:var(--bg-secondary);    --st-soft-2:var(--bg-tertiary);         --st-solid:var(--bg-dark);         --st-border:var(--border-secondary);--st-content:var(--text-primary);--st-on-solid:var(--text-white)}
+
+.dos-badge{display:inline-flex;align-items:center;gap:var(--spacing-0);height:var(--dos-badge-height,28px);
+  padding:var(--spacing-4) var(--spacing-6);border:1px solid transparent;border-radius:var(--button);
+  background:var(--st-soft-2);color:var(--st-content);font-family:var(--family-caption);
+  font-size:var(--font-size-caption-md);line-height:var(--line-height-caption-md);
+  font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden}
+.dos-badge--sm{--dos-badge-height:24px;font-size:11px}
+.dos-badge__label{display:inline-flex;align-items:center;justify-content:center;gap:var(--spacing-4);padding:0 var(--spacing-4)}
+.dos-badge__icon{display:block;flex:none;width:12px;height:12px}
+.dos-badge__dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--st-solid)}
+/* Outline is part of the DesignOS contract but unused by these templates —
+   badges here are Light (no modifier) or Solid only. */
+.dos-badge--outline{background:var(--bg-primary);border-color:var(--st-border)}
+.dos-badge--solid{background:var(--st-solid);color:var(--st-on-solid);border-color:transparent}
+
+.dos-btn{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand);--dos-btn-border:transparent;--dos-btn-border-width:0;
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:var(--spacing-4);
+  height:var(--dos-btn-height,40px);padding:var(--dos-btn-pad-y,10px) var(--dos-btn-pad-x,12px);
+  border:var(--dos-btn-border-width) solid var(--dos-btn-border);border-radius:var(--button);
+  background-color:var(--dos-btn-bg);color:var(--dos-btn-fg);font-family:var(--family-text);
+  font-size:var(--dos-btn-font-size,14px);line-height:1.4286;font-weight:var(--weight-medium);
+  white-space:nowrap;cursor:pointer;appearance:none;-webkit-appearance:none;
+  transition:background-color var(--motion-state) var(--motion-ease),border-color var(--motion-state) var(--motion-ease),color var(--motion-state) var(--motion-ease)}
+.dos-btn__label{display:inline-flex;align-items:center;padding:0 var(--spacing-4)}
+.dos-btn__icon{display:block;flex:none;width:var(--dos-btn-icon-size,16px);height:var(--dos-btn-icon-size,16px)}
+.dos-btn:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring);z-index:10}
+.dos-btn--sm{--dos-btn-height:32px;--dos-btn-pad-y:var(--spacing-6);--dos-btn-pad-x:var(--spacing-12)}
+.dos-btn--lg{--dos-btn-height:48px;--dos-btn-pad-y:14px;--dos-btn-pad-x:var(--spacing-16);--dos-btn-icon-size:20px}
+.dos-btn--xl{--dos-btn-height:56px;--dos-btn-pad-y:var(--spacing-16);--dos-btn-pad-x:var(--spacing-24);--dos-btn-font-size:16px;--dos-btn-icon-size:20px}
+.dos-btn--icon-only{width:var(--dos-btn-height,40px);padding:0}
+.dos-btn--default{--dos-btn-bg:var(--bg-brand-solid);--dos-btn-fg:var(--text-alt)}
+.dos-btn--secondary{--dos-btn-bg:var(--bg-secondary);--dos-btn-fg:var(--text-primary)}
+.dos-btn--outline{--dos-btn-bg:var(--bg-primary);--dos-btn-fg:var(--text-brand);--dos-btn-border:var(--border-brand-secondary);--dos-btn-border-width:1px}
+.dos-btn--ghost{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand)}
+.dos-btn--link{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand);height:auto;padding:0;border-radius:0;text-decoration:underline;text-underline-offset:3px}
+.dos-btn--default:hover{--dos-btn-bg:var(--bg-brand-hover)}
+.dos-btn--secondary:hover{--dos-btn-bg:var(--bg-secondary-hover)}
+.dos-btn--outline:hover,.dos-btn--ghost:hover{--dos-btn-bg:var(--bg-brand-primary-hover)}
+.dos-btn--default:active{--dos-btn-bg:var(--bg-brand-press)}
+.dos-btn--secondary:active{--dos-btn-bg:var(--bg-secondary-press)}
+.dos-btn--outline:active,.dos-btn--ghost:active{--dos-btn-bg:var(--bg-brand-primary-press)}
+.dos-btn:disabled{--dos-btn-bg:var(--bg-disabled);--dos-btn-fg:var(--text-disabled);cursor:not-allowed}
+
+.dos-btn-group{display:inline-flex;align-items:center;width:fit-content;max-width:100%;align-self:flex-start;
+  gap:var(--spacing-0);padding:var(--spacing-0);border:1px solid var(--border-primary);
+  border-radius:var(--button);overflow:hidden}
+.dos-btn-group__item{display:flex;align-items:center;justify-content:center;gap:var(--spacing-0);flex:none;
+  height:44px;padding:var(--spacing-8) var(--spacing-12);border:0;background:var(--bg-primary);
+  color:var(--text-primary);font-family:var(--family-text);font-size:var(--font-size-paragraph-sm);
+  line-height:var(--line-height-paragraph-sm);font-weight:var(--weight-medium);white-space:nowrap;cursor:pointer}
+.dos-btn-group--sm .dos-btn-group__item{height:32px}
+.dos-btn-group__item+.dos-btn-group__item{border-left:1px solid var(--border-primary)}
+.dos-btn-group__item:hover{background:var(--bg-primary-hover)}
+.dos-btn-group__item[aria-pressed="true"],.dos-btn-group__item.is-active{background:var(--bg-brand-primary-press);color:var(--text-primary)}
+.dos-btn-group__item:focus-visible{outline:none;box-shadow:inset 0 0 0 var(--focus-ring-width) var(--focus-ring)}
+/* Icon Only = True: a fixed square, glyph centred, name carried by aria-label. */
+.dos-btn-group__item--icon{width:40px;padding:0}
+.dos-btn-group--sm .dos-btn-group__item--icon{width:34px}
+.dos-btn-group__item--icon svg{display:block;width:18px;height:18px}
+
+.dos-alert{position:relative;display:flex;align-items:flex-start;gap:var(--spacing-16);
+  padding:var(--spacing-20) var(--spacing-16);border:0;border-radius:var(--card);
+  background:var(--st-soft);color:var(--text-primary);font-family:var(--family-text);
+  font-size:var(--font-size-paragraph-sm);line-height:var(--line-height-paragraph-sm);
+  box-shadow:var(--shadow-xs)}
+.dos-alert--default{background:var(--bg-primary);border:1px solid var(--border-primary);
+  padding:var(--spacing-16);box-shadow:var(--shadow-md)}
+.dos-alert--solid{background:var(--st-solid);border:0;padding:var(--spacing-16);color:var(--st-on-solid);
+  box-shadow:var(--shadow-md)}
+.dos-alert--solid .dos-alert__icon,.dos-alert--solid .dos-alert__title{color:var(--st-on-solid)}
+.dos-alert__icon{display:block;flex:none;width:20px;height:20px;color:var(--st-content)}
+.dos-alert__body{display:flex;flex:1 0 0;min-width:0;flex-direction:column;gap:var(--spacing-8)}
+.dos-alert__title{margin:0;font-size:15px;font-weight:var(--weight-semibold)}
+.dos-alert__text{margin:0;color:var(--text-secondary);font-size:13px;line-height:1.5}
+.dos-alert--small{align-items:center;min-height:48px;padding:var(--spacing-12) var(--spacing-16);
+  gap:var(--spacing-12);box-shadow:none}
+.dos-alert--small .dos-alert__title{color:inherit}
+.dos-alert--small.dos-alert--default{box-shadow:var(--shadow-sm)}
+.dos-alert--small .dos-alert__icon{width:16px;height:16px}
+
+.dos-toggle{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:calc(var(--tg-h,20px)*1.8);
+  height:var(--tg-h,20px);border-radius:var(--radius-full);background:var(--bg-quarternary);cursor:pointer;
+  transition:background-color var(--motion-state) var(--motion-ease)}
+.dos-toggle--sm{--tg-h:18px}
+.dos-toggle::after{content:"";position:absolute;top:2px;left:2px;width:calc(var(--tg-h,20px) - 4px);height:calc(var(--tg-h,20px) - 4px);
+  border-radius:50%;background:var(--bg-primary);transition:transform var(--motion-state) var(--motion-ease)}
+.dos-toggle:checked{background:var(--bg-brand-solid)}
+.dos-toggle:checked::after{transform:translateX(calc(var(--tg-h,20px)*.8))}
+.dos-toggle:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+
+.dos-choice{display:flex;align-items:flex-start;gap:var(--spacing-8);cursor:pointer}
+.dos-choice__box{appearance:none;-webkit-appearance:none;flex:none;width:18px;height:18px;margin:1px 0 0;
+  border:1px solid var(--border-control);border-radius:var(--radius-sm);background:var(--bg-primary);cursor:pointer}
+.dos-choice__box:checked{background:var(--bg-brand-solid);border-color:var(--bg-brand-solid);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size:100% 100%}
+html[data-color-mode="dark"] .dos-choice__box:checked{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.dos-choice__box:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.dos-choice__title{font-size:14px;font-weight:var(--weight-medium);color:var(--text-primary)}
+.dos-choice__subtext{font-size:12px;color:var(--text-quarternary)}
+
+.dos-field{display:flex;flex-direction:column;gap:var(--spacing-4);width:100%;font-family:var(--family-text)}
+.dos-field__label{display:flex;align-items:center;gap:var(--spacing-4);font-size:var(--font-size-caption-md);
+  font-weight:var(--weight-medium);color:var(--text-primary)}
+.dos-field__required{color:var(--text-error)}
+.dos-field__hint{font-size:var(--font-size-caption-md);color:var(--text-quarternary)}
+.dos-field.is-error .dos-field__hint{color:var(--text-error)}
+.dos-input{display:flex;align-items:center;gap:var(--spacing-8);height:var(--dos-input-height,40px);width:100%;
+  padding:var(--spacing-8) var(--spacing-12);border:1px solid var(--border-primary);border-radius:var(--input);
+  background:var(--bg-primary);color:var(--text-primary);overflow:hidden;
+  transition:border-color var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.dos-field--lg .dos-input{--dos-input-height:48px}
+.dos-input__field{flex:1 0 0;min-width:0;border:0;background:transparent;color:inherit;font:inherit;outline:none}
+.dos-input__field::placeholder{color:var(--text-placeholder)}
+.dos-input__icon{flex:none;width:18px;height:18px;color:var(--icon-tertiary)}
+.dos-input:focus-within{border-color:var(--border-control);box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.dos-field.is-error .dos-input{border-color:var(--border-error)}
+
+.dos-divider{display:flex;align-items:center;width:100%;color:var(--text-quarternary);font-size:12px}
+.dos-divider::before,.dos-divider::after{content:"";flex:1 0 0;height:1px;background:var(--border-primary)}
+.dos-divider>span{padding:0 var(--spacing-12)}
+.dos-divider--line{gap:0}
+.dos-divider--line::after{display:none}
+
+.dos-tooltip{position:relative;display:inline-flex}
+.dos-tooltip__bubble{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(4px);
+  z-index:40;width:max-content;max-width:240px;padding:var(--spacing-8) var(--spacing-12);border-radius:var(--radius-md);
+  background:var(--bg-alt);color:var(--text-alt);font-size:12px;line-height:1.45;text-align:left;
+  opacity:0;pointer-events:none;transition:opacity var(--motion-state) var(--motion-ease),transform var(--motion-state) var(--motion-ease);
+  box-shadow:var(--shadow-card)}
+.dos-tooltip:hover .dos-tooltip__bubble,.dos-tooltip:focus-within .dos-tooltip__bubble{opacity:1;transform:translateX(-50%) translateY(0)}
+.dos-tooltip__title{display:block;font-weight:var(--weight-semibold)}
+
+.dos-loader{display:inline-block;width:20px;height:20px;border:2px solid var(--border-secondary);
+  border-top-color:var(--icon-primary);border-radius:50%;animation:dos-spin 700ms linear infinite}
+@keyframes dos-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.dos-choice__box--radio{border-radius:var(--radius-full)}
+.dos-choice__box--radio:checked{background-image:none;box-shadow:inset 0 0 0 4px var(--bg-primary)}
+
+/* A badge used as a filter control. Same anatomy, same status family; the
+   pressed state is the Solid style, so nothing new is invented. */
+button.dos-badge{--dos-badge-height:32px;border:1px solid transparent;background:var(--st-soft);
+  color:var(--st-content);font-family:var(--family-text);font-weight:var(--weight-medium);cursor:pointer;
+  transition:background-color var(--motion-state) var(--motion-ease),color var(--motion-state) var(--motion-ease)}
+button.dos-badge:hover{background:var(--st-solid);color:var(--st-on-solid)}
+button.dos-badge[aria-pressed="true"]{background:var(--st-solid);color:var(--st-on-solid)}
+button.dos-badge:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+button.dos-badge .count{opacity:.62;font-variant-numeric:tabular-nums}
+button.dos-badge[aria-pressed="true"] .count{opacity:.72}
+/* ── Impact x effort priority matrix (shared) ── */
+.matrix-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:40px;align-items:start}
+.matrix{position:relative;aspect-ratio:1/.78;border:1px solid var(--border-secondary);border-radius:var(--radius-xl);
+  background:var(--bg-primary);overflow:visible}
+.matrix::before,.matrix::after{content:"";position:absolute;background:var(--border-primary)}
+.matrix::before{left:50%;top:0;bottom:0;width:1px}
+.matrix::after{top:50%;left:0;right:0;height:1px}
+.quad-label{position:absolute;color:var(--text-quarternary);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.quad-tl{top:14px;left:16px}.quad-tr{top:14px;right:16px}.quad-bl{bottom:14px;left:16px}.quad-br{bottom:14px;right:16px}
+.dot{position:absolute;width:30px;height:30px;display:grid;place-items:center;border:2px solid var(--bg-primary);border-radius:50%;
+  transform:translate(-50%,-50%);color:var(--text-alt);background:var(--bg-brand-solid);font-size:12px;font-weight:700;
+  text-decoration:none;box-shadow:var(--shadow-pin)}
+.dot.status-high{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.dot.status-medium{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.dot:hover,.dot:focus-visible{transform:translate(-50%,-50%) scale(1.15);z-index:31}
+/* The dot says which finding it is on hover — a numbered dot alone makes the
+   reader hold a legend in their head while reading the chart. */
+.dot::after{content:attr(data-name);position:absolute;bottom:calc(100% + 10px);left:50%;z-index:30;
+  width:max-content;max-width:190px;padding:7px 10px;border-radius:var(--radius-md);
+  background:var(--bg-alt);color:var(--text-alt);font-size:11px;font-weight:500;line-height:1.4;
+  text-align:center;opacity:0;pointer-events:none;box-shadow:var(--shadow-card);
+  transform:translateX(-50%) translateY(4px);
+  transition:opacity var(--motion-state) var(--motion-ease),transform var(--motion-state) var(--motion-ease)}
+.dot:hover::after,.dot:focus-visible::after{opacity:1;transform:translateX(-50%) translateY(0)}
+.axis{color:var(--stone);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.axis-x{display:flex;justify-content:space-between;margin-top:10px}
+.matrix-side .dos-alert{margin-bottom:14px}
+.matrix-key{margin:0;padding:0;list-style:none}
+.matrix-key li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--border-primary);
+  color:var(--stone);font-size:13px;line-height:1.4}
+.matrix-key li:first-child{border-top:0}
+.matrix-key b{color:var(--ink);font-weight:500}
+.key-no{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:var(--bg-brand-solid);
+  color:var(--text-alt);font-size:11px;font-weight:700}
+.key-no.status-high{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.key-no.status-medium{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.key-no.status-working{background:var(--bg-success-solid);color:var(--text-white)}
+
+@media(max-width:1080px){.matrix-wrap{grid-template-columns:minmax(0,1fr)}}
+/* ── Audit report — sections beyond the shell ── */
+.overview{padding:30px 0;border-bottom:1px solid var(--border)}
+.overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.overview-card{display:flex;flex-direction:column;min-height:134px;padding:20px;border:1px solid var(--border);
+  border-radius:var(--radius-lg);background:var(--bg-primary)}
+.overview-score{display:flex;align-items:baseline;gap:7px;font-size:30px;font-weight:750;line-height:1;font-variant-numeric:tabular-nums}
+.overview-score span{color:var(--stone);font-size:13px;font-weight:650}
+.overview-label{margin-top:10px;color:var(--stone);font-size:13px;line-height:1.35}
+.overview-bar{position:relative;height:6px;margin-top:auto;border-radius:99px;background:var(--sand)}
+.overview-bar i{display:block;height:100%;border-radius:inherit;background:var(--bg-brand-solid)}
+.overview-bar .tick{position:absolute;top:-3px;width:2px;height:11px;border-radius:2px;background:var(--ink);opacity:.4;transform:translateX(-1px)}
+.state-critical .overview-score{color:var(--text-error)}
+.state-critical .overview-bar i{background:var(--bg-error-solid)}
+.state-warning .overview-score{color:var(--text-warning)}
+.state-warning .overview-bar i{background:var(--bg-warning-solid)}
+.state-good .overview-score{color:var(--text-success)}
+.state-good .overview-bar i{background:var(--bg-success-solid)}
+
+/* Evidence quality strip — new: makes the claim-strength of the audit legible */
+.evidence-strip{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:12px;padding:14px 18px;
+  border:1px solid var(--border-primary);border-radius:var(--radius-lg);background:var(--bg-primary)}
+.evidence-strip .strip-label{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.evidence-strip .spacer{flex:1 0 12px}
+
+.evidence-layout{display:grid;grid-template-columns:380px minmax(0,1fr);gap:56px;align-items:start}
+.capture-tall .evidence-layout{grid-template-columns:380px minmax(0,1fr)}
+.capture-wide .evidence-layout{grid-template-columns:minmax(0,1fr)}
+/* The capture is the context every observation refers to, so it holds position
+   while the observations scroll past it. It is sized by the viewport height,
+   not by the column width, so the whole screen stays visible instead of the
+   column scrolling inside itself. Pins are percentages of .capture-inner,
+   which hugs the image exactly, so they track any scale. */
+/* Never `auto`: an internally scrollable pinned column gets hijacked by the
+   wheel and pushes the top of the capture out of view. `clip` holds that line
+   but, unlike `hidden`, takes an overflow-clip-margin — so the device shadow
+   still paints outside the box instead of being sheared off at the edges. */
+.capture-col{position:sticky;top:68px;align-self:start;max-height:calc(100vh - 84px);
+  overflow:hidden;overflow:clip;overflow-clip-margin:44px}
+.capture-sticky{position:static}
+.capture{width:min(100%,calc((100vh - 220px) * 390 / 844));margin-inline:auto;
+  border:1px solid var(--border-tertiary);border-radius:var(--radius-3xl);background:var(--bg-primary);
+  box-shadow:var(--shadow-card);overflow:hidden}
+.capture-inner{position:relative;line-height:0;border-radius:inherit}
+/* aspect-ratio keeps the element box equal to the drawing when max-width clamps
+   the height — without it the SVG letterboxes and every pin drifts. */
+.capture .shot,.capture img{display:block;aspect-ratio:390/844;width:100%;height:auto;border-radius:inherit}
+.capture-wide .capture{width:100%}
+.capture-wide .capture .shot,.capture-wide .capture img{aspect-ratio:auto;width:100%;height:auto;max-height:none}
+
+.pin{position:absolute;width:27px;height:27px;display:grid;place-items:center;border:2px solid var(--bg-primary);
+  border-radius:50%;transform:translate(-50%,-50%);color:var(--text-alt);background:var(--bg-brand-solid);
+  font-size:12px;font-weight:700;line-height:1;text-decoration:none;box-shadow:var(--shadow-pin);
+  transition:transform var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.pin.status-high{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.pin.status-medium{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.pin.status-working{background:var(--bg-success-solid);color:var(--text-white)}
+.pin.is-linked,.pin:hover,.pin:focus-visible{transform:translate(-50%,-50%) scale(1.22);box-shadow:var(--shadow-evidence);z-index:5}
+.pin.is-dimmed{opacity:.28}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;color:var(--stone);font-size:11px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:50%}
+.legend i.status-high{background:var(--bg-error-solid)}
+.legend i.status-medium{background:var(--bg-warning-solid)}
+.legend i.status-working{background:var(--bg-success-solid)}
+.capture-note{margin:13px 0 0;color:var(--stone);font-size:11px;line-height:1.5}
+
+/* Attention cross-check — pairs the audit with the predictive attention tool */
+.attention-card{margin-top:14px;padding:12px 16px;border:1px solid var(--border-primary);
+  border-radius:var(--radius-lg);background:var(--bg-primary)}
+.attention-card summary{cursor:pointer;font-size:13px;font-weight:600;list-style:none}
+.attention-card summary::-webkit-details-marker{display:none}
+.attention-card summary::after{content:"+";float:right;color:var(--text-quarternary);font-weight:400}
+.attention-card[open] summary{margin-bottom:8px}
+.attention-card[open] summary::after{content:"\2013"}
+.attention-card summary:focus-visible{outline:2px solid var(--border-brand);outline-offset:3px;border-radius:4px}
+.attention-card .note{margin:0 0 12px;color:var(--stone);font-size:11px;line-height:1.45}
+.attn-row{display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:10px;align-items:center;margin-bottom:9px;font-size:12px}
+.attn-row .attn-name{color:var(--charcoal);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.attn-track{grid-column:1/-1;height:5px;border-radius:99px;background:var(--bg-quarternary)}
+.attn-track i{display:block;height:100%;border-radius:99px;background:var(--bg-brand-solid)}
+.attn-row .attn-val{text-align:right;color:var(--stone);font-variant-numeric:tabular-nums}
+.attn-row.is-mismatch .attn-name{color:var(--text-error)}
+.attn-row.is-mismatch .attn-track i{background:var(--bg-error-solid)}
+
+/* Observation filters */
+.obs-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:18px}
+.obs-count{margin-left:auto;color:var(--stone);font-size:12px}
+
+.observations{min-width:0}
+.finding-group{margin:26px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border-primary);
+  color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.finding-group:first-child{margin-top:0}
+.observation{display:grid;grid-template-columns:31px minmax(0,1fr);gap:16px;margin:0 0 10px;padding:18px;
+  border:1px solid transparent;border-radius:var(--radius-2xl);background:var(--bg-primary);
+  transition:border-color var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.observation.is-linked{border-color:var(--border-tertiary);box-shadow:var(--shadow-card)}
+.observation.is-target{border-color:var(--border-brand);box-shadow:var(--shadow-card)}
+.observation[hidden]{display:none}
+/* Solid, and the same fill as the pin it answers to — the number on the card
+   and the number on the capture read as one object. */
+.obs-no{width:31px;height:31px;display:grid;place-items:center;border:0;border-radius:50%;
+  background:var(--bg-brand-solid);color:var(--text-alt);font-size:12px;font-weight:700;line-height:1}
+.observation.status-high .obs-no{background:var(--bg-error-solid);color:var(--text-on-error-solid)}
+.observation.status-medium .obs-no{background:var(--bg-warning-solid);color:var(--text-on-warning-solid)}
+.observation.status-working .obs-no{background:var(--bg-success-solid);color:var(--text-white)}
+.observation h3{margin:2px 0 10px;font-size:21px;font-weight:500;letter-spacing:-.015em;line-height:1.2}
+.observation p{margin:0;color:var(--text-tertiary);font-size:14px}
+.observation p+p{margin-top:10px}
+.observation b{color:var(--ink);font-weight:500}
+.obs-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.obs-meta{display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-primary);
+  color:var(--stone);font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.obs-meta b{color:var(--ink);font-weight:600}
+.quick-win{display:block;width:fit-content;max-width:100%;margin-top:12px;padding:8px 11px;border:0;border-radius:10px;
+  color:var(--text-success);background:var(--bg-success);font-size:13px;line-height:1.45;white-space:normal;
+  overflow-wrap:anywhere;word-break:normal;box-shadow:none}
+.quick-win b{color:var(--text-success);font-weight:650}
+
+/* Score ledger */
+.ledger{width:100%;table-layout:fixed;border-collapse:collapse;border-top:2px solid var(--brand)}
+.ledger th,.ledger td{padding:14px 7px;border-bottom:1px solid var(--border-primary);vertical-align:middle;text-align:left}
+.ledger-head th{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.ledger-no{width:48px;color:var(--brand);font-size:12px;font-variant-numeric:tabular-nums}
+.ledger-title{font-size:16px;font-weight:500;line-height:1.25}
+.ledger-score{width:86px;text-align:right;font-size:18px;font-variant-numeric:tabular-nums}
+.ledger-score.band-good{color:var(--text-success)}
+.ledger-score.band-med{color:var(--text-warning)}
+.ledger-score.band-high{color:var(--text-error)}
+.ledger-score.na{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.08em}
+.ledger-copy{color:var(--stone);font-size:13px;line-height:1.4}
+.ledger-total th,.ledger-total td{padding-top:16px;font-weight:600}
+.dimension-lifts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:26px}
+.dimension{padding:16px;border:1px solid var(--border-primary);border-radius:var(--radius-lg);background:var(--bg-primary)}
+.dimension .dim-name{font-size:13px;font-weight:600}
+.dimension .dim-jump{margin:6px 0 10px;color:var(--stone);font-size:12px;font-variant-numeric:tabular-nums}
+.dimension .dim-bar{position:relative;height:6px;border-radius:99px;background:var(--bg-quarternary)}
+.dimension .dim-bar i{display:block;height:100%;border-radius:99px;background:var(--bg-warning-solid)}
+.dimension.weak .dim-bar i{background:var(--bg-error-solid)}
+.dimension.strong .dim-bar i{background:var(--bg-success-solid)}
+.dimension .dim-bar .tick{position:absolute;top:-3px;width:2px;height:12px;border-radius:2px;background:var(--ink);opacity:.4}
+
+/* Decision */
+.decision{padding:68px 0;background:var(--bg-secondary)}
+.decision h2{max-width:800px;margin-bottom:16px;font-size:clamp(32px,4.6vw,50px);font-weight:500;letter-spacing:-.035em;line-height:1.05}
+.decision-intro{max-width:730px;margin-bottom:0;color:var(--text-secondary);font-size:17px}
+.score-lifts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:34px}
+.score-lift{padding:20px;border:1px solid var(--border-primary);border-radius:var(--radius-lg);background:var(--bg-primary)}
+.score-lift-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
+.score-lift-name{font-size:17px;font-weight:600}
+.score-lift-jump{color:var(--stone);font-size:15px;font-weight:650;white-space:nowrap;font-variant-numeric:tabular-nums}
+.score-lift-jump em{color:var(--text-brand);font-style:normal}
+.score-lift-bar{position:relative;height:6px;margin:14px 0 4px;border-radius:99px;background:var(--bg-quarternary)}
+.score-lift-bar i{display:block;height:100%;border-radius:99px;background:var(--bg-warning-solid)}
+.score-lift.weak .score-lift-bar i{background:var(--bg-error-solid)}
+.score-lift-bar .tick{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);border-radius:2px;background:var(--ink);opacity:.42}
+.score-lift ul{margin:14px 0 0;padding:0;list-style:none}
+.score-lift li{position:relative;padding:9px 0 9px 18px;border-top:1px solid var(--border-soft);color:var(--text-tertiary);font-size:14px}
+.score-lift li:first-child{border-top:0}
+.score-lift li::before{content:"\203A";position:absolute;left:2px;color:var(--text-brand);font-weight:800}
+.score-ref{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:99px;color:var(--text-brand);
+  background:var(--bg-brand-primary-hover);font-size:10px;font-weight:650;white-space:nowrap}
+.score-ceiling{margin-top:12px;padding:9px 11px;border:1px dashed var(--border-tertiary);border-radius:var(--radius-sm);
+  color:var(--stone);background:var(--bg-tertiary);font-size:12px;line-height:1.45}
+.path{width:100%;margin-top:38px;table-layout:fixed;border-collapse:collapse;border-top:1px solid var(--border-tertiary)}
+.path th{padding:10px 0;border-bottom:1px solid var(--border-primary);color:var(--stone);font-size:10px;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;text-align:left}
+.path td{padding:18px 0;border-bottom:1px solid var(--border-primary);vertical-align:middle;text-align:left}
+.path-step{width:76px;color:var(--text-secondary);font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+.path-title{width:200px;font-size:16px;font-weight:500}
+.path-copy{color:var(--text-tertiary);font-size:13px}
+.path-owner{width:120px;color:var(--stone);font-size:12px}
+.validation{margin-top:24px;padding:15px 17px;border:1px dashed var(--border-tertiary);border-radius:var(--radius-sm);
+  color:var(--text-secondary);font-size:12px;line-height:1.5}
+.validation b{color:var(--ink)}
+
+@media(max-width:1080px){
+  .evidence-layout,.capture-tall .evidence-layout{grid-template-columns:minmax(0,1fr);gap:32px}
+  .capture-col{position:static;max-height:none;overflow:visible;max-width:420px}
+  .matrix-wrap{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:900px){
+  .overview-grid,.dimension-lifts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .score-lifts{grid-template-columns:minmax(0,1fr)}
+  .path-title{width:auto}
+  .path-owner{display:none}
+}
+@media(max-width:640px){
+  .overview-grid,.dimension-lifts{grid-template-columns:minmax(0,1fr)}
+  .observation{grid-template-columns:minmax(0,1fr)}
+  .obs-no{display:none}
+}
+
+/* Work Report contract, stated under the canonical selectors so the validator
+   and the stylesheet agree on one spelling.
+   Decision-path cells stay left-aligned — a numeric right-align would break the
+   step / title / copy / owner reading order. */
+.path-row td{text-align:left}
+/* A wide capture puts the shot above the findings, so the observations must
+   collapse from the two-column evidence grid into one vertical stack. */
+.report.capture-wide .observations{display:block}
+</style>
+<style>body{margin:0;background:var(--background-primary);color:var(--text-primary);font:17px/1.65 system-ui,sans-serif}.review-content{max-width:850px;margin:auto;padding:40px 24px}.review-content h1{font-size:clamp(30px,5vw,48px);line-height:1.15}.review-content h2{font-size:24px}.review-content h3{font-size:20px}.review-content article{padding:20px 0;border-top:1px solid var(--border-secondary)}.review-content code{font-size:14px;overflow-wrap:anywhere}.review-content .meta,.review-content footer{color:var(--text-secondary);font-size:14px}.review-content a{color:inherit}.review-content a:focus-visible{outline:3px solid var(--border-warning);outline-offset:4px}.review-content li{margin:12px 0}.review-content footer{border-top:1px solid var(--border-secondary);margin-top:32px;padding-top:20px}</style></head>
+<body><div class="report capture-tall" data-report-depth="focused"><main class="review-content">
+<section class="cover"><p class="meta">Static implementation review · 4 September 2026</p><h1>LoomTV has a strong foundation. Finish the API migration next.</h1><p>The desktop, server, mobile and TV work shows substantial investment. The most useful next phase is consistency across clients, reliable failure recovery and smaller modules.</p></section>
+<section aria-labelledby="evidence"><h2 id="evidence">Evidence and limits</h2><p>This review examined server authorization, setup, filesystem containment, desktop IPC and library mutations, plus mobile API adapters and artwork controls. Type checking and lint passed in this review session. No tests, runtime playback checks or visual verification were performed. This is a targeted review, not an exhaustive claim that every bug has been found.</p><p>Visible means directly present in source. Inferred means the consequence follows from the inspected code. Needs verification identifies behavior that requires execution or fault injection.</p></section>
+<section aria-labelledby="findings"><h2 id="findings">Findings</h2>
+<article class="observation" id="observation-1"><p class="meta"><span class="obs-no">1</span> · <span class="tag status-medium">Medium</span> · <span class="tag evidence">Visible</span> · <span class="tag category">Implementation</span></p><h3>Setup exposes library paths to viewers</h3><p>Problem. The setup library GET route requires only <code>library.read</code> and returns raw roots. The root view spreads the saved root, including its filesystem path. Ordinary viewer responses therefore reveal server directory names that the regular library endpoint removes.</p><p class="quick-win">Why it matters. Require <code>library.manage</code> for setup folder details, or return the same redacted root DTO used by the regular endpoint. Verify that a viewer cannot retrieve absolute paths through either route.</p><p class="meta">Evidence. <code>apps/server/src/public-api.js:999</code>; <code>apps/server/src/admin-service.js:869</code> and <code>:1510</code>.</p></article>
+<article class="observation" id="observation-2"><p class="meta"><span class="obs-no">2</span> · <span class="tag status-medium">Medium</span> · <span class="tag evidence">Visible</span> · <span class="tag category">Implementation</span></p><h3>Setup completion waits without a deadline</h3><p>Problem. <code>waitForSetupScan</code> polls every 250 ms until the scan changes state. Setup completion awaits it without a deadline or disconnect cancellation. If scanning stalls, the request cannot complete and polling continues after the client leaves.</p><p class="quick-win">Why it matters. Return a job identifier and let the client poll scan status, or enforce a deadline and cancellation. Keep scanning progress and retry controls available if setup takes longer than expected.</p><p class="meta">Evidence. <code>apps/server/src/public-api.js:460</code> and <code>:1150</code>. A stalled scan was not reproduced.</p></article>
+<article class="observation" id="observation-3"><p class="meta"><span class="obs-no">3</span> · <span class="tag status-medium">Medium</span> · <span class="tag evidence">Visible</span> · <span class="tag category">Implementation</span></p><h3>The poster-refresh control cannot succeed</h3><p>Problem. The detail screen renders a refresh-poster button, and its handler calls <code>getOfficialArtworkCandidates</code>. That method always returns HTTP 410 with <code>legacy_route_retired</code>. Applying artwork is also hardcoded to fail.</p><p class="quick-win">Why it matters. Implement these operations through the canonical API or hide the controls until the server advertises support. A displayed action should have a supported success path.</p><p class="meta">Evidence. <code>apps/mobile/App.tsx:2982</code> and <code>:4639</code>; <code>apps/mobile/mobileLanClient.ts:452</code>.</p></article>
+<article class="observation" id="observation-4"><p class="meta"><span class="obs-no">4</span> · <span class="tag status-medium">Medium</span> · <span class="tag evidence">Visible</span> · <span class="tag category">Implementation</span></p><h3>A single title lookup downloads the catalog</h3><p>Problem. <code>getLibraryItem</code> calls <code>getCanonicalItems</code>, which requests both the library and series collections before searching locally. Index refresh also ignores the caller's ETag. Network traffic and JSON work grow with catalog size, even when a user opens only one title.</p><p class="quick-win">Why it matters. Use a dedicated detail request and retain a revision-aware catalog cache. Honor conditional refreshes and use pagination for collections. Measure transferred bytes and detail-open latency with a large library before claiming a speed improvement.</p><p class="meta">Evidence. <code>apps/mobile/mobileLanClient.ts:240</code>, <code>:409</code> and <code>:417</code>.</p></article>
+<article class="observation" id="observation-5"><p class="meta"><span class="obs-no">5</span> · <span class="tag status-medium">Medium</span> · <span class="tag evidence">Inferred</span> · <span class="tag category">Implementation</span></p><h3>Folder changes can commit to only one store</h3><p>Problem. The desktop add and remove handlers save their library mutation before awaiting the corresponding unified-server operation. There is no rollback in these handlers. If the second operation fails, the caller sees a failure after the local state has already changed.</p><p class="quick-win">Why it matters. Give one service ownership of folder mutations and derive other views from it. During migration, record pending synchronization and reconcile failures, or provide a compensating rollback. Verify add, remove and update with the second write forced to fail.</p><p class="meta">Evidence. <code>apps/desktop/src/main/ipcHandlers.ts:751</code> and <code>:782</code>.</p></article>
+<article class="observation" id="observation-6"><p class="meta"><span class="obs-no">6</span> · <span class="tag status-medium">Medium</span> · <span class="tag evidence">Visible</span> · <span class="tag category">Implementation</span></p><h3>The main client files carry too many responsibilities</h3><p>Problem. The mobile App file contains 6,824 lines and the desktop VideoPlayer contains 4,293. Mobile App includes connection recovery, credentials, artwork actions and rendering. Changes across these responsibilities are difficult to review and isolate.</p><p class="quick-win">Why it matters. Extract mobile connection and credential orchestration, catalog access, detail actions and player coordination into focused modules. Split the desktop player by engine adapter, playback session and controls. Keep shared contracts in packages, while preserving platform-specific behavior.</p><p class="meta">Evidence. line counts of <code>apps/mobile/App.tsx</code> and <code>apps/desktop/src/components/VideoPlayer.tsx</code>, excluding other files.</p></article>
+</section>
+<section aria-labelledby="strengths"><h2 id="strengths">What is worth preserving</h2><p>The repository already has typed IPC validation, trusted-sender checks, scoped permissions, hashed credentials, constrained media paths and shared protocol packages. These are useful engineering investments. Passing lint and type checks is also a good baseline, though neither establishes playback correctness.</p></section>
+<section class="next-actions" aria-labelledby="actions"><h2 id="actions">Next actions</h2><ol><li>Fix the viewer path disclosure and remove or restore the broken poster action.</li><li>Make setup completion bounded and recoverable. Make folder synchronization failures explicit.</li><li>Finish the canonical API migration, including detail requests, conditional catalog refreshes and server-driven capability checks.</li><li>Refactor the two largest client files in small, behavior-preserving steps.</li><li>Once runtime checks are requested, cover server restarts during playback, NAS disconnects, profile switches during pending writes, device revocation, subtitle changes, offline recovery and backup restoration.</li><li>Review actual screens for keyboard and TV focus, screen-reader labels, text scaling, empty libraries and connection errors. These remain unverified here.</li><li>Publish a platform capability matrix that distinguishes shipped behavior from incomplete work, and keep setup documentation and screenshots aligned with each release.</li></ol></section>
+<footer><p>Generated <time datetime="2026-09-04T20:25:13.863Z">8:25:13 PM UTC</time>. Last updated <time datetime="2026-09-04T20:25:13.863Z">8:25:13 PM UTC</time>.</p>Method: targeted static source inspection at repository HEAD 6447d03f, plus lint and type checking reported in this session. Confidence is high for the visible code mismatches and bounded to the inspected paths. No production-readiness score is assigned. Review prepared with the focused HTML Artifacts format.</footer>
+</main></div></body></html>

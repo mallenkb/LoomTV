@@ -30,6 +30,7 @@ let desktopSetupToken = '';
 let adminToken: string | null = null;
 let certificatePinInstalled = false;
 let setupRequired = false;
+let restoredAdminOnly = false;
 let state: UnifiedDesktopServerState = {
   enabled: false,
   ready: false,
@@ -37,12 +38,18 @@ let state: UnifiedDesktopServerState = {
 };
 
 function enabledByEnvironment(): boolean {
-  return ['1', 'true', 'yes', 'on'].includes(String(process.env[TEST_FLAG] || '').trim().toLowerCase());
+  const flag = String(process.env[TEST_FLAG] || '').trim().toLowerCase();
+  if (flag) return ['1', 'true', 'yes', 'on'].includes(flag);
+  // Reopen an existing administration installation on ordinary desktop
+  // launches. Never silently create a second catalog for a fresh install.
+  return fs.existsSync(canonicalStatePath(configuredDataDir() || app.getPath('userData')));
 }
 
 function configuredDataDir(): string | null {
   const value = String(process.env.LOOMTV_DATA_DIR || '').trim();
-  return value ? path.resolve(value) : null;
+  if (value) return path.resolve(value);
+  const existing = app.getPath('userData');
+  return fs.existsSync(canonicalStatePath(existing)) ? existing : null;
 }
 
 export type UnifiedDesktopSetupHooks = {
@@ -186,10 +193,13 @@ function installCanonicalCertificatePin(): void {
 }
 
 export function getUnifiedDesktopServerState(): UnifiedDesktopServerState {
-  return { ...state };
+  // `enabled` opts the native renderer into unified onboarding. Restoring
+  // browser administration must not switch its profile or catalog workflow.
+  return { ...state, enabled: state.enabled && !restoredAdminOnly };
 }
 
 export function getUnifiedDesktopLanAdvertisement(): { port: number; certFingerprint: string } | null {
+  if (restoredAdminOnly) return null;
   const address = host?.address();
   if (!state.enabled || !state.ready || !address || !identity?.certFingerprint) return null;
   return { port: address.port, certFingerprint: identity.certFingerprint };
@@ -225,6 +235,7 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
     return getUnifiedDesktopServerState();
   }
 
+  restoredAdminOnly = !String(process.env[TEST_FLAG] || '').trim();
   try {
     fs.mkdirSync(dataDir, { recursive: true });
     identity = loadOrCreateLanTlsIdentity(dataDir, getLocalNetworkAddresses());
@@ -268,7 +279,7 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
         });
         return result.canceled ? null : result.filePaths[0] || null;
       },
-      setupHooks: {
+      setupHooks: restoredAdminOnly ? undefined : {
         ...setupHooks,
         ownerCreated: ({ adminToken: createdToken }) => {
           adminToken = createdToken;
@@ -298,6 +309,8 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
       appUrl: `${origin}/app/`,
     };
   } catch (error) {
+    await host?.stop().catch(() => undefined);
+    host = null;
     state = {
       enabled: true,
       ready: false,
@@ -309,7 +322,7 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
 }
 
 export async function configureUnifiedDesktopOwner(input: { name: string; password: string }): Promise<UnifiedDesktopServerState> {
-  if (!state.enabled) return getUnifiedDesktopServerState();
+  if (!state.enabled || restoredAdminOnly) return getUnifiedDesktopServerState();
   if (!state.ready || !identity) throw new Error(state.error || 'The unified LoomTV server is not ready.');
   const name = String(input.name || '').trim();
   const password = String(input.password || '');
@@ -337,7 +350,7 @@ function canonicalRootId(folderPath: string): string {
 }
 
 export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others'): Promise<boolean> {
-  if (!state.enabled) return false;
+  if (!state.enabled || restoredAdminOnly) return false;
   if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
   const added = await requestJson<{ root?: { id?: string } }>('/api/v1/library/roots', identity, {
     method: 'POST',
@@ -357,7 +370,7 @@ export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'mo
 }
 
 export async function removeUnifiedDesktopLibraryRoot(folderPath: string): Promise<boolean> {
-  if (!state.enabled) return false;
+  if (!state.enabled || restoredAdminOnly) return false;
   if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
   await requestJson(`/api/v1/library/roots/${canonicalRootId(folderPath)}`, identity, {
     method: 'DELETE',
@@ -373,7 +386,7 @@ export async function openUnifiedDesktopAdmin(): Promise<boolean> {
 }
 
 export function openUnifiedDesktopSetup(onComplete: () => void): boolean {
-  if (!state.enabled || !state.ready || !setupRequired) return false;
+  if (!state.enabled || restoredAdminOnly || !state.ready || !setupRequired) return false;
   openCanonicalSetupWindow(() => {
     const dataDir = configuredDataDir();
     if (dataDir) removeBootstrapSecret(dataDir);

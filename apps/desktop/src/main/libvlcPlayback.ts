@@ -1048,6 +1048,7 @@ class LibVlcPlaybackSession {
   private nativeRearmOnNextViewportSync = false;
   private stopped = false;
   private ended = false;
+  private replaySeek: number | null = null;
   private startSeconds: number;
   private startApplied = false;
   private requestedPaused = false;
@@ -1562,7 +1563,9 @@ class LibVlcPlaybackSession {
     }
     this.state = { ...this.state, ...patch };
     syncNativePlaybackDisplaySleep(this.id, this.state);
-    if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', this.state);
+    // Track metadata only changes on discovery or selection. Do not clone it
+    // across IPC with every position update; the renderer keeps the last list.
+    if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', { ...this.state, tracks: patch.tracks });
   }
 
   private applyPendingRearmTrackSelection(): void {
@@ -1664,8 +1667,26 @@ class LibVlcPlaybackSession {
     this.emit({ tracks });
   }
 
+  private replayFrom(position: number, paused: boolean): boolean {
+    const api = this.runtime.api;
+    api.playerStop(this.player);
+    this.replaySeek = position;
+    this.requestedPaused = paused;
+    this.lastPauseCommand = null;
+    this.startApplied = true;
+    this.nativeRearmUntil = Date.now() + 5_000;
+    if (Number(api.playerPlay(this.player)) < 0) {
+      this.replaySeek = null;
+      this.finish('error', 'LibVLC could not resume this video.');
+      return false;
+    }
+    this.ended = false;
+    this.emit({ status: 'loading', paused, position });
+    return true;
+  }
+
   private poll(): void {
-    if (this.stopped) return;
+    if (this.stopped || this.ended) return;
     try {
       const api = this.runtime.api;
       const nativeState = Number(api.playerGetState(this.player));
@@ -1677,6 +1698,22 @@ class LibVlcPlaybackSession {
         this.timer.unref();
       }
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
+      if (status === 'ended') {
+        this.ended = true;
+        this.requestedPaused = true;
+        this.lastPauseCommand = true;
+        this.pauseAcknowledgementDeadline = 0;
+        // EOF is a reusable player state, not session termination.
+        this.emit({ status: 'ended', paused: true, position: this.state.duration || this.state.position });
+        return;
+      }
+      if (status === 'ready' && this.replaySeek !== null) {
+        api.playerSetTime(this.player, Math.round(this.replaySeek * 1_000));
+        api.playerSetPause(this.player, this.requestedPaused ? 1 : 0);
+        this.replaySeek = null;
+        this.pauseAcknowledgementDeadline = Date.now() + 750;
+        return;
+      }
       const durationMs = Number(api.playerGetLength(this.player));
       const positionMs = Number(api.playerGetTime(this.player));
       if (status === 'ready') {
@@ -1698,10 +1735,7 @@ class LibVlcPlaybackSession {
         // button state with a poll from before the decoder applied the command.
         paused: Date.now() < this.pauseAcknowledgementDeadline ? this.requestedPaused : nativePaused,
       });
-      if (status === 'ended') {
-        this.ended = true;
-        this.finish();
-      } else if (status === 'closed') {
+      if (status === 'closed') {
         this.finish('closed');
       } else if (status === 'error') {
         this.finish('error', 'LibVLC reported a playback error.');
@@ -1718,6 +1752,14 @@ class LibVlcPlaybackSession {
       const api = this.runtime.api;
       switch (command.type) {
         case 'set-paused':
+          if (!command.paused && (this.ended || Number(api.playerGetState(this.player)) === 6)) {
+            return this.replayFrom(0, false);
+          }
+          if (this.replaySeek !== null) {
+            this.requestedPaused = command.paused;
+            this.emit({ paused: command.paused });
+            return true;
+          }
           if (this.lastPauseCommand === command.paused
             && (Date.now() < this.pauseAcknowledgementDeadline
               || (Number(api.playerGetState(this.player)) === 4) === command.paused)) return true;
@@ -1727,7 +1769,15 @@ class LibVlcPlaybackSession {
           this.pauseAcknowledgementDeadline = Date.now() + 750;
           this.emit({ paused: command.paused });
           return true;
-        case 'seek': api.playerSetTime(this.player, Math.round(Math.max(0, finite(command.position, 0)) * 1_000)); return true;
+        case 'seek': {
+          const position = Math.max(0, finite(command.position, 0));
+          if (this.ended || Number(api.playerGetState(this.player)) === 6) {
+            return this.replayFrom(position, this.requestedPaused);
+          }
+          if (this.replaySeek !== null) { this.replaySeek = position; return true; }
+          api.playerSetTime(this.player, Math.round(position * 1_000));
+          return true;
+        }
         case 'set-volume': {
           const volume = clamp(finite(command.volume, 1), 0, 1);
           const applied = Number(api.audioSetVolume(this.player, Math.round(volume * 100))) >= 0;

@@ -1270,7 +1270,8 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const routePath = isHome ? '/' : DISCOVER_ROUTE;
   const pageRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollTopRef = useRef(0);
-  const discoverCache = useRef<DiscoverCacheState>(loadDiscoverCacheFromStorage());
+  const [initialDiscoverCache] = useState(loadDiscoverCacheFromStorage);
+  const discoverCache = useRef<DiscoverCacheState>(initialDiscoverCache);
   const initialRegion = normalizeAvailabilityRegion(initialFilterState.region);
   const initialYearFilter = initialFilterState.yearFilter.trim();
   const initialResolvedYearFilter = /^(19|20)\d{2}$/.test(initialYearFilter) ? initialYearFilter : '';
@@ -1283,7 +1284,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     initialFilterState.platformFilter,
     initialRegion,
   );
-  const initialCachedItems = getValidCachedItems(discoverCache.current, initialCacheId);
+  const [initialCachedItems] = useState(() => getValidCachedItems(initialDiscoverCache, initialCacheId));
   const [tmdbCredential, setTmdbCredential] = useState('');
   const [omdbCredential, setOmdbCredential] = useState('');
   const [query, setQuery] = useState(initialFilterState.query);

@@ -2199,8 +2199,9 @@ async function startBackgroundServices(): Promise<void> {
           void dialog.showMessageBox({
             type: 'info',
             title: 'Loom admin is unavailable',
-            message: 'The Loom admin server is not running in this desktop mode.',
-            detail: 'This desktop startup path has not started the built-in admin server. Your existing admin configuration has not been changed.',
+            message: 'Loom admin could not start.',
+            detail: getUnifiedDesktopServerState().error
+              || 'No existing admin installation was found, or admin startup was explicitly disabled. Your saved data has not been changed.',
           });
           return;
         }
@@ -2290,7 +2291,7 @@ app.whenReady().then(async () => {
   await startMediaServer(mediaServerDeps);
   recordPlaybackDiagnostic('desktop.media-server.ready');
   const unifiedServerState = await startUnifiedDesktopServer(unifiedDesktopSetupHooks);
-  if (unifiedServerState.enabled && !unifiedServerState.ready) {
+  if (unifiedServerState.error && !unifiedServerState.ready) {
     console.error('[unified desktop] Canonical server startup failed:', unifiedServerState.error);
   }
   presentPrimaryWindow();

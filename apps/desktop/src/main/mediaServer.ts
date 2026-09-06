@@ -1703,13 +1703,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               let outputBytes = 0;
               proc.stdout?.on('data', (chunk: Buffer) => {
                 outputBytes += chunk.byteLength;
-                if (cacheKey && outputBytes <= 2 * 1024 * 1024) chunks.push(Buffer.from(chunk));
+                if (cacheKey && outputBytes <= 2 * 1024 * 1024) chunks.push(chunk);
+                else chunks.length = 0;
                 if (!res.destroyed && !res.writableEnded) res.write(chunk);
               });
               proc.stdout?.once('end', () => {
                 if (cacheKey && outputBytes > 0 && outputBytes <= 2 * 1024 * 1024) {
                   saveCachedThumbnail(cacheKey, Buffer.concat(chunks), 'image/jpeg');
                 }
+                chunks.length = 0;
                 safeEndResponse(res);
               });
               proc.once('error', (error) => {
