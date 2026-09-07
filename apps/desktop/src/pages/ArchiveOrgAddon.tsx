@@ -1,6 +1,6 @@
+import { useParams } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Play, RefreshCw } from 'lucide-react';
-import { useParams } from 'react-router';
 import { z } from 'zod';
 import SafeArtwork from '@/components/SafeArtwork';
 import LibrarySearch from '@/components/LibrarySearch';
@@ -135,7 +135,7 @@ async function requireEnabledArchivePlugin(addonId: string): Promise<StremioPlug
 }
 
 export default function ArchiveOrgAddon({ onPlay }: ArchiveOrgAddonProps) {
-  const { addonId = '' } = useParams();
+  const { addonId = '' } = useParams({ from: '/addons/stremio/$addonId' });
   const { theme } = useTheme();
   const [addon, setAddon] = useState<StremioPluginSummary | null>(null);
   const [items, setItems] = useState<ArchiveDocument[]>([]);

@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link } from '@/lib/navigation';
 
 /** Pointer travel before a press is treated as a drag rather than a click. */
 const DRAG_THRESHOLD = 12;

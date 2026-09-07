@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link } from '@/lib/navigation';
 import { Play } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import SafeArtwork from '@/components/SafeArtwork';

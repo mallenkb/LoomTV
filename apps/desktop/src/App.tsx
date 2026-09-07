@@ -1,21 +1,24 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router';
+import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+import { useLocation, parseDesktopSearch, stringifyDesktopSearch } from './lib/navigation';
 import { MotionConfig } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
 import ProfileGate from './components/profiles/ProfileGate';
 import Home from './pages/Home';
-import MyList from './pages/MyList';
-import Movies from './pages/Movies';
-import Others from './pages/Others';
-import TVShows from './pages/TVShows';
-import MovieDetail from './pages/MovieDetail';
-import TVDetail from './pages/TVDetail';
-import Settings from './pages/Settings';
-import PluginDiscover from './pages/PluginDiscover';
-import LiveTv from './pages/LiveTv';
-import ArchiveOrgAddon from './pages/ArchiveOrgAddon';
+const MyList = lazyRouteComponent(() => import('./pages/MyList'));
+const Movies = lazyRouteComponent(() => import('./pages/Movies'));
+const Others = lazyRouteComponent(() => import('./pages/Others'));
+const TVShows = lazyRouteComponent(() => import('./pages/TVShows'));
+const MovieDetail = lazyRouteComponent(() => import('./pages/MovieDetail'));
+const TVDetail = lazyRouteComponent(() => import('./pages/TVDetail'));
+const Settings = lazyRouteComponent(() => import('./pages/Settings'));
+const PluginDiscover = lazyRouteComponent(() => import('./pages/PluginDiscover'));
+const LiveTv = lazyRouteComponent(() => import('./pages/LiveTv'));
+const ArchiveOrgAddon = lazyRouteComponent(() => import('./pages/ArchiveOrgAddon'));
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer/LazyVideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
@@ -172,9 +175,9 @@ export default function App() {
             transform and layout animations when the OS asks for reduced motion,
             keeping only opacity. CSS transitions are handled separately in index.css. */}
         <MotionConfig reducedMotion="user">
-          <HashRouter>
-            <DesktopBootstrap />
-          </HashRouter>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
         </MotionConfig>
         {!startupReady && <StartupSplash />}
       </StartupVisibilityContext.Provider>
@@ -533,22 +536,9 @@ function AppShell() {
           title="This page ran into a problem"
           description="The rest of LoomTV is still running. Retry, or pick another section from the sidebar."
         >
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/my-list" element={<MyList />} />
-            <Route path="/movies" element={<Movies />} />
-            <Route path="/others" element={<Others onPlay={handlePlayMedia} />} />
-            <Route path="/tv" element={<TVShows kind="series" />} />
-            <Route path="/anime" element={<TVShows kind="anime" />} />
-            <Route path="/discover" element={<PluginDiscover />} />
-            <Route path="/live/:sourceId" element={<LiveTv onPlay={handlePlayLiveChannel} />} />
-            <Route path="/addons/stremio/:addonId" element={<ArchiveOrgAddon onPlay={handlePlayArchiveMovie} />} />
-            <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
-            <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
-            <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <PlaybackActionsContext.Provider value={{ handlePlayMedia, handlePlayLiveChannel, handlePlayArchiveMovie }}>
+            <Outlet />
+          </PlaybackActionsContext.Provider>
         </ErrorBoundary>
       </main>
       </div>
@@ -586,4 +576,71 @@ function AppShell() {
     </div>
     </LibraryFilterVisibilityContext.Provider>
   );
+}
+
+
+type PlaybackActions = {
+  handlePlayMedia: NonNullable<React.ComponentProps<typeof TVDetail>['onPlay']>;
+  handlePlayLiveChannel: NonNullable<React.ComponentProps<typeof LiveTv>['onPlay']>;
+  handlePlayArchiveMovie: NonNullable<React.ComponentProps<typeof ArchiveOrgAddon>['onPlay']>;
+};
+const PlaybackActionsContext = createContext<PlaybackActions | null>(null);
+function usePlaybackActions() {
+  const actions = useContext(PlaybackActionsContext);
+  if (!actions) throw new Error('Playback actions are unavailable.');
+  return actions;
+}
+function MovieRoute() { return <MovieDetail onPlay={usePlaybackActions().handlePlayMedia} />; }
+function SeriesRoute() { return <TVDetail kind="series" onPlay={usePlaybackActions().handlePlayMedia} />; }
+function AnimeRoute() { return <TVDetail kind="anime" onPlay={usePlaybackActions().handlePlayMedia} />; }
+function OthersRoute() { return <Others onPlay={usePlaybackActions().handlePlayMedia} />; }
+function LiveRoute() { return <LiveTv onPlay={usePlaybackActions().handlePlayLiveChannel} />; }
+function AddonRoute() { return <ArchiveOrgAddon onPlay={usePlaybackActions().handlePlayArchiveMovie} />; }
+
+let preloadingDetails = false;
+function warmDetails(id: string, preload: boolean, state: unknown) {
+  const routeState = state as { fromDiscover?: boolean; stremioCatalogItem?: unknown; from?: string } | undefined;
+  if (!preload || preloadingDetails || routeState?.fromDiscover || routeState?.stremioCatalogItem || routeState?.from?.startsWith('/discover')) return;
+  preloadingDetails = true;
+  void desktopApi.getLibraryItem(id).catch(() => undefined).finally(() => { preloadingDetails = false; });
+}
+
+const rootRoute = createRootRoute({ component: DesktopBootstrap, validateSearch: (search: Record<string, unknown>) => Object.fromEntries(Object.entries(search).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')),  notFoundComponent: () => <Navigate to="/" replace /> });
+const routes = [
+  createRoute({ getParentRoute: () => rootRoute, path: '/', component: Home }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/my-list', component: MyList }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/movies', component: Movies }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/others', beforeLoad: () => Others.preload?.(), component: OthersRoute }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/tv', beforeLoad: () => TVShows.preload?.(), component: () => <TVShows kind="series" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/anime', beforeLoad: () => TVShows.preload?.(), component: () => <TVShows kind="anime" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/discover', component: PluginDiscover }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/live/$sourceId', beforeLoad: () => LiveTv.preload?.(), component: LiveRoute }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/addons/stremio/$addonId', beforeLoad: () => ArchiveOrgAddon.preload?.(), component: AddonRoute }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/movie/$id', component: MovieRoute, beforeLoad: () => MovieDetail.preload?.(), loader: ({ params, preload, location }) => warmDetails(params.id, preload, location.state) }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/tv/$id', component: SeriesRoute, beforeLoad: () => TVDetail.preload?.(), loader: ({ params, preload, location }) => warmDetails(params.id, preload, location.state) }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/anime/$id', component: AnimeRoute, beforeLoad: () => TVDetail.preload?.(), loader: ({ params, preload, location }) => warmDetails(params.id, preload, location.state) }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: Settings }),
+] as const;
+const router = createRouter({
+  routeTree: rootRoute.addChildren(routes), history: createHashHistory(),
+  parseSearch: parseDesktopSearch, stringifySearch: stringifyDesktopSearch,
+  defaultPreload: 'intent', defaultPreloadDelay: 120,
+  defaultPreloadStaleTime: 0, defaultGcTime: 0,
+  scrollRestoration: true,
+  scrollToTopSelectors: ['main .loom-page', '.loom-modern-home'],
+  defaultPendingMs: 150, defaultPendingMinMs: 0,
+  defaultPendingComponent: () => <div role="status" className="p-8 text-[var(--loom-muted)]">Loading page…</div>,
+  defaultErrorComponent: ({ error, reset }) => <div role="alert" className="p-8">
+    <p>{error.message || 'This page could not load.'}</p>
+    <button type="button" onClick={reset}>Retry</button>
+  </div>,
+});
+
+router.subscribe('onBeforeNavigate', ({ pathChanged }) => {
+  if (!pathChanged) return;
+  void queryClient.cancelQueries({ queryKey: ['getThumbnail'], type: 'inactive', fetchStatus: 'fetching' });
+});
+
+declare module '@tanstack/react-router' {
+  interface Register { router: typeof router }
 }

@@ -18,9 +18,9 @@ export function availableSeasonCount(show: TVShow): number {
 }
 
 export function mediaLink(item: MediaItem): string {
-  if (item.type === 'movie') return `/movie/${item.id}`;
-  if (item.type === 'anime') return `/anime/${item.id}`;
-  return `/tv/${item.id}`;
+  if (item.type === 'movie') return `/movie/${encodeURIComponent(item.id)}`;
+  if (item.type === 'anime') return `/anime/${encodeURIComponent(item.id)}`;
+  return `/tv/${encodeURIComponent(item.id)}`;
 }
 
 export function mediaMetaLine(item: MediaItem): string {

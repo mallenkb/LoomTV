@@ -1,3 +1,4 @@
+import { cachedDesktopRead, invalidateDesktopData, queryClient } from './queryClient';
 import packageJson from '../../package.json';
 import type {
   MediaSessionCommand,
@@ -841,7 +842,7 @@ function browserMediaSessionDiagnostics(): MediaSessionDiagnostics {
   };
 }
 
-export const desktopApi = {
+const desktopTransport = {
   async getLibraryIndex(): Promise<LibraryIndexPayload | null> {
     if (isRemoteDesktopMode()) {
       const session = getRemoteDesktopSession();
@@ -1653,11 +1654,11 @@ export const desktopApi = {
   },
 
   onProfilesChanged(callback: (event: ProfilesChangedEvent) => void): () => void {
-    return window.desktopApi?.onProfilesChanged?.(callback) || (() => undefined);
+    return window.desktopApi?.onProfilesChanged?.(event => { invalidateDesktopData(); callback(event); }) || (() => undefined);
   },
 
   onActiveProfileChanged(callback: (state: ActiveProfileState) => void): () => void {
-    return window.desktopApi?.onActiveProfileChanged?.(callback) || (() => undefined);
+    return window.desktopApi?.onActiveProfileChanged?.(state => { invalidateDesktopData(); callback(state); }) || (() => undefined);
   },
 
   async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
@@ -2142,3 +2143,46 @@ export const desktopApi = {
     },
   },
 };
+
+
+// Keep the typed transport contract at the boundary. Query owns read caching
+// and MutationCache owns writes; components continue to use the same IPC API.
+const cachedReads = new Set<string>([
+  'getLibraryIndex', 'getLibrary', 'getLibraryItem', 'getThumbnail', 'requestMetadataProvider', 'getStremioCatalog',
+  'getStremioMeta', 'getStremioMetaByItem', 'getMediaSegments', 'getStreamingProviders',
+  'getPlaybackLogo', 'getOfficialMetadataCandidates', 'listIptvChannels',
+  'getProfileLists', 'getProfilePreferences',
+] satisfies (keyof typeof desktopTransport)[]);
+const writes = new Set<string>([
+  'scanLibrary', 'addLibraryFolder',
+  'addLibraryFolderPath', 'removeLibraryFolder', 'updateLibraryFolder', 'clearAppData',
+  'saveSettings', 'saveCustomArtwork', 'importCustomArtwork', 'refreshOfficialArtwork',
+  'refreshIncompleteMetadata', 'applyOfficialMetadata', 'setProfileListEntry',
+  'saveProfilePreferences', 'saveProfileRestrictions', 'approveStremioAddon',
+  'disableStremioAddon', 'removeStremioAddon', 'saveStremioAddonConfiguration',
+  'saveManualMediaSegment', 'deleteManualMediaSegment', 'undoManualMediaSegment',
+] satisfies (keyof typeof desktopTransport)[]);
+const wrappers = new Map<PropertyKey, unknown>();
+export const desktopApi: typeof desktopTransport = new Proxy(desktopTransport, {
+  get(target, property, receiver) {
+    const original: unknown = Reflect.get(target, property, receiver);
+    if (typeof property !== 'string' || typeof original !== 'function'
+      || (!cachedReads.has(property) && !writes.has(property))) return original;
+    if (wrappers.has(property)) return wrappers.get(property);
+    const wrapped = (...args: unknown[]) => {
+      const invoke = () => Reflect.apply(original, target, args) as Promise<unknown>;
+      if (cachedReads.has(property)) {
+        return cachedDesktopRead(property === 'getLibraryItem' ? 'detail' : property,
+          args, invoke, property === 'getLibraryIndex' || property === 'getLibrary' ? 0 : property === 'getMediaSegments' ? 30_000 : 120_000);
+      }
+      return queryClient.getMutationCache().build(queryClient, {
+        mutationFn: invoke,
+        scope: { id: property === 'setProfileListEntry' ? 'profile-lists' : property },
+        onSuccess: () => invalidateDesktopData(property === 'setProfileListEntry' ? ['getProfileLists']
+          : property === 'saveProfilePreferences' ? ['getProfilePreferences'] : undefined),
+      }).execute(undefined);
+    };
+    wrappers.set(property, wrapped);
+    return wrapped;
+  },
+});

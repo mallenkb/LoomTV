@@ -1,5 +1,5 @@
+import { useParams } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router';
 import { AlertTriangle, Play, Tv } from 'lucide-react';
 import LibrarySearch from '@/components/LibrarySearch';
 import ThemeFilterDropdown from '@/components/ThemeFilterDropdown';
@@ -133,7 +133,7 @@ function ChannelCard({
  * shipping the whole list to the renderer.
  */
 export default function LiveTv({ onPlay }: LiveTvProps) {
-  const { sourceId = '' } = useParams<{ sourceId: string }>();
+  const { sourceId = '' } = useParams({ from: '/live/$sourceId' });
   const { theme } = useTheme();
 
   const [query, setQuery] = useState('');

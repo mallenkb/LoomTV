@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from '@/lib/navigation';
 import { FolderOpen, FolderPlus } from 'lucide-react';
 import { PencilSimple } from '@phosphor-icons/react';
 import { libraryMutationMessage, useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';

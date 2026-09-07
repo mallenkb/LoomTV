@@ -1,5 +1,7 @@
+import { useParams } from '@tanstack/react-router';
+import { queryClient, queryScope } from '@/lib/queryClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate } from '@/lib/navigation';
 import { Play, ArrowLeft } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -145,7 +147,7 @@ function mediaBelongsToFolders(filePath: string | undefined, folders: readonly s
 }
 
 export default function MovieDetail({ onPlay }: MovieDetailProps) {
-  const { id: mediaId } = useParams<{ id: string }>();
+  const { id: mediaId } = useParams({ from: '/movie/$id' });
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
@@ -155,7 +157,9 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     const initialRoute = location.state as MovieDetailRouteState | null;
     if (initialRoute?.stremioCatalogItem) return mediaFromStremioCatalogItem(initialRoute.stremioCatalogItem);
     if (initialRoute?.fromDiscover || initialRoute?.from?.startsWith('/discover')) return null;
-    return findLocalMovieMatch(state.movies, mediaId);
+    const card = findLocalMovieMatch(state.movies, mediaId);
+    const cached = queryClient.getQueryData<{ revision: number; item: MediaItem }>(['detail', ...queryScope(), mediaId]);
+    return card && cached?.revision === state.catalogRevision ? cached.item : card;
   });
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const progressTick = useProgressRefreshRevision();
@@ -215,7 +219,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     // specific local file is the same work. Discover items remain remote-only
     // until the host supplies an explicit provider-to-library binding.
     const found = routeFallbackMovie ? null : findLocalMovieMatch(state.movies, mediaId);
-    const nextMovie = routeFallbackMovie || found;
+    const cached = queryClient.getQueryData<{ revision: number; item: MediaItem }>(['detail', ...queryScope(), mediaId]);
+    const nextMovie = routeFallbackMovie || (found && cached?.revision === state.catalogRevision ? cached.item : found);
     if (routeFallbackMovie) setIsRemoteStremioMovie(true);
     else if (found) setIsRemoteStremioMovie(false);
     setMovie(nextMovie);
@@ -408,7 +413,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     ? sourceRoute
     : isOtherMedia ? '/others' : '/movies';
   const handleBack = () => {
-    const historyIndex = window.history.state?.idx;
+    const historyIndex = window.history.state?.__TSR_index;
     if (typeof historyIndex === 'number' && historyIndex > 0) {
       navigate(-1);
       return;
