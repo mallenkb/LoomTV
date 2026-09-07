@@ -1,0 +1,10 @@
+import base64, gzip, hashlib, pathlib, subprocess
+root = pathlib.Path(__file__).parent
+encoded = ''.join((root / f'patch-{i}.txt').read_text().strip() for i in range(1, 6))
+patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+assert hashlib.sha256(patch).hexdigest() == '0f583d8cc92271aee514e23cb23f9d34fb9793f22bbb11a127947308a46fef93'
+path = pathlib.Path('evidence/source.patch')
+path.parent.mkdir(exist_ok=True)
+path.write_bytes(patch)
+subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+subprocess.run(['git', 'apply', '--index', str(path)], check=True)
