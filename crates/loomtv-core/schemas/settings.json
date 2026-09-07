@@ -1,0 +1,369 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "omdbApiKey": {
+      "type": "string"
+    },
+    "tmdbApiKey": {
+      "type": "string"
+    },
+    "metadataApiKeys": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "metadataOfflineMode": {
+      "type": "boolean"
+    },
+    "openSubtitlesUsername": {
+      "type": "string"
+    },
+    "openSubtitlesPassword": {
+      "type": "string"
+    },
+    "openSubtitlesLanguages": {
+      "type": "string"
+    },
+    "openSubtitlesAutoDownload": {
+      "type": "boolean"
+    },
+    "autoSyncIntervalHours": {
+      "type": "number"
+    },
+    "playbackSkipBackSeconds": {
+      "type": "number"
+    },
+    "playbackSkipForwardSeconds": {
+      "type": "number"
+    },
+    "playbackDisplaySleepTimeoutMinutes": {
+      "type": "number"
+    },
+    "localSkipAnalysisEnabled": {
+      "type": "boolean"
+    },
+    "skipAnalysis": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "analyzeNewMedia": {
+          "type": "boolean"
+        },
+        "enabledTypes": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "intro",
+              "recap",
+              "outro",
+              "credits",
+              "preview"
+            ]
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "required": [
+            "intro",
+            "recap",
+            "outro",
+            "credits",
+            "preview"
+          ]
+        },
+        "promptTypes": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "intro",
+              "recap",
+              "outro",
+              "credits",
+              "preview"
+            ]
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "required": [
+            "intro",
+            "recap",
+            "outro",
+            "credits",
+            "preview"
+          ]
+        },
+        "durationLimits": {
+          "type": "object",
+          "properties": {
+            "intro": {
+              "type": "object",
+              "properties": {
+                "minSeconds": {
+                  "type": "number"
+                },
+                "maxSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "minSeconds",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            "recap": {
+              "type": "object",
+              "properties": {
+                "minSeconds": {
+                  "type": "number"
+                },
+                "maxSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "minSeconds",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            "outro": {
+              "type": "object",
+              "properties": {
+                "minSeconds": {
+                  "type": "number"
+                },
+                "maxSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "minSeconds",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            "credits": {
+              "type": "object",
+              "properties": {
+                "minSeconds": {
+                  "type": "number"
+                },
+                "maxSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "minSeconds",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            "preview": {
+              "type": "object",
+              "properties": {
+                "minSeconds": {
+                  "type": "number"
+                },
+                "maxSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "minSeconds",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            },
+            "movieCredits": {
+              "type": "object",
+              "properties": {
+                "minSeconds": {
+                  "type": "number"
+                },
+                "maxSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "minSeconds",
+                "maxSeconds"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "intro",
+            "recap",
+            "outro",
+            "credits",
+            "preview",
+            "movieCredits"
+          ],
+          "additionalProperties": false
+        },
+        "suppressFirstEpisodeIntro": {
+          "type": "boolean"
+        },
+        "analyzeSpecials": {
+          "type": "boolean"
+        },
+        "exclusions": {
+          "type": "object",
+          "properties": {
+            "seriesIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "movieIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "seasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "seriesIds",
+            "movieIds",
+            "seasons",
+            "paths"
+          ],
+          "additionalProperties": false
+        },
+        "seasonOverrides": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "full",
+              "chapter-only",
+              "providers-only"
+            ]
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "analyzeNewMedia",
+        "enabledTypes",
+        "promptTypes",
+        "durationLimits",
+        "suppressFirstEpisodeIntro",
+        "analyzeSpecials",
+        "exclusions",
+        "seasonOverrides"
+      ],
+      "additionalProperties": false
+    },
+    "sidebarNavOrder": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "customFolderNames": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "otherFolderGroups": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "icon",
+          "folders"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "otherFolderIcon": {
+      "type": "string"
+    },
+    "appThemeMode": {
+      "type": "string",
+      "enum": [
+        "dark",
+        "light"
+      ]
+    },
+    "appThemeColor": {
+      "type": "string",
+      "enum": [
+        "orange",
+        "yellow",
+        "red",
+        "blue",
+        "twitch"
+      ]
+    },
+    "appDarkTheme": {
+      "type": "string",
+      "const": "black"
+    },
+    "appLoaderStyle": {
+      "type": "string",
+      "enum": [
+        "play-mark",
+        "logo-mark",
+        "horizontal-logo"
+      ]
+    },
+    "localNetworkSharingEnabled": {
+      "type": "boolean"
+    },
+    "localNetworkShareToken": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

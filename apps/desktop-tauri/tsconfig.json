@@ -1,0 +1,5 @@
+{
+  "extends": "../desktop/tsconfig.json",
+  "compilerOptions": { "baseUrl": "../desktop", "noEmit": true },
+  "include": ["src/**/*.ts", "vite.config.ts"]
+}

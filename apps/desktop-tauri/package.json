@@ -1,0 +1,42 @@
+{
+  "name": "@loom-media-server/desktop-tauri",
+  "version": "1.0.147",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/stage-runtimes.mjs && tauri dev",
+    "build": "node scripts/stage-runtimes.mjs && tauri build",
+    "frontend:dev": "vp dev --config vite.config.ts",
+    "frontend:build": "vp build --config vite.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify-runtime": "node scripts/verify-runtime.mjs",
+    "parity": "node ../../scripts/tauri/contract-inventory.mjs"
+  },
+  "dependencies": {
+    "@loom-media-server/lan-protocol": "workspace:*",
+    "@loom-media-server/media-core": "workspace:*",
+    "@loom-media-server/plugin-protocol": "workspace:*",
+    "@loom-media-server/transcode-capabilities": "workspace:*",
+    "@loom-media-server/video-contracts": "workspace:*",
+    "@loom-media-server/video-migration": "workspace:*",
+    "@phosphor-icons/react": "2.1.10",
+    "clsx": "2.1.1",
+    "hls.js": "1.6.16",
+    "lucide-react": "1.14.0",
+    "motion": "12.38.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router": "8.3.0",
+    "tailwind-merge": "3.5.0",
+    "zod": "catalog:",
+    "@tauri-apps/api": "2.11.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@vitejs/plugin-react": "6.0.1",
+    "typescript": "5.7.3",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "@tailwindcss/postcss": "4.2.4"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "appThemeMode": {
+      "type": "string",
+      "enum": [
+        "dark",
+        "light"
+      ]
+    },
+    "appThemeColor": {
+      "type": "string",
+      "enum": [
+        "orange",
+        "yellow",
+        "red",
+        "blue",
+        "twitch"
+      ]
+    },
+    "appDarkTheme": {
+      "type": "string",
+      "const": "black"
+    },
+    "appLoaderStyle": {
+      "type": "string",
+      "enum": [
+        "play-mark",
+        "logo-mark",
+        "horizontal-logo"
+      ]
+    },
+    "appHomeStyle": {
+      "type": "string",
+      "enum": [
+        "default",
+        "modern"
+      ]
+    },
+    "appModernHeroMode": {
+      "type": "string",
+      "enum": [
+        "continue-watching",
+        "featured"
+      ]
+    },
+    "showProviderRatingBadges": {
+      "type": "boolean"
+    },
+    "sidebarNavOrder": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "autoplayNextEnabled": {
+      "type": "boolean"
+    },
+    "playbackSkipBackSeconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "playbackSkipForwardSeconds": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

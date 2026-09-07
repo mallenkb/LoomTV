@@ -1,0 +1,989 @@
+{
+  "referenceSha": "e5907d2be8d43309d5f3b648735e08dc584dd84b",
+  "scope": "desktop",
+  "complete": false,
+  "explanation": "A referenced command name does not prove implementation or behavior parity. All native behavior remains unverified.",
+  "commands": [
+    {
+      "channel": "artwork:apply-official",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "artwork:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "artwork:import",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "artwork:official-candidates",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "artwork:playback-logo",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "artwork:refresh-official",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "artwork:save",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "database:backup",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "database:clear",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "iptv:add-source",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "iptv:list-channels",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "iptv:list-sources",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "iptv:refresh-source",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "iptv:remove-source",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "iptv:update-source",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "library:add-folder",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "library:add-folder-path",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs",
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "library:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "library:get-index",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "library:get-item",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "library:pick-folder",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "library:remove-folder",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs",
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "library:scan",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "library:update-folder",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs",
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:availability",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:command",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:refresh-availability",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:set-fullscreen-transition",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:set-viewport",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:start",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:stop",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "libvlc:sync-surface",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media-control:publish",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media-control:release",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:can-direct-play",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "media:ffmpeg-available",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:get-file-info",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "media:get-server-port",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:get-stream-url",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:get-subtitle-url",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:get-thumbnail",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:play",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "media:probe",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "media:start-transcode",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "media:stop-transcode",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "metadata:provider-request",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "metadata:refresh-incomplete",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "metadata:streaming-providers",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "metadata:test-keys",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "mpv:availability",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "mpv:choose-executable",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "mpv:command",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "mpv:refresh-availability",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "mpv:reset-executable",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "mpv:start",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "mpv:stop",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "network:discover-peers",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "network:remote-connect",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "network:remote-disconnect",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "network:remote-request",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "network:remote-session",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "network:revoke-paired-device",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "network:set-device-name",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "network:status",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "playback-track-preferences:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback-track-preferences:save",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:activity",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:cancel",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:cleanup",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:pause",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:rebuild",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:resume",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:run",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:season",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "playback:analysis:status",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:delete-manual",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:manage-erase",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:manage-list",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:manage-update",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:save-manual",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "playback:segments:undo-manual",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/segments.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:approve",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:audit",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:available",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:catalog",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:configuration",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:disable",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:list",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:meta",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:meta-item",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:official",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:profile-access",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:remove",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:review-installed",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:review-official",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:review-url",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:save-configuration",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:set-profile-access",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs",
+        "crates/loomtv-core/src/stremio_store.rs"
+      ]
+    },
+    {
+      "channel": "plugins:stremio:streams",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profile-lists:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profile-lists:set",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profile-preferences:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profile-preferences:save",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profile-restrictions:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profile-restrictions:save",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:choose-avatar",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "profiles:create",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:delete",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:export",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "profiles:get-active",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:import",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "profiles:list",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:lock",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:pin",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:reorder",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:reset-owner",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:select",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:select-guest",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:set-auto-sign-in",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "profiles:update",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "progress:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "progress:import",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "progress:save",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "renderer:session",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "server:configure-owner",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "server:open-admin",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "server:unified-state",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "settings:get",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "settings:save",
+      "status": "unverified",
+      "handlerSources": [
+        "crates/loomtv-core/src/store.rs"
+      ]
+    },
+    {
+      "channel": "shell:open-external",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "shell:open-folder-path",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "shell:show-item",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "updates:check",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "updates:get-state",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "updates:install",
+      "status": "unverified",
+      "handlerSources": []
+    },
+    {
+      "channel": "window:set-chrome-visible",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    },
+    {
+      "channel": "window:set-fullscreen",
+      "status": "unverified",
+      "handlerSources": [
+        "apps/desktop-tauri/src-tauri/src/main.rs"
+      ]
+    }
+  ],
+  "events": [
+    "library:scan-progress",
+    "libvlc:state",
+    "media-control:command",
+    "mpv:state",
+    "profile:active-changed",
+    "profiles:changed",
+    "updates:state",
+    "window:fullscreen-changed"
+  ],
+  "missingHandlers": [
+    "artwork:apply-official",
+    "artwork:official-candidates",
+    "artwork:refresh-official",
+    "media:can-direct-play",
+    "media:start-transcode",
+    "media:stop-transcode",
+    "mpv:choose-executable",
+    "mpv:command",
+    "mpv:reset-executable",
+    "mpv:start",
+    "mpv:stop",
+    "network:revoke-paired-device",
+    "network:set-device-name",
+    "network:status",
+    "server:configure-owner",
+    "server:open-admin",
+    "server:unified-state",
+    "updates:check",
+    "updates:install"
+  ]
+}

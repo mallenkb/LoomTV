@@ -1,0 +1,31 @@
+[package]
+name = "loomtv-desktop-tauri"
+version = "1.0.147"
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2.7"
+tauri-plugin-opener = "2.5"
+base64 = "0.22"
+image = { version = "=0.25.9", default-features = false, features = ["jpeg", "png", "webp"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+loomtv-core = { path = "../../../crates/loomtv-core" }
+loomtv-playback = { path = "../../../crates/loomtv-playback" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSWindow", "NSColor"] }
+objc2-foundation = "0.3"
+block2 = "0.6"
+objc2-media-player = { version = "=0.3.2", default-features = false, features = ["std", "block2", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Foundation"] }

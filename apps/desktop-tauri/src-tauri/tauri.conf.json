@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LoomTV Tauri",
+  "version": "1.0.147",
+  "identifier": "com.mallenkb.loomtv.tauri",
+  "build": {
+    "beforeDevCommand": "pnpm frontend:dev",
+    "beforeBuildCommand": "pnpm frontend:build",
+    "devUrl": "http://127.0.0.1:5197",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "LoomTV Tauri",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1180,
+        "minHeight": 768,
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 16
+        },
+        "create": false
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "main"
+      ],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' loomtv: plexserver: data: blob: https: http://127.0.0.1:*; media-src 'self' loomtv: plexserver: blob: https: http://127.0.0.1:*; connect-src 'self' loomtv: plexserver: ipc: http://ipc.localhost http://127.0.0.1:* https:; font-src 'self' data:; frame-src https://www.youtube-nocookie.com https://www.youtube.com; object-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/": "runtimes/"
+    }
+  }
+}

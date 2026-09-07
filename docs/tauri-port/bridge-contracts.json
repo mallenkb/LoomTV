@@ -1,0 +1,568 @@
+{
+  "sourceSha": "e5907d2be8d43309d5f3b648735e08dc584dd84b",
+  "source": "apps/desktop/src/shared/createDesktopBridge.ts",
+  "commands": [
+    {
+      "channel": "artwork:apply-official",
+      "status": "not-started"
+    },
+    {
+      "channel": "artwork:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "artwork:import",
+      "status": "not-started"
+    },
+    {
+      "channel": "artwork:official-candidates",
+      "status": "not-started"
+    },
+    {
+      "channel": "artwork:playback-logo",
+      "status": "not-started"
+    },
+    {
+      "channel": "artwork:refresh-official",
+      "status": "not-started"
+    },
+    {
+      "channel": "artwork:save",
+      "status": "not-started"
+    },
+    {
+      "channel": "database:backup",
+      "status": "not-started"
+    },
+    {
+      "channel": "database:clear",
+      "status": "not-started"
+    },
+    {
+      "channel": "iptv:add-source",
+      "status": "not-started"
+    },
+    {
+      "channel": "iptv:list-channels",
+      "status": "not-started"
+    },
+    {
+      "channel": "iptv:list-sources",
+      "status": "not-started"
+    },
+    {
+      "channel": "iptv:refresh-source",
+      "status": "not-started"
+    },
+    {
+      "channel": "iptv:remove-source",
+      "status": "not-started"
+    },
+    {
+      "channel": "iptv:update-source",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:add-folder",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:add-folder-path",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:get-index",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:get-item",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:pick-folder",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:remove-folder",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:scan",
+      "status": "not-started"
+    },
+    {
+      "channel": "library:update-folder",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:availability",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:command",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:refresh-availability",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:set-fullscreen-transition",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:set-viewport",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:start",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:stop",
+      "status": "not-started"
+    },
+    {
+      "channel": "libvlc:sync-surface",
+      "status": "not-started"
+    },
+    {
+      "channel": "media-control:publish",
+      "status": "not-started"
+    },
+    {
+      "channel": "media-control:release",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:can-direct-play",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:ffmpeg-available",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:get-file-info",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:get-server-port",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:get-stream-url",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:get-subtitle-url",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:get-thumbnail",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:play",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:probe",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:start-transcode",
+      "status": "not-started"
+    },
+    {
+      "channel": "media:stop-transcode",
+      "status": "not-started"
+    },
+    {
+      "channel": "metadata:provider-request",
+      "status": "not-started"
+    },
+    {
+      "channel": "metadata:refresh-incomplete",
+      "status": "not-started"
+    },
+    {
+      "channel": "metadata:streaming-providers",
+      "status": "not-started"
+    },
+    {
+      "channel": "metadata:test-keys",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:availability",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:choose-executable",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:command",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:refresh-availability",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:reset-executable",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:start",
+      "status": "not-started"
+    },
+    {
+      "channel": "mpv:stop",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:discover-peers",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:remote-connect",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:remote-disconnect",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:remote-request",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:remote-session",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:revoke-paired-device",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:set-device-name",
+      "status": "not-started"
+    },
+    {
+      "channel": "network:status",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback-track-preferences:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback-track-preferences:save",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:activity",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:cancel",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:cleanup",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:pause",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:rebuild",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:resume",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:run",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:season",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:analysis:status",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:delete-manual",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:manage-erase",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:manage-list",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:manage-update",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:save-manual",
+      "status": "not-started"
+    },
+    {
+      "channel": "playback:segments:undo-manual",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:approve",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:audit",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:available",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:catalog",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:configuration",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:disable",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:list",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:meta",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:meta-item",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:official",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:profile-access",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:remove",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:review-installed",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:review-official",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:review-url",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:save-configuration",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:set-profile-access",
+      "status": "not-started"
+    },
+    {
+      "channel": "plugins:stremio:streams",
+      "status": "not-started"
+    },
+    {
+      "channel": "profile-lists:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "profile-lists:set",
+      "status": "not-started"
+    },
+    {
+      "channel": "profile-preferences:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "profile-preferences:save",
+      "status": "not-started"
+    },
+    {
+      "channel": "profile-restrictions:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "profile-restrictions:save",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:choose-avatar",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:create",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:delete",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:export",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:get-active",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:import",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:list",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:lock",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:pin",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:reorder",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:reset-owner",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:select",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:select-guest",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:set-auto-sign-in",
+      "status": "not-started"
+    },
+    {
+      "channel": "profiles:update",
+      "status": "not-started"
+    },
+    {
+      "channel": "progress:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "progress:import",
+      "status": "not-started"
+    },
+    {
+      "channel": "progress:save",
+      "status": "not-started"
+    },
+    {
+      "channel": "renderer:session",
+      "status": "not-started"
+    },
+    {
+      "channel": "server:configure-owner",
+      "status": "not-started"
+    },
+    {
+      "channel": "server:open-admin",
+      "status": "not-started"
+    },
+    {
+      "channel": "server:unified-state",
+      "status": "not-started"
+    },
+    {
+      "channel": "settings:get",
+      "status": "not-started"
+    },
+    {
+      "channel": "settings:save",
+      "status": "not-started"
+    },
+    {
+      "channel": "shell:open-external",
+      "status": "not-started"
+    },
+    {
+      "channel": "shell:open-folder-path",
+      "status": "not-started"
+    },
+    {
+      "channel": "shell:show-item",
+      "status": "not-started"
+    },
+    {
+      "channel": "updates:check",
+      "status": "not-started"
+    },
+    {
+      "channel": "updates:get-state",
+      "status": "not-started"
+    },
+    {
+      "channel": "updates:install",
+      "status": "not-started"
+    },
+    {
+      "channel": "window:set-chrome-visible",
+      "status": "not-started"
+    },
+    {
+      "channel": "window:set-fullscreen",
+      "status": "not-started"
+    }
+  ],
+  "events": [
+    "library:scan-progress",
+    "libvlc:state",
+    "media-control:command",
+    "mpv:state",
+    "profile:active-changed",
+    "profiles:changed",
+    "updates:state",
+    "window:fullscreen-changed"
+  ]
+}

@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["apps/desktop-tauri/src-tauri", "crates/loomtv-core", "crates/loomtv-playback"]
+default-members = ["crates/loomtv-core", "crates/loomtv-playback"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "fs", "io-util", "process"] }
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

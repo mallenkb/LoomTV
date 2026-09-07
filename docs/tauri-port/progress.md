@@ -1,0 +1,15 @@
+# Desktop port status
+
+Full desktop parity is incomplete. The branch remains an implementation in progress and is not ready to replace Electron. Existing default desktop commands still select Electron.
+
+The Tauri application now reuses the React renderer through the transport-neutral desktop bridge. The Rust workspace has handlers or services for profile selection and PINs, Guest and Owner flows, profile preferences and restrictions, lists, progress, track preferences, progress import, profile transfer, database backups, full and compact catalog reads, custom artwork, bounded filesystem scanning, metadata provider requests and key checks, mDNS discovery, remote-host connections, loopback media delivery, subtitle and thumbnail conversion, ffprobe, shell and window operations, playback sleep inhibition, and the macOS LibVLC host.
+
+Tauri now opens Electron's version 14 `LoomTV/loomtv.sqlite` by default. `LOOMTV_DATA_DIR` can select another directory. Before using a pre-existing database for the first time, Tauri writes a SQLite backup under `backups/` and records completion with `tauri-shared-storage-v1`. Profiles, library records, personal data, custom artwork, settings, and metadata API keys are shared. Tauri uses `desktop-tauri` for its device-selection and selection-revision rows, so choosing or locking a profile in Tauri does not replace Electron's desktop selection row.
+
+Code presence and successful compilation do not establish behavior parity. The catalog projections and custom-artwork route have static coverage, but they have not received visual or runtime checks. The scanner now runs bounded TMDB, OMDb, and AniList enrichment and supports metadata-only refresh. Several secondary providers and artwork-selection flows remain open. Forced transcode returns a port error, mpv reports unavailable, and updates report disabled. IPTV source/channel commands and a scoped HTTPS streaming proxy are wired. HLS manifests use encrypted resource references, and direct streams use bounded chunks. Their provider-network and renderer behavior has not received runtime acceptance. Desktop LAN hosting, Stremio, automatic segment analysis, the Electron browser playback fallbacks, tray behavior, signed updates, and complete Windows and Linux native support remain open.
+
+Remote discovery and remote-client commands are present, including certificate and saved-session code. They have not been accepted as end-to-end pairing parity. The native player, power-management service, fullscreen transitions, external subtitles, track commands, and shutdown paths also need runtime evidence on supported platforms.
+
+`bridge-coverage.json` records handler references and labels them unverified. A referenced command must not be treated as fully implemented or accepted without its behavior checks. `source-inventory.json` records reference paths and does not prove parity.
+
+Static TypeScript and Rust compilation checks have passed during branch work. No test suite, app launch, visual review, playback benchmark, real-library scan, provider request, pairing session, or Windows or Linux native check has been run for this status update.

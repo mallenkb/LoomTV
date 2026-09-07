@@ -1,0 +1,4 @@
+/* The accent follows ThemeProvider, including changes made while the app is open. */
+html[data-loom-runtime="tauri"] [data-shared-highlight-id="home"] > svg {
+  color: var(--loom-accent);
+}
