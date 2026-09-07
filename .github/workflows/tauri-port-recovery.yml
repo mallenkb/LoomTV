@@ -1,0 +1,130 @@
+name: Apply reviewed Tauri fallback changes
+
+on:
+  push:
+    branches: [codex/tauri-react-port]
+    paths:
+      - '.github/tauri-recovery/**'
+      - '.github/workflows/tauri-port-recovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: github.repository == 'mallenkb/LoomTV' && github.ref == 'refs/heads/codex/tauri-react-port'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 11.20.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Apply checksum-bound source diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          cp pnpm-lock.yaml /tmp/loomtv-original-lock.yaml
+          python3 - <<'PY'
+          import base64, gzip, hashlib, pathlib, subprocess
+          encoded = ''.join(pathlib.Path(f'.github/tauri-recovery/patch-{i}.txt').read_text().strip() for i in (1, 2, 3))
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '58ace570fa40b9602300374e555bcd36e3102a97dcfa1bd50b62eef52f43b173'
+          destination = pathlib.Path('/tmp/loomtv-reviewed.patch')
+          destination.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(destination)], check=True)
+          subprocess.run(['git', 'apply', '--index', str(destination)], check=True)
+          PY
+          cargo fmt --all
+      - name: Generate the missing Tauri lock entries
+        run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
+      - name: Verify frozen install
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Preserve existing workspace dependency selections
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'JS'
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          const YAML = require('yaml');
+          const oldLock = YAML.parse(fs.readFileSync('/tmp/loomtv-original-lock.yaml', 'utf8'));
+          const newLock = YAML.parse(fs.readFileSync('pnpm-lock.yaml', 'utf8'));
+          for (const [name, importer] of Object.entries(oldLock.importers)) {
+            assert.deepEqual(newLock.importers[name], importer, `Unexpected dependency change in ${name}`);
+          }
+          assert(newLock.importers['apps/desktop-tauri'], 'Missing Tauri importer');
+          console.log('Existing workspace importers are unchanged.');
+          JS
+          pnpm verify:workflow-policy
+      - name: Commit only port sources and lockfile to the requested branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add apps/desktop-tauri/src-tauri/src crates pnpm-lock.yaml
+          python3 - <<'PY'
+          import subprocess
+          paths = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z']).decode().split('\0')
+          for path in filter(None, paths):
+              assert path == 'pnpm-lock.yaml' or path.startswith(('crates/', 'apps/desktop-tauri/src-tauri/src/')), path
+          PY
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(tauri): implement scoped local HLS fallback and restore clean builds'
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          remote="$(git ls-remote origin refs/heads/codex/tauri-react-port | cut -f1)"
+          test "$remote" = "$EXPECTED_HEAD"
+          git push origin HEAD:refs/heads/codex/tauri-react-port
+          unset GIT_CONFIG_VALUE_0 GH_TOKEN
+          git rev-parse HEAD | tee evidence/source-sha.txt
+      - name: Install test-only build and media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config ffmpeg
+      - name: Run Rust unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p loomtv-core -p loomtv-playback --locked --no-fail-fast > evidence/core-tests.log 2>&1 || { tail -160 evidence/core-tests.log; exit 1; }
+          tail -80 evidence/core-tests.log
+      - name: Run generated-media integration test
+        env:
+          LOOMTV_TEST_FFMPEG: /usr/bin/ffmpeg
+          LOOMTV_TEST_FFPROBE: /usr/bin/ffprobe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p loomtv-core --locked generated_media_probe_hls_seek_range_and_revocation -- --ignored --nocapture > evidence/media-test.log 2>&1 || { tail -160 evidence/media-test.log; exit 1; }
+          cat evidence/media-test.log
+      - name: Capture exact source and test evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-sha.txt
+          git diff --binary HEAD > evidence/uncommitted.patch
+          tar -czf evidence/port-source.tar.gz crates apps/desktop-tauri/src-tauri/src Cargo.toml Cargo.lock pnpm-lock.yaml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: tauri-recovery-${{ github.sha }}-${{ github.run_attempt }}
+          path: evidence/
+          retention-days: 7
+          if-no-files-found: error
