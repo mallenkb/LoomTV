@@ -1,0 +1,57 @@
+--- a/crates/loomtv-playback/src/mpv/contract.rs
++++ b/crates/loomtv-playback/src/mpv/contract.rs
+@@ -320,7 +320,7 @@
+                         | "estimated-vf-fps",
+                     ) if data
+                         .as_f64()
+-                        .is_some_and(|n| n >= 0. && n <= 9_007_199_254_740_991.) =>
++                        .is_some_and(|n| (0. ..=9_007_199_254_740_991.).contains(&n)) =>
+                     {
+                         let key = match message["name"].as_str() {
+                             Some("frame-drop-count") => "frameDrops",
+--- a/crates/loomtv-playback/src/mpv/mod.rs
++++ b/crates/loomtv-playback/src/mpv/mod.rs
+@@ -232,7 +232,7 @@
+             }
+             #[cfg(test)]
+             Wake::Request(Some(Request::Inspect { reply })) => {
+-                let _=reply.send(Ok(current.as_ref().map(|p|json!({"pid":p.child.id(),"directory":p.endpoint.directory,"state":p.state.value})).unwrap_or(Value::Null)));
++                let _=reply.send(Ok(current.as_ref().map(|p|json!({"pid":p.child.id(),"directory":p._endpoint.directory,"state":p.state.value})).unwrap_or(Value::Null)));
+             }
+             Wake::Message(Some(Ok(message))) => {
+                 if let Some(p) = current.as_mut() {
+@@ -364,7 +364,7 @@
+ struct Session {
+     id: String,
+     child: Child,
+-    endpoint: Endpoint,
++    _endpoint: Endpoint,
+     writer: tokio::io::WriteHalf<Stream>,
+     messages: mpsc::Receiver<Result<Value>>,
+     reader: JoinHandle<()>,
+@@ -482,7 +482,7 @@
+         let mut session = Self {
+             id,
+             child,
+-            endpoint,
++            _endpoint: endpoint,
+             writer,
+             messages,
+             reader,
+--- a/apps/desktop-tauri/src-tauri/src/window_host/macos.rs
++++ b/apps/desktop-tauri/src-tauri/src/window_host/macos.rs
+@@ -128,11 +128,12 @@
+             // with_webview confines AppKit access to the main thread and supplies a live NSWindow.
+             let native = unsafe { &*webview.ns_window().cast::<NSWindow>() };
+             native.setOpaque(!active);
+-            native.setBackgroundColor(Some(&if active {
++            let color = if active {
+                 NSColor::clearColor()
+             } else {
+                 NSColor::blackColor()
+-            }));
++            };
++            native.setBackgroundColor(Some(&color));
+             let _ = tx.send(());
+         })
+         .map_err(native_error)?;
