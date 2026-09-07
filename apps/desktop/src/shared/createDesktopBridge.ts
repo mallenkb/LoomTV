@@ -53,8 +53,8 @@ type CompactLibraryBridgeApi = {
 
 export interface DesktopTransport {
   invoke<T = unknown>(channel: string, ...args: unknown[]): Promise<T>;
-  on(channel: string, listener: (event: unknown, ...args: any[]) => void): void;
-  removeListener(channel: string, listener: (event: unknown, ...args: any[]) => void): void;
+  on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
+  removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
 }
 
 /** Both shells use the same argument defaults, event transforms, and result mapping. */
