@@ -8,15 +8,15 @@ import type {
   PlaybackStartOptions,
 } from './PlaybackEngine';
 import PlaybackVolumeController from './PlaybackVolumeController';
+import { NativeSessionLease } from './NativeSessionLease';
 
 const SEEK_COALESCE_MS = 16;
 
 export default class MpvPlaybackEngine implements PlaybackEngine {
   readonly kind = 'mpv' as const;
+  // Do not claim in-window composition until the native host confirms it.
   surface: PlaybackEngineSurface = 'external-window';
-  private sessionId: string | null = null;
-  private readonly pendingStates: PlaybackEngineState[] = [];
-  private readonly unsubscribe: () => void;
+  private readonly lease: NativeSessionLease<MpvStartOptions, PlaybackEngineState>;
   private readonly volumeController = new PlaybackVolumeController(async (volume, muted) => {
     await this.command({ type: 'set-volume', volume });
     await this.command({ type: 'set-muted', muted });
@@ -29,33 +29,35 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
   private destroyed = false;
 
   constructor(private readonly listener: PlaybackEngineStateListener) {
-    this.unsubscribe = desktopApi.mpv.onState((state) => {
-      if (!this.sessionId) {
-        this.pendingStates.push(state);
-        return;
-      }
-      if (state.sessionId === this.sessionId) this.emitState(state);
-    });
+    this.lease = new NativeSessionLease<MpvStartOptions, PlaybackEngineState>(
+      {
+        start: (source, options) => desktopApi.mpv.start(source, options),
+        stop: (sessionId) => desktopApi.mpv.stop(sessionId),
+        onState: (callback) => desktopApi.mpv.onState(callback),
+      },
+      (state) => {
+        this.surface = this.lease.surface === 'composited-window' ? 'composited-window' : 'external-window';
+        this.emitState(state);
+      },
+      (error) => console.error('[playback] Native session lifecycle failed.', error),
+    );
   }
+
+  private get sessionId(): string | null { return this.lease.sessionId; }
 
   static async available(): Promise<boolean> {
     return (await desktopApi.mpv.availability()).available;
   }
 
   async load(filePath: string, options?: PlaybackStartOptions): Promise<boolean> {
-    this.destroyed = false;
-    this.lastPauseCommand = false;
+    if (this.destroyed) throw new Error('The native playback engine has been disposed.');
+    this.cancelSeek();
+    this.lastState = null;
+    this.lastPauseCommand = null;
     this.volumeController.reset(options?.volume, options?.muted);
-    const result = await desktopApi.mpv.start(filePath, options as MpvStartOptions | undefined);
-    if (!result.ok || !result.sessionId) {
-      this.lastPauseCommand = null;
-      throw new Error(result.error || 'Native mpv playback could not be started.');
-    }
-    this.surface = result.surface === 'composited-window' ? 'composited-window' : 'external-window';
-    this.sessionId = result.sessionId;
-    this.pendingStates.splice(0).forEach((state) => {
-      if (state.sessionId === this.sessionId) this.emitState(state);
-    });
+    const loaded = await this.lease.load(filePath, options as MpvStartOptions | undefined);
+    if (!loaded) return false;
+    this.surface = this.lease.surface === 'composited-window' ? 'composited-window' : 'external-window';
     return true;
   }
 
@@ -66,11 +68,15 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
   }
 
   private async command(command: PlaybackCommand): Promise<void> {
-    if (this.sessionId) await desktopApi.mpv.command(this.sessionId, command as MpvCommand);
+    const sessionId = this.sessionId;
+    if (!sessionId || this.destroyed) return;
+    if (!await desktopApi.mpv.command(sessionId, command as MpvCommand)) {
+      throw new Error(`The native player rejected ${command.type}.`);
+    }
   }
 
   private setPaused(paused: boolean): Promise<void> {
-    if (this.lastPauseCommand === paused) return Promise.resolve();
+    if (this.lastPauseCommand === paused && this.lastState?.paused === paused) return Promise.resolve();
     this.lastPauseCommand = paused;
     return this.command({ type: 'set-paused', paused }).catch((error) => {
       this.lastPauseCommand = null;
@@ -88,21 +94,32 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     return this.command({ type: 'seek', position });
   }
 
+  private cancelSeek(): void {
+    if (this.seekTimer) clearTimeout(this.seekTimer);
+    this.seekTimer = null;
+    this.pendingSeekPosition = null;
+    this.lastSeekSentAt = 0;
+  }
+
   play(): Promise<void> { return this.setPaused(false); }
   pause(): Promise<void> { return this.setPaused(true); }
   seek(position: number): Promise<void> {
+    if (this.destroyed) return Promise.resolve();
     const target = Math.max(0, Number.isFinite(position) ? position : 0);
     this.reflectSeek(target);
     const elapsed = performance.now() - this.lastSeekSentAt;
     if (!this.seekTimer && elapsed >= SEEK_COALESCE_MS) return this.sendSeek(target);
-
     this.pendingSeekPosition = target;
     if (!this.seekTimer) {
       this.seekTimer = setTimeout(() => {
         this.seekTimer = null;
         const pending = this.pendingSeekPosition;
         this.pendingSeekPosition = null;
-        if (pending !== null && !this.destroyed) void this.sendSeek(pending);
+        if (pending !== null && !this.destroyed) {
+          void this.sendSeek(pending).catch((error) => {
+            console.error('[playback] Deferred native seek failed.', error);
+          });
+        }
       }, Math.max(0, SEEK_COALESCE_MS - elapsed));
     }
     return Promise.resolve();
@@ -127,15 +144,9 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
-    this.unsubscribe();
-    this.pendingStates.length = 0;
-    if (this.seekTimer) clearTimeout(this.seekTimer);
-    this.seekTimer = null;
-    this.pendingSeekPosition = null;
+    this.cancelSeek();
     this.lastPauseCommand = null;
     this.lastState = null;
-    const sessionId = this.sessionId;
-    this.sessionId = null;
-    if (sessionId) await desktopApi.mpv.stop(sessionId);
+    await this.lease.dispose();
   }
 }
