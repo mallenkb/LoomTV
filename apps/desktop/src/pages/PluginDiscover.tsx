@@ -638,11 +638,36 @@ async function discoverTmdbProviders(
   }));
 }
 
+const animeFallbackGenres: Record<string, number[]> = {
+  Action: [28, 10759], Adventure: [12, 10759], Comedy: [35], Drama: [18],
+  Fantasy: [14, 10765], Horror: [27], Mystery: [9648], Romance: [10749],
+  'Sci-Fi': [878, 10765], Thriller: [53],
+};
+let aniListRetryAfter = 0;
+
+async function requestDiscoverAniList(query: string, variables?: Record<string, unknown>) {
+  if (Date.now() < aniListRetryAfter) throw new Error('AniList is temporarily unavailable.');
+  try {
+    const result = await desktopApi.requestMetadataProvider({ provider: 'anilist', query, variables });
+    const errors = (result as { errors?: { message?: string }[] } | null)?.errors;
+    if (errors?.length) throw new Error(errors[0]?.message || 'AniList is temporarily unavailable.');
+    return result;
+  } catch (error) {
+    aniListRetryAfter = Date.now() + 60_000;
+    throw error;
+  }
+}
+
 async function discoverAniListGenres(): Promise<GenreOption[]> {
-  const payload = aniListGenreResponseSchema.parse(await desktopApi.requestMetadataProvider({
-    provider: 'anilist',
-    query: ANILIST_GENRE_QUERY,
-  }));
+  try {
+    return await fetchAniListGenres();
+  } catch {
+    return Object.keys(animeFallbackGenres).map((genre) => ({ label: genre, value: genre }));
+  }
+}
+
+async function fetchAniListGenres(): Promise<GenreOption[]> {
+  const payload = aniListGenreResponseSchema.parse(await requestDiscoverAniList(ANILIST_GENRE_QUERY));
   if (payload.errors?.length) {
     throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
   }
@@ -929,7 +954,7 @@ async function enrichAnimeCatalogMetadata(
       const index = nextIndex;
       nextIndex += 1;
       const item = items[index];
-      if (!item || item.streamingProviders !== undefined) continue;
+      if (!item || item.source === 'tmdb' || item.streamingProviders !== undefined) continue;
       try {
         enrichedItems[index] = await enrichAnimeCatalogItemWithTmdbProviders(item, credential);
       } catch {
@@ -943,15 +968,49 @@ async function enrichAnimeCatalogMetadata(
 
 const animeCatalogRequests = new Map<string, Promise<readonly StremioPluginCatalogItem[]>>();
 
-function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '') {
-  const key = JSON.stringify([query.trim(), section, genre, year]);
+function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '', credential = '') {
+  const key = JSON.stringify([query.trim(), section, genre, year, Boolean(credential)]);
   const pending = animeCatalogRequests.get(key);
   if (pending) return pending;
-  const request = fetchAnimeCatalog(query, section, genre, year).finally(() => {
+  const request = fetchAnimeCatalog(query, section, genre, year).catch((error) => {
+    if (!credential) throw error;
+    return fetchTmdbAnimeCatalog(query, section, genre, year, credential);
+  }).finally(() => {
     if (animeCatalogRequests.get(key) === request) animeCatalogRequests.delete(key);
   });
   animeCatalogRequests.set(key, request);
   return request;
+}
+
+async function fetchTmdbAnimeCatalog(query: string, section: DiscoverSection, genre: string, year: string, credential: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  const responses = await Promise.all((['tv', 'movie'] as const).map(async (type) => {
+    const response = await requestTmdbJson(query.trim() ? `search/${type}` : `discover/${type}`, credential, tmdbListResponseSchema, {
+      include_adult: false,
+      ...(query.trim() ? { query: query.trim() } : {
+        with_genres: '16', with_original_language: 'ja',
+        sort_by: tmdbDiscoverySort(type, section),
+        ...(section === 'new' ? { [type === 'tv' ? 'first_air_date.lte' : 'primary_release_date.lte']: today } : {}),
+        ...(section === 'top_rated' ? { 'vote_count.gte': 50 } : {}),
+        ...(year ? { [type === 'tv' ? 'first_air_date_year' : 'primary_release_year']: Number(year) } : {}),
+      }),
+      page: 1,
+    });
+    return (response.results || [])
+      .filter((media) => media.original_language === 'ja' && media.genre_ids?.includes(16))
+      .map((media) => ({
+        ...mapTmdbToCatalog(media, type),
+        genres: Object.entries(animeFallbackGenres)
+          .filter(([, ids]) => ids.some((id) => media.genre_ids?.includes(id)))
+          .map(([name]) => name),
+      }));
+  }));
+  // Preserve TMDB IDs and media types so details, trailers, and watched state
+  // continue to use the provider that supplied this fallback catalog.
+  return responses.flat().filter((item) => hasGenreMatch(item, genre, 'anime') && hasYearMatch(item, year))
+    .sort((a, b) => section === 'top_rated' ? (b.rating || 0) - (a.rating || 0)
+      : section === 'new' ? (b.releaseInfo || '').localeCompare(a.releaseInfo || '') : 0)
+    .slice(0, DISCOVER_RESULT_LIMIT);
 }
 
 async function fetchAnimeCatalog(
@@ -963,17 +1022,13 @@ async function fetchAnimeCatalog(
   const selectedGenres = genre.split(',').map((entry) => entry.trim()).filter(Boolean);
   const genresToRequest = selectedGenres.length > 0 ? selectedGenres : [''];
   const responses = await Promise.all(genresToRequest.map(async (selectedGenre) => {
-    const payload = aniListDiscoverResponseSchema.parse(await desktopApi.requestMetadataProvider({
-      provider: 'anilist',
-      query: ANILIST_DISCOVER_QUERY,
-      variables: {
+    const payload = aniListDiscoverResponseSchema.parse(await requestDiscoverAniList(ANILIST_DISCOVER_QUERY, {
         page: 1,
         perPage: DISCOVER_RESULT_LIMIT,
         sort: ANILIST_SECTION_SORT[section],
         ...(query.trim() ? { search: query.trim() } : {}),
         ...(selectedGenre ? { genre: selectedGenre } : {}),
         ...(year.trim() ? { seasonYear: Number(year) } : {}),
-      },
     }));
     if (payload.errors?.length) {
       throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
@@ -1725,7 +1780,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     try {
       let nextItems: readonly StremioPluginCatalogItem[];
       if (contentType === 'anime') {
-        nextItems = await discoverAnime(trimmedQuery, section, providerGenre, normalizedYear);
+        nextItems = await discoverAnime(trimmedQuery, section, providerGenre, normalizedYear, tmdbCredential);
       } else {
         if (!tmdbCredential) {
           throw new Error('TMDB API key is missing. Add it in Settings → Metadata API keys before browsing Movies or TV.');
@@ -2036,6 +2091,11 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
           </div>
         </header>
 
+        {!loading && !error && contentType === 'anime' && items.some((item) => item.source === 'tmdb') && (
+          <p role="status" className="mb-4 text-sm text-[var(--loom-muted)]">
+            AniList is unavailable. Showing anime from TMDB; genres and rankings may differ.
+          </p>
+        )}
         {error && errorKind !== 'offline' && (
           <div role="alert" className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             <p className="flex items-start gap-2">

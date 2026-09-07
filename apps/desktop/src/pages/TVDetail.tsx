@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { useAnimate } from 'motion/react';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -53,6 +52,7 @@ function formatShortMinutes(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
   return `${Math.max(1, Math.round(seconds / 60))}m`;
 }
+
 
 const episodeAirDateFormatter = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
@@ -399,7 +399,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
   const { canManageProfiles, lists, setListEntry, watchedKeys, setWatchedEntries } = useProfiles();
   const { theme } = useTheme();
-  const [show, setShow] = useState<TVShow | null>(null);
+  const [show, setShow] = useState<TVShow | null>(() => {
+    const initialRoute = location.state as TVDetailRouteState | null;
+    if (initialRoute?.stremioCatalogItem) return showFromStremioCatalogItem(kind, initialRoute.stremioCatalogItem);
+    if (initialRoute?.fromDiscover || initialRoute?.from?.startsWith('/discover')) return null;
+    return findLocalShowMatch(kind === 'anime' ? state.animeShows : state.tvShows, mediaId);
+  });
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
   const accordionPageKeyRef = useRef('');
   const accordionWasToggledRef = useRef(false);
@@ -408,21 +413,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
-  const [detailScope, animateDetail] = useAnimate();
-
-  useEffect(() => {
-    if (!detailsReady || !detailScope.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-
-    const controls = animateDetail(
-      detailScope.current,
-      { opacity: [0, 1] },
-      { duration: 0.22, ease: 'easeOut' },
-    );
-
-    return () => controls.stop();
-  }, [animateDetail, detailScope, detailsReady]);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const routeState = (location.state as TVDetailRouteState | null) || null;
@@ -553,7 +543,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       setExpandedSeason(resumeEpisode?.season ?? nextEpisode?.season ?? firstVisibleSeason ?? null);
     }
     return () => { cancelled = true; };
-  }, [hydrateLibraryItem, kind, mediaId, progressTick, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
+  }, [hydrateLibraryItem, kind, mediaId, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
 
   const toggleSeason = (seasonNumber: number) => {
     accordionWasToggledRef.current = true;
@@ -641,16 +631,20 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       '00:00:10',
     ].filter(Boolean)));
 
-    void Promise.all(times.map((time) =>
-      desktopApi.getThumbnail(thumbnailEpisode.filePath, time)
-        .then(({ url }) => url)
-        .catch(() => ''),
-    )).then((urls) => {
-      if (!cancelled) setFallbackThumbnails(urls.filter(Boolean));
-    });
+    const fallbackTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      void Promise.all(times.map((time) =>
+        desktopApi.getThumbnail(thumbnailEpisode.filePath, time)
+          .then(({ url }) => url)
+          .catch(() => ''),
+      )).then((urls) => {
+        if (!cancelled) setFallbackThumbnails(urls.filter(Boolean));
+      });
+    }, 650);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(fallbackTimer);
     };
   }, [show?.backdrop, show?.backdropCandidates?.length, show?.episodeFiles, show?.id, show?.poster, show?.posterCandidates?.length]);
 
@@ -661,10 +655,14 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       const progress = getProgressState(file.filePath, file.localMetadata?.durationSeconds);
       return progress.inProgress || !progress.watched;
     }));
-    const timers = ordered.slice(currentIndex, currentIndex + 3).map((file, index) => window.setTimeout(() => {
-      void desktopApi.getMediaSegments({ mediaId: show.id, season: file.season, episode: file.episode }).catch(() => undefined);
-    }, 100 + index * 150));
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    // Segment extraction is only a playback warm-up. Let the detail page
+    // finish mounting before it competes with navigation and artwork work.
+    const timer = window.setTimeout(() => {
+      ordered.slice(currentIndex, currentIndex + 3).forEach((file) => {
+        void desktopApi.getMediaSegments({ mediaId: show.id, season: file.season, episode: file.episode }).catch(() => undefined);
+      });
+    }, 1_200);
+    return () => window.clearTimeout(timer);
   }, [show?.episodeFiles, show?.id]);
 
   // refreshLibrary() updates the item, but the artwork snapshot captured in
@@ -932,7 +930,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
 
   return (
-    <div ref={detailScope} className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
+    <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       {/* Hero backdrop */}
       <div className="loom-detail-cover relative h-[45vh] w-full overflow-hidden">
         <div className="loom-detail-cover-image absolute inset-y-0 left-0 right-0 mx-auto w-full max-w-[var(--loom-frame-max-width)]">
@@ -1260,13 +1258,35 @@ function EpisodeRow({
 }) {
   const [imgError, setImgError] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const rowRef = useRef<HTMLButtonElement | null>(null);
+  const [isNearViewport, setIsNearViewport] = useState(false);
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row || ep.still) return undefined;
+    if (typeof IntersectionObserver === 'undefined') {
+      setIsNearViewport(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      setIsNearViewport(true);
+      observer.disconnect();
+    }, { rootMargin: '480px 0px' });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [ep.still]);
 
   useEffect(() => {
     let cancelled = false;
     setImgError(false);
     setThumbnailUrl(null);
 
-    if (!filePath) return () => {
+    // Most metadata rows already have a still. Avoid spawning FFmpeg/IPC work
+    // for those rows; generate a fallback only when an artwork-less row is
+    // close to the viewport.
+    if (!isNearViewport || !filePath || ep.still) return () => {
       cancelled = true;
     };
 
@@ -1281,7 +1301,7 @@ function EpisodeRow({
     return () => {
       cancelled = true;
     };
-  }, [filePath]);
+  }, [ep.still, filePath, isNearViewport]);
 
   const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
   const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
@@ -1304,6 +1324,7 @@ function EpisodeRow({
   return (
     <button
       type="button"
+      ref={rowRef}
       data-shared-highlight-item
       data-shared-highlight-id={`${seasonNum}-${ep.number}`}
       className="group relative z-10 flex w-full items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"

@@ -91,7 +91,10 @@ impl PlaybackActivity {
                 "Playback activity requires a Boolean active flag.",
             )
         })?;
-        if let Some(label) = args.get(2) {
+        // JavaScript's optional `label` becomes JSON null when the shared
+        // bridge serializes a call that omitted it. Treat that the same as an
+        // absent argument, matching Electron's IPC behavior during teardown.
+        if let Some(label) = args.get(2).filter(|value| !value.is_null()) {
             if !label.is_string() {
                 return Err(Error::new(
                     "invalid_argument",

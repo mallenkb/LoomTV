@@ -27,6 +27,10 @@ type SharedListHighlightProps = {
 
 const itemSelector = '[data-shared-highlight-item]';
 
+function sameRect(a: HighlightRect | null, b: HighlightRect): boolean {
+  return Boolean(a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
+}
+
 function isAvailableItem(item: HTMLElement): boolean {
   return !item.matches(':disabled, [aria-disabled="true"]');
 }
@@ -67,10 +71,10 @@ export default function SharedListHighlight({
     };
     if (layer === 'hover') {
       hoveredItemRef.current = item;
-      setHoverRect(nextRect);
+      setHoverRect((current) => sameRect(current, nextRect) ? current : nextRect);
     } else {
       highlightedItemRef.current = item;
-      setRect(nextRect);
+      setRect((current) => sameRect(current, nextRect) ? current : nextRect);
     }
   }, []);
 

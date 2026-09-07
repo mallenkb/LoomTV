@@ -2,3 +2,14 @@
 html[data-loom-runtime="tauri"] [data-shared-highlight-id="home"] > svg {
   color: var(--loom-accent);
 }
+
+/* The native transparent window has a uniform macOS corner radius. Clip the
+   WebKit surface to that same radius so content cannot square off any edge. */
+:root[data-loom-runtime="tauri"],
+:root[data-loom-runtime="tauri"] body,
+:root[data-loom-runtime="tauri"] #root,
+:root[data-loom-runtime="tauri"] .loom-app-shell {
+  --loom-window-radius: 12px;
+  border-radius: var(--loom-window-radius);
+  overflow: hidden;
+}

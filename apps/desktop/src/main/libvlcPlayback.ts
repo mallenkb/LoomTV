@@ -1165,7 +1165,7 @@ class LibVlcPlaybackSession {
     this.emit({ status: 'loading' });
     // Detect initial readiness and apply resume seeks without waiting for the
     // steady-state progress interval. Bound the faster polling for slow media.
-    this.timer = setInterval(() => this.poll(), 32);
+    this.timer = setInterval(() => this.poll(), 16);
     this.timer.unref();
   }
 
@@ -1694,7 +1694,10 @@ class LibVlcPlaybackSession {
       if (this.startupPolling && (status === 'ready' || Date.now() >= this.startupPollDeadline)) {
         this.startupPolling = false;
         if (this.timer) clearInterval(this.timer);
-        this.timer = setInterval(() => this.poll(), 250);
+        // Native subtitle overlays follow the latest playback timestamp from
+        // this poll. Keep the steady-state cadence close to a video frame so
+        // subtitle cues do not visibly trail the picture.
+        this.timer = setInterval(() => this.poll(), 16);
         this.timer.unref();
       }
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;

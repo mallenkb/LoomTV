@@ -1,9 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
-// Keep several screens of artwork warm so normal rail paging does not expose
-// an image-loading gap, while still allowing distant artwork to release its
-// decoded image resource when it is no longer near the viewport.
-const ARTWORK_PRELOAD_MARGIN = '768px 1200px';
+// Warm nearby artwork without decoding several offscreen rails on every page
+// mount. Distant artwork releases its decoded image resource.
+const ARTWORK_PRELOAD_MARGIN = '256px 400px';
 const artworkVisibilityCallbacks = new Map<Element, (visible: boolean) => void>();
 let artworkObserver: IntersectionObserver | null = null;
 

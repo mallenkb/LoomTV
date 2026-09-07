@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { useAnimate } from 'motion/react';
 import { Play, ArrowLeft } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -152,27 +151,17 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
   const { canManageProfiles, lists, setListEntry, watchedKeys, setWatched } = useProfiles();
   const { theme } = useTheme();
-  const [movie, setMovie] = useState<MediaItem | null>(null);
+  const [movie, setMovie] = useState<MediaItem | null>(() => {
+    const initialRoute = location.state as MovieDetailRouteState | null;
+    if (initialRoute?.stremioCatalogItem) return mediaFromStremioCatalogItem(initialRoute.stremioCatalogItem);
+    if (initialRoute?.fromDiscover || initialRoute?.from?.startsWith('/discover')) return null;
+    return findLocalMovieMatch(state.movies, mediaId);
+  });
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const progressTick = useProgressRefreshRevision();
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
-  const [detailScope, animateDetail] = useAnimate();
-
-  useEffect(() => {
-    if (!detailsReady || !detailScope.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-
-    const controls = animateDetail(
-      detailScope.current,
-      { opacity: [0, 1] },
-      { duration: 0.22, ease: 'easeOut' },
-    );
-
-    return () => controls.stop();
-  }, [animateDetail, detailScope, detailsReady]);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const metadataFetchKeyRef = useRef('');
@@ -317,16 +306,20 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
       '00:00:10',
     ].filter(Boolean)));
 
-    void Promise.all(times.map((time) =>
-      desktopApi.getThumbnail(movie.filePath, time)
-        .then(({ url }) => url)
-        .catch(() => ''),
-    )).then((urls) => {
-      if (!cancelled) setFallbackThumbnails(urls.filter(Boolean));
-    });
+    const fallbackTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      void Promise.all(times.map((time) =>
+        desktopApi.getThumbnail(movie.filePath, time)
+          .then(({ url }) => url)
+          .catch(() => ''),
+      )).then((urls) => {
+        if (!cancelled) setFallbackThumbnails(urls.filter(Boolean));
+      });
+    }, 650);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(fallbackTimer);
     };
   }, [movie?.backdrop, movie?.backdropCandidates?.length, movie?.filePath, movie?.localMetadata?.durationSeconds, movie?.poster, movie?.posterCandidates?.length]);
 
@@ -433,7 +426,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
 
   return (
-    <div ref={detailScope} className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
+    <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       <div className="loom-detail-cover relative h-[50vh] w-full overflow-hidden">
         <div className="loom-detail-cover-image absolute inset-y-0 left-0 right-0 mx-auto w-full max-w-[var(--loom-frame-max-width)]">
           <SafeArtwork

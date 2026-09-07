@@ -10,8 +10,17 @@ const sources = {
   'linux-x64': [['ffmpeg/linux', 'ffmpeg']],
 };
 if (!sources[target]) throw new Error(`Native runtime staging is not configured for ${target}.`);
+const configuredLibMpv = process.env.LOOMTV_LIBMPV_PATH?.trim();
+if (configuredLibMpv) {
+  const relative = target.startsWith('darwin-')
+    ? 'mpv/lib/libmpv.dylib'
+    : target.startsWith('win32-')
+      ? 'mpv/mpv.dll'
+      : 'mpv/lib/libmpv.so';
+  sources[target].push([configuredLibMpv, relative]);
+}
 await mkdir(destination, { recursive: true });
-for (const [source, relative] of [...sources[target], ['libvlc/NOTICE.md', 'libvlc/NOTICE.md'], ['ffmpeg/NOTICE.md', 'ffmpeg/NOTICE.md'], ['ffmpeg/COPYING.GPLv3.txt', 'ffmpeg/COPYING.GPLv3.txt']]) {
+for (const [source, relative] of [...sources[target], ['libvlc/NOTICE.md', 'libvlc/NOTICE.md'], ['ffmpeg/NOTICE.md', 'ffmpeg/NOTICE.md'], ['ffmpeg/COPYING.GPLv3.txt', 'ffmpeg/COPYING.GPLv3.txt'], ['mpv/NOTICE.md', 'mpv/NOTICE.md']]) {
   const input = path.join(root, source);
   await stat(input);
   await cp(input, path.join(destination, relative), { recursive: true, dereference: false, filter: source => !source.endsWith('/libmacosx_plugin.dylib') });

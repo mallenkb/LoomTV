@@ -496,7 +496,10 @@ class MpvPlaybackSession {
       const position = finiteNumber(message.data);
       this.state = { ...this.state, position };
       const now = Date.now();
-      if (now - this.lastPositionEventAt >= 250) {
+      // Keep renderer playback timestamps close to the media clock. The
+      // player owns native subtitle rendering, and the renderer also uses
+      // these events for playback state and overlay timing.
+      if (now - this.lastPositionEventAt >= 16) {
         this.lastPositionEventAt = now;
         this.emit({ position });
       }

@@ -7,7 +7,7 @@ mod profile_transfer;
 mod window_host;
 
 use loomtv_core::{string, Error, Result, Store};
-use loomtv_playback::PlaybackService;
+use loomtv_playback::{MpvPlaybackService, PlaybackService};
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
@@ -34,6 +34,7 @@ struct Runtime {
     drained: AtomicBool,
     media_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     player: PlaybackService,
+    mpv: MpvPlaybackService,
     playback_activity: playback_activity::PlaybackActivity,
     media_control: media_control::MediaControl,
     metadata: loomtv_core::metadata::MetadataProviderGateway,
@@ -41,6 +42,7 @@ struct Runtime {
     playback_gate: Mutex<()>,
     scan_gate: Arc<tokio::sync::Semaphore>,
     vlc_path: Option<PathBuf>,
+    mpv_path: Option<PathBuf>,
     ffmpeg: Option<PathBuf>,
     closing: Arc<AtomicBool>,
 }
@@ -63,6 +65,96 @@ fn runtime_file(root: &std::path::Path, paths: &[&str]) -> Option<PathBuf> {
         .iter()
         .map(|path| root.join(path))
         .find(|path| path.is_file())
+}
+
+fn mpv_library_path(root: &std::path::Path) -> Option<PathBuf> {
+    let mut candidates = vec![
+        root.join("mpv/lib/libmpv.dylib"),
+        root.join("mpv/lib/libmpv.2.dylib"),
+        root.join("mpv/lib/libmpv.so"),
+        root.join("mpv/libmpv.dylib"),
+        root.join("mpv/libmpv.2.dylib"),
+        root.join("mpv/libmpv.so"),
+        root.join("mpv/mpv.dll"),
+    ];
+    if let Ok(value) = std::env::var("LOOMTV_LIBMPV_PATH") {
+        if !value.trim().is_empty() {
+            candidates.insert(0, PathBuf::from(value.trim()));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/opt/mpv/lib/libmpv.dylib"),
+        PathBuf::from("/usr/local/opt/mpv/lib/libmpv.dylib"),
+    ]);
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+async fn resolve_playback_source(state: &Runtime, input: &str) -> Result<(String, PlaybackScope)> {
+    if input.starts_with("iptv:") {
+        let url = state.media.grant(input).await?;
+        let store = state.store.lock().await;
+        Ok((
+            url,
+            PlaybackScope::Local {
+                profile: store.require_active(None)?,
+                revision: store.selection_revision(),
+            },
+        ))
+    } else if input.starts_with("loomtv:") || input.starts_with("plexserver:") {
+        Ok((
+            state.media.grant(input).await?,
+            PlaybackScope::Remote(state.remote.epoch()),
+        ))
+    } else {
+        let store = state.store.lock().await;
+        Ok((
+            store.authorize_media(input)?.to_string_lossy().into_owned(),
+            PlaybackScope::Local {
+                profile: store.require_active(None)?,
+                revision: store.selection_revision(),
+            },
+        ))
+    }
+}
+
+async fn authorize_subtitle_files(state: &Runtime, input: &str, options: &Value) -> Result<()> {
+    let Some(subtitles) = options["subtitleFiles"].as_array() else {
+        return Ok(());
+    };
+    if subtitles.len() > 32 {
+        return Err(Error::new(
+            "subtitle_limit",
+            "Too many external subtitle files.",
+        ));
+    }
+    for subtitle in subtitles {
+        state.store.lock().await.authorize_subtitle(
+            input,
+            subtitle["path"]
+                .as_str()
+                .ok_or_else(|| Error::new("invalid_subtitle", "The subtitle path is missing."))?,
+        )?;
+    }
+    Ok(())
+}
+
+async fn validate_playback_scope(state: &Runtime) -> Result<()> {
+    match state.native_scope.lock().await.as_ref() {
+        Some(PlaybackScope::Remote(epoch)) if *epoch == state.remote.epoch() => Ok(()),
+        Some(PlaybackScope::Local { profile, revision }) => {
+            let store = state.store.lock().await;
+            store.require_active(Some(profile))?;
+            if store.selection_revision() != *revision {
+                return Err(Error::new("stale_profile", "The active profile changed."));
+            }
+            Ok(())
+        }
+        _ => Err(Error::new(
+            "stale_playback",
+            "The playback session is no longer active.",
+        )),
+    }
 }
 
 #[tauri::command]
@@ -470,48 +562,9 @@ async fn desktop_invoke(
         "libvlc:start" => {
             let _gate = state.playback_gate.lock().await;
             let input = string(&args, 0)?;
-            let (source, scope) = if input.starts_with("iptv:") {
-                let url = state.media.grant(input).await?;
-                let store = state.store.lock().await;
-                (
-                    url,
-                    PlaybackScope::Local {
-                        profile: store.require_active(None)?,
-                        revision: store.selection_revision(),
-                    },
-                )
-            } else if input.starts_with("loomtv:") || input.starts_with("plexserver:") {
-                (
-                    state.media.grant(input).await?,
-                    PlaybackScope::Remote(state.remote.epoch()),
-                )
-            } else {
-                let store = state.store.lock().await;
-                (
-                    store.authorize_media(input)?.to_string_lossy().into_owned(),
-                    PlaybackScope::Local {
-                        profile: store.require_active(None)?,
-                        revision: store.selection_revision(),
-                    },
-                )
-            };
+            let (source, scope) = resolve_playback_source(&state, input).await?;
             let options = args.get(1).cloned().unwrap_or(json!({}));
-            if let Some(subtitles) = options["subtitleFiles"].as_array() {
-                if subtitles.len() > 32 {
-                    return Err(Error::new(
-                        "subtitle_limit",
-                        "Too many external subtitle files.",
-                    ));
-                }
-                for subtitle in subtitles {
-                    state.store.lock().await.authorize_subtitle(
-                        input,
-                        subtitle["path"].as_str().ok_or_else(|| {
-                            Error::new("invalid_subtitle", "The subtitle path is missing.")
-                        })?,
-                    )?;
-                }
-            }
+            authorize_subtitle_files(&state, input, &options).await?;
             let drawable = window_host::ensure(&window).await?;
             let result = state
                 .player
@@ -523,22 +576,7 @@ async fn desktop_invoke(
         }
         "libvlc:command" => {
             let _gate = state.playback_gate.lock().await;
-            match state.native_scope.lock().await.as_ref() {
-                Some(PlaybackScope::Remote(epoch)) if *epoch == state.remote.epoch() => {}
-                Some(PlaybackScope::Local { profile, revision }) => {
-                    let store = state.store.lock().await;
-                    store.require_active(Some(profile))?;
-                    if store.selection_revision() != *revision {
-                        return Err(Error::new("stale_profile", "The active profile changed."));
-                    }
-                }
-                _ => {
-                    return Err(Error::new(
-                        "stale_playback",
-                        "The playback session is no longer active.",
-                    ))
-                }
-            }
+            validate_playback_scope(&state).await?;
             state
                 .player
                 .command(
@@ -583,6 +621,89 @@ async fn desktop_invoke(
             }
             Ok(json!(true))
         }
+        "mpv:availability" | "mpv:refresh-availability" => {
+            let available = cfg!(target_os = "macos") && state.mpv_path.is_some();
+            let runtime_source = state
+                .mpv_path
+                .as_ref()
+                .map(|path| {
+                    let path = path.to_string_lossy();
+                    if path.contains("/resources/")
+                        || path.contains("\\resources\\")
+                        || path.contains("/runtimes/")
+                        || path.contains("\\runtimes\\")
+                    {
+                        "bundled"
+                    } else {
+                        "system"
+                    }
+                })
+                .unwrap_or("system");
+            Ok(json!({
+                "available": available,
+                "enabled": true,
+                "surface": if available { "composited-window" } else { "unavailable" },
+                "libraryPath": state.mpv_path,
+                "runtimeSource": runtime_source,
+                "warning": if available { Value::Null } else { json!("The libmpv runtime is not packaged or could not be loaded.") }
+            }))
+        }
+        "mpv:start" => {
+            let _gate = state.playback_gate.lock().await;
+            let input = string(&args, 0)?;
+            let (source, scope) = resolve_playback_source(&state, input).await?;
+            let options = args.get(1).cloned().unwrap_or(json!({}));
+            authorize_subtitle_files(&state, input, &options).await?;
+            let drawable = window_host::ensure(&window).await?;
+            let result = state
+                .mpv
+                .start(source, options, drawable)
+                .await
+                .map_err(media_error)?;
+            *state.native_scope.lock().await = Some(scope);
+            Ok(result)
+        }
+        "mpv:command" => {
+            let _gate = state.playback_gate.lock().await;
+            validate_playback_scope(&state).await?;
+            state
+                .mpv
+                .command(
+                    string(&args, 0)?.into(),
+                    args.get(1).cloned().ok_or_else(|| {
+                        Error::new("invalid_command", "The playback command is missing.")
+                    })?,
+                )
+                .await
+                .map_err(media_error)
+        }
+        "mpv:stop" => {
+            let _gate = state.playback_gate.lock().await;
+            let result = state
+                .mpv
+                .stop(Some(string(&args, 0)?.into()))
+                .await
+                .map_err(media_error)?;
+            if result == true {
+                state.playback_activity.release_all().await?;
+                state.media_control.release_all().await?;
+                *state.native_scope.lock().await = None;
+                window_host::hide(&window).await?;
+            }
+            Ok(result)
+        }
+        "mpv:set-viewport" | "mpv:sync-surface" | "mpv:set-fullscreen-transition" => {
+            if channel == "mpv:set-viewport" {
+                window_host::set_viewport(
+                    &window,
+                    serde_json::from_value(args.first().cloned().unwrap_or(Value::Null))?,
+                )
+                .await?;
+            } else {
+                window_host::ensure(&window).await?;
+            }
+            Ok(json!(true))
+        }
         "shell:open-external" => {
             let url = tauri::Url::parse(string(&args, 0)?).map_err(failed)?;
             if !["http", "https"].contains(&url.scheme()) {
@@ -597,9 +718,6 @@ async fn desktop_invoke(
                 .map_err(failed)?;
             Ok(Value::Null)
         }
-        "mpv:availability" | "mpv:refresh-availability" => Ok(
-            json!({"available":false,"reason":"The mpv fallback adapter has not been ported yet."}),
-        ),
         "updates:get-state" => Ok(
             json!({"status":"disabled","currentVersion":env!("CARGO_PKG_VERSION"),"platform":if cfg!(target_os="macos"){"darwin"}else if cfg!(windows){"win32"}else{"linux"},"arch":std::env::consts::ARCH,"supported":false,"message":"The Tauri update feed has not been configured."}),
         ),
@@ -685,14 +803,22 @@ fn main() {
             let store = Arc::new(Mutex::new(Store::open(&data_dir)?));
             let root = runtime_root(app.handle())?;
             let vlc_path = runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"]);
+            let mpv_path = mpv_library_path(&root);
             let ffmpeg = runtime_file(&root, &["ffmpeg/ffmpeg", "ffmpeg/ffmpeg.exe"]);
             let ffprobe = runtime_file(&root, &["ffmpeg/ffprobe", "ffmpeg/ffprobe.exe"]);
-            let handle = app.handle().clone();
+            let libvlc_handle = app.handle().clone();
             let player = PlaybackService::new(
                 vlc_path.clone(),
                 Some(root.join("libvlc/plugins")),
                 Arc::new(move |value| {
-                    let _ = handle.emit_to("main", "loomtv:libvlc:state", [value]);
+                    let _ = libvlc_handle.emit_to("main", "loomtv:libvlc:state", [value]);
+                }),
+            )?;
+            let mpv_handle = app.handle().clone();
+            let mpv = MpvPlaybackService::new(
+                mpv_path.clone(),
+                Arc::new(move |value| {
+                    let _ = mpv_handle.emit_to("main", "loomtv:mpv:state", [value]);
                 }),
             )?;
             let remote = Arc::new(loomtv_core::remote::RemoteClient::default());
@@ -712,12 +838,14 @@ fn main() {
                 drained: AtomicBool::new(false),
                 media_stop: Mutex::new(Some(stop)),
                 player,
+                mpv,
                 playback_activity: playback_activity::PlaybackActivity::new()?,
                 media_control: media_control::MediaControl::new(app.handle().clone()),
                 metadata: loomtv_core::metadata::MetadataProviderGateway::new()?,
                 playback_gate: Mutex::new(()),
                 scan_gate: Arc::new(tokio::sync::Semaphore::new(1)),
                 vlc_path,
+                mpv_path,
                 ffmpeg,
                 closing: Arc::new(AtomicBool::new(false)),
             });
@@ -770,6 +898,7 @@ fn begin_shutdown(handle: &tauri::AppHandle) {
         let cleanup = async {
             let _gate = state.playback_gate.lock().await;
             let _ = state.player.shutdown().await;
+            let _ = state.mpv.shutdown().await;
             let _ = state.playback_activity.shutdown().await;
             let _ = state.media_control.shutdown().await;
             state.media.shutdown().await;

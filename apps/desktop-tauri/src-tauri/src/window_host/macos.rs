@@ -43,7 +43,20 @@ pub async fn ensure(window: &WebviewWindow) -> Result<usize> {
                     Error::new("native_parent", "The WebView parent is unavailable.")
                 })?;
                 HOST.with_borrow_mut(|host| {
-                    let viewport = VIEWPORT.with_borrow(|v| *v);
+                    let mut viewport = VIEWPORT.with_borrow(|v| *v);
+                    // A libmpv fallback can start before the renderer has had a
+                    // chance to publish its first ResizeObserver measurement.
+                    // Give the native surface a useful initial frame instead
+                    // of attaching it at 1x1 until the next layout event.
+                    if viewport.width <= 0. || viewport.height <= 0. {
+                        let bounds = parent.bounds();
+                        viewport = Viewport {
+                            x: 0.,
+                            y: 0.,
+                            width: bounds.size.width,
+                            height: bounds.size.height,
+                        };
+                    }
                     let owned = host.get_or_insert_with(|| Host {
                         view: NSView::initWithFrame(NSView::alloc(mtm), frame(&parent, viewport)),
                         viewport,

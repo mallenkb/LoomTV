@@ -8,7 +8,7 @@ script = ""
 [[actions]]
 name = "Desktop App"
 icon = "run"
-command = "pnpm desktop:start"
+command = "vp run desktop:start"
 
 [[actions]]
 name = "Mobile App"
@@ -16,6 +16,6 @@ icon = "test"
 command = "pnpm mobile:start"
 
 [[actions]]
-name = "Vite Run Desktop App"
+name = "Desktop App: Tauri"
 icon = "debug"
-command = "vp run desktop:start"
+command = "vp run desktop:tauri:dev"

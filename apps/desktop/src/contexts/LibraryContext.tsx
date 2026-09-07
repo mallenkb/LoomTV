@@ -16,6 +16,17 @@ import type {
   WireMediaItem,
 } from '../shared/desktopProtocol';
 
+function scheduleIdle(callback: () => void, timeout = 750): void {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(callback, { timeout });
+    return;
+  }
+
+  // WKWebView does not expose requestIdleCallback. A short timer yields the
+  // first paint while keeping startup work moving on the next task.
+  window.setTimeout(callback, Math.min(32, timeout));
+}
+
 export interface MediaItem extends WireMediaItem {
   /** Present only on lightweight catalog cards. Full details are fetched on demand. */
   catalogRevision?: number;
@@ -790,7 +801,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
       await new Promise<void>((resolve) => {
         window.setTimeout(() => {
-          window.requestIdleCallback(() => resolve(), { timeout: 750 });
+          scheduleIdle(resolve, 750);
         }, 100);
       });
       if (cancelled) return;
