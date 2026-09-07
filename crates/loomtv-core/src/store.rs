@@ -14,14 +14,21 @@ pub struct Store {
     pub(crate) revision: i64,
     pub(crate) unlocked_until: i64,
     pub(crate) failures: HashMap<String, (u32, i64)>,
+    _lease: crate::storage::StorageLease,
 }
 
 impl Store {
     pub fn open(data_dir: &Path) -> Result<Self> {
-        std::fs::create_dir_all(data_dir)?;
+        let lease = crate::storage::StorageLease::acquire(data_dir)?;
         let db_path = data_dir.join("loomtv.sqlite");
         let fresh = !db_path.exists();
-        let mut db = Connection::open(&db_path)?;
+        if fresh {
+            crate::storage::create_private(&db_path)?;
+        }
+        let mut db = crate::storage::connection(&db_path, false)?;
+        if !fresh {
+            crate::storage::validate_version(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
@@ -36,30 +43,6 @@ impl Store {
             }
             tx.execute("INSERT INTO profiles (id, name, avatar_key, color_key, profile_type, created_at, updated_at) VALUES (?, 'Owner', 'glyph-01', 'ember', 'owner', ?, ?)", params![uuid::Uuid::new_v4().to_string(), now(), now()])?;
             tx.commit()?;
-        }
-        let version: i64 = db.query_row(
-            "SELECT COALESCE(MAX(version),0) FROM schema_migrations",
-            [],
-            |r| r.get(0),
-        )?;
-        if version != 14 {
-            return Err(Error::new(
-                "schema_version",
-                "This database requires a different migration version.",
-            ));
-        }
-        let shared_marker = data_dir.join("tauri-shared-storage-v1");
-        if !fresh && !shared_marker.is_file() {
-            let backups = data_dir.join("backups");
-            std::fs::create_dir_all(&backups)?;
-            let backup = backups.join(format!("loomtv-before-tauri-{}.sqlite", now()));
-            db.backup(rusqlite::DatabaseName::Main, &backup, None)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o600))?;
-            }
-            std::fs::write(&shared_marker, b"LoomTV shared desktop storage version 1\n")?;
         }
         #[cfg(unix)]
         {
@@ -79,6 +62,7 @@ impl Store {
             revision,
             unlocked_until: now() + 14_400_000,
             failures: HashMap::new(),
+            _lease: lease,
         })
     }
 
@@ -228,10 +212,7 @@ impl Store {
             "playback-track-preferences:save" => self.save_track_preferences(args),
             "database:backup" => {
                 self.require_owner()?;
-                let folder = self.data_dir.join("backups");
-                std::fs::create_dir_all(&folder)?;
-                let path = folder.join(format!("loomtv-{}.sqlite", now()));
-                self.db.backup(rusqlite::DatabaseName::Main, &path, None)?;
+                let path = crate::storage::backup(&self.db, &self.data_dir.join("backups"))?;
                 Ok(json!({"ok":true,"path":path}))
             }
             _ => Err(Error::unsupported(channel)),

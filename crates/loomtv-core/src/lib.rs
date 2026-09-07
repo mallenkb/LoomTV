@@ -20,6 +20,7 @@ pub mod remote;
 pub mod scanner;
 mod segments;
 mod settings;
+pub mod storage;
 mod store;
 pub mod streaming;
 pub mod stremio_store;
@@ -108,3 +109,6 @@ pub fn number(args: &[Value], index: usize) -> Result<f64> {
 
 #[cfg(test)]
 mod transcode_tests;
+
+#[cfg(test)]
+mod storage_tests;

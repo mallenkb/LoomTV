@@ -668,20 +668,14 @@ fn main() {
         .register_asynchronous_uri_scheme_protocol("plexserver", media_protocol::handle)
         .invoke_handler(tauri::generate_handler![desktop_invoke])
         .setup(|app| {
-            let data_dir = match std::env::var("LOOMTV_DATA_DIR")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-            {
-                Some(value) => {
-                    let path = PathBuf::from(value.trim());
-                    if path.is_absolute() {
-                        path
-                    } else {
-                        std::env::current_dir()?.join(path)
-                    }
-                }
-                None => app.path().config_dir()?.join("LoomTV"),
-            };
+            let selected = std::env::var("LOOMTV_TAURI_DATA_DIR")
+                .or_else(|_| std::env::var("LOOMTV_DATA_DIR"))
+                .ok();
+            let data_dir = loomtv_core::storage::isolated_data_dir(
+                &app.path().app_data_dir()?,
+                selected.as_deref(),
+                &app.path().config_dir()?.join("LoomTV"),
+            )?;
             let store = Arc::new(Mutex::new(Store::open(&data_dir)?));
             let root = runtime_root(app.handle())?;
             let vlc_path = runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"]);
