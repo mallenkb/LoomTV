@@ -19,7 +19,19 @@ pub struct Store {
 
 impl Store {
     pub fn open(data_dir: &Path) -> Result<Self> {
-        let lease = crate::storage::StorageLease::acquire(data_dir)?;
+        Self::open_mode(data_dir, false)
+    }
+
+    pub fn open_shared(data_dir: &Path) -> Result<Self> {
+        Self::open_mode(data_dir, true)
+    }
+
+    fn open_mode(data_dir: &Path, shared: bool) -> Result<Self> {
+        let lease = if shared {
+            crate::storage::StorageLease::acquire_shared(data_dir)?
+        } else {
+            crate::storage::StorageLease::acquire(data_dir)?
+        };
         let db_path = data_dir.join("loomtv.sqlite");
         let fresh = !db_path.exists();
         if fresh {
@@ -49,12 +61,12 @@ impl Store {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600))?;
         }
-        db.execute(
-            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-tauri'",
+        if !shared { db.execute(
+            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-primary'",
             [],
-        )?;
-        let revision = db.query_row("SELECT revision FROM device_profile_selection_revisions WHERE device_id = 'desktop-tauri'", [], |r| r.get(0)).optional()?.unwrap_or(0);
-        let active = db.query_row("SELECT s.profile_id FROM device_profile_selections s JOIN profiles p ON p.id=s.profile_id WHERE s.device_id='desktop-tauri' AND s.automatic_sign_in=1 AND p.pin_hash IS NULL", [], |r| r.get(0)).optional()?;
+        )?; }
+        let revision = db.query_row("SELECT revision FROM device_profile_selection_revisions WHERE device_id = 'desktop-primary'", [], |r| r.get(0)).optional()?.unwrap_or(0);
+        let active = db.query_row("SELECT s.profile_id FROM device_profile_selections s JOIN profiles p ON p.id=s.profile_id WHERE s.device_id='desktop-primary' AND s.automatic_sign_in=1 AND p.pin_hash IS NULL", [], |r| r.get(0)).optional()?;
         Ok(Self {
             db,
             data_dir: data_dir.into(),
@@ -196,7 +208,7 @@ impl Store {
                         "Automatic sign-in requires a permanent profile without a PIN.",
                     ));
                 }
-                self.db.execute("UPDATE device_profile_selections SET automatic_sign_in=? WHERE device_id='desktop-tauri' AND profile_id=?", params![enabled,id])?;
+                self.db.execute("UPDATE device_profile_selections SET automatic_sign_in=? WHERE device_id='desktop-primary' AND profile_id=?", params![enabled,id])?;
                 self.active_state()
             }
             "profile-preferences:get" => self.preferences(),

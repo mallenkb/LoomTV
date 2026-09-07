@@ -280,6 +280,8 @@ export interface LibraryPayload extends LanLibraryPayload<WireMediaItem> {
 }
 
 export interface LibraryScanProgress {
+  phase?: 'metadata';
+  updatedItems?: number;
   isComplete: boolean;
   scannedFolders: number;
   totalFolders: number;

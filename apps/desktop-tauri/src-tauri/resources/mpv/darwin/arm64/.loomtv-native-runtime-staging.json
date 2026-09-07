@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "engine": "mpv",
+  "target": "darwin-arm64",
+  "layout": "resources/mpv/darwin/arm64",
+  "sourceMode": "source-root"
+}

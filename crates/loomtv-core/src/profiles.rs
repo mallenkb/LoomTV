@@ -5,6 +5,23 @@ use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
 
 impl Store {
+    pub fn sync_desktop_selection(&mut self) -> Result<()> {
+        let saved: Option<(String, i64, bool, bool)> = self.db.query_row(
+            "SELECT s.profile_id,s.selection_revision,s.automatic_sign_in,p.pin_hash IS NOT NULL FROM device_profile_selections s JOIN profiles p ON p.id=s.profile_id WHERE s.device_id='desktop-primary'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional()?;
+        match saved {
+            Some((id, revision, automatic, has_pin)) if revision != self.revision || self.active.as_deref() != Some(&id) => {
+                self.revision = revision;
+                self.active = if automatic && !has_pin { Some(id) } else { None };
+                self.unlocked_until = 0;
+            }
+            None => { self.active = None; self.unlocked_until = 0; }
+            _ => {},
+        }
+        Ok(())
+    }
+
     pub fn selection_revision(&self) -> i64 {
         self.revision
     }
@@ -19,6 +36,13 @@ impl Store {
                 "stale_profile_selection",
                 "The active profile changed.",
             ));
+        }
+        let selected: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM device_profile_selections WHERE device_id='desktop-primary' AND profile_id=? AND selection_revision=?)",
+            params![id, self.revision], |row| row.get(0),
+        )?;
+        if !selected {
+            return Err(Error::new("stale_profile_selection", "The active profile changed."));
         }
         let (_kind, has_pin): (String, bool) = self.db.query_row(
             "SELECT profile_type,pin_hash IS NOT NULL FROM profiles WHERE id=?",
@@ -49,8 +73,10 @@ impl Store {
         Ok(id)
     }
     pub(crate) fn bump_selection(&mut self) -> Result<()> {
-        self.revision += 1;
-        self.db.execute("INSERT INTO device_profile_selection_revisions VALUES ('desktop-tauri',?) ON CONFLICT(device_id) DO UPDATE SET revision=excluded.revision",[self.revision])?;
+        self.revision = self.db.query_row(
+            "INSERT INTO device_profile_selection_revisions VALUES ('desktop-primary',1) ON CONFLICT(device_id) DO UPDATE SET revision=revision+1 RETURNING revision",
+            [], |row| row.get(0),
+        )?;
         Ok(())
     }
     pub fn profiles(&self) -> Result<Value> {
@@ -61,7 +87,7 @@ impl Store {
         ))
     }
     pub fn active_state(&self) -> Result<Value> {
-        let automatic: bool=self.db.query_row("SELECT automatic_sign_in FROM device_profile_selections WHERE device_id='desktop-tauri'",[],|r|r.get(0)).optional()?.unwrap_or(false);
+        let automatic: bool=self.db.query_row("SELECT automatic_sign_in FROM device_profile_selections WHERE device_id='desktop-primary'",[],|r|r.get(0)).optional()?.unwrap_or(false);
         Ok(
             json!({"profileId":self.active,"selectionRequired":self.active.is_none(),"selectionRevision":self.revision,"automaticSignIn":automatic}),
         )
@@ -134,10 +160,10 @@ impl Store {
                 })?;
         let automatic = !has_pin && !guest;
         if self.active.as_deref() != Some(id) {
-            self.db.execute("DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-tauri' AND id!=?",[id])?;
+            self.db.execute("DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-primary' AND id!=?",[id])?;
         }
         self.bump_selection()?;
-        self.db.execute("INSERT INTO device_profile_selections (device_id,profile_id,selected_at,selection_revision,automatic_sign_in) VALUES ('desktop-tauri',?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET automatic_sign_in=CASE WHEN device_profile_selections.profile_id=excluded.profile_id THEN device_profile_selections.automatic_sign_in ELSE excluded.automatic_sign_in END,profile_id=excluded.profile_id,selected_at=excluded.selected_at,selection_revision=excluded.selection_revision", params![id,now(),self.revision,automatic])?;
+        self.db.execute("INSERT INTO device_profile_selections (device_id,profile_id,selected_at,selection_revision,automatic_sign_in) VALUES ('desktop-primary',?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET automatic_sign_in=CASE WHEN device_profile_selections.profile_id=excluded.profile_id THEN device_profile_selections.automatic_sign_in ELSE excluded.automatic_sign_in END,profile_id=excluded.profile_id,selected_at=excluded.selected_at,selection_revision=excluded.selection_revision", params![id,now(),self.revision,automatic])?;
         self.db.execute(
             "UPDATE profiles SET last_used_at=? WHERE id=?",
             params![now(), id],
@@ -294,11 +320,11 @@ impl Store {
     pub fn lock_profile(&mut self) -> Result<Value> {
         let tx = self.db.transaction()?;
         tx.execute(
-            "DELETE FROM device_profile_selections WHERE device_id='desktop-tauri'",
+            "DELETE FROM device_profile_selections WHERE device_id='desktop-primary'",
             [],
         )?;
         tx.execute(
-            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-tauri'",
+            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-primary'",
             [],
         )?;
         tx.commit()?;
@@ -311,10 +337,10 @@ impl Store {
         let id = uuid::Uuid::new_v4().to_string();
         let tx = self.db.transaction()?;
         tx.execute(
-            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-tauri'",
+            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-primary'",
             [],
         )?;
-        tx.execute("INSERT INTO profiles (id,name,avatar_key,color_key,profile_type,created_at,updated_at,sort_order,is_guest,guest_device_id) VALUES (?,'Guest','glyph-12','slate','guest',?,?,9999,1,'desktop-tauri')",params![id,now(),now()])?;
+        tx.execute("INSERT INTO profiles (id,name,avatar_key,color_key,profile_type,created_at,updated_at,sort_order,is_guest,guest_device_id) VALUES (?,'Guest','glyph-12','slate','guest',?,?,9999,1,'desktop-primary')",params![id,now(),now()])?;
         tx.commit()?;
         self.select_profile(&id, None)
     }

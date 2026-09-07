@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::{
     ffi::{c_char, c_int, c_void, CStr, CString},
     path::PathBuf,
+    rc::Rc,
     sync::{mpsc, Arc},
     time::Duration,
 };
@@ -12,6 +13,7 @@ use tokio::sync::oneshot;
 
 type Reply = oneshot::Sender<Result<Value, String>>;
 enum Request {
+    Availability { reply: Reply },
     Start {
         source: String,
         options: Value,
@@ -44,17 +46,23 @@ impl PlaybackService {
         let (sender, receiver) = mpsc::sync_channel(32);
         std::thread::Builder::new().name("loomtv-libvlc".into()).spawn(move || {
             // Native pointers and the loaded library never leave this owner thread.
+            let runtime = path.as_deref().ok_or_else(|| "The packaged LibVLC runtime is missing.".to_string())
+                .and_then(|path| unsafe { WarmRuntime::open(path, plugins.as_deref()).map(Rc::new) });
             let mut player:Option<Player>=None;
             loop {
                 // Native subtitle overlays follow the playback timestamp
                 // emitted after each snapshot. Keep this cadence close to a
                 // video frame so cues do not visibly trail the picture.
                 match receiver.recv_timeout(Duration::from_millis(16)) {
+                    Ok(Request::Availability { reply }) => {
+                        let warning = runtime.as_ref().err();
+                        let _ = reply.send(Ok(json!({"available":runtime.is_ok(),"enabled":true,"surface":if runtime.is_ok(){"composited-window"}else{"unavailable"},"libraryPath":path,"runtimeSource":"bundled","warning":warning})));
+                    }
                     Ok(Request::Start{source,options,drawable,reply}) => {
                         let result=(|| {
                             if let Some(mut previous)=player.take() { previous.close(); emit(json!({"sessionId":previous.session,"status":"closed"})); }
-                            let path=path.as_ref().ok_or("The packaged LibVLC runtime is missing.")?;
-                            let next=unsafe {Player::open(path,plugins.as_deref(),source,options,drawable)}?;
+                            let runtime = runtime.as_ref().map_err(Clone::clone)?;
+                            let next=unsafe {Player::open(Rc::clone(runtime),source,options,drawable)}?;
                             let response=json!({"ok":true,"sessionId":next.session,"surface":"composited-window"});
                             player=Some(next);Ok(response)
                         })();
@@ -96,6 +104,9 @@ impl PlaybackService {
             .map_err(|_| "The playback command queue is busy or closed.")?;
         rx.await.map_err(|_| "The playback worker stopped.")?
     }
+    pub async fn availability(&self) -> Result<Value, String> {
+        self.send(|reply| Request::Availability { reply }).await
+    }
     /// The drawable comes only from the native window host. Its owner must keep it alive through stop.
     pub async fn start(
         &self,
@@ -134,9 +145,71 @@ struct TrackDescription {
     next: *mut TrackDescription,
 }
 
-struct Player {
+// Initialized on the owner worker at app startup. Sessions share plugin discovery
+// and the LibVLC instance, but keep their media/player handles independent.
+struct WarmRuntime {
     library: Library,
+    _core_library: Option<Library>,
     instance: *mut c_void,
+}
+impl WarmRuntime {
+    unsafe fn open(path: &std::path::Path, plugins: Option<&std::path::Path>) -> Result<Self, String> {
+        // The VLC app normally loads this dependency before libvlc. Tauri has
+        // no VLC executable rpath, so retain the sibling core for the process lifetime.
+        let core_name = if cfg!(windows) { "libvlccore.dll" } else { "libvlccore.dylib" };
+        let core_path = path.with_file_name(core_name);
+        let core_library = if core_path.is_file() {
+            Some(Library::new(&core_path).map_err(|error| format!("LibVLC core could not be loaded: {error}"))?)
+        } else { None };
+        let library = Library::new(path)
+            .map_err(|error| format!("LibVLC could not be loaded: {error}"))?;
+        let version = library
+            .get::<unsafe extern "C" fn() -> *const c_char>(b"libvlc_get_version\0")
+            .map_err(|_| "The LibVLC version API is unavailable.")?();
+        if version.is_null() || !CStr::from_ptr(version).to_bytes().starts_with(b"3.") {
+            return Err("This adapter requires the bundled LibVLC 3 ABI.".into());
+        }
+        // LibVLC uses its plugin path during initialization. This process owns one engine.
+        let previous_plugin_path = std::env::var_os("VLC_PLUGIN_PATH");
+        if let Some(plugins) = plugins {
+            std::env::set_var("VLC_PLUGIN_PATH", plugins);
+        }
+        let mut arguments = vec!["--no-plugins-cache"];
+        if std::env::var("LOOMTV_DEBUG_LIBVLC").as_deref() == Ok("1") {
+            arguments.extend(["--no-quiet", "--verbose=2"]);
+        } else { arguments.push("--quiet"); }
+        let arguments = arguments
+            .iter()
+            .map(|s| CString::new(*s))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Invalid LibVLC arguments.")?;
+        let pointers = arguments.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
+        let new = library
+            .get::<unsafe extern "C" fn(c_int, *const *const c_char) -> *mut c_void>(
+                b"libvlc_new\0",
+            )
+            .map_err(|_| "The LibVLC instance API is unavailable.")?;
+        let instance = new(pointers.len() as c_int, pointers.as_ptr());
+        if let Some(previous) = previous_plugin_path {
+            std::env::set_var("VLC_PLUGIN_PATH", previous);
+        } else { std::env::remove_var("VLC_PLUGIN_PATH"); }
+        if instance.is_null() {
+            return Err("LibVLC initialization failed.".into());
+        }
+        Ok(Self { library, _core_library: core_library, instance })
+    }
+}
+impl Drop for WarmRuntime {
+    fn drop(&mut self) {
+        unsafe {
+            if let Ok(release) = self.library.get::<unsafe extern "C" fn(*mut c_void)>(b"libvlc_release\0") {
+                release(self.instance);
+            }
+        }
+    }
+}
+struct Player {
+    runtime: Rc<WarmRuntime>,
     media: *mut c_void,
     player: *mut c_void,
     session: String,
@@ -150,6 +223,11 @@ struct Player {
     restore_commands: std::collections::BTreeMap<String, Value>,
 }
 
+impl std::ops::Deref for Player {
+    type Target = WarmRuntime;
+    fn deref(&self) -> &Self::Target { &self.runtime }
+}
+
 macro_rules! vlc {
     ($owner:expr,$name:literal,$ty:ty $(,$arg:expr)*)=>{{
         let function=$owner.library.get::<$ty>(concat!($name,"\0").as_bytes()).map_err(|_|concat!("Missing LibVLC 3 API: ",$name).to_string())?;
@@ -158,8 +236,7 @@ macro_rules! vlc {
 }
 impl Player {
     unsafe fn open(
-        path: &std::path::Path,
-        plugins: Option<&std::path::Path>,
+        runtime: Rc<WarmRuntime>,
         source: String,
         options: Value,
         drawable: usize,
@@ -167,44 +244,9 @@ impl Player {
         if drawable == 0 {
             return Err("The native video view is unavailable.".into());
         }
-        let library =
-            Library::new(path).map_err(|_| "The approved LibVLC runtime could not be loaded.")?;
-        let version = library
-            .get::<unsafe extern "C" fn() -> *const c_char>(b"libvlc_get_version\0")
-            .map_err(|_| "The LibVLC version API is unavailable.")?();
-        if version.is_null() || !CStr::from_ptr(version).to_bytes().starts_with(b"3.") {
-            return Err("This adapter requires the bundled LibVLC 3 ABI.".into());
-        }
-        // LibVLC uses its plugin path during initialization. This process owns one engine.
-        if let Some(plugins) = plugins {
-            std::env::set_var("VLC_PLUGIN_PATH", plugins);
-        }
-        let arguments = [
-            "--no-video-title-show",
-            "--no-snapshot-preview",
-            "--no-osd",
-            "--no-xlib",
-            "--no-video-on-top",
-            "--avcodec-hw=any",
-        ];
-        let arguments = arguments
-            .iter()
-            .map(|s| CString::new(*s))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "Invalid LibVLC arguments.")?;
-        let pointers = arguments.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
-        let new = library
-            .get::<unsafe extern "C" fn(c_int, *const *const c_char) -> *mut c_void>(
-                b"libvlc_new\0",
-            )
-            .map_err(|_| "The LibVLC instance API is unavailable.")?;
-        let instance = new(pointers.len() as c_int, pointers.as_ptr());
-        if instance.is_null() {
-            return Err("LibVLC initialization failed.".into());
-        }
+        let instance = runtime.instance;
         let mut result = Self {
-            library,
-            instance,
+            runtime,
             media: std::ptr::null_mut(),
             player: std::ptr::null_mut(),
             session: uuid::Uuid::new_v4().to_string(),
@@ -684,15 +726,7 @@ impl Player {
                 }
                 self.media = std::ptr::null_mut();
             }
-            if !self.instance.is_null() {
-                if let Ok(release) = self
-                    .library
-                    .get::<unsafe extern "C" fn(*mut c_void)>(b"libvlc_release\0")
-                {
-                    release(self.instance);
-                }
-                self.instance = std::ptr::null_mut();
-            }
+
         }
     }
 }

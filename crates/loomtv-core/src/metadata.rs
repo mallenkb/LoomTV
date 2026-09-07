@@ -50,6 +50,7 @@ pub struct MetadataProviderGateway {
 
 #[derive(Default)]
 struct ProviderClients {
+    tvmaze: Mutex<Option<PinnedClient>>,
     omdb: Mutex<Option<PinnedClient>>,
     tmdb: Mutex<Option<PinnedClient>>,
     anilist: Mutex<Option<PinnedClient>>,
@@ -61,6 +62,7 @@ struct ProviderClients {
 impl ProviderClients {
     fn slot(&self, hostname: &str) -> Result<&Mutex<Option<PinnedClient>>> {
         match hostname {
+            "api.tvmaze.com" => Ok(&self.tvmaze),
             OMDB_HOST => Ok(&self.omdb),
             TMDB_HOST => Ok(&self.tmdb),
             ANILIST_HOST => Ok(&self.anilist),
@@ -175,6 +177,7 @@ impl MetadataProviderGateway {
             .ok_or_else(|| invalid("The metadata provider request must be an object."))?;
         let provider = required_string(input, "provider", 32, false)?;
         match provider.as_str() {
+            "tvmaze" => self.request_tvmaze(input).await,
             "omdb" => self.request_omdb(input, settings).await,
             "tmdb" => self.request_tmdb(input, settings).await,
             "anilist" => self.request_anilist(input).await,
@@ -230,6 +233,26 @@ impl MetadataProviderGateway {
             }))
             .await,
         )
+    }
+
+    async fn request_tvmaze(&self, input: &Map<String, Value>) -> Result<Value> {
+        let path = required_string(input, "path", 120, true)?;
+        let parts: Vec<_> = path.split('/').collect();
+        let allowed = path == "search/shows" || (parts.len() >= 2
+            && parts[0] == "shows" && !parts[1].is_empty()
+            && parts[1].bytes().all(|byte| byte.is_ascii_digit())
+            && (parts.len() == 2 || (parts.len() == 3
+                && matches!(parts[2], "episodes" | "cast" | "images"))));
+        if !allowed { return Err(invalid("TVmaze path is not allowed.")); }
+        let mut url = fixed_url(&format!("https://api.tvmaze.com/{path}"))?;
+        for (key, value) in optional_query(input, "query")? {
+            if !matches!(key.as_str(), "q" | "embed" | "specials") {
+                return Err(invalid("TVmaze query is not allowed."));
+            }
+            url.query_pairs_mut().append_pair(&key, &value);
+        }
+        validate_url_size(&url)?;
+        self.send_json(Request::new(Method::GET, url), "TVmaze", DEFAULT_RESPONSE_BYTES, 2).await
     }
 
     async fn request_omdb(

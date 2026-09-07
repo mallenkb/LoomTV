@@ -1,8 +1,7 @@
-import { setQueryProfile } from '@/lib/queryClient';
+import { invalidateDesktopData, setQueryProfile } from '@/lib/queryClient';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   desktopApi,
-  isBrowserLocalApp,
   type ActiveProfileState,
   type ProfileCreateInput,
   type ProfileListEntry,
@@ -163,14 +162,17 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     // applied avoids both a redundant re-render and re-serializing the current
     // list every tick.
     let lastRemoteProfilesSignature = '';
+    let refreshPending = false;
     const refreshBrowserHostState = async () => {
-      if (document.visibilityState !== 'visible') return;
+      if (refreshPending || document.visibilityState !== 'visible') return;
+      refreshPending = true;
       try {
         const [nextProfiles, nextActiveState] = await Promise.all([
           desktopApi.listProfiles(),
           desktopApi.getActiveProfileState(),
         ]);
         if (!mountedRef.current) return;
+        invalidateDesktopData(['getProfilePreferences', 'getProfileLists']);
         const previousProfileId = activeStateRef.current.profileId;
         activeStateRef.current = nextActiveState;
         setProfiles(nextProfiles);
@@ -194,13 +196,15 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         setLists(nextLists);
       } catch {
         // Preserve the last host snapshot until the next visible refresh.
+      } finally {
+        refreshPending = false;
       }
     };
-    const browserLocal = isBrowserLocalApp();
+    const refreshLocal = !desktopApi.isRemoteLibraryMode();
     const handleBrowserFocus = () => {
-      if (browserLocal) void refreshBrowserHostState();
+      if (refreshLocal) void refreshBrowserHostState();
     };
-    if (browserLocal) {
+    if (refreshLocal) {
       window.addEventListener('focus', handleBrowserFocus);
       document.addEventListener('visibilitychange', handleBrowserFocus);
     }
@@ -215,14 +219,14 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             setProfiles(nextProfiles);
           }).catch(() => undefined);
         }, 5_000)
-      : browserLocal
+      : refreshLocal
         ? window.setInterval(() => void refreshBrowserHostState(), 5_000)
         : null;
     return () => {
       mountedRef.current = false;
       unsubscribeProfiles();
       unsubscribeActive();
-      if (browserLocal) {
+      if (refreshLocal) {
         window.removeEventListener('focus', handleBrowserFocus);
         document.removeEventListener('visibilitychange', handleBrowserFocus);
       }

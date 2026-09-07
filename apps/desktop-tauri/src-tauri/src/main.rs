@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod desktop_os;
+mod desktop_menu;
 mod media_control;
 mod media_protocol;
 mod mpv_host;
@@ -45,7 +46,6 @@ struct Runtime {
     iptv: loomtv_core::iptv::IptvService,
     playback_gate: Mutex<()>,
     scan_gate: Arc<tokio::sync::Semaphore>,
-    vlc_path: Option<PathBuf>,
     ffmpeg: Option<PathBuf>,
     closing: Arc<AtomicBool>,
 }
@@ -96,6 +96,7 @@ async fn desktop_invoke(
             "The desktop request is too large.",
         ));
     }
+    state.store.lock().await.sync_desktop_selection()?;
     match channel.as_str() {
         "profiles:choose-avatar" | "shell:open-folder-path" | "shell:show-item" => {
             desktop_os::handle(&window, &state, &channel, &args).await
@@ -476,10 +477,10 @@ async fn desktop_invoke(
                 .map(|value| json!(value)),
         )),
         "libvlc:availability" | "libvlc:refresh-availability" => {
-            let available = cfg!(target_os = "macos") && state.vlc_path.is_some();
-            Ok(
-                json!({"available":available,"enabled":true,"surface":if available{"composited-window"}else{"unavailable"},"libraryPath":state.vlc_path,"runtimeSource":"bundled","warning":if available{Value::Null}else{json!("The native video host or its packaged runtime is unavailable.")}}),
-            )
+            if !cfg!(target_os = "macos") {
+                return Ok(json!({"available":false,"enabled":true,"surface":"unavailable","warning":"The native video host is unavailable on this platform."}));
+            }
+            state.player.availability().await.map_err(media_error)
         }
         "libvlc:start" | "mpv:start" => {
             let _gate = state.playback_gate.lock().await;
@@ -730,22 +731,20 @@ fn main() {
         .register_asynchronous_uri_scheme_protocol("plexserver", media_protocol::handle)
         .invoke_handler(tauri::generate_handler![desktop_invoke])
         .setup(|app| {
-            let selected = std::env::var("LOOMTV_TAURI_DATA_DIR")
-                .or_else(|_| std::env::var("LOOMTV_DATA_DIR"))
-                .ok();
-            let data_dir = loomtv_core::storage::isolated_data_dir(
-                &app.path().app_data_dir()?,
-                selected.as_deref(),
-                &app.path().config_dir()?.join("LoomTV"),
-            )?;
-            let store = Arc::new(Mutex::new(Store::open(&data_dir)?));
+            desktop_menu::install(app.handle())?;
+            // Match Electron's USER_DATA_DIR, including its shared override.
+            let data_dir = std::env::var("LOOMTV_DATA_DIR").ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| PathBuf::from(value.trim()))
+                .unwrap_or(app.path().config_dir()?.join("LoomTV"));
+            let store = Arc::new(Mutex::new(Store::open_shared(&data_dir)?));
             let root = runtime_root(app.handle())?;
             let vlc_path = runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"]);
             let ffmpeg = runtime_file(&root, &["ffmpeg/ffmpeg", "ffmpeg/ffmpeg.exe"]);
             let ffprobe = runtime_file(&root, &["ffmpeg/ffprobe", "ffmpeg/ffprobe.exe"]);
             let handle = app.handle().clone();
             let player = PlaybackService::new(
-                vlc_path.clone(),
+                vlc_path,
                 Some(root.join("libvlc/plugins")),
                 Arc::new(move |value| {
                     let _ = handle.emit_to("main", "loomtv:libvlc:state", [value]);
@@ -802,7 +801,6 @@ fn main() {
                 metadata: loomtv_core::metadata::MetadataProviderGateway::new()?,
                 playback_gate: Mutex::new(()),
                 scan_gate: Arc::new(tokio::sync::Semaphore::new(1)),
-                vlc_path,
                 ffmpeg,
                 closing: Arc::new(AtomicBool::new(false)),
             });

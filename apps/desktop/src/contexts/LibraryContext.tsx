@@ -729,11 +729,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   useEffect(() => {
-    return desktopApi.onLibraryScanProgress((progress) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    let updatedItems = 0;
+    const unsubscribe = desktopApi.onLibraryScanProgress((progress) => {
       applyScanProgress(progress);
       dispatch({ type: 'SET_LOADING', payload: false });
+      if (progress.phase === 'metadata' && (progress.updatedItems || 0) > updatedItems) {
+        updatedItems = progress.updatedItems || 0;
+        if (!timer) timer = setTimeout(() => {
+          timer = undefined;
+          if (!cancelled) void loadPrimaryCatalog().catch(error => console.warn('Could not load updated artwork:', error));
+        }, 1500);
+      }
+      if (progress.isComplete) updatedItems = 0;
     });
-  }, [applyScanProgress]);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); unsubscribe(); };
+  }, [applyScanProgress, loadPrimaryCatalog]);
 
   useEffect(() => {
     let cancelled = false;
@@ -848,14 +860,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [activeProfile?.type, applyScanCatalog, beginLibraryMutation, runLibraryScan, state.autoSyncIntervalHours]);
 
   useEffect(() => {
-    if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;
+    if (!activeProfile) return undefined;
     let pending = false;
     let disposed = false;
     const refreshRemote = async () => {
-      if (pending || disposed || document.hidden) return;
+      if (pending || disposed || document.hidden || isScanningRef.current) return;
       pending = true;
       try {
-        await loadPrimaryCatalog(beginLibraryMutation('catalog'));
+        await loadPrimaryCatalog();
       } catch (error) {
         const mutationError = toLibraryMutationError('refresh', error);
         console.warn(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
@@ -863,10 +875,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     };
     const intervalId = window.setInterval(refreshRemote, 30_000);
     document.addEventListener('visibilitychange', refreshRemote);
+    window.addEventListener('focus', refreshRemote);
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', refreshRemote);
+      window.removeEventListener('focus', refreshRemote);
     };
   }, [activeProfile, beginLibraryMutation, loadPrimaryCatalog]);
 

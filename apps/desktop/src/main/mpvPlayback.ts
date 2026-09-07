@@ -3,7 +3,6 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import type {
   MpvAvailability,
@@ -239,7 +238,7 @@ function resolveMpvRuntime(): { runtime: MpvRuntime | null; version?: string; wa
 
 function mpvVersion(executablePath: string): string | undefined {
   try {
-    const output = execFileSync(executablePath, ['--version'], {
+    const output = execFileSync(executablePath, ['--no-config', '--load-scripts=no', '--version'], {
       encoding: 'utf8',
       timeout: 3000,
       windowsHide: true,
@@ -252,7 +251,10 @@ function mpvVersion(executablePath: string): string | undefined {
 
 function ipcAddress(sessionId: string): string {
   if (process.platform === 'win32') return `\\\\.\\pipe\\loomtv-mpv-${sessionId}`;
-  return path.join(os.tmpdir(), `loomtv-mpv-${sessionId}.sock`);
+  // macOS TMPDIR plus a UUID can exceed the Unix socket path limit.
+  const directory = path.join('/tmp', `loomtv-mpv-${sessionId}`);
+  fs.mkdirSync(directory, { mode: 0o700 });
+  return path.join(directory, 'ipc');
 }
 
 function mpvGeometry(window: BrowserWindow): string {
@@ -637,7 +639,10 @@ class MpvPlaybackSession {
     this.socket = null;
     this.pendingRequests.clear();
     this.windowListeners.splice(0).forEach((remove) => remove());
-    if (process.platform !== 'win32') fs.rmSync(this.address, { force: true });
+    if (process.platform !== 'win32') {
+      fs.rmSync(this.address, { force: true });
+      fs.rmSync(path.dirname(this.address), { recursive: true, force: true });
+    }
   }
 
   private finishTermination(): void {

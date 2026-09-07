@@ -1,5 +1,5 @@
-//! Coexistence ownership and explicit, offline snapshot transfer.
-//! This module never adopts an installed Electron database as writable storage.
+//! Shared desktop storage, isolated ownership, and offline snapshot transfer.
+//! Shared access validates the Electron schema before opening it for writes.
 use crate::{Error, Result};
 use rusqlite::{backup::StepResult, Connection, OpenFlags};
 use serde_json::{json, Value};
@@ -12,6 +12,8 @@ use std::{
 
 const MARKER: &str = ".loomtv-tauri-storage-v1";
 const IDENTITY: &[u8] = b"com.mallenkb.loomtv.tauri\nstorage=1\n";
+const LEGACY_MARKER: &str = "tauri-storage-v1";
+const LEGACY_IDENTITY: &[u8] = b"LoomTV Tauri storage version 1\n";
 const MAX_SNAPSHOT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// The file remains open until the SQLite connection and its users are dropped.
@@ -156,10 +158,27 @@ pub(crate) fn create_private(path: &Path) -> Result<File> {
 
 impl StorageLease {
     pub(crate) fn acquire(directory: &Path) -> Result<Self> {
+        Self::acquire_mode(directory, false)
+    }
+
+    pub(crate) fn acquire_shared(directory: &Path) -> Result<Self> {
+        Self::acquire_mode(directory, true)
+    }
+
+    fn acquire_mode(directory: &Path, shared: bool) -> Result<Self> {
         let database = directory.join("loomtv.sqlite");
         let marker = directory.join(MARKER);
+        let legacy_marker = directory.join(LEGACY_MARKER);
+        let legacy_owned = if !marker.exists() && legacy_marker.exists() {
+            regular_file(&legacy_marker)?;
+            let mut value = Vec::new();
+            File::open(&legacy_marker)?.take(128).read_to_end(&mut value)?;
+            value == LEGACY_IDENTITY
+        } else {
+            false
+        };
         // Check before creating a lock or changing permissions in an existing store.
-        if fs::symlink_metadata(&database).is_ok() && !marker.is_file() {
+        if fs::symlink_metadata(&database).is_ok() && !marker.is_file() && !legacy_owned && !shared {
             return Err(Error::new("storage_not_owned", "This database is not Tauri-owned. Import a closed backup into a new directory instead."));
         }
         private_directory(directory)?;
@@ -184,13 +203,27 @@ impl StorageLease {
         };
         regular_file(&path)?;
         file.try_lock().map_err(|_| Error::new("storage_in_use", "Another Tauri process is using this directory. Close it before importing or launching again."))?;
-        if !marker.exists() && database.exists() {
+        if !marker.exists() && database.exists() && !legacy_owned && !shared {
             return Err(Error::new(
                 "storage_not_owned",
                 "Import the existing database into a new Tauri directory.",
             ));
         }
-        if !marker.exists() {
+        if shared {
+            if database.exists() {
+                let source = connection(&database, true)?;
+                validate_snapshot(&source)?;
+            }
+        } else if !marker.exists() {
+            if legacy_owned && database.exists() {
+                // Earlier Tauri builds used a different ownership marker.
+                // Keep their data and caches, and preserve a consistent SQLite
+                // backup including any committed WAL pages before upgrading.
+                let source = connection(&database, true)?;
+                source.execute_batch("BEGIN")?;
+                validate_snapshot(&source)?;
+                backup(&source, &directory.join("backups"))?;
+            }
             let mut marker = create_private(&marker)?;
             marker.write_all(IDENTITY)?;
             marker.sync_all()?;
@@ -260,7 +293,8 @@ fn validate_snapshot(db: &Connection) -> Result<()> {
             "The snapshot failed integrity, foreign-key or schema safety checks.",
         ));
     }
-    // Compare declared columns, not provider/user values or SQLite's SQL formatting.
+    // Migration histories can produce different column orders. Compare by name.
+    // Electron removes the old unscoped playback tables after profile migration.
     let expected = Connection::open_in_memory()?;
     expected.execute_batch(include_str!("desktop-schema.sql"))?;
     let tables = expected
@@ -270,16 +304,22 @@ fn validate_snapshot(db: &Connection) -> Result<()> {
     for table in tables {
         let columns = |database: &Connection| -> Result<Vec<(String, String, bool, i64)>> {
             Ok(database
-                .prepare("SELECT name,type,\"notnull\",pk FROM pragma_table_info(?) ORDER BY cid")?
+                .prepare("SELECT name,type,\"notnull\",pk FROM pragma_table_info(?) ORDER BY name")?
                 .query_map([&table], |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()?)
         };
-        if columns(db)? != columns(&expected)? {
+        let actual = columns(db)?;
+        if actual.is_empty()
+            && matches!(table.as_str(), "playback_progress_legacy" | "playback_track_preferences_legacy")
+        {
+            continue;
+        }
+        if actual != columns(&expected)? {
             return Err(Error::new(
                 "invalid_snapshot_schema",
-                "The snapshot does not match the supported desktop schema.",
+                format!("Desktop table '{table}' does not match the supported schema."),
             ));
         }
     }

@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "engine": "mpv",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "sourceLayout": "mpv 0.41.0 macOS 14 arm application runtime",
+  "files": [
+    {
+      "path": "mpv.app/Contents/MacOS/mpv"
+    }
+  ]
+}

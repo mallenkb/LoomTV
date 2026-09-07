@@ -386,7 +386,7 @@ function AppShell() {
     || location.pathname.startsWith('/settings/')
     || location.hash.includes('/settings');
   const showContinueBarOnRoute = ['/', '/anime', '/tv', '/movies'].includes(location.pathname);
-  const showLibraryFilter = !nowPlaying && isLibraryFilterPath(location.pathname);
+  const showLibraryFilter = !nowPlaying && !gateOpen && isLibraryFilterPath(location.pathname);
   const hideContinueBar = Boolean(nowPlaying) || !showContinueBarOnRoute;
   const reserveContinueBarSpace = showContinueBarOnRoute && !nowPlaying;
   const appUnderlayHidden = Boolean(nowPlaying || gateOpen);

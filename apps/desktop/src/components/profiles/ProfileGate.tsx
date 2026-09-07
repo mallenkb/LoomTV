@@ -356,12 +356,12 @@ function ProfileCard({
       >
         <span
           className={cn(
-            'relative block aspect-square w-[clamp(88px,10vw,176px)] rounded-full border-4 transition-transform duration-150',
+            'relative block h-[clamp(88px,10vw,176px)] w-[clamp(88px,10vw,176px)] shrink-0 rounded-full border-4 transition-transform duration-150',
             active ? 'border-[var(--loom-accent)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--loom-accent)_35%,transparent)]' : 'border-transparent',
             'group-hover:scale-105 group-hover:border-[var(--loom-accent)] group-focus-visible:scale-105 group-focus-visible:border-[var(--loom-accent)]',
           )}
         >
-          <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} className="rounded-full" />
+          <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} className="absolute inset-0 rounded-full" />
           {editMode && (
             <span className="absolute bottom-0 right-0 grid h-[clamp(30px,2.8vw,42px)] w-[clamp(30px,2.8vw,42px)] place-items-center rounded-full bg-[var(--loom-text)] text-[var(--loom-bg)] shadow-lg">
               <Pencil className="h-[45%] w-[45%]" />

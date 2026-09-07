@@ -334,9 +334,8 @@ export default function VideoPlayer({
   const [mediaSessionStopped, setMediaSessionStopped] = useState(false);
   const nativePlaybackEndedRef = useRef(false);
   const libVlcEofReachedRef = useRef(false);
-  // Tauri's libmpv adapter renders into the same composited native host as
-  // LibVLC. Electron's mpv sidecar keeps its external-window surface, so its
-  // viewport must remain outside this path.
+  // Only engines reporting an in-window surface participate in native layout.
+  // The MPV process currently uses an external window in both desktop apps.
   const libVlcSurfaceActive = nativePlaybackActive && (
     nativeEngineKind === 'libvlc'
     || playbackEngineRef.current?.surface === 'composited-window'
