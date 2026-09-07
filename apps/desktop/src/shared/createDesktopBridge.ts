@@ -121,7 +121,9 @@ const desktopApi = {
   setFullscreen: (enabled: boolean) => electronIpcRenderer.invoke('window:set-fullscreen', enabled) as Promise<boolean>,
   setWindowChromeVisible: (visible: boolean) => electronIpcRenderer.invoke('window:set-chrome-visible', visible) as Promise<boolean>,
   onFullscreenChanged: (callback: (fullscreen: boolean) => void) => {
-    const handler = (_: unknown, fullscreen: boolean) => callback(Boolean(fullscreen));
+    const handler: Parameters<DesktopTransport['on']>[1] = (_: unknown, ...args: unknown[]) => {
+      callback(Boolean(args[0]));
+    };
     electronIpcRenderer.on('window:fullscreen-changed', handler);
     return () => electronIpcRenderer.removeListener('window:fullscreen-changed', handler);
   },
@@ -335,7 +337,11 @@ const desktopApi = {
       electronIpcRenderer.invoke('libvlc:set-fullscreen-transition', transitioning, waitForFinalViewport) as Promise<boolean>,
     setViewport: (viewport: PlaybackViewport) => electronIpcRenderer.invoke('libvlc:set-viewport', viewport) as Promise<boolean>,
     onState: (callback: (state: LibVlcPlaybackState) => void) => {
-      const handler = (_: unknown, state: LibVlcPlaybackState) => callback(state);
+      const handler: Parameters<DesktopTransport['on']>[1] = (_: unknown, ...args: unknown[]) => {
+        const state = args[0];
+        if (typeof state !== 'object' || state === null) return;
+        callback(state as LibVlcPlaybackState);
+      };
       electronIpcRenderer.on('libvlc:state', handler);
       return () => electronIpcRenderer.removeListener('libvlc:state', handler);
     },
