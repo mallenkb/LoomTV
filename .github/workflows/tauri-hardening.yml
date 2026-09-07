@@ -24,6 +24,7 @@ jobs:
         run: |
           mkdir -p evidence
           python3 .github/tauri-hardening/apply.py
+          python3 .github/tauri-hardening/catalog-fix.py
           cargo fmt --all
           git add -N crates/loomtv-core/src/content_ratings.rs crates/loomtv-core/fixtures/content-ratings.json
           git diff --check
