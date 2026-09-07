@@ -25,7 +25,7 @@
         "hiddenTitle": true,
         "trafficLightPosition": {
           "x": 16,
-          "y": 16
+          "y": 25
         },
         "create": false
       }
@@ -34,7 +34,7 @@
       "capabilities": [
         "main"
       ],
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' loomtv: plexserver: data: blob: https: http://127.0.0.1:*; media-src 'self' loomtv: plexserver: blob: https: http://127.0.0.1:*; connect-src 'self' loomtv: plexserver: ipc: http://ipc.localhost http://127.0.0.1:* https:; font-src 'self' data:; frame-src https://www.youtube-nocookie.com https://www.youtube.com; object-src 'none'; base-uri 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' loomtv: plexserver: data: blob: http: https: http://127.0.0.1:*; media-src 'self' loomtv: plexserver: blob: https: http://127.0.0.1:*; connect-src 'self' loomtv: plexserver: ipc: http://ipc.localhost http://127.0.0.1:* https:; font-src 'self' data:; frame-src https://www.youtube-nocookie.com https://www.youtube.com; object-src 'none'; base-uri 'none'"
     }
   },
   "bundle": {

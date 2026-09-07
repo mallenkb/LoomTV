@@ -334,7 +334,13 @@ export default function VideoPlayer({
   const [mediaSessionStopped, setMediaSessionStopped] = useState(false);
   const nativePlaybackEndedRef = useRef(false);
   const libVlcEofReachedRef = useRef(false);
-  const libVlcSurfaceActive = nativePlaybackActive && nativeEngineKind === 'libvlc';
+  // Tauri's libmpv adapter renders into the same composited native host as
+  // LibVLC. Electron's mpv sidecar keeps its external-window surface, so its
+  // viewport must remain outside this path.
+  const libVlcSurfaceActive = nativePlaybackActive && (
+    nativeEngineKind === 'libvlc'
+    || playbackEngineRef.current?.surface === 'composited-window'
+  );
 
   // The renderer is transparent only while a live native surface is expected
   // beneath it. Derive that global class from React state so an unmount, retry,

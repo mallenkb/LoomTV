@@ -2,6 +2,7 @@ import { memo, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Star } from 'lucide-react';
 import { epCode } from './helpers';
+import { normalizeIptvLogoUrl } from '@/shared/iptvLogoUrl';
 
 type PauseOverlayProps = {
   visible: boolean;
@@ -29,7 +30,9 @@ function PauseOverlay({
   const [logoIndex, setLogoIndex] = useState(0);
   const logoSourceKey = logoSources.join('\n');
   useEffect(() => setLogoIndex(0), [logoSourceKey, visible]);
-  const logoSource = logoSources[logoIndex] || '';
+  const logoSource = isLiveStream
+    ? normalizeIptvLogoUrl(logoSources[logoIndex])
+    : logoSources[logoIndex] || '';
 
   return (
     <AnimatePresence>
@@ -64,6 +67,7 @@ function PauseOverlay({
                 src={logoSource}
                 alt={title}
                 decoding="async"
+                referrerPolicy="no-referrer"
                 className={`${isLiveStream ? 'mb-3 h-[6.2rem] max-h-[20vh]' : 'mb-4 h-40 max-h-[28vh]'} w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]`}
                 onError={(event) => {
                   event.currentTarget.style.display = 'none';

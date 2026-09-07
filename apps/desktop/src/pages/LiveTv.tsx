@@ -9,6 +9,7 @@ import { desktopApi } from '@/lib/desktopApi';
 import { iptvSourceDisplayName } from '@/lib/liveTvSources';
 import type { IptvChannelPage, IptvChannelSort, IptvChannelSummary, IptvGeoFilter } from '@/shared/desktopProtocol';
 import { buildIptvPlaybackReference } from '@/shared/iptvPlayback';
+import { normalizeIptvLogoUrl } from '@/shared/iptvLogoUrl';
 
 const CHANNEL_PAGE_SIZE = 120;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -65,7 +66,10 @@ function ChannelCard({
   onPlay: () => void;
 }) {
   const [logoFailed, setLogoFailed] = useState(false);
+  const logoUrl = useMemo(() => normalizeIptvLogoUrl(channel.logoUrl), [channel.logoUrl]);
   const progress = programmeProgress(channel, nowMs);
+
+  useEffect(() => setLogoFailed(false), [logoUrl]);
 
   return (
     <button
@@ -76,11 +80,15 @@ function ChannelCard({
     >
       <div className="flex items-center gap-3">
         <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--loom-surface-2)]">
-          {channel.logoUrl && !logoFailed ? (
+          {logoUrl && !logoFailed ? (
             <img
-              src={channel.logoUrl}
+              src={logoUrl}
               alt=""
-              loading="lazy"
+              loading="eager"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              width={48}
+              height={48}
               onError={() => setLogoFailed(true)}
               className="h-full w-full object-contain p-1"
             />
@@ -359,7 +367,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                           key={channel.channelId}
                           channel={channel}
                           nowMs={nowMs}
-                          onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, channel.logoUrl)}
+                          onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, normalizeIptvLogoUrl(channel.logoUrl) || undefined)}
                         />
                       ))}
                     </div>
@@ -373,7 +381,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                     key={channel.channelId}
                     channel={channel}
                     nowMs={nowMs}
-                    onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, channel.logoUrl)}
+                    onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, normalizeIptvLogoUrl(channel.logoUrl) || undefined)}
                   />
                 ))}
               </div>

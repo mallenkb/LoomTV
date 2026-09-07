@@ -46,7 +46,10 @@ impl PlaybackService {
             // Native pointers and the loaded library never leave this owner thread.
             let mut player:Option<Player>=None;
             loop {
-                match receiver.recv_timeout(Duration::from_millis(100)) {
+                // Native subtitle overlays follow the playback timestamp
+                // emitted after each snapshot. Keep this cadence close to a
+                // video frame so cues do not visibly trail the picture.
+                match receiver.recv_timeout(Duration::from_millis(16)) {
                     Ok(Request::Start{source,options,drawable,reply}) => {
                         let result=(|| {
                             if let Some(mut previous)=player.take() { previous.close(); emit(json!({"sessionId":previous.session,"status":"closed"})); }

@@ -22,6 +22,7 @@ export const tmdbGenreResponseSchema = z.object({ genres: z.array(tmdbGenreSchem
 
 const tmdbListResultSchema = z.object({
   id: z.number().int(),
+  original_language: z.string().optional(),
   title: z.string().optional(),
   name: z.string().optional(),
   overview: z.string().optional(),

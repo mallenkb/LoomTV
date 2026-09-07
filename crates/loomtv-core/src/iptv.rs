@@ -1045,10 +1045,10 @@ fn parse_m3u_playlist(text: &str) -> ParsedPlaylist {
             tvg_id.clone()
         };
         let channel_id = unique_channel_id(&base_id, &mut used_ids);
-        let logo_url = attributes
-            .get("tvg-logo")
-            .filter(|value| is_https_url(value))
-            .map(|value| truncate(value, MAX_URL_CHARS))
+        let logo_url = ["tvg-logo", "logo"]
+            .iter()
+            .filter_map(|key| attributes.get(*key))
+            .find_map(|value| normalize_logo_url(value))
             .unwrap_or_default();
         let declared_geo = attributes
             .get("geo-blocked")
@@ -1138,6 +1138,28 @@ fn is_https_url(value: &str) -> bool {
                 && url.username().is_empty()
                 && url.password().is_none()
         })
+}
+
+fn normalize_logo_url(value: &str) -> Option<String> {
+    let decoded = value.trim().replace("&amp;", "&");
+    let trimmed = decoded.trim_matches(['\'', '"']);
+    if trimmed.is_empty() || trimmed.chars().count() > MAX_URL_CHARS {
+        return None;
+    }
+    let candidate = if trimmed.starts_with("//") {
+        format!("https:{trimmed}")
+    } else {
+        trimmed.to_owned()
+    };
+    let url = Url::parse(&candidate).ok()?;
+    if url.scheme() != "https"
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    Some(url.to_string())
 }
 
 fn parse_xmltv_guide(text: &str, known_ids: &HashSet<String>) -> Vec<ParsedProgramme> {

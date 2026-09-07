@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { MotionConfig } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
@@ -351,6 +351,20 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 }
 
 function AppShell() {
+  const pageRef = useRef<HTMLElement>(null);
+  const route = useLocation();
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    if (!page || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    // One compositor opacity transition per route. Keep the element in place
+    // so fixed controls retain their viewport coordinates.
+    page.style.willChange = 'opacity';
+    const animation = page.animate([{ opacity: 0.75 }, { opacity: 1 }], {
+      duration: 160, easing: 'ease-out',
+    });
+    animation.onfinish = () => { page.style.willChange = ''; };
+    return () => { animation.cancel(); page.style.willChange = ''; };
+  }, [route.pathname]);
   const { state: libraryState } = useLibrary();
   const { activeProfile, gateOpen, openGate } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
@@ -505,6 +519,7 @@ function AppShell() {
         aria-hidden="true"
       />
       <main
+        ref={pageRef}
         className="flex-1 overflow-hidden"
         // The now-playing bar is 93px tall before its shell padding. Keep a
         // full breathing band below every library grid so its final row can be

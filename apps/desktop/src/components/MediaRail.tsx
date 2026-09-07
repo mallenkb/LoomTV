@@ -34,12 +34,13 @@ export function useRailScroll() {
     const rail = railRef.current;
     if (!rail) return;
     const maxScrollLeft = rail.scrollWidth - rail.clientWidth;
-    setOverflow({
+    const next = {
       left: rail.scrollLeft > 1,
       // A fractional gap of a pixel is normal at the end of a scroll, so treat
       // anything under 1px of remaining travel as fully scrolled.
       right: maxScrollLeft - rail.scrollLeft > 1,
-    });
+    };
+    setOverflow((current) => current.left === next.left && current.right === next.right ? current : next);
   }, []);
 
   useEffect(() => {
@@ -89,7 +90,7 @@ export function useRailScroll() {
       setIsDragging(true);
       rail.setPointerCapture(event.pointerId);
     }
-    rail.scrollLeft = drag.startScrollLeft - distance;
+    rail.scrollTo({ left: drag.startScrollLeft - distance, behavior: 'instant' });
     event.preventDefault();
   };
 

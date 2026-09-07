@@ -1,4 +1,5 @@
 import { iptvChannelSearchText } from '../../shared/iptvSearch.ts';
+import { normalizeIptvLogoUrl } from '../../shared/iptvLogoUrl.ts';
 
 /**
  * Extended M3U is the interchange format every IPTV provider speaks, and the
@@ -99,13 +100,14 @@ function isHttpStreamUrl(value: string): boolean {
   }
 }
 
-function safeLogoUrl(value: string): string {
-  if (!value || value.length > MAX_URL_LENGTH) return '';
-  try {
-    return new URL(value).protocol === 'https:' ? value : '';
-  } catch {
-    return '';
+function safeLogoUrl(...values: string[]): string {
+  for (const value of values) {
+    const normalized = normalizeIptvLogoUrl(value);
+    if (normalized && normalized.length <= MAX_URL_LENGTH && normalized.startsWith('https://')) {
+      return normalized;
+    }
   }
+  return '';
 }
 
 function isGeoBlockedEntry(attributes: Record<string, string>, title: string): boolean {
@@ -202,7 +204,7 @@ export function parseM3uPlaylist(text: string): ParsedIptvPlaylist {
       name,
       tvgId,
       tvgName,
-      logoUrl: safeLogoUrl(entry.attributes['tvg-logo'] || ''),
+      logoUrl: safeLogoUrl(entry.attributes['tvg-logo'] || '', entry.attributes.logo || ''),
       groupTitle,
       isGeoBlocked: isGeoBlockedEntry(entry.attributes, name),
       streamUrl,

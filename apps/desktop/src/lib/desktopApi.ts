@@ -365,7 +365,7 @@ export type DesktopBridgeApi = {
         chooseExecutable: () => Promise<MpvAvailability>;
         resetExecutable: () => Promise<MpvAvailability>;
         refreshAvailability: () => Promise<MpvAvailability>;
-        start: (filePath: string, options?: MpvStartOptions) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+        start: (filePath: string, options?: MpvStartOptions) => Promise<{ ok: boolean; sessionId?: string; surface?: 'composited-window' | 'external-window'; error?: string }>;
         command: (sessionId: string, command: MpvCommand) => Promise<boolean>;
         stop: (sessionId: string) => Promise<boolean>;
         onState: (callback: (state: MpvPlaybackState) => void) => () => void;
@@ -2008,7 +2008,7 @@ export const desktopApi = {
       return window.desktopApi.mpv.refreshAvailability();
     },
 
-    async start(filePath: string, options?: MpvStartOptions): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
+    async start(filePath: string, options?: MpvStartOptions): Promise<{ ok: boolean; sessionId?: string; surface?: 'composited-window' | 'external-window'; error?: string }> {
       if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
         return { ok: false, error: 'mpv playback is unavailable for this media source.' };
       }

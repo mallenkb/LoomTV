@@ -314,9 +314,20 @@ type MediaItem = MetadataMediaItem;
 
 const { extractSeasons, scanEpisodeFiles } = createLibraryScanFilesAsync(probeMediaFileAsync);
 
+const BROKEN_CONSOLE_STREAM_ERRORS = new Set([
+  'EPIPE',
+  'EIO',
+  'EBADF',
+  'ECONNRESET',
+  'ERR_STREAM_DESTROYED',
+]);
+
 function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code !== 'EPIPE') throw error;
+    // Electron can inherit a closed or unavailable stdout/stderr when it is
+    // launched from Finder. Logging must never turn that broken descriptor
+    // into an uncaught main-process exception.
+    if (!error.code || !BROKEN_CONSOLE_STREAM_ERRORS.has(error.code)) throw error;
   });
 }
 
@@ -1553,7 +1564,7 @@ function configureRendererSecurityPolicy(): void {
     "default-src 'self' file: data: blob:",
     `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' file: 'unsafe-inline'",
-    "img-src 'self' file: data: blob: http://127.0.0.1:* http://localhost:* https: loomtv: plexserver:",
+    "img-src 'self' file: data: blob: http: https: http://127.0.0.1:* http://localhost:* loomtv: plexserver:",
     "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* https: loomtv: plexserver:",
     `connect-src ${connectSrc.join(' ')}`,
     "font-src 'self' file: data:",

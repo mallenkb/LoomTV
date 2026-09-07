@@ -158,6 +158,8 @@ export type MpvPlaybackDiagnostics = {
 
 export type MpvAvailability = {
   available: boolean;
+  surface?: 'composited-window' | 'external-window' | 'unavailable';
+  libraryPath?: string;
   executablePath?: string;
   runtimeSource?: 'environment' | 'user-selected' | 'bundled' | 'system';
   version?: string;

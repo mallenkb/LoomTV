@@ -121,7 +121,7 @@ export interface IpcContract {
   'mpv:choose-executable': { args: []; result: MpvAvailability };
   'mpv:reset-executable': { args: []; result: MpvAvailability };
   'mpv:refresh-availability': { args: []; result: MpvAvailability };
-  'mpv:start': { args: [filePath: string, options?: MpvStartOptions]; result: { ok: boolean; sessionId?: string; error?: string } };
+  'mpv:start': { args: [filePath: string, options?: MpvStartOptions]; result: { ok: boolean; sessionId?: string; surface?: 'composited-window' | 'external-window'; error?: string } };
   'mpv:command': { args: [sessionId: string, command: MpvCommand]; result: boolean };
   'mpv:stop': { args: [sessionId: string]; result: boolean };
   'network:discover-peers': { args: [timeoutMs?: number]; result: LocalNetworkPeer[] };

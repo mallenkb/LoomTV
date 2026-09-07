@@ -4,6 +4,7 @@ import type {
   PlaybackEngine,
   PlaybackEngineState,
   PlaybackEngineStateListener,
+  PlaybackEngineSurface,
   PlaybackStartOptions,
 } from './PlaybackEngine';
 import PlaybackVolumeController from './PlaybackVolumeController';
@@ -12,7 +13,7 @@ const SEEK_COALESCE_MS = 16;
 
 export default class MpvPlaybackEngine implements PlaybackEngine {
   readonly kind = 'mpv' as const;
-  readonly surface = 'external-window' as const;
+  surface: PlaybackEngineSurface = 'external-window';
   private sessionId: string | null = null;
   private readonly pendingStates: PlaybackEngineState[] = [];
   private readonly unsubscribe: () => void;
@@ -50,6 +51,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
       this.lastPauseCommand = null;
       throw new Error(result.error || 'Native mpv playback could not be started.');
     }
+    this.surface = result.surface === 'composited-window' ? 'composited-window' : 'external-window';
     this.sessionId = result.sessionId;
     this.pendingStates.splice(0).forEach((state) => {
       if (state.sessionId === this.sessionId) this.emitState(state);
