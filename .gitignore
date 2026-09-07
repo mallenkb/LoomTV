@@ -101,3 +101,6 @@ apps/desktop/resources/fpcalc/win/fpcalc.exe
 # Locally generated mobile release binaries. Keep the verification record and
 # screenshots in git, but publish installable artifacts through release storage.
 apps/mobile/release-evidence/**/verification/artifacts/
+
+# Rust/Cargo build artifacts
+target/
