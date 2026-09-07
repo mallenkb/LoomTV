@@ -557,8 +557,10 @@ impl Store {
             if let Some(path) = source.get("filePath").and_then(Value::as_str) {
                 if !path.is_empty() {
                     let mut reference = json!({"progressKey": path});
-                    if let Some(duration) = source["localMetadata"]["durationSeconds"]
-                        .as_f64()
+                    if let Some(duration) = source
+                        .get("localMetadata")
+                        .and_then(|metadata| metadata.get("durationSeconds"))
+                        .and_then(Value::as_f64)
                         .filter(|duration| *duration > 0.0)
                     {
                         reference["durationSeconds"] = json!(duration);
@@ -699,5 +701,54 @@ impl Store {
             "revision": self.catalog_revision()?,
             "item": self.full_item(row, &profile)?,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_movie_cards_do_not_require_optional_probe_metadata() {
+        let base = json!({"id":"fixture","type":"movie","title":"New movie","poster":"","backdrop":"","summary":"","rating":0,"genres":[],"filePath":"/fixture/new.mp4"});
+        let card = Store::card(&base).unwrap();
+        assert_eq!(
+            card["playbackReferences"],
+            json!([{"progressKey":"/fixture/new.mp4"}])
+        );
+        assert!(card.get("filePath").is_none());
+        assert!(card.get("localMetadata").is_none());
+        for metadata in [
+            Value::Null,
+            json!({}),
+            json!({"durationSeconds":0}),
+            json!({"durationSeconds":-1}),
+            json!({"durationSeconds":"invalid"}),
+        ] {
+            let mut item = base.clone();
+            item["localMetadata"] = metadata;
+            assert_eq!(
+                Store::card(&item).unwrap()["playbackReferences"],
+                card["playbackReferences"]
+            );
+        }
+        let mut probed = base;
+        probed["localMetadata"] = json!({"durationSeconds":65});
+        assert_eq!(
+            Store::card(&probed).unwrap()["playbackReferences"][0]["durationSeconds"],
+            65.0
+        );
+    }
+
+    #[test]
+    fn episode_cards_preserve_track_identity_without_optional_metadata() {
+        let item = json!({"id":"show","type":"tv","title":"New show","episodeFiles":[{"filePath":"/fixture/S01E02.mp4","season":1,"episode":2},{"filePath":"/fixture/S01E03.mp4","season":1,"episode":3,"localMetadata":{"durationSeconds":65}}]});
+        let card = Store::card(&item).unwrap();
+        assert_eq!(
+            card["playbackReferences"][0],
+            json!({"progressKey":"/fixture/S01E02.mp4","season":1,"episode":2})
+        );
+        assert_eq!(card["playbackReferences"][1]["durationSeconds"], 65.0);
+        assert!(card.get("episodeFiles").is_none());
     }
 }

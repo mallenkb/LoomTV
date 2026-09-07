@@ -159,7 +159,7 @@ impl Store {
             }
             "library:scan" => {
                 self.require_owner()?;
-                return Err(Error::unsupported(channel));
+                Err(Error::unsupported(channel))
             }
             "media:get-file-info" => {
                 let path = self.authorize_media(string(args, 0)?)?;

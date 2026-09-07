@@ -29,8 +29,34 @@ fn generated_media_probe_hls_seek_range_and_revocation() {
         let owner: String = store.db.query_row("SELECT id FROM profiles WHERE profile_type='owner'",[],|r|r.get(0)).unwrap();
         store.select_profile(&owner,None).unwrap();
         store.add_folder("movies",media_dir.to_str().unwrap()).unwrap();
-        store.db.execute("INSERT INTO media_items(id,type,title,file_path,updated_at) VALUES ('fixture','movie','Fixture',?,0)",[source.to_str().unwrap()]).unwrap();
         let store = Arc::new(Mutex::new(store));
+        let library = scan_fixture(store.clone()).await.unwrap();
+        assert_eq!(library["movies"].as_array().unwrap().len(),1);
+        let media_id = library["movies"][0]["id"].as_str().unwrap().to_owned();
+        {
+            let store = store.lock().await;
+            assert_eq!(store.library_item(&media_id).unwrap()["item"]["filePath"],source.to_str().unwrap());
+            store.db.execute("UPDATE media_items SET title='Manual fixture title' WHERE id=?",[&media_id]).unwrap();
+            store.db.execute("INSERT INTO playback_progress(profile_id,file_path,position,duration,updated_at) VALUES (?,?,12,65,1)",rusqlite::params![owner,source.to_str().unwrap()]).unwrap();
+            store.db.execute("INSERT INTO profile_media_lists(profile_id,media_id,list_kind,created_at) VALUES (?,?,'watchlist',1)",rusqlite::params![owner,media_id]).unwrap();
+        }
+        let repeated = scan_fixture(store.clone()).await.unwrap();
+        assert_eq!(repeated["movies"][0]["id"],media_id);
+        assert_eq!(repeated["movies"][0]["title"],"Manual fixture title");
+        let offline = root.join("offline-media");
+        tokio::fs::rename(&media_dir,&offline).await.unwrap();
+        assert_eq!(scan_fixture(store.clone()).await.unwrap_err().code,"library_unavailable");
+        {
+            let store = store.lock().await;
+            let library = store.library(true).unwrap();
+            assert_eq!(library["movies"][0]["id"],media_id);
+            assert_eq!(library["libraryFolderStatuses"][0]["state"],"unavailable");
+            let position: f64 = store.db.query_row("SELECT position FROM playback_progress WHERE profile_id=? AND file_path=?",rusqlite::params![owner,source.to_str().unwrap()],|row|row.get(0)).unwrap();
+            assert_eq!(position,12.0);
+            let saved: bool = store.db.query_row("SELECT EXISTS(SELECT 1 FROM profile_media_lists WHERE profile_id=? AND media_id=?)",rusqlite::params![owner,media_id],|row|row.get(0)).unwrap();
+            assert!(saved);
+        }
+        tokio::fs::rename(&offline,&media_dir).await.unwrap();
         let (server,stop) = MediaServer::start(store.clone(),Arc::new(RemoteClient::default()),Some(ffmpeg),Some(ffprobe)).await.unwrap();
         let probe = server.probe.probe(store.clone(),source.to_str().unwrap()).await.unwrap();
         assert_eq!(probe["videoCodec"],"h264");
@@ -87,4 +113,18 @@ fn generated_media_probe_hls_seek_range_and_revocation() {
         assert!(root.join("TEST-OWNED").is_file());
         tokio::fs::remove_dir_all(root).await.unwrap();
     });
+}
+
+async fn scan_fixture(store: Arc<Mutex<Store>>) -> crate::Result<serde_json::Value> {
+    let request = store.lock().await.scan_request()?;
+    tokio::task::spawn_blocking(move || {
+        crate::scanner::scan(
+            store,
+            request,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::new(|_| {}),
+        )
+    })
+    .await
+    .unwrap()
 }

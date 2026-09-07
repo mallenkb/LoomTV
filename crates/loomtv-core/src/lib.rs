@@ -3,6 +3,7 @@ mod artwork_import;
 mod catalog;
 mod clear;
 mod content_policy;
+mod content_ratings;
 pub mod discovery;
 pub mod hls;
 pub mod iptv;

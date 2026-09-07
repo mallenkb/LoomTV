@@ -629,10 +629,11 @@ impl Transcodes {
             let mut expire = invalid;
             if let Ok(mut encoder) = session.state.try_lock() {
                 expire |= encoder.last_activity.elapsed() >= SESSION_IDLE;
-                if !expire && encoder.last_activity.elapsed() >= ENCODER_IDLE {
-                    if stop_encoder(&mut encoder).await.is_err() {
-                        expire = true;
-                    }
+                if !expire
+                    && encoder.last_activity.elapsed() >= ENCODER_IDLE
+                    && stop_encoder(&mut encoder).await.is_err()
+                {
+                    expire = true;
                 }
                 if !expire && self.prune(&session, &encoder).await.is_err() {
                     expire = true;
@@ -725,7 +726,7 @@ fn validate_options(value: &Value) -> Result<Value> {
         if let Some(value) = object.get(field) {
             if !value
                 .as_f64()
-                .is_some_and(|n| n.is_finite() && n >= 0.0 && n <= 1_000_000.0)
+                .is_some_and(|n| n.is_finite() && (0.0..=1_000_000.0).contains(&n))
             {
                 return Err(invalid_options());
             }
@@ -854,52 +855,6 @@ fn selected_media_info(probe: &Value, options: &Value) -> Result<Value> {
     Ok(
         json!({"videoCodec":video["codec"],"videoProfile":video["profile"],"pixelFormat":video["pixelFormat"],"colorTransfer":video["colorTransfer"],"colorPrimaries":video["colorPrimaries"],"colorSpace":video["colorSpace"],"frameRate":video["frameRate"],"audioCodec":audio.map(|a| a["codec"].clone())}),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn segment_names_cannot_escape_the_session_directory() {
-        for name in [
-            "../segment-00000.ts",
-            "segment-00000.ts.tmp",
-            "segment--0001.ts",
-            "segment-0.ts",
-            "segment-000000.ts",
-            "/etc/passwd",
-            "segment-100000.ts",
-            "segment-00001.ts?x=1",
-        ] {
-            assert_eq!(segment_index(name), None, "{name}");
-        }
-        assert_eq!(segment_index("segment-00000.ts"), Some(0));
-        assert_eq!(segment_index("segment-99999.ts"), Some(99999));
-    }
-    #[test]
-    fn invalid_options_are_rejected_before_starting_a_process() {
-        for value in [
-            json!([]),
-            json!({"startSeconds":-1}),
-            json!({"preset":"shell"}),
-            json!({"audioTrackIndex":1.5}),
-            json!({"subtitleFilePath":"a\u{0}b"}),
-            json!({"codec":"unknown"}),
-        ] {
-            assert!(validate_options(&value).is_err());
-        }
-        assert!(validate_options(
-            &json!({"startSeconds":12.5,"audioTrackIndex":-1,"preset":"software"})
-        )
-        .is_ok());
-    }
-    #[test]
-    fn selected_tracks_use_stream_indices_not_ordinals() {
-        let probe = json!({"tracks":[{"index":2,"type":"video","codec":"h264","frameRate":24.0},{"index":5,"type":"audio","codec":"aac"},{"index":7,"type":"audio","codec":"ac3"}]});
-        let info = selected_media_info(&probe, &json!({"audioTrackIndex":7})).unwrap();
-        assert_eq!(info["audioCodec"], "ac3");
-        assert!(selected_media_info(&probe, &json!({"audioTrackIndex":1})).is_err());
-    }
 }
 
 pub fn router(service: Transcodes) -> axum::Router {
@@ -1036,4 +991,50 @@ async fn deliver_inner(
         ))
     };
     response.body(body).map_err(|_| invalid_options())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn segment_names_cannot_escape_the_session_directory() {
+        for name in [
+            "../segment-00000.ts",
+            "segment-00000.ts.tmp",
+            "segment--0001.ts",
+            "segment-0.ts",
+            "segment-000000.ts",
+            "/etc/passwd",
+            "segment-100000.ts",
+            "segment-00001.ts?x=1",
+        ] {
+            assert_eq!(segment_index(name), None, "{name}");
+        }
+        assert_eq!(segment_index("segment-00000.ts"), Some(0));
+        assert_eq!(segment_index("segment-99999.ts"), Some(99999));
+    }
+    #[test]
+    fn invalid_options_are_rejected_before_starting_a_process() {
+        for value in [
+            json!([]),
+            json!({"startSeconds":-1}),
+            json!({"preset":"shell"}),
+            json!({"audioTrackIndex":1.5}),
+            json!({"subtitleFilePath":"a\u{0}b"}),
+            json!({"codec":"unknown"}),
+        ] {
+            assert!(validate_options(&value).is_err());
+        }
+        assert!(validate_options(
+            &json!({"startSeconds":12.5,"audioTrackIndex":-1,"preset":"software"})
+        )
+        .is_ok());
+    }
+    #[test]
+    fn selected_tracks_use_stream_indices_not_ordinals() {
+        let probe = json!({"tracks":[{"index":2,"type":"video","codec":"h264","frameRate":24.0},{"index":5,"type":"audio","codec":"aac"},{"index":7,"type":"audio","codec":"ac3"}]});
+        let info = selected_media_info(&probe, &json!({"audioTrackIndex":7})).unwrap();
+        assert_eq!(info["audioCodec"], "ac3");
+        assert!(selected_media_info(&probe, &json!({"audioTrackIndex":1})).is_err());
+    }
 }

@@ -137,10 +137,12 @@ impl Store {
         }
         let ratings: Value = serde_json::from_str(&ratings)?;
         let country = restrictions["country"].as_str().unwrap_or("US");
-        Ok(match ratings[country]["minimumAge"].as_i64() {
-            Some(age) => age <= maximum,
-            None => restrictions["allowUnrated"] == true,
-        })
+        Ok(
+            match crate::content_ratings::stored_minimum_age(country, &ratings[country]) {
+                Some(age) => age <= maximum,
+                None => restrictions["allowUnrated"] == true,
+            },
+        )
     }
     pub fn authorize_subtitle(&self, media: &str, subtitle: &str) -> Result<()> {
         self.authorize_media(media)?;
