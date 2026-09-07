@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useLocation } from 'react-router';
+import { useLocation } from '@/lib/navigation';
 import { FolderPlus, Tv } from 'lucide-react';
 import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';

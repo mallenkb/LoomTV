@@ -1,10 +1,10 @@
+import { queryClient, queryScope, trimQueryCache } from './queryClient';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
-import { parseStoredValue, stremioCatalogItemSchema } from '@/lib/desktopDecoders';
+import { parseStoredValue } from '@/lib/desktopDecoders';
 import { z } from 'zod';
 
 export const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
 export const EXPLORE_ITEM_UPDATED_EVENT = 'loomtv:explore-item-updated';
-const EXPLORE_ITEM_CACHE_PREFIX = 'loomtv:explore-item-v2:';
 const DISCOVER_RETURN_ROUTE_TTL_MS = 7_200_000;
 const cachedDiscoverReturnRouteSchema = z.object({
   at: z.number().int().nonnegative(),
@@ -56,22 +56,12 @@ export function getCachedDiscoverReturnRoute(): string | null {
 
 export function cacheExploreItem(item: StremioPluginCatalogItem): void {
   if (typeof window === 'undefined' || !item.id || !item.type) return;
-  try {
-    window.sessionStorage.setItem(`${EXPLORE_ITEM_CACHE_PREFIX}${item.type}:${item.id}`, JSON.stringify(item));
-  } catch {
-    // Route state remains authoritative when session storage is unavailable.
-  }
+  queryClient.setQueryData(['explore', ...queryScope(), item.type, item.id], item);
+  trimQueryCache();
   window.dispatchEvent(new CustomEvent<StremioPluginCatalogItem>(EXPLORE_ITEM_UPDATED_EVENT, { detail: item }));
 }
 
 export function getCachedExploreItem(type: string, id?: string): StremioPluginCatalogItem | null {
-  if (typeof window === 'undefined' || !id) return null;
-  try {
-    const raw = window.sessionStorage.getItem(`${EXPLORE_ITEM_CACHE_PREFIX}${type}:${id}`);
-    if (!raw) return null;
-    const item = parseStoredValue(raw, stremioCatalogItemSchema.nullable(), null);
-    return item && item.id === id && item.type === type ? item : null;
-  } catch {
-    return null;
-  }
+  if (!id) return null;
+  return queryClient.getQueryData<StremioPluginCatalogItem>(['explore', ...queryScope(), type, id]) || null;
 }

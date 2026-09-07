@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from '@/lib/navigation';
 import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/LibraryContext';
@@ -514,14 +514,14 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
                 onError={requestHeroThumbnail}
                 priority
               />
-              <SafeArtwork
+              {document.documentElement.dataset.loomClient === 'browser' && <SafeArtwork
                 src={heroPosterSources[0] || resolvedHeroArtwork}
                 alt=""
                 className="loom-modern-hero-poster h-full w-full"
                 imgClassName="loom-modern-hero-image object-cover object-center"
                 onError={requestHeroThumbnail}
                 priority
-              />
+              />}
           </motion.div>
         </AnimatePresence>
         <div className="loom-modern-hero-vignette absolute inset-0" />

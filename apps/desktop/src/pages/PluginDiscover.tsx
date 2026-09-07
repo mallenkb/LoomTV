@@ -1,7 +1,8 @@
+import { cachedDesktopRead, queryClient, queryScope, trimQueryCache } from '@/lib/queryClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Compass, RefreshCw, WifiOff } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from '@/lib/navigation';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
 import LibrarySearch from '@/components/LibrarySearch';
@@ -18,7 +19,6 @@ import {
   aniListGenreResponseSchema,
   type AniListMediaResult,
 } from '@/lib/anilistSchemas';
-import { parseStoredValue } from '@/lib/desktopDecoders';
 import {
   tmdbContentRatingsResponseSchema,
   tmdbDetailResponseSchema,
@@ -42,21 +42,14 @@ import {
   DEFAULT_AVAILABILITY_REGION,
   DISCOVER_CACHE_STORAGE_KEY,
   DISCOVER_ROUTE,
-  DISCOVER_VIEW_STATE_STORAGE_KEY,
   buildDiscoverSearch,
-  discoverViewStateSchema,
-  getValidCachedItems,
-  hasCachedImageCandidate,
-  loadDiscoverCacheFromStorage,
   makeCacheId,
   nextMidnightAt,
   normalizeAvailabilityRegion,
   parseDiscoverFilterState,
   releaseYearOptions,
-  toLocalDateKey,
   type AvailabilityRegion,
   type CachedCacheId,
-  type DiscoverCacheState,
   type DiscoverSection,
   type DiscoverType,
 } from './PluginDiscover/discoverState';
@@ -809,14 +802,14 @@ async function tmdbCatalogContentRating(
   const contentRating = type === 'movie'
     ? tmdbContentRating({
         release_dates: await requestTmdbJson(
-          `${type}/${item.id}/release_dates`,
+          `${type}/${encodeURIComponent(item.id)}/release_dates`,
           credential,
           tmdbReleaseDatesResponseSchema,
         ),
       }, type)
     : tmdbContentRating({
         content_ratings: await requestTmdbJson(
-          `${type}/${item.id}/content_ratings`,
+          `${type}/${encodeURIComponent(item.id)}/content_ratings`,
           credential,
           tmdbContentRatingsResponseSchema,
         ),
@@ -856,7 +849,7 @@ async function enrichCatalogItemWithTmdbCredits(
   type: 'movie' | 'tv',
   credential: string,
 ): Promise<StremioPluginCatalogItem> {
-  const response = await requestTmdbJson(`${type}/${item.id}`, credential, tmdbDetailResponseSchema, {
+  const response = await requestTmdbJson(`${type}/${encodeURIComponent(item.id)}`, credential, tmdbDetailResponseSchema, {
     append_to_response: 'credits,images,videos,release_dates,content_ratings,watch/providers,external_ids',
   });
   const logoCandidates = tmdbLogoCandidates(response);
@@ -966,20 +959,12 @@ async function enrichAnimeCatalogMetadata(
   return enrichedItems;
 }
 
-const animeCatalogRequests = new Map<string, Promise<readonly StremioPluginCatalogItem[]>>();
-
 function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '', credential = '') {
-  const key = JSON.stringify([query.trim(), section, genre, year, Boolean(credential)]);
-  const pending = animeCatalogRequests.get(key);
-  if (pending) return pending;
-  const request = fetchAnimeCatalog(query, section, genre, year).catch((error) => {
-    if (!credential) throw error;
-    return fetchTmdbAnimeCatalog(query, section, genre, year, credential);
-  }).finally(() => {
-    if (animeCatalogRequests.get(key) === request) animeCatalogRequests.delete(key);
-  });
-  animeCatalogRequests.set(key, request);
-  return request;
+  return cachedDesktopRead('discover-anime', [query.trim(), section, genre, year, Boolean(credential)], () =>
+    fetchAnimeCatalog(query, section, genre, year).catch(error => {
+      if (!credential) throw error;
+      return fetchTmdbAnimeCatalog(query, section, genre, year, credential);
+    }));
 }
 
 async function fetchTmdbAnimeCatalog(query: string, section: DiscoverSection, genre: string, year: string, credential: string) {
@@ -1319,14 +1304,12 @@ export default function PluginDiscover() {
 export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) {
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
+  const [pageQueryScope] = useState(queryScope);
   const location = useLocation();
   const initialFilterState = useMemo(() => parseDiscoverFilterState(location.search), [location.search]);
   const isHome = mode === 'home';
   const routePath = isHome ? '/' : DISCOVER_ROUTE;
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const pendingScrollTopRef = useRef(0);
-  const [initialDiscoverCache] = useState(loadDiscoverCacheFromStorage);
-  const discoverCache = useRef<DiscoverCacheState>(initialDiscoverCache);
   const initialRegion = normalizeAvailabilityRegion(initialFilterState.region);
   const initialYearFilter = initialFilterState.yearFilter.trim();
   const initialResolvedYearFilter = /^(19|20)\d{2}$/.test(initialYearFilter) ? initialYearFilter : '';
@@ -1339,7 +1322,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     initialFilterState.platformFilter,
     initialRegion,
   );
-  const [initialCachedItems] = useState(() => getValidCachedItems(initialDiscoverCache, initialCacheId));
+  const [initialCachedItems] = useState(() => queryClient.getQueryData<readonly StremioPluginCatalogItem[]>(['discover', ...queryScope(), initialCacheId]));
   const [tmdbCredential, setTmdbCredential] = useState('');
   const [omdbCredential, setOmdbCredential] = useState('');
   const [query, setQuery] = useState(initialFilterState.query);
@@ -1368,22 +1351,9 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const yearRef = useRef('');
   const platformRef = useRef('');
   const regionRef = useRef<AvailabilityRegion>(initialRegion);
-  const detailsCache = useRef(new Map<string, Promise<StremioPluginCatalogItem>>());
-  const providerOptionsCache = useRef<Record<string, ProviderOption[]>>({});
-  const providerLoadTracker = useRef<Record<string, Promise<ProviderOption[]> | null>>({});
   const regionWasExplicitRef = useRef(Boolean(initialFilterState.region.trim()));
-  const genreOptionsCache = useRef<Record<DiscoverType, GenreOption[]>>({
-    movie: [],
-    tv: [],
-    anime: [],
-  });
   const activeContentTypeRef = useRef<DiscoverType>(contentType);
   const previousContentTypeRef = useRef<DiscoverType>(contentType);
-  const genreLoadTracker = useRef<Record<DiscoverType, Promise<GenreOption[]> | null>>({
-    movie: null,
-    tv: null,
-    anime: null,
-  });
   const navigate = useNavigate();
 
   const availableSections = useMemo(() => DISCOVER_SECTIONS[contentType], [contentType]);
@@ -1397,7 +1367,6 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
      exists on macOS. */
   const topPaddingClass = isModern ? 'pt-6' : 'loom-discover-page-frame';
   const currentSearch = location.search.startsWith('?') ? location.search.slice(1) : location.search;
-  const viewStateStorageKey = isHome ? 'loomtv:home-discover-view-state-v1' : DISCOVER_VIEW_STATE_STORAGE_KEY;
 
   useEffect(() => {
     const nextSearch = buildDiscoverSearch({
@@ -1447,50 +1416,6 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   }, [activeProfile?.id]);
 
   useEffect(() => {
-    if (!pageRef.current) return;
-    try {
-      const raw = sessionStorage.getItem(viewStateStorageKey);
-      if (!raw) return;
-      const saved = parseStoredValue(raw, discoverViewStateSchema, {});
-      if (saved.search !== location.search || typeof saved.scrollTop !== 'number' || !Number.isFinite(saved.scrollTop) || saved.scrollTop <= 0) {
-        return;
-      }
-      pendingScrollTopRef.current = Math.max(0, saved.scrollTop);
-    } catch {
-      // Ignore invalid or unavailable storage state.
-    }
-  }, [location.search, viewStateStorageKey]);
-
-  useEffect(() => {
-    if (loading || items.length === 0 || pendingScrollTopRef.current <= 0) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      const page = pageRef.current;
-      if (!page) return;
-      page.scrollTop = pendingScrollTopRef.current;
-      pendingScrollTopRef.current = 0;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [items.length, loading, location.search]);
-
-  useEffect(() => {
-    const page = pageRef.current;
-    return () => {
-      if (!page) return;
-      try {
-        sessionStorage.setItem(
-          viewStateStorageKey,
-          JSON.stringify({
-            search: location.search,
-            scrollTop: page.scrollTop,
-          }),
-        );
-      } catch {
-        // Ignore storage persistence failures.
-      }
-    };
-  }, [location.search, viewStateStorageKey]);
-
-  useEffect(() => {
     queryRef.current = query;
   }, [query]);
 
@@ -1515,164 +1440,38 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   }, [availabilityRegion]);
 
   const getCachedItems = useCallback((cacheId: CachedCacheId): readonly StremioPluginCatalogItem[] | null => {
-    const now = Date.now();
-    const today = toLocalDateKey();
-    const cache = discoverCache.current;
-    if (cache.date !== today) {
-      discoverCache.current = { date: today, entries: {} };
-      try {
-        localStorage.removeItem(DISCOVER_CACHE_STORAGE_KEY);
-      } catch {
-        // Ignore cache storage failures, fallback to memory cache only.
-      }
-      return null;
-    }
-
-    const cached = getValidCachedItems(cache, cacheId, now);
-    if (!cached) {
-      const entry = cache.entries[cacheId];
-      const shouldCleanEntry = Boolean(entry && entry.expiresAt >= now && !hasCachedImageCandidate(entry.items));
-      if (shouldCleanEntry) {
-        delete cache.entries[cacheId];
-        try {
-          localStorage.setItem(DISCOVER_CACHE_STORAGE_KEY, JSON.stringify(cache));
-        } catch {
-          // Ignore cache cleanup persistence failures.
-        }
-      }
-      return null;
-    }
-    return cached;
-  }, []);
-
+    const key = ['discover', ...pageQueryScope, cacheId];
+    const cached = queryClient.getQueryState<readonly StremioPluginCatalogItem[]>(key);
+    return cached && Date.now() - cached.dataUpdatedAt < 120_000 ? cached.data || null : null;
+  }, [pageQueryScope]);
   const setCachedItems = useCallback((cacheId: CachedCacheId, nextItems: readonly StremioPluginCatalogItem[]) => {
-    const today = toLocalDateKey();
-    if (discoverCache.current.date !== today) {
-      discoverCache.current = { date: today, entries: {} };
-    }
-
-    // Refresh insertion order so trimming retains recently updated catalogs.
-    delete discoverCache.current.entries[cacheId];
-    discoverCache.current.entries[cacheId] = {
-      expiresAt: nextMidnightAt(),
-      items: [...nextItems],
-    };
-
-    // Search/filter combinations otherwise accumulate until midnight, making
-    // every cache write serialize an ever-growing collection on the UI thread.
-    const cacheIds = Object.keys(discoverCache.current.entries);
-    for (const expiredId of cacheIds.slice(0, Math.max(0, cacheIds.length - 24))) {
-      delete discoverCache.current.entries[expiredId];
-    }
-
-    try {
-      localStorage.setItem(DISCOVER_CACHE_STORAGE_KEY, JSON.stringify(discoverCache.current));
-    } catch {
-      // Ignore persistence failures.
-    }
-  }, []);
+    if (JSON.stringify(pageQueryScope) !== JSON.stringify(queryScope())) return;
+    queryClient.setQueryData(['discover', ...pageQueryScope, cacheId], nextItems.slice(0, DISCOVER_RESULT_LIMIT));
+    trimQueryCache();
+  }, [pageQueryScope]);
 
   const ensureGenreOptions = useCallback(async (type: DiscoverType) => {
-    const cached = genreOptionsCache.current[type];
-    if (cached.length > 0) {
-      setGenreOptions(cached);
-      return;
-    }
-
-    if (genreLoadTracker.current[type]) {
-      const inFlight = genreLoadTracker.current[type];
-      if (!inFlight) return;
-      try {
-        const options = await inFlight;
-        if (type === activeContentTypeRef.current) {
-          setGenreOptions(options);
-        }
-      } catch {
-        if (type === activeContentTypeRef.current) {
-          setGenreOptions([]);
-        }
-      }
-      return;
-    }
-
-    const loader = type === 'anime'
-      ? discoverAniListGenres()
-      : (async () => {
-        if (!tmdbCredential) return [] as GenreOption[];
-        return discoverTmdbGenres(type, tmdbCredential);
-      })();
-
-    genreLoadTracker.current[type] = loader;
     try {
-      const options = await loader;
-      genreLoadTracker.current[type] = null;
-      genreOptionsCache.current = {
-        ...genreOptionsCache.current,
-        [type]: [...options],
-      };
-      if (type === activeContentTypeRef.current) {
-        setGenreOptions(options);
-      }
-    } catch {
-      genreLoadTracker.current[type] = null;
-      if (type === activeContentTypeRef.current) {
-        setGenreOptions([]);
-      }
-    }
+      const options = await cachedDesktopRead('discover-genres', [type, Boolean(tmdbCredential)], () =>
+        type === 'anime' ? discoverAniListGenres() : tmdbCredential ? discoverTmdbGenres(type, tmdbCredential) : Promise.resolve([]));
+      if (type === activeContentTypeRef.current) setGenreOptions(options);
+    } catch { if (type === activeContentTypeRef.current) setGenreOptions([]); }
   }, [tmdbCredential]);
 
   const ensureProviderOptions = useCallback(async (type: GenreSourceType, region: AvailabilityRegion) => {
-    const cacheKey = `${type}:${region}`;
-    const cached = providerOptionsCache.current[cacheKey];
-    if (cached) {
-      if (type === activeContentTypeRef.current && region === regionRef.current) {
-        setProviderOptions(cached);
-        setPlatformFilter((current) => normalizeProviderFilterValue(current, cached));
-      }
-      return;
-    }
-
-    const inFlight = providerLoadTracker.current[cacheKey];
-    if (inFlight) {
-      try {
-        const options = await inFlight;
-        if (type === activeContentTypeRef.current && region === regionRef.current) {
-          setProviderOptions(options);
-          setPlatformFilter((current) => normalizeProviderFilterValue(current, options));
-        }
-      } catch {
-        // The original request owns the visible provider error state.
-      }
-      return;
-    }
-
-    if (!tmdbCredential) {
-      if (type === activeContentTypeRef.current && region === regionRef.current) setProviderOptions([]);
-      return;
-    }
-
-    const loader = discoverTmdbProviders(type, region, tmdbCredential);
-    providerLoadTracker.current[cacheKey] = loader;
-    if (type === activeContentTypeRef.current && region === regionRef.current) {
-      setProviderOptionsLoading(true);
-      setProviderError(null);
-    }
+    if (!tmdbCredential) { setProviderOptions([]); return; }
+    setProviderOptionsLoading(true);
+    setProviderError(null);
     try {
-      const options = await loader;
-      providerOptionsCache.current[cacheKey] = [...options];
+      const options = await cachedDesktopRead('discover-providers', [type, region], () => discoverTmdbProviders(type, region, tmdbCredential));
       if (type === activeContentTypeRef.current && region === regionRef.current) {
         setProviderOptions(options);
-        setProviderOptionsLoading(false);
-        setPlatformFilter((current) => normalizeProviderFilterValue(current, options));
+        setPlatformFilter(current => normalizeProviderFilterValue(current, options));
       }
-    } catch (loadError) {
-      if (type === activeContentTypeRef.current && region === regionRef.current) {
-        setProviderOptions([]);
-        setProviderOptionsLoading(false);
-        setProviderError(errorMessage(loadError));
-      }
+    } catch (error) {
+      if (type === activeContentTypeRef.current && region === regionRef.current) setProviderError(errorMessage(error));
     } finally {
-      providerLoadTracker.current[cacheKey] = null;
+      if (type === activeContentTypeRef.current && region === regionRef.current) setProviderOptionsLoading(false);
     }
   }, [tmdbCredential]);
 
@@ -1684,16 +1483,15 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       setGenreFilter('');
       setYearFilter('');
       setPlatformFilter('');
-      detailsCache.current.clear();
       setError(null);
       setErrorKind(null);
     }
-    const cachedGenres = genreOptionsCache.current[contentType];
+    const cachedGenres = queryClient.getQueryData<GenreOption[]>(['discover-genres', ...queryScope(), contentType, Boolean(tmdbCredential)]) || [];
     setGenreOptions(cachedGenres);
     if (cachedGenres.length === 0) {
       void ensureGenreOptions(contentType);
     }
-  }, [contentType, ensureGenreOptions]);
+  }, [contentType, ensureGenreOptions, tmdbCredential]);
 
   useEffect(() => {
     setProviderError(null);
@@ -1707,7 +1505,6 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   useEffect(() => {
     if (contentType === 'anime') return;
     if (!tmdbCredential) return;
-    if (genreOptionsCache.current[contentType].length > 0) return;
     void ensureGenreOptions(contentType);
   }, [contentType, tmdbCredential, ensureGenreOptions]);
 
@@ -1851,7 +1648,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     const now = Date.now();
     const delayMs = Math.max(1_000, nextMidnightAt(new Date(now)) - now);
     const timer = window.setTimeout(() => {
-      discoverCache.current = { date: toLocalDateKey(), entries: {} };
+      queryClient.removeQueries({ queryKey: ['discover'] });
       try {
         localStorage.removeItem(DISCOVER_CACHE_STORAGE_KEY);
       } catch {
@@ -1874,9 +1671,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       tmdbCredential ? 'tmdb' : 'no-tmdb',
       omdbCredential ? 'omdb' : 'no-omdb',
     ].join(':');
-    const existing = detailsCache.current.get(cacheKey);
-    if (existing) return existing;
-
+    return cachedDesktopRead('discover-detail', [cacheKey], async () => {
     let metadataPending = Promise.resolve(item);
     if (tmdbCredential && item.type === 'anime' && (item.streamingProviders === undefined || !item.trailerUrl)) {
       metadataPending = enrichAnimeCatalogItemWithTmdbProviders(item, tmdbCredential).catch(() => item);
@@ -1888,14 +1683,13 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
         ? enrichCatalogItemWithOmdbRatings(metadataItem, omdbCredential).catch(() => metadataItem)
         : metadataItem
     ));
-    detailsCache.current.set(cacheKey, pending);
-    const resolved = await pending;
-    detailsCache.current.set(cacheKey, Promise.resolve(resolved));
-    return resolved;
+    return pending;
+    });
   }, [omdbCredential, tmdbCredential]);
 
   const openItemTrailer = useCallback(async (item: StremioPluginCatalogItem) => {
     const enrichedItem = item.trailerUrl ? item : await enrichWithCast(item);
+    if (JSON.stringify(pageQueryScope) !== JSON.stringify(queryScope())) return;
     cacheExploreItem(enrichedItem);
     if (enrichedItem.trailerUrl) {
       setTrailerItem(enrichedItem);
@@ -1904,7 +1698,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     const year = parseYearFromItem(enrichedItem);
     const query = `${enrichedItem.title}${year ? ` ${year}` : ''} official trailer`;
     await desktopApi.openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
-  }, [enrichWithCast]);
+  }, [pageQueryScope, enrichWithCast]);
 
   const openItemDetails = useCallback((item: StremioPluginCatalogItem) => {
     const discoverSourceRoute = location.search
@@ -1913,10 +1707,10 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     cacheDiscoverReturnRoute(discoverSourceRoute);
     cacheExploreItem(item);
     const detailPath = item.type === 'movie'
-      ? `/movie/${item.id}`
+      ? `/movie/${encodeURIComponent(item.id)}`
       : item.type === 'anime'
-        ? `/anime/${item.id}`
-        : `/tv/${item.id}`;
+        ? `/anime/${encodeURIComponent(item.id)}`
+        : `/tv/${encodeURIComponent(item.id)}`;
 
     // Navigate with the catalog payload immediately. Provider enrichment is
     // an enhancement and must never block opening the detail screen.
@@ -1929,9 +1723,9 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     });
 
     void enrichWithCast(item)
-      .then((nextItem) => cacheExploreItem(nextItem))
+      .then((nextItem) => { if (JSON.stringify(pageQueryScope) === JSON.stringify(queryScope())) cacheExploreItem(nextItem); })
       .catch(() => undefined);
-  }, [enrichWithCast, location.search, navigate, routePath]);
+  }, [pageQueryScope, enrichWithCast, location.search, navigate, routePath]);
 
   const chipClass = (isActive: boolean) => `h-8 shrink-0 rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${
     isActive
@@ -1940,7 +1734,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   }`;
 
   const gridEntries = useMemo<GridEntry[]>(() => items.map((item, index) => ({
-    id: `${item.type}:${item.id}`,
+    id: `${item.type}:${encodeURIComponent(item.id)}`,
     item,
     rank: index + 1,
   })), [items]);

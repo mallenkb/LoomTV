@@ -1,3 +1,4 @@
+import { setQueryProfile } from '@/lib/queryClient';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   desktopApi,
@@ -77,6 +78,16 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [activeState, setActiveState] = useState<ActiveProfileState>(EMPTY_ACTIVE_STATE);
   const [preferences, setPreferences] = useState<ProfilePreferences>({});
   const [lists, setLists] = useState<ProfileListEntry[]>([]);
+  const [listOverrides, setListOverrides] = useState<Record<string, { entry: ProfileListEntry; present: boolean; revision: number }>>({});
+  const listRevision = useRef(0);
+  const visibleLists = useMemo(() => {
+    const entries = new Map(lists.map(entry => [`${entry.kind}:${entry.mediaId}`, entry]));
+    for (const [key, override] of Object.entries(listOverrides)) {
+      if (override.present) entries.set(key, override.entry);
+      else entries.delete(key);
+    }
+    return Array.from(entries.values());
+  }, [lists, listOverrides]);
   const [watchedOverrides, setWatchedOverrides] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -92,7 +103,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     const hydrationGeneration = ++generationRef.current;
     setGeneration(hydrationGeneration);
     watchedMutationRef.current.clear();
+    setListOverrides({});
     setWatchedOverrides({});
+    setQueryProfile(profileId);
     await setProgressProfile(profileId);
     if (hydrationGeneration !== generationRef.current) return;
     if (!profileId) {
@@ -317,20 +330,32 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const setListEntry = useCallback(async (mediaId: string, kind: ProfileListKind, present: boolean) => {
     const expectedProfileId = activeState.profileId || undefined;
     const writeGeneration = generationRef.current;
-    const saved = await desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
-    if (writeGeneration === generationRef.current) setLists(saved);
+    const revision = ++listRevision.current;
+    const key = `${kind}:${mediaId}`;
+    setListOverrides(current => ({ ...current, [key]: { entry: { mediaId, kind, createdAt: Date.now() }, present, revision } }));
+    try {
+      const saved = await desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
+      if (writeGeneration === generationRef.current) setLists(saved);
+    } finally {
+      if (writeGeneration === generationRef.current) setListOverrides(current => {
+        if (current[key]?.revision !== revision) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
   }, [activeState.profileId]);
 
   const watchedKeys = useMemo(
     () => {
-      const next = new Set(lists.filter((entry) => entry.kind === 'watched').map((entry) => entry.mediaId));
+      const next = new Set(visibleLists.filter((entry) => entry.kind === 'watched').map((entry) => entry.mediaId));
       for (const [mediaId, present] of Object.entries(watchedOverrides)) {
         if (present) next.add(mediaId);
         else next.delete(mediaId);
       }
       return next;
     },
-    [lists, watchedOverrides],
+    [visibleLists, watchedOverrides],
   );
 
   const setWatched = useCallback(async (mediaId: string, present: boolean) => {
@@ -403,7 +428,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     activeProfile,
     activeState,
     preferences,
-    lists,
+    lists: visibleLists,
     watchedKeys,
     isLoading,
     loadError,
@@ -434,7 +459,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     exportProfile,
     importProfile,
   }), [
-    profiles, activeProfile, activeState, preferences, lists, isLoading, loadError, gateOpen, gateIntent, clearGateIntent,
+    profiles, activeProfile, activeState, preferences, visibleLists, isLoading, loadError, gateOpen, gateIntent, clearGateIntent,
     generation, canManageProfiles, canCreateProfiles,
     openGate, closeGate, selectProfile, selectGuestProfile, lock, createProfile, updateProfile,
     deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry, setWatched,

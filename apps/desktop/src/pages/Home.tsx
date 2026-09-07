@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation } from '@/lib/navigation';
 import { Film, FolderPlus, Tv } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';

@@ -1,6 +1,6 @@
+import { queryClient } from '@/lib/queryClient';
 import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode, useCallback } from 'react';
 import { desktopApi, type LibraryIndexPayload } from '@/lib/desktopApi';
-import { isRemoteDesktopMode } from '@/lib/remoteDesktop';
 import { migrateLegacyArtwork } from '@/lib/customArtwork';
 import { hydrateProgressFromDatabase } from '@/lib/progress';
 import {
@@ -355,7 +355,6 @@ function hasConfiguredFolders(data: {
   );
 }
 
-const DETAIL_CACHE_LIMIT = 32;
 type LibraryScanMode = 'quick' | 'metadata' | 'full';
 
 function strongerScanMode(current: LibraryScanMode | null, requested: LibraryScanMode): LibraryScanMode {
@@ -440,16 +439,6 @@ function findItemInState(state: LibraryState, mediaId: string): MediaItem | null
   return [...state.movies, ...state.tvShows, ...state.animeShows].find((item) => item.id === mediaId) || null;
 }
 
-function rememberBoundedDetail(cache: Map<string, MediaItem>, key: string, item: MediaItem): void {
-  cache.delete(key);
-  cache.set(key, item);
-  while (cache.size > DETAIL_CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (typeof oldest !== 'string') break;
-    cache.delete(oldest);
-  }
-}
-
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const { activeProfile } = useProfiles();
   const [state, dispatch] = useReducer(libraryReducer, initialState);
@@ -461,8 +450,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const isScanningRef = useRef(false);
   const pendingScanModeRef = useRef<LibraryScanMode | null>(null);
   const hasConfiguredFoldersRef = useRef(false);
-  const detailCacheRef = useRef(new Map<string, MediaItem>());
-  const detailRequestsRef = useRef(new Map<string, Promise<MediaItem | null>>());
   const detailScopeRef = useRef<string | null>(null);
   const detailGenerationRef = useRef(0);
   const legacyFallbackCountRef = useRef(0);
@@ -486,8 +473,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     if (detailScopeRef.current === nextScope) return;
     detailScopeRef.current = nextScope;
     detailGenerationRef.current += 1;
-    detailCacheRef.current.clear();
-    detailRequestsRef.current.clear();
+    queryClient.removeQueries({ queryKey: ['detail'] });
   }, [activeProfileId]);
 
   const applyLibraryData = useCallback((data: {
@@ -536,14 +522,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const loadPrimaryCatalog = useCallback(async (mutationToken?: LibraryMutationToken) => {
     const requestProfileId = activeProfileId;
-    if (!isRemoteDesktopMode()) {
-      const library = await desktopApi.getLibrary();
-      if (activeProfileIdRef.current !== requestProfileId) return null;
-      if (!isCurrentLibraryMutation(mutationToken)) return null;
-      const localLibrary = { ...library, catalogRevision: null, catalogTransport: 'legacy' as const };
-      return applyLibraryData(localLibrary, mutationToken) ? localLibrary : null;
-    }
-
     const index = await desktopApi.getLibraryIndex();
     if (activeProfileIdRef.current !== requestProfileId) return null;
     if (!isCurrentLibraryMutation(mutationToken)) return null;
@@ -561,12 +539,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [activeProfileId, applyCompactIndex, applyLibraryData, isCurrentLibraryMutation]);
 
   const applyScanCatalog = useCallback(async (index: LibraryIndexPayload, mutationToken: LibraryMutationToken) => {
-    if (isRemoteDesktopMode()) {
-      applyCompactIndex(index, mutationToken);
-      return;
-    }
-    await loadPrimaryCatalog(mutationToken);
-  }, [applyCompactIndex, loadPrimaryCatalog]);
+    applyCompactIndex(index, mutationToken);
+  }, [applyCompactIndex]);
 
   const applyScanProgress = useCallback((progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
     if (!progress) return;
@@ -608,15 +582,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     clearDetailStateIfScopeChanged(currentState.catalogRevision);
     const catalogItem = findItemInState(currentState, mediaId);
     if (!catalogItem || catalogItem.catalogRevision === undefined || currentState.catalogRevision === null) return catalogItem;
-    const key = `${activeProfileId}:${currentState.catalogRevision}:${mediaId}`;
-    const cached = detailCacheRef.current.get(key);
-    if (cached) {
-      rememberBoundedDetail(detailCacheRef.current, key, cached);
-      return cached;
-    }
-    const pending = detailRequestsRef.current.get(key);
-    if (pending) return pending;
-
     const requestGeneration = detailGenerationRef.current;
     const request: Promise<MediaItem | null> = desktopApi.getLibraryItem(mediaId)
       .then(async (payload) => {
@@ -628,7 +593,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           if (requestGeneration !== detailGenerationRef.current) return null;
           const detail = [...legacy.movies, ...legacy.tvShows, ...(legacy.animeShows || [])]
             .find((item) => item.id === mediaId) as MediaItem | undefined;
-          if (detail) rememberBoundedDetail(detailCacheRef.current, key, detail);
           return detail || null;
         }
         const latestState = stateRef.current;
@@ -637,13 +601,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           return findItemInState(latestState, mediaId);
         }
         const item = payload.item as MediaItem;
-        rememberBoundedDetail(detailCacheRef.current, key, item);
         return item;
-      })
-      .finally(() => {
-        if (detailRequestsRef.current.get(key) === request) detailRequestsRef.current.delete(key);
       });
-    detailRequestsRef.current.set(key, request);
     return request;
   }, [activeProfileId, clearDetailStateIfScopeChanged]);
 
@@ -792,8 +751,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
       }
 
-      // Local host mode already loaded the persisted rich snapshot. Remote mode
-      // intentionally keeps the compact index and hydrates opened titles only.
+      // Both desktop runtimes retain compact cards and hydrate opened titles.
       if (!cancelled) {
         dispatch({ type: 'SET_LOADING', payload: false });
         dispatch({ type: 'SET_STARTUP_PREPARED', payload: true });

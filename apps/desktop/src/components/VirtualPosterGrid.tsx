@@ -1,14 +1,6 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import {
-  virtualGridCardHeightDiverges,
-  virtualGridItemAttributes,
-  virtualGridLayout,
-  virtualGridRange,
-} from '@/lib/virtualGrid';
-
-const IS_DEVELOPMENT = (
-  import.meta as ImportMeta & { env?: { DEV?: boolean } }
-).env?.DEV === true;
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { virtualGridLayout, virtualGridRange } from '@/lib/virtualGrid';
 
 type VirtualPosterGridProps<T extends { id: string }> = {
   items: T[];
@@ -19,170 +11,55 @@ type VirtualPosterGridProps<T extends { id: string }> = {
   gap?: number;
 };
 
-function scrollParentFor(element: HTMLElement): HTMLElement | Window {
-  let current: HTMLElement | null = element.parentElement;
-  while (current) {
-    const style = window.getComputedStyle(current);
-    if (/(auto|scroll)/.test(`${style.overflowY}${style.overflow}`)) return current;
-    current = current.parentElement;
-  }
-  return window;
-}
-
-function scrollMetrics(parent: HTMLElement | Window, element: HTMLElement) {
-  const parentRect = parent instanceof Window
-    ? { top: 0, height: window.innerHeight }
-    : parent.getBoundingClientRect();
-  const rect = element.getBoundingClientRect();
-  return {
-    scrollTop: Math.max(0, parentRect.top - rect.top),
-    viewportHeight: parentRect.height,
-  };
-}
-
 export default function VirtualPosterGrid<T extends { id: string }>({
-  items,
-  renderItem,
-  minColumnWidth = 176,
-  maxColumnWidth = 200,
-  rowHeight = 384,
-  gap = 24,
+  items, renderItem, minColumnWidth = 176, maxColumnWidth = 200, rowHeight = 384, gap = 24,
 }: VirtualPosterGridProps<T>) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const itemsLayerRef = useRef<HTMLDivElement | null>(null);
-  const warnedAboutCardHeightRef = useRef(false);
-  const [viewport, setViewport] = useState({ width: 0, scrollTop: 0, height: 720 });
-  const layout = virtualGridLayout({
-    containerWidth: viewport.width,
-    minColumnWidth,
-    maxColumnWidth,
-    rowHeight,
-    gap,
-  });
-
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+  const [geometry, setGeometry] = useState({ width: 0, margin: 0 });
   useLayoutEffect(() => {
     const root = rootRef.current;
-    if (!root) return undefined;
-    const parent = scrollParentFor(root);
-
-    let animationFrame: number | null = null;
-    const measure = () => {
-      animationFrame = null;
-      const metrics = scrollMetrics(parent, root);
-      const width = root.clientWidth;
-      setViewport((current) => (
-        current.width === width
-        && current.scrollTop === metrics.scrollTop
-        && current.height === metrics.viewportHeight
-          ? current
-          : { width, scrollTop: metrics.scrollTop, height: metrics.viewportHeight }
-      ));
-    };
-    const update = () => {
-      if (animationFrame !== null) return;
-      animationFrame = requestAnimationFrame(measure);
-    };
-
-    measure();
-    const resizeObserver = new ResizeObserver(update);
-    resizeObserver.observe(root);
-    const scrollTarget = parent instanceof Window ? window : parent;
-    scrollTarget.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
-
-    return () => {
-      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
-      resizeObserver.disconnect();
-      scrollTarget.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-    };
-  }, []);
-
-  useEffect(() => {
-    const root = rootRef.current;
     if (!root) return;
-    setViewport((current) => current.width === root.clientWidth
-      ? current
-      : { ...current, width: root.clientWidth });
-  }, [items.length]);
-
-  const range = virtualGridRange({
-    itemCount: items.length,
-    containerWidth: viewport.width,
-    scrollTop: viewport.scrollTop,
-    viewportHeight: viewport.height,
-    minColumnWidth: layout.minColumnWidth,
-    maxColumnWidth: layout.maxColumnWidth,
-    rowHeight: layout.rowHeight,
-    gap: layout.gap,
-    overscanRows: 2,
-  });
-  const visibleItems = items.slice(range.startIndex, range.endIndex);
-  const visibleItemIds = visibleItems.map((item) => item.id).join('\u0000');
-
-  useEffect(() => {
-    if (!IS_DEVELOPMENT || warnedAboutCardHeightRef.current) return undefined;
-    const itemsLayer = itemsLayerRef.current;
-    if (!itemsLayer) return undefined;
-
-    const renderedCards: HTMLElement[] = [];
-    for (const wrapper of itemsLayer.children) {
-      const card = wrapper.firstElementChild;
-      if (card instanceof HTMLElement) renderedCards.push(card);
-    }
-    if (renderedCards.length === 0) return undefined;
-
-    const warnIfCardHeightDiverges = (card: HTMLElement) => {
-      if (warnedAboutCardHeightRef.current) return true;
-      const measuredHeight = card.getBoundingClientRect().height;
-      if (!virtualGridCardHeightDiverges(range.itemHeight, measuredHeight)) return false;
-      warnedAboutCardHeightRef.current = true;
-      console.warn(
-        `[VirtualPosterGrid] Rendered card height (${measuredHeight}px) differs from the expected `
-        + `${range.itemHeight}px item height. Keep cards pinned to the row pitch minus its gap.`,
-      );
-      return true;
+    let parent = root.parentElement;
+    while (parent && !/(auto|scroll)/.test(getComputedStyle(parent).overflowY)) parent = parent.parentElement;
+    const scroller = parent || document.documentElement;
+    setContainer(scroller);
+    const measure = () => {
+      const width = root.clientWidth;
+      const margin = root.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      setGeometry(current => current.width === width && current.margin === margin ? current : { width, margin });
     };
-
-    for (const card of renderedCards) {
-      if (warnIfCardHeightDiverges(card)) return undefined;
-    }
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (warnIfCardHeightDiverges(entry.target as HTMLElement)) {
-          resizeObserver.disconnect();
-          break;
-        }
-      }
-    });
-    renderedCards.forEach((card) => resizeObserver.observe(card));
-    return () => resizeObserver.disconnect();
-  }, [range.endIndex, range.itemHeight, range.startIndex, visibleItemIds]);
-
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, []);
+  const layout = virtualGridLayout({ containerWidth: geometry.width, minColumnWidth, maxColumnWidth, rowHeight, gap });
+  const grid = virtualGridRange({ ...layout, itemCount: items.length, containerWidth: geometry.width, scrollTop: 0, viewportHeight: 0 });
+  const virtual = useVirtualizer({
+    count: grid.totalRows,
+    getScrollElement: () => container,
+    estimateSize: () => layout.rowHeight,
+    getItemKey: index => items[index * grid.columns]?.id || index,
+    scrollMargin: geometry.margin,
+    overscan: 2,
+  });
   return (
-    <div ref={rootRef} className="relative w-full" style={{ height: range.totalHeight }}>
-      <div
-        ref={itemsLayerRef}
-        className="absolute left-0 right-0 top-0 grid justify-start"
-        role="list"
-        aria-label="Media items"
-        style={{
-          gap: layout.gap,
-          gridTemplateColumns: `repeat(${range.columns}, minmax(0, ${range.columnWidth}px))`,
-          transform: `translateY(${range.offsetY}px)`,
-        }}
-      >
-        {visibleItems.map((item, visibleIndex) => (
-          <div
-            key={item.id}
-            className="h-full"
-            {...virtualGridItemAttributes(range, visibleIndex, items.length)}
-          >
-            {renderItem(item)}
-          </div>
-        ))}
-      </div>
+    <div ref={rootRef} className="relative w-full" role="list" aria-label="Media items" style={{ height: Math.max(0, virtual.getTotalSize() - layout.gap) }}>
+      {virtual.getVirtualItems().map(row => (
+        <div key={row.key} className="absolute left-0 top-0 grid" style={{
+          transform: `translateY(${row.start - virtual.options.scrollMargin}px)`,
+          gridTemplateColumns: `repeat(${grid.columns}, ${grid.columnWidth}px)`, gap: layout.gap,
+        }}>
+          {items.slice(row.index * grid.columns, (row.index + 1) * grid.columns).map((item, column) => (
+            <div key={item.id} role="listitem" aria-posinset={row.index * grid.columns + column + 1} aria-setsize={items.length}
+              style={{ width: grid.columnWidth, height: grid.itemHeight }}>
+              {renderItem(item)}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

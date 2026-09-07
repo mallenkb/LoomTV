@@ -1,5 +1,8 @@
+import { useParams } from '@tanstack/react-router';
+import { queryClient, queryScope } from '@/lib/queryClient';
+import VirtualEpisodeList from '@/components/VirtualEpisodeList';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate } from '@/lib/navigation';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -393,7 +396,7 @@ function findLocalShowMatch(shows: readonly TVShow[], mediaId: string | undefine
 }
 
 export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
-  const { id: mediaId } = useParams<{ id: string }>();
+  const { id: mediaId } = useParams({ strict: false });
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
@@ -403,7 +406,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const initialRoute = location.state as TVDetailRouteState | null;
     if (initialRoute?.stremioCatalogItem) return showFromStremioCatalogItem(kind, initialRoute.stremioCatalogItem);
     if (initialRoute?.fromDiscover || initialRoute?.from?.startsWith('/discover')) return null;
-    return findLocalShowMatch(kind === 'anime' ? state.animeShows : state.tvShows, mediaId);
+    const card = findLocalShowMatch(kind === 'anime' ? state.animeShows : state.tvShows, mediaId);
+    const cached = queryClient.getQueryData<{ revision: number; item: TVShow }>(['detail', ...queryScope(), mediaId]);
+    return card && cached?.revision === state.catalogRevision ? cached.item : card;
   });
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
   const accordionPageKeyRef = useRef('');
@@ -484,7 +489,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     // Only an explicit future host binding may connect provider identity to a
     // local library identity.
     const found = routeFallbackShow ? null : findLocalShowMatch(collection, mediaId);
-    const nextShow = routeFallbackShow || found;
+    const cached = queryClient.getQueryData<{ revision: number; item: TVShow }>(['detail', ...queryScope(), mediaId]);
+    const nextShow = routeFallbackShow || (found && cached?.revision === state.catalogRevision ? cached.item : found);
     if (routeFallbackShow) setIsRemoteStremioShow(true);
     else if (found) setIsRemoteStremioShow(false);
     setShow(nextShow);
@@ -912,7 +918,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     ? sourceRoute
     : fallbackRoute;
   const handleBack = () => {
-    const historyIndex = window.history.state?.idx;
+    const historyIndex = window.history.state?.__TSR_index;
     if (typeof historyIndex === 'number' && historyIndex > 0) {
       navigate(-1);
       return;
@@ -1152,7 +1158,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
                     {isExpanded && (
                       <SharedListHighlight className="loom-shared-highlight-episodes divide-y divide-[var(--loom-panel-border)]" >
-                        <div id={`season-${season.number}-episodes`} className="contents">
+                        <VirtualEpisodeList id={`season-${season.number}-episodes`}>
                         {seasonEps.length > 0 ? seasonEps.map((episode) => (
                           <EpisodeRow
                             key={episode.number}
@@ -1179,7 +1185,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                               onPlay={() => onPlay && onPlay(file.filePath, show.title, file.subtitles || show.subtitles, playerEpisodes, show.episodeFiles, season.number, file.episode, show.id, playerArtwork)}
                             />
                           ))}
-                        </div>
+                        </VirtualEpisodeList>
                       </SharedListHighlight>
                     )}
                   </div>
