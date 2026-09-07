@@ -5,7 +5,7 @@ export type NativeStartResult = {
   surface?: string;
   error?: string;
 };
-export type NativeState = { sessionId: string };
+export type NativeState = { sessionId?: string };
 export type NativeSessionPort<Options, State extends NativeState> = {
   start: (source: string, options?: Options) => Promise<NativeStartResult>;
   stop: (sessionId: string) => Promise<unknown>;
@@ -24,6 +24,7 @@ export class NativeSessionLease<Options, State extends NativeState> {
   private active: string | null = null;
   private activeGeneration = 0;
   private readonly early = new Map<string, State>();
+  private earlyAnonymous: State | null = null;
   private readonly failedStops = new Set<string>();
   private starting = false;
   private tail: Promise<void> = Promise.resolve();
@@ -57,19 +58,44 @@ export class NativeSessionLease<Options, State extends NativeState> {
   }
 
   private receive(state: State): void {
-    if (this.disposed || !state.sessionId) return;
-    if (state.sessionId === this.active && this.activeGeneration === this.generation) {
+    if (this.disposed) return;
+    const sessionId = state.sessionId;
+    if (
+      this.active
+      && this.activeGeneration === this.generation
+      && (!sessionId || sessionId === this.active)
+    ) {
+      // LibVLC historically permits session-less state patches. A serialized
+      // active lease gives those patches an unambiguous owner.
       this.deliver(state);
-    } else if (this.starting) {
-      // Events are patches. Retain the accumulated latest state, not a queue
-      // of every time-pos event. Bound unrelated candidate sessions as well.
-      const merged = { ...this.early.get(state.sessionId), ...state };
-      this.early.delete(state.sessionId);
-      this.early.set(state.sessionId, merged);
-      if (this.early.size > 8) {
-        const oldest = this.early.keys().next();
-        if (!oldest.done) this.early.delete(oldest.value);
+      return;
+    }
+    if (!this.starting) return;
+
+    if (!sessionId) {
+      // A start can emit state before its reply supplies the session ID. Apply
+      // anonymous patches to every candidate already seen, and keep a base for
+      // candidates that identify themselves later. This preserves event order.
+      this.earlyAnonymous = this.earlyAnonymous
+        ? { ...this.earlyAnonymous, ...state }
+        : state;
+      for (const [candidateId, existing] of this.early) {
+        this.early.set(candidateId, { ...existing, ...state });
       }
+      return;
+    }
+
+    const existing = this.early.get(sessionId);
+    const merged = existing
+      ? { ...existing, ...state }
+      : this.earlyAnonymous
+        ? { ...this.earlyAnonymous, ...state }
+        : state;
+    this.early.delete(sessionId);
+    this.early.set(sessionId, merged);
+    if (this.early.size > 8) {
+      const oldest = this.early.keys().next();
+      if (!oldest.done) this.early.delete(oldest.value);
     }
   }
 
@@ -97,6 +123,7 @@ export class NativeSessionLease<Options, State extends NativeState> {
       if (this.disposed || generation !== this.generation) return false;
       this.starting = true;
       this.early.clear();
+      this.earlyAnonymous = null;
       try {
         const result = await this.port.start(source, options);
         if (this.disposed || generation !== this.generation) {
@@ -110,12 +137,13 @@ export class NativeSessionLease<Options, State extends NativeState> {
         this.active = result.sessionId;
         this.activeGeneration = generation;
         this.surface = result.surface;
-        const state = this.early.get(result.sessionId);
+        const state = this.early.get(result.sessionId) ?? this.earlyAnonymous;
         if (state) this.deliver(state);
         return !this.disposed && generation === this.generation;
       } finally {
         this.starting = false;
         this.early.clear();
+        this.earlyAnonymous = null;
       }
     });
     // Keep the queue alive after a failure while returning the actual rejection
@@ -130,6 +158,7 @@ export class NativeSessionLease<Options, State extends NativeState> {
     ++this.generation;
     try { this.unsubscribe(); } catch (error) { this.report(error); }
     this.early.clear();
+    this.earlyAnonymous = null;
     this.disposal = this.tail.then(async () => {
       const active = this.active;
       this.active = null;
