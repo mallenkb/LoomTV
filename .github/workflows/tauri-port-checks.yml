@@ -1,0 +1,221 @@
+name: Tauri port checks
+
+on:
+  push:
+    branches: [codex/tauri-react-port]
+    paths:
+      - 'apps/desktop-tauri/**'
+      - 'apps/desktop/src/**'
+      - 'crates/**'
+      - 'packages/**'
+      - 'scripts/tauri/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/tauri-port-checks.yml'
+  pull_request:
+    paths:
+      - 'apps/desktop-tauri/**'
+      - 'apps/desktop/src/**'
+      - 'crates/**'
+      - 'packages/**'
+      - 'scripts/tauri/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/tauri-port-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-port-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-evidence:
+    name: Record the exact source under review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Archive tracked source without runtimes or user data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-sha.txt
+          python3 - <<'PY'
+          import pathlib, subprocess, tarfile
+          root = pathlib.Path.cwd()
+          extensions = {'.rs', '.toml', '.lock', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.sql', '.md', '.css', '.html', '.yaml', '.yml'}
+          prefixes = ('crates/', 'apps/desktop-tauri/', 'apps/desktop/src/', 'apps/desktop/tests/', 'packages/', 'scripts/', 'docs/tauri-port/', '.github/')
+          names = {'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'AGENTS.md'}
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          with tarfile.open('evidence/tauri-source.tar.gz', 'w:gz') as archive:
+              for name in paths:
+                  if not name or '/resources/' in name or '/node_modules/' in name:
+                      continue
+                  path = root / name
+                  if not path.is_file() or path.is_symlink():
+                      continue
+                  if name in names or path.name == 'AGENTS.md' or (name.startswith(prefixes) and path.suffix in extensions):
+                      archive.add(path, arcname=name, recursive=False)
+          PY
+          sha256sum evidence/tauri-source.tar.gz > evidence/source-archive.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tauri-source-${{ github.sha }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  core:
+    name: Rust services and generated-media regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Install test-only media and secret-service build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libdbus-1-dev pkg-config ffmpeg > /tmp/tauri-apt.log 2>&1
+      - name: Record environment
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/source-sha.txt
+          rustc --version --verbose | tee evidence/rustc.txt
+          cargo --version | tee evidence/cargo.txt
+          ffmpeg -version > evidence/ffmpeg.txt
+          ffprobe -version > evidence/ffprobe.txt
+      - name: Check Rust formatting
+        id: formatting
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check > evidence/format.log 2>&1 || { tail -100 evidence/format.log; exit 1; }
+      - name: Test the Rust services
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p loomtv-core -p loomtv-playback --locked --no-fail-fast > evidence/core-tests.log 2>&1 || { tail -120 evidence/core-tests.log; exit 1; }
+          tail -80 evidence/core-tests.log
+      - name: Test real FFmpeg output, seeks, ranges and revocation
+        id: media
+        continue-on-error: true
+        env:
+          LOOMTV_TEST_FFMPEG: /usr/bin/ffmpeg
+          LOOMTV_TEST_FFPROBE: /usr/bin/ffprobe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p loomtv-core --locked generated_media_probe_hls_seek_range_and_revocation -- --ignored --nocapture > evidence/media-test.log 2>&1 || { tail -120 evidence/media-test.log; exit 1; }
+          cat evidence/media-test.log
+      - name: Lint the Rust services
+        id: lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy -p loomtv-core -p loomtv-playback --all-targets --locked -- -D warnings > evidence/core-clippy.log 2>&1 || { tail -160 evidence/core-clippy.log; exit 1; }
+      - name: Require every executed check to pass
+        if: always()
+        env:
+          FORMAT_RESULT: ${{ steps.formatting.outcome }}
+          TEST_RESULT: ${{ steps.tests.outcome }}
+          MEDIA_RESULT: ${{ steps.media.outcome }}
+          LINT_RESULT: ${{ steps.lint.outcome }}
+        run: |
+          test "$FORMAT_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$MEDIA_RESULT" = success
+          test "$LINT_RESULT" = success
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: tauri-core-checks-${{ github.sha }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  frontend:
+    name: Shared React renderer and desktop typechecks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 11.20.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:workflow-policy
+      - run: pnpm desktop:tauri:test
+      - run: pnpm --filter @loom-media-server/desktop-tauri run typecheck
+      - run: pnpm --filter loom-media-server-desktop run typecheck
+      - run: pnpm --filter @loom-media-server/desktop-tauri run frontend:build
+
+  macos-adapter:
+    name: Compile the macOS Tauri adapter with staged runtimes
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 11.20.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Record environment
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-sha.txt
+          sw_vers > evidence/macos.txt
+          uname -m > evidence/architecture.txt
+          rustc --version --verbose > evidence/rustc.txt
+          xcodebuild -version > evidence/xcode.txt
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @loom-media-server/desktop-tauri run frontend:build
+      - run: node apps/desktop-tauri/scripts/stage-runtimes.mjs
+      - name: Compile native command wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check -p loomtv-desktop-tauri --locked > evidence/adapter-check.log 2>&1 || { tail -160 evidence/adapter-check.log; exit 1; }
+          tail -40 evidence/adapter-check.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: tauri-macos-check-${{ github.sha }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7

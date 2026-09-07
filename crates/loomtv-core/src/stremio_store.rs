@@ -811,7 +811,7 @@ fn manifest_warnings(
             }
         }
     }
-    if manifest
+    let peer_declared = manifest
         .get("peerToPeerDeclared")
         .and_then(Value::as_bool)
         .unwrap_or(false)
@@ -820,11 +820,9 @@ fn manifest_warnings(
             .and_then(Value::as_object)
             .and_then(|hints| hints.get("p2p"))
             .and_then(Value::as_bool)
-            .unwrap_or(false)
-    {
-        if !warnings.iter().any(|warning| warning == PEER_WARNING) {
-            warnings.push(PEER_WARNING.into());
-        }
+            .unwrap_or(false);
+    if peer_declared && !warnings.iter().any(|warning| warning == PEER_WARNING) {
+        warnings.push(PEER_WARNING.into());
     }
     Ok(warnings)
 }

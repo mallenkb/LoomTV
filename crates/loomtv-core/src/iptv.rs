@@ -214,12 +214,11 @@ impl IptvService {
             Some(value) => normalize_iptv_url(value, "playlist")?,
             None => existing.playlist_url.clone(),
         };
-        if playlist_url != existing.playlist_url {
-            if source_by_playlist_url(&store, &playlist_url)?
+        if playlist_url != existing.playlist_url
+            && source_by_playlist_url(&store, &playlist_url)?
                 .is_some_and(|source| source.id != source_id)
-            {
-                return Err(iptv_error("That playlist has already been added."));
-            }
+        {
+            return Err(iptv_error("That playlist has already been added."));
         }
         let epg_url = match optional_text(patch, "epgUrl", MAX_URL_CHARS)? {
             Some(value) if value.trim().is_empty() => String::new(),

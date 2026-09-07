@@ -525,9 +525,9 @@ pub fn build_hls_args(
         &mut args,
         "-hls_flags",
         if seekable {
-            "independent_segments"
+            "independent_segments+temp_file"
         } else {
-            "append_list+delete_segments+independent_segments"
+            "append_list+delete_segments+independent_segments+temp_file"
         },
     );
     let segment_path = output_path
@@ -953,7 +953,7 @@ fn integer(value: Option<&Value>) -> Option<i64> {
             value
                 .as_f64()
                 .filter(|value| value.is_finite())
-                .map(|value| *value as i64)
+                .map(|value| value as i64)
         })
     })
 }

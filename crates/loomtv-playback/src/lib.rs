@@ -142,7 +142,7 @@ struct Player {
     tracks: Value,
     poll_count: u32,
     restore_pending: bool,
-    restore_commands: std::collections::BTreeMap<String,Value>,
+    restore_commands: std::collections::BTreeMap<String, Value>,
 }
 
 macro_rules! vlc {
@@ -303,8 +303,9 @@ impl Player {
             result.player,
             drawable as *mut c_void
         );
-        #[cfg(not(any(target_os = "macos", windows)))]
-        return Err("Native LibVLC embedding is not implemented on this platform.".into());
+        if !cfg!(any(target_os = "macos", windows)) {
+            return Err("Native LibVLC embedding is not implemented on this platform.".into());
+        }
         vlc!(
             result,
             "libvlc_video_set_mouse_input",
@@ -469,28 +470,64 @@ impl Player {
             "set-audio-track" => {
                 let track = match command.get("trackId") {
                     Some(Value::Null) => -1,
-                    Some(value) => value.as_i64().filter(|id| *id >= -1 && *id <= i32::MAX as i64).ok_or("Invalid track ID.")? as c_int,
+                    Some(value) => value
+                        .as_i64()
+                        .filter(|id| *id >= -1 && *id <= i32::MAX as i64)
+                        .ok_or("Invalid track ID.")? as c_int,
                     None => return Err("The track ID is missing.".into()),
                 };
-                if vlc!(self,"libvlc_audio_set_track",unsafe extern "C" fn(*mut c_void,c_int)->c_int,self.player,track) < 0 {return Ok(json!(false));}
+                if vlc!(
+                    self,
+                    "libvlc_audio_set_track",
+                    unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
+                    self.player,
+                    track
+                ) < 0
+                {
+                    return Ok(json!(false));
+                }
                 self.poll_count = 0;
             }
             "set-subtitle-track" => {
                 let track = match command.get("trackId") {
                     Some(Value::Null) => -1,
-                    Some(value) => value.as_i64().filter(|id| *id >= -1 && *id <= i32::MAX as i64).ok_or("Invalid track ID.")? as c_int,
+                    Some(value) => value
+                        .as_i64()
+                        .filter(|id| *id >= -1 && *id <= i32::MAX as i64)
+                        .ok_or("Invalid track ID.")? as c_int,
                     None => return Err("The track ID is missing.".into()),
                 };
-                if vlc!(self,"libvlc_video_set_spu",unsafe extern "C" fn(*mut c_void,c_int)->c_int,self.player,track) < 0 {return Ok(json!(false));}
+                if vlc!(
+                    self,
+                    "libvlc_video_set_spu",
+                    unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
+                    self.player,
+                    track
+                ) < 0
+                {
+                    return Ok(json!(false));
+                }
                 self.poll_count = 0;
             }
             "set-video-track" => {
                 let track = match command.get("trackId") {
                     Some(Value::Null) => -1,
-                    Some(value) => value.as_i64().filter(|id| *id >= -1 && *id <= i32::MAX as i64).ok_or("Invalid track ID.")? as c_int,
+                    Some(value) => value
+                        .as_i64()
+                        .filter(|id| *id >= -1 && *id <= i32::MAX as i64)
+                        .ok_or("Invalid track ID.")? as c_int,
                     None => return Err("The track ID is missing.".into()),
                 };
-                if vlc!(self,"libvlc_video_set_track",unsafe extern "C" fn(*mut c_void,c_int)->c_int,self.player,track) < 0 {return Ok(json!(false));}
+                if vlc!(
+                    self,
+                    "libvlc_video_set_track",
+                    unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
+                    self.player,
+                    track
+                ) < 0
+                {
+                    return Ok(json!(false));
+                }
                 self.poll_count = 0;
             }
             "set-video-aspect" => {
@@ -545,7 +582,9 @@ impl Player {
         if (state == 3 || state == 4) && self.restore_pending {
             self.restore_pending = false;
             let commands = self.restore_commands.values().cloned().collect::<Vec<_>>();
-            for command in commands { let _ = self.command(command)?; }
+            for command in commands {
+                let _ = self.command(command)?;
+            }
         }
         self.poll_count = self.poll_count.wrapping_add(1);
         let tracks_changed = self.poll_count % 10 == 1;
@@ -570,7 +609,12 @@ impl Player {
                 .get::<unsafe extern "C" fn(*mut c_void) -> *mut TrackDescription>(symbol)
                 .map_err(|_| "LibVLC track descriptions are unavailable.")?;
             let selected = if kind == "video" {
-                vlc!(self,"libvlc_video_get_track",unsafe extern "C" fn(*mut c_void)->c_int,self.player)
+                vlc!(
+                    self,
+                    "libvlc_video_get_track",
+                    unsafe extern "C" fn(*mut c_void) -> c_int,
+                    self.player
+                )
             } else if kind == "audio" {
                 vlc!(
                     self,

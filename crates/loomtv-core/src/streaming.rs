@@ -3,7 +3,6 @@ use crate::{
     remote::{media_route, RemoteClient},
     Error, Result, Store,
 };
-use serde::Serialize;
 use axum::{
     body::{Body, Bytes},
     extract::{Path, State},
@@ -22,82 +21,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{Duration, Instant, SystemTime},
-    path::PathBuf,
-    process::Stdio,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
-    process::Command,
     sync::{oneshot, Mutex},
 };
-
-const MAX_ACTIVE_TRANSCODE_SESSIONS: usize = 2;
-const ENCODER_IDLE_TIMEOUT_MS: u64 = 30_000;
-const CACHE_PRUNE_INTERVAL_MS: u64 = 5_000;
-const TRANSCODE_READY_TIMEOUT_MS: u64 = 30_000;
-const TRANSCODE_READY_POLL_MS: u64 = 80;
-const HLS_PENDING_SEGMENT_TIMEOUT_MS: u64 = 30_000;
-const HLS_PENDING_SEGMENT_POLL_MS: u64 = 80;
-const HLS_RESTART_BUDGET_WINDOW_MS: i64 = 30_000;
-const MAX_HLS_RESTARTS_PER_WINDOW: usize = 16;
-const SEGMENT_REQUEST_CONTIGUITY: i64 = 3;
-const MAX_CACHED_BYTES_PER_SESSION: usize = 256 * 1024 * 1024;
 
 #[derive(Clone)]
 enum Scope {
     Local { profile: String, revision: i64 },
     Remote { epoch: u64 },
     Iptv(crate::iptv_proxy::IptvPlaybackScope),
-    Transcode {
-        session_id: String,
-        profile: String,
-        revision: i64,
-    },
-}
-
-#[derive(Clone)]
-struct TranscodeSession {
-    id: String,
-    key: String,
-    file_path: String,
-    profile: String,
-    revision: i64,
-    output_dir: PathBuf,
-    scope: String,
-    options: crate::serde_json::Value,
-    preset: String,
-    codec: String,
-    seekable: bool,
-    start_seconds: i64,
-    segment_seconds: f64,
-    segment_count: usize,
-    window_segments: usize,
-    window_start_index: i64,
-    last_requested_index: i64,
-    last_activity: Instant,
-    last_pruned_at: Instant,
-    restart_timestamps: Vec<Instant>,
-    process: Option<tokio::process::Child>,
-    stderr: String,
-    stopped: bool,
-}
-
-#[derive(Clone, Serialize)]
-struct TranscodeSessionInfo {
-    #[serde(rename = "sessionId")]
-    session_id: String,
-    #[serde(rename = "filePath")]
-    file_path: String,
-    #[serde(rename = "outputDir")]
-    output_dir: String,
-    #[serde(rename = "seekable")]
-    seekable: bool,
-    #[serde(rename = "startSeconds")]
-    start_seconds: i64,
-    preset: Option<String>,
-    codec: Option<String>,
-    playlist_url: String,
 }
 
 #[derive(Clone)]
@@ -115,6 +50,8 @@ pub struct MediaServer {
     resource_key: [u8; 32],
     generation: Arc<AtomicU64>,
     tools: MediaTools,
+    pub probe: crate::probe::MediaProbe,
+    pub transcodes: crate::transcode::Transcodes,
     store: Arc<Mutex<Store>>,
     remote: Arc<RemoteClient>,
     iptv: crate::iptv_proxy::IptvProxy,
@@ -125,12 +62,24 @@ impl MediaServer {
         store: Arc<Mutex<Store>>,
         remote: Arc<RemoteClient>,
         ffmpeg: Option<std::path::PathBuf>,
+        ffprobe: Option<std::path::PathBuf>,
     ) -> Result<(Self, oneshot::Sender<()>)> {
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let probe = crate::probe::MediaProbe::new(ffprobe);
+        let cache = store.lock().await.data_dir.join("cache/tauri-transcodes");
+        let transcodes = crate::transcode::Transcodes::new(
+            store.clone(),
+            probe.clone(),
+            ffmpeg.clone(),
+            cache,
+            listener.local_addr()?.port(),
+        );
         let server = Self {
             port: listener.local_addr()?.port(),
             generation: Arc::new(AtomicU64::new(0)),
             tools: MediaTools::new(ffmpeg),
+            probe,
+            transcodes,
             token: uuid::Uuid::new_v4().to_string(),
             resource_key: {
                 let mut key = [0; 32];
@@ -146,7 +95,8 @@ impl MediaServer {
         let routes = Router::new()
             .route("/media/{id}", get(deliver))
             .route("/media/{id}/resource/{reference}", get(deliver_resource))
-            .with_state(server.clone());
+            .with_state(server.clone())
+            .merge(crate::transcode::router(server.transcodes.clone()));
         let (stop, stopped) = oneshot::channel();
         tokio::spawn(async move {
             let _ = axum::serve(listener, routes)
@@ -271,11 +221,14 @@ impl MediaServer {
     }
     pub async fn shutdown(&self) {
         self.revoke_all().await;
+        self.transcodes.shutdown().await;
+        self.probe.shutdown().await;
         self.tools.shutdown().await;
     }
     pub async fn revoke_all(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.grants.lock().await.clear();
+        self.transcodes.revoke_all().await;
     }
     fn resource_cipher(&self) -> Result<aead::LessSafeKey> {
         aead::UnboundKey::new(&aead::AES_256_GCM, &self.resource_key)
@@ -432,7 +385,11 @@ async fn deliver_inner(
             return response
                 .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
                 .header(header::CONTENT_LENGTH, body.len())
-                .body(Body::from(body))
+                .body(if method == axum::http::Method::HEAD {
+                    Body::empty()
+                } else {
+                    Body::from(body)
+                })
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
         }
         for (name, value) in &upstream.headers {
@@ -727,4 +684,28 @@ pub fn content_type(path: &std::path::Path) -> String {
     mime_guess::from_path(path)
         .first_or_octet_stream()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_range;
+    #[test]
+    fn bounded_ranges_cover_empty_suffix_open_and_invalid_requests() {
+        assert_eq!(parse_range(None, 0), Some((0, 0, false)));
+        assert_eq!(parse_range(Some("bytes=0-"), 0), None);
+        assert_eq!(parse_range(Some("bytes=-3"), 10), Some((7, 9, true)));
+        assert_eq!(parse_range(Some("bytes=-30"), 10), Some((0, 9, true)));
+        assert_eq!(parse_range(Some("bytes=3-"), 10), Some((3, 9, true)));
+        assert_eq!(parse_range(Some("bytes=0-99"), 10), Some((0, 9, true)));
+        for value in [
+            "bytes=-0",
+            "bytes=10-",
+            "bytes=5-3",
+            "bytes=0-1,3-4",
+            "items=0-1",
+            "bytes=abc-1",
+        ] {
+            assert_eq!(parse_range(Some(value), 10), None, "{value}");
+        }
+    }
 }

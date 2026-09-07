@@ -95,7 +95,9 @@ impl Store {
             ));
         }
         match channel {
-            channel if channel.starts_with("plugins:stremio:") => Ok(self.invoke_stremio_store(channel,args)),
+            channel if channel.starts_with("plugins:stremio:") => {
+                Ok(self.invoke_stremio_store(channel, args))
+            }
             channel
                 if channel.starts_with("playback:segments:")
                     || channel.starts_with("playback:analysis:") =>
@@ -157,7 +159,7 @@ impl Store {
             }
             "library:scan" => {
                 self.require_owner()?;
-                return Err(Error::unsupported(channel));
+                Err(Error::unsupported(channel))
             }
             "media:get-file-info" => {
                 let path = self.authorize_media(string(args, 0)?)?;

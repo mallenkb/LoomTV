@@ -10,7 +10,10 @@
     "frontend:build": "vp build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "verify-runtime": "node scripts/verify-runtime.mjs",
-    "parity": "node ../../scripts/tauri/contract-inventory.mjs"
+    "parity": "node ../../scripts/tauri/contract-inventory.mjs",
+    "test": "node --experimental-strip-types --test tests/transport.test.mjs",
+    "test:rust": "cargo test -p loomtv-core -p loomtv-playback --locked",
+    "test:media": "node scripts/test-media.mjs"
   },
   "dependencies": {
     "@loom-media-server/lan-protocol": "workspace:*",

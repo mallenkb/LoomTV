@@ -1,3 +1,4 @@
+use crate::content_ratings::normalize as normalized_content_rating;
 use crate::{metadata::MetadataProviderGateway, now, Error, Result, Store};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{json, Map, Value};
@@ -160,6 +161,12 @@ pub async fn official_candidates(
     Ok(Value::Array(fetch_candidates(&context, &item).await?))
 }
 
+pub struct OfficialArtworkSelection<'a> {
+    pub media_id: &'a str,
+    pub candidate: &'a Value,
+    pub target: Option<&'a str>,
+}
+
 /// Applies a fresh provider candidate, ignoring renderer-supplied metadata.
 /// Target-specific artwork variants must belong to the re-fetched candidate.
 pub async fn apply_official(
@@ -167,11 +174,14 @@ pub async fn apply_official(
     gateway: &MetadataProviderGateway,
     expected_profile: &str,
     expected_revision: i64,
-    media_id: &str,
-    supplied_candidate: &Value,
-    requested_target: Option<&str>,
+    selection: OfficialArtworkSelection<'_>,
     cancelled: Arc<AtomicBool>,
 ) -> Result<Value> {
+    let OfficialArtworkSelection {
+        media_id,
+        candidate: supplied_candidate,
+        target: requested_target,
+    } = selection;
     validate_media_id(media_id)?;
     let supplied = supplied_candidate
         .as_object()
@@ -1444,9 +1454,9 @@ fn sha1_hex(input: &[u8]) -> String {
         0x10325476,
         0xc3d2e1f0,
     ];
-    for chunk in data.chunks_exact(64) {
+    for chunk in data.chunks(64) {
         let mut w = [0u32; 80];
-        for (i, word) in chunk.chunks_exact(4).enumerate() {
+        for (i, word) in chunk.chunks(4).enumerate() {
             w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]])
         }
         for i in 16..80 {
@@ -1774,39 +1784,7 @@ fn accept_content_rating(result: &mut Map<String, Value>, country: &str, code: &
         }
     }
 }
-fn normalized_content_rating(country: &str, code: &str, source: &str) -> Option<Value> {
-    let country = country.trim().to_uppercase();
-    let code = code
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_uppercase();
-    if country.is_empty()
-        || code.is_empty()
-        || ["N/A", "NA", "NONE", "NOT RATED", "UNKNOWN", "UNRATED"].contains(&code.as_str())
-    {
-        return None;
-    }
-    let known = match (country.as_str(), code.as_str()) {
-        ("US", "G" | "TV-Y" | "TV-G") => Some(0),
-        ("US", "TV-Y7") => Some(7),
-        ("US", "PG" | "TV-PG") => Some(8),
-        ("US", "PG-13") => Some(13),
-        ("US", "TV-14") => Some(14),
-        ("US", "R" | "TV-MA") => Some(17),
-        ("US", "NC-17") => Some(18),
-        _ => None,
-    };
-    let inferred = code
-        .split(|character: char| !character.is_ascii_digit())
-        .find_map(|part| {
-            (!part.is_empty())
-                .then(|| part.parse::<i64>().ok())
-                .flatten()
-        })
-        .unwrap_or(0);
-    Some(json!({"code":code,"minimumAge":known.unwrap_or(inferred),"source":source}))
-}
+
 fn omdb_provider_ratings(response: &Value) -> Map<String, Value> {
     let mut result = Map::new();
     let rating_source = |name: &str| {
@@ -1827,10 +1805,9 @@ fn omdb_provider_ratings(response: &Value) -> Map<String, Value> {
         10.0,
     ) {
         let mut rating = json!({"value":value,"scale":10});
-        if let Some(votes) = text(response.get("imdbVotes"))
+        if let Ok(votes) = text(response.get("imdbVotes"))
             .replace(',', "")
             .parse::<i64>()
-            .ok()
         {
             rating["votes"] = json!(votes)
         }
@@ -1922,4 +1899,19 @@ fn tmdb_trailer(details: &Value) -> Option<String> {
         "https://www.youtube.com/watch?v={}",
         text(selected.get("key"))
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sha1_hex;
+
+    #[test]
+    fn candidate_hash_retains_the_reference_sha1_bytes() {
+        assert_eq!(sha1_hex(b""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+        assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            sha1_hex(&[b'a'; 200]),
+            "e61cfffe0d9195a525fc6cf06ca2d77119c24a40"
+        );
+    }
 }

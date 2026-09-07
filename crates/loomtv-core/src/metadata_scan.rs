@@ -1,3 +1,4 @@
+use crate::content_ratings::normalize as normalized_content_rating;
 use crate::{metadata::MetadataProviderGateway, now, Error, Result, Store};
 use futures_util::{stream, StreamExt};
 use rusqlite::{params, OptionalExtension, Transaction};
@@ -279,16 +280,18 @@ pub async fn enrich_library_metadata(
         let patch_categories = outcome.patch.categories();
         let changed = if outcome.patch.has_values() {
             commit_patch(
-                &store,
-                expected_profile,
-                expected_revision,
+                MetadataWriteContext {
+                    store: &store,
+                    expected_profile,
+                    expected_revision,
+                    owner_required: true,
+                },
                 mode,
                 &outcome.item,
                 &outcome.patch,
                 &patch_categories,
                 outcome.errors.last().map(String::as_str),
                 &cancelled,
-                true,
             )
             .await?
         } else if outcome.attempted {
@@ -298,15 +301,17 @@ pub async fn enrich_library_metadata(
                 .map(String::as_str)
                 .unwrap_or("No matching provider metadata was returned.");
             record_attempt(
-                &store,
-                expected_profile,
-                expected_revision,
+                MetadataWriteContext {
+                    store: &store,
+                    expected_profile,
+                    expected_revision,
+                    owner_required: true,
+                },
                 &outcome.item.id,
                 &outcome.item.requested,
                 &HashSet::new(),
                 Some(message),
                 &cancelled,
-                true,
             )
             .await?;
             false
@@ -392,16 +397,18 @@ pub async fn refresh_incomplete_metadata(
     let patch_categories = outcome.patch.categories();
     if outcome.patch.has_values() {
         return commit_patch(
-            &store,
-            expected_profile,
-            expected_revision,
+            MetadataWriteContext {
+                store: &store,
+                expected_profile,
+                expected_revision,
+                owner_required: false,
+            },
             ScanMode::Quick,
             &outcome.item,
             &outcome.patch,
             &patch_categories,
             outcome.errors.last().map(String::as_str),
             &cancelled,
-            false,
         )
         .await;
     }
@@ -412,15 +419,17 @@ pub async fn refresh_incomplete_metadata(
             .map(String::as_str)
             .unwrap_or("No matching provider metadata was returned.");
         record_attempt(
-            &store,
-            expected_profile,
-            expected_revision,
+            MetadataWriteContext {
+                store: &store,
+                expected_profile,
+                expected_revision,
+                owner_required: false,
+            },
             &outcome.item.id,
             &outcome.item.requested,
             &HashSet::new(),
             Some(message),
             &cancelled,
-            false,
         )
         .await?;
     }
@@ -524,15 +533,17 @@ pub async fn streaming_providers(
         Ok(response) => response,
         Err(error) => {
             record_attempt(
-                &store,
-                expected_profile,
-                expected_revision,
+                MetadataWriteContext {
+                    store: &store,
+                    expected_profile,
+                    expected_revision,
+                    owner_required: false,
+                },
                 media_id,
                 &requested,
                 &HashSet::new(),
                 Some(&error.message),
                 &cancelled,
-                false,
             )
             .await?;
             return Ok(Value::Array(cached));
@@ -541,15 +552,17 @@ pub async fn streaming_providers(
     let providers = tmdb_streaming_providers_response(&response);
     if providers.is_empty() {
         record_attempt(
-            &store,
-            expected_profile,
-            expected_revision,
+            MetadataWriteContext {
+                store: &store,
+                expected_profile,
+                expected_revision,
+                owner_required: false,
+            },
             media_id,
             &requested,
             &requested,
             None,
             &cancelled,
-            false,
         )
         .await?;
         return Ok(Value::Array(cached));
@@ -571,16 +584,18 @@ pub async fn streaming_providers(
     };
     let categories = patch.categories();
     commit_patch(
-        &store,
-        expected_profile,
-        expected_revision,
+        MetadataWriteContext {
+            store: &store,
+            expected_profile,
+            expected_revision,
+            owner_required: false,
+        },
         ScanMode::Refresh,
         &item,
         &patch,
         &categories,
         None,
         &cancelled,
-        false,
     )
     .await?;
     Ok(Value::Array(providers))
@@ -1026,41 +1041,43 @@ fn matching_tmdb_hit<'a>(
 }
 
 fn tmdb_details(details: &Value, media_type: &str, tmdb_id: &str) -> MetadataPatch {
-    let mut patch = MetadataPatch::default();
-    patch.title = nonempty(if media_type == "movie" {
-        text(details.get("title"))
-    } else {
-        text(details.get("name"))
-    });
-    patch.year = year_from_date(&text(if media_type == "movie" {
-        details.get("release_date")
-    } else {
-        details.get("first_air_date")
-    }));
-    patch.summary = nonempty(text(details.get("overview")));
-    patch.rating = positive_number(details.get("vote_average"));
-    patch.runtime = integer(details.get("runtime"))
-        .or_else(|| {
-            details
-                .get("episode_run_time")
-                .and_then(Value::as_array)
-                .and_then(|values| values.first())
-                .and_then(|value| integer(Some(value)))
-        })
-        .filter(|minutes| *minutes > 0)
-        .map(|minutes| format!("{minutes}m"));
-    patch.season_count = integer(details.get("number_of_seasons"));
-    patch.episode_count = integer(details.get("number_of_episodes"));
-    patch.trailer_url = tmdb_trailer(details);
-    patch.genres = details
-        .get("genres")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|genre| nonempty(text(genre.get("name"))))
-        .take(64)
-        .collect();
-    patch.cast = tmdb_cast(details);
+    let mut patch = MetadataPatch {
+        title: nonempty(if media_type == "movie" {
+            text(details.get("title"))
+        } else {
+            text(details.get("name"))
+        }),
+        year: year_from_date(&text(if media_type == "movie" {
+            details.get("release_date")
+        } else {
+            details.get("first_air_date")
+        })),
+        summary: nonempty(text(details.get("overview"))),
+        rating: positive_number(details.get("vote_average")),
+        runtime: integer(details.get("runtime"))
+            .or_else(|| {
+                details
+                    .get("episode_run_time")
+                    .and_then(Value::as_array)
+                    .and_then(|values| values.first())
+                    .and_then(|value| integer(Some(value)))
+            })
+            .filter(|minutes| *minutes > 0)
+            .map(|minutes| format!("{minutes}m")),
+        season_count: integer(details.get("number_of_seasons")),
+        episode_count: integer(details.get("number_of_episodes")),
+        trailer_url: tmdb_trailer(details),
+        genres: details
+            .get("genres")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|genre| nonempty(text(genre.get("name"))))
+            .take(64)
+            .collect(),
+        cast: tmdb_cast(details),
+        ..MetadataPatch::default()
+    };
     patch.provider_ids.insert("tmdbId".into(), json!(tmdb_id));
     if let Some(value) = details
         .get("imdb_id")
@@ -1157,24 +1174,26 @@ async fn fetch_omdb(
     let Some(response) = response else {
         return Ok(None);
     };
-    let mut patch = MetadataPatch::default();
-    patch.title = nonempty(text(response.get("Title")));
-    patch.year = text(response.get("Year"))
-        .get(0..4)
-        .and_then(|year| year.parse::<i64>().ok());
-    patch.summary = valid_omdb_text(response.get("Plot"));
-    patch.content_rating = valid_omdb_text(response.get("Rated"));
-    patch.runtime = valid_omdb_text(response.get("Runtime"));
-    patch.genres = valid_omdb_text(response.get("Genre"))
-        .map(|value| {
-            value
-                .split(',')
-                .filter_map(|genre| nonempty(genre.trim().to_owned()))
-                .take(64)
-                .collect()
-        })
-        .unwrap_or_default();
-    patch.poster = secure_url(response.get("Poster").and_then(Value::as_str));
+    let mut patch = MetadataPatch {
+        title: nonempty(text(response.get("Title"))),
+        year: text(response.get("Year"))
+            .get(0..4)
+            .and_then(|year| year.parse::<i64>().ok()),
+        summary: valid_omdb_text(response.get("Plot")),
+        content_rating: valid_omdb_text(response.get("Rated")),
+        runtime: valid_omdb_text(response.get("Runtime")),
+        genres: valid_omdb_text(response.get("Genre"))
+            .map(|value| {
+                value
+                    .split(',')
+                    .filter_map(|genre| nonempty(genre.trim().to_owned()))
+                    .take(64)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        poster: secure_url(response.get("Poster").and_then(Value::as_str)),
+        ..MetadataPatch::default()
+    };
     if let Some(value) = patch.poster.clone() {
         patch.poster_candidates.push(value);
     }
@@ -1256,27 +1275,29 @@ async fn fetch_anilist(
         })
         .filter(|title| !title.trim().is_empty())
         .collect::<Vec<_>>();
-    let mut patch = MetadataPatch::default();
-    patch.title = titles.first().map(|value| (*value).to_owned());
-    patch.year = integer(media.pointer("/startDate/year"));
-    patch.format = nonempty(text(media.get("format"))).map(|value| value.replace('_', " "));
-    patch.summary = nonempty(strip_markup(&text(media.get("description"))));
-    patch.rating = positive_number(media.get("averageScore")).map(|value| value / 10.0);
-    patch.genres = media
-        .get("genres")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().and_then(|value| nonempty(value.to_owned())))
-        .take(64)
-        .collect();
-    patch.poster = ["extraLarge", "large", "medium"].iter().find_map(|key| {
-        secure_url(
-            media
-                .pointer(&format!("/coverImage/{key}"))
-                .and_then(Value::as_str),
-        )
-    });
+    let mut patch = MetadataPatch {
+        title: titles.first().map(|value| (*value).to_owned()),
+        year: integer(media.pointer("/startDate/year")),
+        format: nonempty(text(media.get("format"))).map(|value| value.replace('_', " ")),
+        summary: nonempty(strip_markup(&text(media.get("description")))),
+        rating: positive_number(media.get("averageScore")).map(|value| value / 10.0),
+        genres: media
+            .get("genres")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str().and_then(|value| nonempty(value.to_owned())))
+            .take(64)
+            .collect(),
+        poster: ["extraLarge", "large", "medium"].iter().find_map(|key| {
+            secure_url(
+                media
+                    .pointer(&format!("/coverImage/{key}"))
+                    .and_then(Value::as_str),
+            )
+        }),
+        ..MetadataPatch::default()
+    };
     if let Some(value) = patch.poster.clone() {
         patch.poster_candidates.push(value);
     }
@@ -1357,18 +1378,28 @@ fn merge_patch(target: &mut MetadataPatch, incoming: MetadataPatch, prefer_incom
     }
 }
 
-async fn commit_patch(
-    store: &Arc<Mutex<Store>>,
-    expected_profile: &str,
+struct MetadataWriteContext<'a> {
+    store: &'a Arc<Mutex<Store>>,
+    expected_profile: &'a str,
     expected_revision: i64,
+    owner_required: bool,
+}
+
+async fn commit_patch(
+    context: MetadataWriteContext<'_>,
     mode: ScanMode,
     item: &ItemSnapshot,
     patch: &MetadataPatch,
     patch_categories: &HashSet<Category>,
     partial_error: Option<&str>,
     cancelled: &AtomicBool,
-    owner_required: bool,
 ) -> Result<bool> {
+    let MetadataWriteContext {
+        store,
+        expected_profile,
+        expected_revision,
+        owner_required,
+    } = context;
     check_cancelled(cancelled)?;
     let mut store = store.lock().await;
     check_cancelled(cancelled)?;
@@ -1660,16 +1691,19 @@ fn commit_episodes(
 }
 
 async fn record_attempt(
-    store: &Arc<Mutex<Store>>,
-    expected_profile: &str,
-    expected_revision: i64,
+    context: MetadataWriteContext<'_>,
     media_id: &str,
     requested: &HashSet<Category>,
     successful: &HashSet<Category>,
     error: Option<&str>,
     cancelled: &AtomicBool,
-    owner_required: bool,
 ) -> Result<()> {
+    let MetadataWriteContext {
+        store,
+        expected_profile,
+        expected_revision,
+        owner_required,
+    } = context;
     check_cancelled(cancelled)?;
     let mut store = store.lock().await;
     check_cancelled(cancelled)?;
@@ -1948,46 +1982,6 @@ fn accept_content_rating(result: &mut Map<String, Value>, country: &str, code: &
     if age > existing_age {
         result.insert(country.to_uppercase(), rating);
     }
-}
-
-fn normalized_content_rating(country: &str, code: &str, source: &str) -> Option<Value> {
-    let country = country.trim().to_uppercase();
-    let code = code
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_uppercase();
-    if country.is_empty()
-        || code.is_empty()
-        || ["N/A", "NA", "NONE", "NOT RATED", "UNKNOWN", "UNRATED"].contains(&code.as_str())
-    {
-        return None;
-    }
-    let known = match (country.as_str(), code.as_str()) {
-        ("US", "G" | "TV-Y" | "TV-G") => Some(0),
-        ("US", "TV-Y7") => Some(7),
-        ("US", "PG" | "TV-PG") => Some(8),
-        ("US", "PG-13") => Some(13),
-        ("US", "TV-14") => Some(14),
-        ("US", "R" | "TV-MA") => Some(17),
-        ("US", "NC-17") => Some(18),
-        _ => None,
-    };
-    let inferred = code
-        .split(|character: char| !character.is_ascii_digit())
-        .find_map(|part| {
-            (!part.is_empty())
-                .then(|| part.parse::<i64>().ok())
-                .flatten()
-        })
-        .unwrap_or_else(|| {
-            if ["G", "U", "ALL", "AL", "L", "TP", "T"].contains(&code.as_str()) {
-                0
-            } else {
-                0
-            }
-        });
-    Some(json!({"code":code,"minimumAge":known.unwrap_or(inferred),"source":source}))
 }
 
 fn omdb_provider_ratings(response: &Value) -> Map<String, Value> {
@@ -2272,10 +2266,10 @@ fn secure_url(value: Option<&str>) -> Option<String> {
     let value = value?.trim();
     if value.starts_with("https://") {
         Some(value.to_owned())
-    } else if let Some(value) = value.strip_prefix("http://") {
-        Some(format!("https://{value}"))
     } else {
-        None
+        value
+            .strip_prefix("http://")
+            .map(|value| format!("https://{value}"))
     }
 }
 
@@ -2294,12 +2288,8 @@ fn year_from_date(value: &str) -> Option<i64> {
 fn normalize_title(value: &str) -> String {
     value
         .nfkd()
-        .filter_map(|character| {
-            character
-                .is_alphanumeric()
-                .then(|| character.to_lowercase())
-        })
-        .flatten()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
         .collect()
 }
 
