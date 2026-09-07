@@ -66,7 +66,10 @@ export class NativeSessionLease<Options, State extends NativeState> {
       const merged = { ...this.early.get(state.sessionId), ...state };
       this.early.delete(state.sessionId);
       this.early.set(state.sessionId, merged);
-      if (this.early.size > 8) this.early.delete(this.early.keys().next().value!);
+      if (this.early.size > 8) {
+        const oldest = this.early.keys().next();
+        if (!oldest.done) this.early.delete(oldest.value);
+      }
     }
   }
 
