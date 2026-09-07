@@ -7,22 +7,23 @@ pub mod discovery;
 pub mod hls;
 pub mod iptv;
 pub mod iptv_proxy;
-pub mod transcode_plan;
 pub mod media_tools;
 pub mod metadata;
 pub mod metadata_scan;
 pub mod official_artwork;
+pub mod probe;
 mod profile_transfer;
 mod profiles;
 pub mod progress_import;
 pub mod remote;
-pub mod probe;
 pub mod scanner;
 mod segments;
 mod settings;
 mod store;
-pub mod stremio_store;
 pub mod streaming;
+pub mod stremio_store;
+pub mod transcode;
+pub mod transcode_plan;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -103,3 +104,6 @@ pub fn number(args: &[Value], index: usize) -> Result<f64> {
             )
         })
 }
+
+#[cfg(test)]
+mod transcode_tests;

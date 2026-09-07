@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod desktop_os;
-mod media_protocol;
 mod media_control;
+mod media_protocol;
 mod playback_activity;
 mod profile_transfer;
 mod window_host;
@@ -31,7 +31,6 @@ struct Runtime {
     media: loomtv_core::streaming::MediaServer,
     remote: Arc<loomtv_core::remote::RemoteClient>,
     native_scope: Mutex<Option<PlaybackScope>>,
-    probe_gate: Arc<tokio::sync::Semaphore>,
     drained: AtomicBool,
     media_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     player: PlaybackService,
@@ -43,9 +42,7 @@ struct Runtime {
     scan_gate: Arc<tokio::sync::Semaphore>,
     vlc_path: Option<PathBuf>,
     ffmpeg: Option<PathBuf>,
-    ffprobe: Option<PathBuf>,
     closing: Arc<AtomicBool>,
-    shutdown_signal: tokio::sync::watch::Sender<bool>,
 }
 fn failed(error: impl std::fmt::Display) -> Error {
     Error::new("desktop_error", error.to_string())
@@ -200,7 +197,7 @@ async fn desktop_invoke(
         }
         "media-control:publish" | "media-control:release" => {
             let _gate = state.playback_gate.lock().await;
-            state.media_control.handle(&window,&channel,&args).await
+            state.media_control.handle(&window, &channel, &args).await
         }
         "playback:activity" => {
             let timeout_minutes = {
@@ -261,13 +258,13 @@ async fn desktop_invoke(
             if session_changed {
                 state.player.stop(None).await.map_err(media_error)?;
                 state.playback_activity.release_all().await?;
-            state.media_control.release_all().await?;
+                state.media_control.release_all().await?;
                 *state.native_scope.lock().await = None;
                 state.media.revoke_all().await;
                 window_host::hide(&window).await?;
             } else if profile_change {
                 state.playback_activity.release_all().await?;
-            state.media_control.release_all().await?;
+                state.media_control.release_all().await?;
             }
             Ok(result)
         }
@@ -398,7 +395,14 @@ async fn desktop_invoke(
                 .get(1)
                 .is_some_and(|options| options["forceTranscode"] == true)
             {
-                return Err(Error::unsupported(&channel));
+                let session = state
+                    .media
+                    .transcodes
+                    .start(string(&args, 0)?, args.get(1).unwrap_or(&Value::Null))
+                    .await?;
+                return Ok(
+                    json!({"url":session["playlistUrl"],"contentType":"application/vnd.apple.mpegurl","fileName":"index.m3u8","isTranscoded":true,"isRemuxed":false,"playbackMode":"transcode","decisionReason":"The player requested an HLS fallback."}),
+                );
             }
             let url = state.media.grant(string(&args, 0)?).await?;
             let input = string(&args, 0)?;
@@ -419,74 +423,44 @@ async fn desktop_invoke(
         "media:ffmpeg-available" => {
             Ok(json!({"available":state.ffmpeg.is_some(),"path":state.ffmpeg}))
         }
-        "media:probe" => {
-            let path = state
-                .store
-                .lock()
-                .await
-                .authorize_media(string(&args, 0)?)?;
-            let binary = state.ffprobe.as_ref().ok_or_else(|| {
-                Error::new(
-                    "ffprobe_missing",
-                    "The packaged ffprobe runtime is missing.",
-                )
-            })?;
-            let _permit = state
-                .probe_gate
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| Error::new("probe_busy", "A media probe is already running."))?;
-            use tokio::io::AsyncReadExt;
-            let mut child = tokio::process::Command::new(binary)
-                .args([
-                    "-v",
-                    "error",
-                    "-show_format",
-                    "-show_streams",
-                    "-show_chapters",
-                    "-of",
-                    "json",
-                ])
-                .arg(path)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .kill_on_drop(true)
-                .spawn()?;
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| Error::new("probe_failed", "The media probe did not start."))?;
-            let mut stopped = state.shutdown_signal.subscribe();
-            if *stopped.borrow() {
-                return Err(Error::new(
-                    "probe_cancelled",
-                    "The media probe was cancelled.",
-                ));
-            }
-            let work = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-                let mut bytes = Vec::new();
-                stdout
-                    .take(4 * 1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)
+        "media:probe" => Ok(api_result(
+            state
+                .media
+                .probe
+                .probe(state.store.clone(), string(&args, 0)?)
+                .await,
+        )),
+        "media:can-direct-play" => {
+            let result = async {
+                let probe = state
+                    .media
+                    .probe
+                    .probe(state.store.clone(), string(&args, 0)?)
                     .await?;
-                if bytes.len() > 4 * 1024 * 1024 {
-                    return Err(Error::new(
-                        "probe_too_large",
-                        "The media probe response is too large.",
-                    ));
-                }
-                if !child.wait().await?.success() {
-                    return Err(Error::new("probe_failed", "The media probe failed."));
-                }
-                Ok(bytes)
-            });
-            let output = tokio::select! {
-                _ = stopped.changed() => return Err(Error::new("probe_cancelled", "The media probe was cancelled.")),
-                result = work => result.map_err(|_| Error::new("probe_timeout", "The media probe timed out."))??,
-            };
-            Ok(json!({"ok":true,"data":serde_json::from_slice::<Value>(&output)?}))
+                loomtv_core::probe::can_direct_play(
+                    &probe,
+                    args.get(1).and_then(Value::as_str).unwrap_or("html5"),
+                )
+                .map(|value| json!(value))
+            }
+            .await;
+            Ok(api_result(result))
         }
+        "media:start-transcode" => Ok(api_result(
+            state
+                .media
+                .transcodes
+                .start(string(&args, 0)?, args.get(1).unwrap_or(&Value::Null))
+                .await,
+        )),
+        "media:stop-transcode" => Ok(api_result(
+            state
+                .media
+                .transcodes
+                .stop(string(&args, 0)?)
+                .await
+                .map(|value| json!(value)),
+        )),
         "libvlc:availability" | "libvlc:refresh-availability" => {
             let available = cfg!(target_os = "macos") && state.vlc_path.is_some();
             Ok(
@@ -585,7 +559,7 @@ async fn desktop_invoke(
                 .map_err(media_error)?;
             if result == true {
                 state.playback_activity.release_all().await?;
-            state.media_control.release_all().await?;
+                state.media_control.release_all().await?;
                 *state.native_scope.lock().await = None;
                 window_host::hide(&window).await?;
             }
@@ -655,7 +629,7 @@ async fn desktop_invoke(
             if profile_change {
                 state.player.stop(None).await.map_err(media_error)?;
                 state.playback_activity.release_all().await?;
-            state.media_control.release_all().await?;
+                state.media_control.release_all().await?;
                 *state.native_scope.lock().await = None;
                 state.media.revoke_all().await;
                 window_host::hide(&window).await?;
@@ -727,6 +701,7 @@ fn main() {
                     store.clone(),
                     remote.clone(),
                     ffmpeg.clone(),
+                    ffprobe,
                 ))?;
             app.manage(Runtime {
                 iptv: loomtv_core::iptv::IptvService::new(store.clone()),
@@ -734,7 +709,6 @@ fn main() {
                 media,
                 remote,
                 native_scope: Mutex::new(None),
-                probe_gate: Arc::new(tokio::sync::Semaphore::new(2)),
                 drained: AtomicBool::new(false),
                 media_stop: Mutex::new(Some(stop)),
                 player,
@@ -745,9 +719,7 @@ fn main() {
                 scan_gate: Arc::new(tokio::sync::Semaphore::new(1)),
                 vlc_path,
                 ffmpeg,
-                ffprobe,
                 closing: Arc::new(AtomicBool::new(false)),
-                shutdown_signal: tokio::sync::watch::channel(false).0,
             });
             let config = app
                 .config()
@@ -795,7 +767,6 @@ fn begin_shutdown(handle: &tauri::AppHandle) {
     let app = handle.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<Runtime>();
-        state.shutdown_signal.send_replace(true);
         let cleanup = async {
             let _gate = state.playback_gate.lock().await;
             let _ = state.player.shutdown().await;
@@ -807,7 +778,6 @@ fn begin_shutdown(handle: &tauri::AppHandle) {
             }
             // A cancelled scan finishes its current atomic SQLite batch before process exit.
             let _scan = state.scan_gate.acquire().await;
-            let _probes = state.probe_gate.acquire_many(2).await;
         };
         let _ = tokio::time::timeout(std::time::Duration::from_secs(15), cleanup).await;
         state.drained.store(true, Ordering::SeqCst);
@@ -892,4 +862,13 @@ fn trusted_ui_url(url: &tauri::Url) -> bool {
             && url.scheme() == "http"
             && url.host_str() == Some("127.0.0.1")
             && url.port() == Some(5197))
+}
+
+fn api_result(result: Result<Value>) -> Value {
+    match result {
+        Ok(data) => json!({"ok":true,"data":data}),
+        Err(error) => {
+            json!({"ok":false,"error":error.message,"code":error.code,"retryable":error.retryable})
+        }
+    }
 }

@@ -95,7 +95,9 @@ impl Store {
             ));
         }
         match channel {
-            channel if channel.starts_with("plugins:stremio:") => Ok(self.invoke_stremio_store(channel,args)),
+            channel if channel.starts_with("plugins:stremio:") => {
+                Ok(self.invoke_stremio_store(channel, args))
+            }
             channel
                 if channel.starts_with("playback:segments:")
                     || channel.starts_with("playback:analysis:") =>

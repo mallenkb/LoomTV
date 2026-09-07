@@ -20,6 +20,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const QUEUE_TIMEOUT: Duration = Duration::from_secs(15);
 const CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 const CACHE_ENTRIES: usize = 128;
+const MAX_PENDING: usize = 16;
+const MAX_WAITERS: usize = 32;
 
 #[derive(Clone)]
 pub struct MediaProbe {
@@ -43,12 +45,12 @@ struct ProbeState {
 struct CacheKey {
     path: PathBuf,
     size: u64,
-    modified_ms: i128,
+    modified_ns: i128,
 }
 
 impl PartialEq for CacheKey {
     fn eq(&self, other: &Self) -> bool {
-        self.path == other.path && self.size == other.size && self.modified_ms == other.modified_ms
+        self.path == other.path && self.size == other.size && self.modified_ns == other.modified_ns
     }
 }
 
@@ -56,7 +58,7 @@ impl Hash for CacheKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.path.hash(state);
         self.size.hash(state);
-        self.modified_ms.hash(state);
+        self.modified_ns.hash(state);
     }
 }
 
@@ -172,8 +174,18 @@ impl MediaProbe {
             }
             let (reply, response) = oneshot::channel();
             if let Some(waiters) = state.pending.get_mut(&key) {
+                waiters.retain(|waiter| !waiter.is_closed());
+                if waiters.len() >= MAX_WAITERS {
+                    return Err(Error::new(
+                        "probe_busy",
+                        "Too many pending requests for this media.",
+                    ));
+                }
                 waiters.push(reply);
             } else {
+                if state.pending.len() >= MAX_PENDING {
+                    return Err(Error::new("probe_busy", "The media probe queue is full."));
+                }
                 state.pending.insert(key.clone(), vec![reply]);
                 let service = self.clone();
                 let path = authorization.path.clone();
@@ -277,8 +289,12 @@ impl MediaProbe {
         });
         let result = tokio::select! {
             _ = stopped.changed() => Err(cancelled()),
-            result = work => result.map_err(|_| Error::new("probe_timeout", "The media probe timed out."))?,
+            result = work => result.unwrap_or_else(|_| Err(Error::new("probe_timeout", "The media probe timed out."))),
         };
+        if result.is_err() {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+        }
         drop(permit);
         result
     }
@@ -336,7 +352,9 @@ pub fn can_direct_play(probe_result: &Value, backend: &str) -> Result<bool> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_lowercase();
-    Ok(video_codec == "h264"
+    let container = probe_result["container"].as_str().unwrap_or_default();
+    Ok(["mov", "mp4", "m4v"].contains(&container)
+        && video_codec == "h264"
         && pixel_format == Some("yuv420p")
         && !profile.contains("10")
         && ["aac", "mp3"].contains(&audio_codec.as_str()))
@@ -391,16 +409,16 @@ async fn cache_key(path: &Path) -> Result<CacheKey> {
             "The media source must be a file.",
         ));
     }
-    let modified_ms = metadata
+    let modified_ns = metadata
         .modified()
         .ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| (duration.as_secs_f64() * 1000.0).round() as i128)
+        .map(|duration| duration.as_nanos() as i128)
         .unwrap_or(0);
     Ok(CacheKey {
         path: path.to_owned(),
         size: metadata.len(),
-        modified_ms,
+        modified_ns,
     })
 }
 
@@ -593,4 +611,23 @@ fn parse_rounded(value: &str) -> Option<f64> {
 
 fn cancelled() -> Error {
     Error::new("probe_cancelled", "The media probe was cancelled.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn normalized_result_matches_renderer_fields_and_subtitle_indices() {
+        let raw = br#"{"format":{"duration":"12.25","format_name":"mov,mp4","bit_rate":"250000"},"streams":[{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","avg_frame_rate":"24000/1001","width":1920,"height":1080},{"index":2,"codec_type":"audio","codec_name":"aac"},{"index":7,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"eng"}}]}"#;
+        let result = normalize_output("fixture.mp4", raw).unwrap();
+        assert_eq!(result["container"], "mov");
+        assert_eq!(result["bitrateKbps"], 250.0);
+        assert_eq!(result["subtitleStreams"][0]["index"], 7.0);
+        assert!(can_direct_play(&result, "html5").unwrap());
+        assert!(!can_direct_play(&result, "hls").unwrap());
+        let mut mkv = result.clone();
+        mkv["container"] = json!("matroska");
+        assert!(!can_direct_play(&mkv, "html5").unwrap());
+        assert!(can_direct_play(&result, "unknown").is_err());
+    }
 }
