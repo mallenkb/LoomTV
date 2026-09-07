@@ -381,6 +381,7 @@ pub fn import_snapshot(source: &Path, directory: &Path) -> Result<Value> {
                 Error::new("invalid_snapshot", "Snapshot settings must be an object.")
             })?;
             for field in [
+                "mpvExecutablePath",
                 "localNetworkHmacSecret",
                 "localNetworkPairedDevices",
                 "localNetworkShareToken",

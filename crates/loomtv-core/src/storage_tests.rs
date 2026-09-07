@@ -23,7 +23,7 @@ impl Fixture {
             )
             .unwrap();
         store.select_profile(&owner, None).unwrap();
-        store.db.execute("INSERT INTO app_settings VALUES(1,?,1)", [json!({"tmdbApiKey":"synthetic-fixture-only","localNetworkSharingEnabled":true,"localNetworkShareToken":"111111"}).to_string()]).unwrap();
+        store.db.execute("INSERT INTO app_settings VALUES(1,?,1)", [json!({"tmdbApiKey":"synthetic-fixture-only","localNetworkSharingEnabled":true,"localNetworkShareToken":"111111","mpvExecutablePath":"/untrusted-snapshot/mpv"}).to_string()]).unwrap();
         store.db.execute("INSERT INTO custom_artwork VALUES('test-media','poster','data:image/png;base64,AA==',1)", []).unwrap();
         storage::backup(&store.db, &self.0.join("backups")).unwrap()
     }
@@ -115,6 +115,7 @@ fn snapshot_import_preserves_data_and_source_but_not_device_sessions() {
         .unwrap()
         .get("localNetworkShareToken")
         .is_none());
+    assert!(store.settings().unwrap().get("mpvExecutablePath").is_none());
     let art: String = store
         .db
         .query_row(

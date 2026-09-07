@@ -118,3 +118,24 @@ pub async fn set_chrome_visible(window: &WebviewWindow, visible: bool) -> Result
         .map_err(native_error)?;
     rx.await.map_err(native_error)
 }
+
+/// The reference mpv backend uses an owned external window below the React controls.
+/// The caller enables this only after mpv IPC startup, and restores the backdrop on exit.
+pub async fn external_backdrop(window: &WebviewWindow, active: bool) -> Result<()> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .with_webview(move |webview| {
+            // with_webview confines AppKit access to the main thread and supplies a live NSWindow.
+            let native = unsafe { &*webview.ns_window().cast::<NSWindow>() };
+            native.setOpaque(!active);
+            let color = if active {
+                NSColor::clearColor()
+            } else {
+                NSColor::blackColor()
+            };
+            native.setBackgroundColor(Some(&color));
+            let _ = tx.send(());
+        })
+        .map_err(native_error)?;
+    rx.await.map_err(native_error)
+}

@@ -1,3 +1,5 @@
+pub mod mpv;
+
 use libloading::Library;
 use serde_json::{json, Value};
 use std::{

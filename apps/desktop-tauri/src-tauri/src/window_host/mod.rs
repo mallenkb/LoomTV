@@ -30,7 +30,7 @@ impl Viewport {
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::{ensure, hide, set_chrome_visible, set_viewport};
+pub use macos::{ensure, external_backdrop, hide, set_chrome_visible, set_viewport};
 
 #[cfg(not(target_os = "macos"))]
 pub async fn ensure(_: &WebviewWindow) -> Result<usize> {
@@ -61,4 +61,16 @@ pub fn native_error(_: impl std::fmt::Display) -> Error {
 #[cfg(not(target_os = "macos"))]
 pub async fn set_chrome_visible(_: &tauri::WebviewWindow, _: bool) -> Result<()> {
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub async fn external_backdrop(window: &WebviewWindow, active: bool) -> Result<()> {
+    window
+        .set_background_color(Some(tauri::window::Color(
+            0,
+            0,
+            0,
+            if active { 0 } else { 255 },
+        )))
+        .map_err(native_error)
 }
