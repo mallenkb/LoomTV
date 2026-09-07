@@ -1,0 +1,11 @@
+--- a/crates/loomtv-core/src/transcode_tests.rs
++++ b/crates/loomtv-core/src/transcode_tests.rs
+@@ -59,7 +59,7 @@
+         assert_eq!(ranged.bytes().await.unwrap().len(),188);
+         let head = client.head(format!("{base}segment-00060.ts")).send().await.unwrap();
+         assert_eq!(head.status(),200);
+-        assert!(head.content_length().unwrap() > 0);
++        assert!(head.headers()[reqwest::header::CONTENT_LENGTH].to_str().unwrap().parse::<u64>().unwrap() > 0);
+         assert!(head.bytes().await.unwrap().is_empty());
+         let invalid_range = client.get(format!("{base}segment-00060.ts")).header("Range","bytes=999999999-").send().await.unwrap();
+         assert_eq!(invalid_range.status(),416);

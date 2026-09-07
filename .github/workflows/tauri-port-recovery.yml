@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - name: Apply checksum-bound source and lockfile diffs
+      - name: Apply reviewed source and lockfile diffs
         shell: bash
         run: |
           set -euo pipefail
@@ -46,6 +46,8 @@ jobs:
               subprocess.run(['git', 'apply', '--check', str(destination)], check=True)
               subprocess.run(['git', 'apply', '--index', str(destination)], check=True)
           PY
+          git apply --check .github/tauri-recovery/fixes.patch
+          git apply --index .github/tauri-recovery/fixes.patch
           cargo fmt --all
       - name: Verify frozen install
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -64,6 +66,7 @@ jobs:
           console.log('Existing workspace importers are unchanged.');
           JS
           pnpm verify:workflow-policy
+          pnpm desktop:tauri:test
       - name: Install test-only build and media tools
         run: |
           sudo apt-get update -qq
@@ -81,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test -p loomtv-core --locked generated_media_probe_hls_seek_range_and_revocation -- --ignored --nocapture > evidence/media-test.log 2>&1 || { tail -120 evidence/media-test.log; exit 1; }
+          pnpm desktop:tauri:test:media > evidence/media-test.log 2>&1 || { tail -120 evidence/media-test.log; exit 1; }
           cat evidence/media-test.log
       - name: Capture exact source and test evidence
         if: always()

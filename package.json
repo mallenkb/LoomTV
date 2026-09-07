@@ -45,7 +45,15 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
     "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
-    "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
+    "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test",
+    "desktop:tauri:dev": "pnpm --filter @loom-media-server/desktop-tauri run dev",
+    "desktop:tauri:build": "pnpm --filter @loom-media-server/desktop-tauri run build",
+    "desktop:tauri:typecheck": "pnpm --filter @loom-media-server/desktop-tauri run typecheck",
+    "desktop:tauri:test": "pnpm --filter @loom-media-server/desktop-tauri run test",
+    "desktop:tauri:verify-runtime": "pnpm --filter @loom-media-server/desktop-tauri run verify-runtime",
+    "desktop:tauri:parity": "pnpm --filter @loom-media-server/desktop-tauri run parity",
+    "desktop:tauri:test:media": "pnpm --filter @loom-media-server/desktop-tauri run test:media",
+    "desktop:tauri:test:rust": "pnpm --filter @loom-media-server/desktop-tauri run test:rust"
   },
   "devDependencies": {
     "yaml": "2.9.0"
