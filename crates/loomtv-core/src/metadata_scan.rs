@@ -857,14 +857,15 @@ async fn fetch_item(
     }
     let has_metadata_key = credential_is_configured(settings, "tmdb", "tmdbApiKey")
         || credential_is_configured(settings, "omdb", "omdbApiKey");
-    if item.kind != "movie" && (!has_metadata_key || patch.summary.is_none()) {
-        if !cancelled.load(Ordering::SeqCst) {
-            attempted = true;
-            match tvmaze::fetch(gateway, settings, &item, cancelled).await {
-                Ok(Some(value)) => merge_patch(&mut patch, value, false),
-                Ok(None) => {},
-                Err(error) => errors.push(error.message),
-            }
+    if item.kind != "movie"
+        && (!has_metadata_key || patch.summary.is_none())
+        && !cancelled.load(Ordering::SeqCst)
+    {
+        attempted = true;
+        match tvmaze::fetch(gateway, settings, &item, cancelled).await {
+            Ok(Some(value)) => merge_patch(&mut patch, value, false),
+            Ok(None) => {}
+            Err(error) => errors.push(error.message),
         }
     }
     if item.kind == "anime" && patch.summary.is_none() {

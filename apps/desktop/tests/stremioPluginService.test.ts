@@ -33,7 +33,7 @@ function jsonResponse(url: string, payload: unknown) {
   };
 }
 
-function fixture() {
+function fixture(providerFetch?: StremioFetchImplementation) {
   const owner: StremioHostProfile = { id: 'owner', type: 'owner', isGuest: false };
   const standard: StremioHostProfile = { id: 'standard', type: 'standard', isGuest: false };
   const kid: StremioHostProfile = { id: 'kid', type: 'kid', isGuest: false };
@@ -59,7 +59,7 @@ function fixture() {
       return enabled;
     },
     authorizeManagement: () => owner,
-    fetchImpl,
+    fetchImpl: providerFetch ?? fetchImpl,
   });
   return { service, standard, kid };
 }
@@ -74,6 +74,46 @@ test('official review pins the expected manifest identity and rolls back a misma
   );
   assert.deepEqual(service.listManaged(), []);
 });
+
+for (const action of ['disable', 'remove'] as const) {
+  test(`${action} aborts only that add-on and rejects its late result`, async () => {
+    const otherId = 'org.example.other';
+    const pending = new Map<string, { signal: AbortSignal; respond: () => void }>();
+    let started!: () => void;
+    const bothStarted = new Promise<void>(resolve => { started = resolve; });
+    const { service } = fixture(async (url, init) => {
+      const id = url.includes('other.example') ? otherId : addonId;
+      if (url.endsWith('/manifest.json')) return jsonResponse(url, { ...manifest, id });
+      return new Promise(resolve => {
+        pending.set(id, {
+          signal: (init as { signal: AbortSignal }).signal,
+          respond: () => resolve(jsonResponse(url, { metas: [{ id: 'tt123', type: 'movie', name: 'Movie' }] })),
+        });
+        if (pending.size === 2) started();
+      });
+    });
+    for (const [id, host] of [[addonId, 'catalog.example'], [otherId, 'other.example']]) {
+      const review = await service.reviewManifestUrl(`https://${host}/manifest.json`, id);
+      await service.approve(id, review.reviewToken);
+    }
+    const cancelled = service.fetchCatalog('owner', addonId, { type: 'movie', catalogId: 'popular' });
+    const rejected = assert.rejects(cancelled, (error) => error instanceof StremioPluginServiceError
+      && error.code === 'STREMIO_PLUGIN_REQUEST_CANCELLED');
+    const other = service.fetchCatalog('owner', otherId, { type: 'movie', catalogId: 'popular' });
+    await bothStarted;
+    await service[action](addonId);
+    const cancelledRequest = pending.get(addonId);
+    const otherRequest = pending.get(otherId);
+    assert.ok(cancelledRequest);
+    assert.ok(otherRequest);
+    assert.equal(cancelledRequest.signal.aborted, true);
+    assert.equal(otherRequest.signal.aborted, false);
+    cancelledRequest.respond();
+    otherRequest.respond();
+    await rejected;
+    assert.equal((await other).items[0].id, 'tt123');
+  });
+}
 
 test('standard profiles require an explicit grant while Kids profiles remain denied', async () => {
   const { service, standard, kid } = fixture();

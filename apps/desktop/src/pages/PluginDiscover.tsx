@@ -36,6 +36,7 @@ import {
   type TmdbVideo,
 } from '@/lib/tmdbSchemas';
 import { z } from 'zod';
+import { cinemetaCatalog, cinemetaGenres } from './PluginDiscover/cinemeta';
 import {
   ALL_AVAILABILITY_REGION,
   AVAILABILITY_REGIONS,
@@ -71,6 +72,50 @@ const omdbDiscoverResponseSchema = z.object({
 }).passthrough();
 
 type OmdbDiscoverResponse = z.output<typeof omdbDiscoverResponseSchema>;
+
+const jikanImageSchema = z.object({
+  image_url: z.string().nullable().optional(),
+  small_image_url: z.string().nullable().optional(),
+  large_image_url: z.string().nullable().optional(),
+}).passthrough();
+
+const jikanAnimeSchema = z.object({
+  mal_id: z.number().int().positive(),
+  title: z.string().optional(),
+  title_english: z.string().nullable().optional(),
+  title_japanese: z.string().nullable().optional(),
+  synopsis: z.string().nullable().optional(),
+  score: z.number().finite().nullable().optional(),
+  type: z.string().nullable().optional(),
+  duration: z.string().nullable().optional(),
+  episodes: z.number().int().nonnegative().nullable().optional(),
+  year: z.number().int().positive().nullable().optional(),
+  aired: z.object({ from: z.string().nullable().optional() }).optional(),
+  images: z.object({
+    jpg: jikanImageSchema.optional(),
+    webp: jikanImageSchema.optional(),
+  }).optional(),
+  trailer: z.object({
+    url: z.string().nullable().optional(),
+    youtube_id: z.string().nullable().optional(),
+  }).nullable().optional(),
+  genres: z.array(z.object({ name: z.string().optional() })).optional(),
+  themes: z.array(z.object({ name: z.string().optional() })).optional(),
+  demographics: z.array(z.object({ name: z.string().optional() })).optional(),
+}).passthrough();
+
+const jikanListResponseSchema = z.object({
+  data: z.array(jikanAnimeSchema).default([]),
+}).passthrough();
+
+const jikanGenreResponseSchema = z.object({
+  data: z.array(z.object({
+    mal_id: z.number().int().positive(),
+    name: z.string().trim().min(1),
+  }).passthrough()).default([]),
+}).passthrough();
+
+type JikanAnime = z.output<typeof jikanAnimeSchema>;
 
 type GenreOption = {
   label: string;
@@ -509,6 +554,44 @@ function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogIte
   };
 }
 
+function mapJikanToCatalog(media: JikanAnime): StremioPluginCatalogItem {
+  const title = media.title_english || media.title || media.title_japanese || 'Unknown title';
+  const releaseYear = media.year || yearFromDateValue(media.aired?.from || '');
+  const episodeCount = typeof media.episodes === 'number' ? media.episodes : undefined;
+  const genres = [...(media.genres || []), ...(media.themes || []), ...(media.demographics || [])]
+    .map((entry) => entry.name?.trim())
+    .filter((name): name is string => Boolean(name));
+  const trailerUrl = media.trailer?.youtube_id
+    ? `https://www.youtube.com/watch?v=${encodeURIComponent(media.trailer.youtube_id)}`
+    : media.trailer?.url || '';
+
+  return {
+    id: `jikan:${media.mal_id}`,
+    type: 'anime',
+    source: 'jikan',
+    format: media.type || 'TV',
+    title,
+    genres: [...new Set(genres)],
+    description: stripHtml(media.synopsis || ''),
+    releaseInfo: releaseYear ? String(releaseYear) : '',
+    released: releaseYear ? String(releaseYear) : '',
+    rating: media.score ?? undefined,
+    trailerUrl,
+    runtime: media.duration || (episodeCount !== undefined ? `${episodeCount} eps` : undefined),
+    seasonCount: episodeCount !== undefined ? 1 : undefined,
+    episodeCount,
+    cast: [],
+    posterUrl: pickImageUrl(
+      media.images?.webp?.large_image_url,
+      media.images?.jpg?.large_image_url,
+      media.images?.webp?.image_url,
+      media.images?.jpg?.image_url,
+    ),
+    backgroundUrl: '',
+    logoUrl: '',
+  };
+}
+
 function mapTmdbToCatalog(media: TmdbListResult, type: 'movie' | 'tv'): StremioPluginCatalogItem {
   const title = media.title || media.name || 'Unknown title';
   const releaseDate = type === 'movie' ? media.release_date : media.first_air_date;
@@ -559,7 +642,7 @@ function hasGenreMatch(item: StremioPluginCatalogItem, genreValue: string, type:
     .map((genre) => genre.trim())
     .filter(Boolean);
   if (selectedGenres.length === 0) return true;
-  if (type === 'anime') {
+  if (type === 'anime' || item.source === 'cinemeta') {
     return item.genres.some((genre) => selectedGenres.includes(normalizeGenreFilter(genre)));
   }
   return selectedGenres.some((genre) => item.genres.includes(genre));
@@ -651,11 +734,26 @@ async function requestDiscoverAniList(query: string, variables?: Record<string, 
   }
 }
 
-async function discoverAniListGenres(): Promise<GenreOption[]> {
+async function requestDiscoverJikan(path: string, query?: Record<string, string | number | boolean>) {
+  return desktopApi.requestMetadataProvider({ provider: 'jikan', path, query });
+}
+
+async function fetchJikanGenres(): Promise<Array<GenreOption & { id: number }>> {
+  const payload = jikanGenreResponseSchema.parse(await requestDiscoverJikan('genres/anime'));
+  return payload.data
+    .map((genre) => ({ id: genre.mal_id, label: genre.name, value: genre.name }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+async function discoverAnimeGenres(): Promise<GenreOption[]> {
   try {
     return await fetchAniListGenres();
   } catch {
-    return Object.keys(animeFallbackGenres).map((genre) => ({ label: genre, value: genre }));
+    try {
+      return await fetchJikanGenres();
+    } catch {
+      return Object.keys(animeFallbackGenres).map((genre) => ({ label: genre, value: genre }));
+    }
   }
 }
 
@@ -962,9 +1060,65 @@ async function enrichAnimeCatalogMetadata(
 function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '', credential = '') {
   return cachedDesktopRead('discover-anime', [query.trim(), section, genre, year, Boolean(credential)], () =>
     fetchAnimeCatalog(query, section, genre, year).catch(error => {
-      if (!credential) throw error;
-      return fetchTmdbAnimeCatalog(query, section, genre, year, credential);
+      return fetchJikanAnimeCatalog(query, section, genre, year).catch(() => {
+        if (!credential) throw error;
+        return fetchTmdbAnimeCatalog(query, section, genre, year, credential);
+      });
     }));
+}
+
+function jikanSearchSort(section: DiscoverSection): { order_by: string; sort: 'asc' | 'desc' } {
+  if (section === 'top_rated') return { order_by: 'score', sort: 'desc' };
+  if (section === 'new') return { order_by: 'start_date', sort: 'desc' };
+  return { order_by: 'popularity', sort: 'asc' };
+}
+
+async function fetchJikanAnimeCatalog(
+  query: string,
+  section: DiscoverSection,
+  genre = '',
+  year = '',
+): Promise<readonly StremioPluginCatalogItem[]> {
+  const selectedGenres = genre.split(',').map((entry) => entry.trim()).filter(Boolean);
+  let genreIds: number[] = [];
+  if (selectedGenres.length > 0) {
+    const genreOptions = await fetchJikanGenres();
+    const idsByName = new Map(genreOptions.map((option) => [option.value.toLowerCase(), option.id]));
+    genreIds = selectedGenres
+      .map((name) => idsByName.get(name.toLowerCase()))
+      .filter((id): id is number => id !== undefined);
+  }
+
+  const trimmedQuery = query.trim();
+  const hasFilters = Boolean(trimmedQuery || genreIds.length || year.trim());
+  let path = 'anime';
+  let requestQuery: Record<string, string | number | boolean> = {
+    limit: DISCOVER_RESULT_LIMIT,
+    sfw: true,
+  };
+
+  if (!hasFilters) {
+    if (section === 'new') path = 'seasons/now';
+    else {
+      path = 'top/anime';
+      if (section === 'trending') requestQuery.filter = 'airing';
+      if (section === 'popular') requestQuery.filter = 'bypopularity';
+    }
+  } else {
+    requestQuery = {
+      ...requestQuery,
+      ...jikanSearchSort(section),
+      ...(trimmedQuery ? { q: trimmedQuery } : {}),
+      ...(genreIds.length ? { genres: genreIds.join(',') } : {}),
+      ...(year.trim() ? {
+        start_date: `${year.trim()}-01-01`,
+        end_date: `${year.trim()}-12-31`,
+      } : {}),
+    };
+  }
+
+  const payload = jikanListResponseSchema.parse(await requestDiscoverJikan(path, requestQuery));
+  return payload.data.slice(0, DISCOVER_RESULT_LIMIT).map(mapJikanToCatalog);
 }
 
 async function fetchTmdbAnimeCatalog(query: string, section: DiscoverSection, genre: string, year: string, credential: string) {
@@ -1356,7 +1510,10 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const previousContentTypeRef = useRef<DiscoverType>(contentType);
   const navigate = useNavigate();
 
-  const availableSections = useMemo(() => DISCOVER_SECTIONS[contentType], [contentType]);
+  const usesCinemeta = contentType !== 'anime' && !tmdbCredential;
+  const availableSections = useMemo(() => usesCinemeta
+    ? ['trending', 'top_rated', 'new'] as const
+    : DISCOVER_SECTIONS[contentType], [contentType, usesCinemeta]);
   const yearOptions = useMemo(() => releaseYearOptions(), []);
   const isModern = theme.homeStyle === 'modern';
   const frameClass = isModern ? 'loom-modern-content-frame' : 'loom-frame';
@@ -1442,8 +1599,10 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const getCachedItems = useCallback((cacheId: CachedCacheId): readonly StremioPluginCatalogItem[] | null => {
     const key = ['discover', ...pageQueryScope, cacheId];
     const cached = queryClient.getQueryState<readonly StremioPluginCatalogItem[]>(key);
+    const expectedSource = contentType === 'anime' ? null : tmdbCredential ? 'tmdb' : 'cinemeta';
+    if (expectedSource && cached?.data?.some(item => item.source !== expectedSource)) return null;
     return cached && Date.now() - cached.dataUpdatedAt < 120_000 ? cached.data || null : null;
-  }, [pageQueryScope]);
+  }, [pageQueryScope, contentType, tmdbCredential]);
   const setCachedItems = useCallback((cacheId: CachedCacheId, nextItems: readonly StremioPluginCatalogItem[]) => {
     if (JSON.stringify(pageQueryScope) !== JSON.stringify(queryScope())) return;
     queryClient.setQueryData(['discover', ...pageQueryScope, cacheId], nextItems.slice(0, DISCOVER_RESULT_LIMIT));
@@ -1453,7 +1612,11 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const ensureGenreOptions = useCallback(async (type: DiscoverType) => {
     try {
       const options = await cachedDesktopRead('discover-genres', [type, Boolean(tmdbCredential)], () =>
-        type === 'anime' ? discoverAniListGenres() : tmdbCredential ? discoverTmdbGenres(type, tmdbCredential) : Promise.resolve([]));
+        type === 'anime'
+          ? discoverAnimeGenres()
+          : tmdbCredential
+            ? discoverTmdbGenres(type, tmdbCredential)
+            : cinemetaGenres(type));
       if (type === activeContentTypeRef.current) setGenreOptions(options);
     } catch { if (type === activeContentTypeRef.current) setGenreOptions([]); }
   }, [tmdbCredential]);
@@ -1538,7 +1701,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       normalizedRegion,
     );
     const hydrateRatings = (catalogItems: readonly StremioPluginCatalogItem[]) => {
-      if (!tmdbCredential) {
+      if (!tmdbCredential || catalogItems.some(item => item.source === 'cinemeta')) {
         return;
       }
       const isAnime = contentType === 'anime';
@@ -1579,15 +1742,14 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       if (contentType === 'anime') {
         nextItems = await discoverAnime(trimmedQuery, section, providerGenre, normalizedYear, tmdbCredential);
       } else {
-        if (!tmdbCredential) {
-          throw new Error('TMDB API key is missing. Add it in Settings → Metadata API keys before browsing Movies or TV.');
-        }
-        nextItems = await discoverMoviesOrTv(contentType, section, trimmedQuery, tmdbCredential, {
-          genre: normalizedGenre,
-          year: normalizedYear,
-          provider: normalizedProvider,
-          region: normalizedRegion,
-        });
+        nextItems = tmdbCredential
+          ? await discoverMoviesOrTv(contentType, section, trimmedQuery, tmdbCredential, {
+            genre: normalizedGenre,
+            year: normalizedYear,
+            provider: normalizedProvider,
+            region: normalizedRegion,
+          })
+          : await cinemetaCatalog(contentType, section, trimmedQuery, normalizedGenre, normalizedYear);
       }
 
       const filteredItems = nextItems
@@ -1675,7 +1837,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     let metadataPending = Promise.resolve(item);
     if (tmdbCredential && item.type === 'anime' && (item.streamingProviders === undefined || !item.trailerUrl)) {
       metadataPending = enrichAnimeCatalogItemWithTmdbProviders(item, tmdbCredential).catch(() => item);
-    } else if (tmdbCredential && (item.type === 'movie' || item.type === 'tv')) {
+    } else if (tmdbCredential && item.source === 'tmdb' && (item.type === 'movie' || item.type === 'tv')) {
       metadataPending = enrichCatalogItemWithTmdbCredits(item, item.type, tmdbCredential).catch(() => item);
     }
     const pending = metadataPending.then((metadataItem) => (
@@ -1768,9 +1930,9 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       : platformFilter
         ? `No ${DISCOVER_TYPE_LABELS[contentType].toLowerCase()} are listed as streaming on ${activeProviderLabel} in ${availabilityRegionLabel}.`
         : 'No titles returned for this selection.';
-  const historicalTrendingNote = yearFilter && section === 'trending'
+  const historicalTrendingNote = !usesCinemeta && yearFilter && section === 'trending'
     ? contentType === 'anime'
-      ? 'Release year is applied by AniList; Trending remains the provider’s current ranking, not a historical trend snapshot.'
+      ? 'Release year is applied by the anime provider; Trending remains the provider’s current ranking, not a historical trend snapshot.'
       : 'Release year is applied by TMDB; historical Trending is not available, so filtered results use popularity ordering.'
     : '';
   const retryCatalog = useCallback(() => {
@@ -1821,10 +1983,12 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
               <ThemeDropdown
                 id="discover-section-select"
                 label="Discover filter"
-                value={section}
+                value={usesCinemeta && section === 'popular' ? 'trending' : section}
                 options={availableSections.map((discoverSection) => ({
                   value: discoverSection,
-                  label: DISCOVER_SECTION_LABELS[discoverSection],
+                  label: usesCinemeta
+                    ? ({ trending: 'Popular', popular: 'Popular', top_rated: 'Featured', new: 'New' })[discoverSection]
+                    : DISCOVER_SECTION_LABELS[discoverSection],
                 }))}
                 buttonClassName="!min-w-0"
                 onChange={(value) => setSection(value as DiscoverSection)}
@@ -1853,7 +2017,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
                 emptySearchMessage="No matching years"
                 onChange={setYearFilter}
               />
-              {contentType !== 'anime' ? (
+              {contentType !== 'anime' && tmdbCredential ? (
                 <>
                   <ThemeDropdown
                     id="discover-platform-select"
@@ -1878,18 +2042,13 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
                 </>
               ) : null}
             </div>
-            {providerStatusMessage && contentType !== 'anime' && (
+            {providerStatusMessage && contentType !== 'anime' && tmdbCredential && (
               <p role="status" className="mt-2 text-xs text-[var(--loom-muted)]">{providerStatusMessage}</p>
             )}
             {historicalTrendingNote && <p className="mt-2 text-xs text-[var(--loom-muted)]">{historicalTrendingNote}</p>}
           </div>
         </header>
 
-        {!loading && !error && contentType === 'anime' && items.some((item) => item.source === 'tmdb') && (
-          <p role="status" className="mb-4 text-sm text-[var(--loom-muted)]">
-            AniList is unavailable. Showing anime from TMDB; genres and rankings may differ.
-          </p>
-        )}
         {error && errorKind !== 'offline' && (
           <div role="alert" className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             <p className="flex items-start gap-2">

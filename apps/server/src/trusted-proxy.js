@@ -6,6 +6,12 @@ const MAX_FORWARDED_HOPS = 32;
 const MAX_FORWARDED_HEADER_BYTES = 2_048;
 const MAX_FORWARDED_PROTO_BYTES = 32;
 
+/**
+ * @typedef {{ family: number, originalFamily: number, bits: number, numeric: bigint, canonical: string, mapped?: boolean }} ParsedAddress
+ * @typedef {{ headers?: import('node:http').IncomingHttpHeaders, socket?: { remoteAddress?: string, encrypted?: boolean } }} ProxyRequest
+ */
+
+/** @param {string} value @returns {ParsedAddress | null} */
 function parseIpv4(value) {
   if (isIP(value) !== 4) return null;
   const octets = value.split('.').map(Number);
@@ -13,6 +19,7 @@ function parseIpv4(value) {
   return { family: 4, originalFamily: 4, bits: IPV4_BITS, numeric, canonical: octets.join('.') };
 }
 
+/** @param {string} value */
 function parseIpv6Numeric(value) {
   let expanded = value;
   if (expanded.includes('.')) {
@@ -38,6 +45,7 @@ function parseIpv6Numeric(value) {
   return groups.reduce((result, group) => (result << 16n) | BigInt(`0x${group}`), 0n);
 }
 
+/** @param {bigint} numeric */
 function canonicalIpv6(numeric) {
   const groups = Array.from({ length: 8 }, (_, index) => (
     Number((numeric >> BigInt((7 - index) * 16)) & 0xffffn).toString(16)
@@ -66,6 +74,7 @@ function canonicalIpv6(numeric) {
   return `${left}::${right}`;
 }
 
+/** @param {unknown} value @returns {ParsedAddress | null} */
 function parseAddress(value, { allowZone = false } = {}) {
   if (typeof value !== 'string') return null;
   let candidate = value.trim();
@@ -104,11 +113,13 @@ function parseAddress(value, { allowZone = false } = {}) {
   };
 }
 
+/** @param {number} bits @param {number} prefix */
 function prefixMask(bits, prefix) {
   if (prefix === 0) return 0n;
   return ((1n << BigInt(prefix)) - 1n) << BigInt(bits - prefix);
 }
 
+/** @param {string} value */
 function parseAllowlistEntry(value) {
   const parts = value.split('/');
   if (parts.length > 2 || !parts[0]) throw new Error(`Invalid trusted proxy address or CIDR: ${value}`);
@@ -141,6 +152,7 @@ function parseAllowlistEntry(value) {
   });
 }
 
+/** @param {unknown} value */
 export function parseTrustedProxyAllowlist(value = []) {
   if (value === undefined || value === null || value === '') return Object.freeze([]);
   const sources = Array.isArray(value) ? value : [value];
@@ -159,18 +171,22 @@ export function parseTrustedProxyAllowlist(value = []) {
   return Object.freeze([...deduplicated.values()]);
 }
 
+/** @param {unknown} value */
 export function normalizeIpAddress(value) {
   return parseAddress(value, { allowZone: true })?.canonical || null;
 }
 
+/** @param {ProxyRequest | undefined} req @param {string} name */
 function rawHeader(req, name) {
   const value = req?.headers?.[name];
   return Array.isArray(value) ? value.join(',') : typeof value === 'string' ? value : '';
 }
 
+/** @param {unknown} value */
 export function createTrustedProxyPolicy(value = []) {
   const allowlist = parseTrustedProxyAllowlist(value);
 
+  /** @param {ParsedAddress | null} address */
   function parsedTrusted(address) {
     if (!address) return false;
     return allowlist.some((entry) => (
@@ -178,10 +194,12 @@ export function createTrustedProxyPolicy(value = []) {
     ));
   }
 
+  /** @param {unknown} valueToCheck */
   function isTrustedAddress(valueToCheck) {
     return parsedTrusted(parseAddress(valueToCheck, { allowZone: true }));
   }
 
+  /** @param {ProxyRequest | undefined} req */
   function clientAddress(req) {
     const peer = parseAddress(req?.socket?.remoteAddress, { allowZone: true });
     if (!peer) return 'unknown';
@@ -202,6 +220,7 @@ export function createTrustedProxyPolicy(value = []) {
     return selected.canonical;
   }
 
+  /** @param {ProxyRequest | undefined} req */
   function isSecureRequest(req) {
     if (req?.socket?.encrypted) return true;
     if (!isTrustedAddress(req?.socket?.remoteAddress)) return false;

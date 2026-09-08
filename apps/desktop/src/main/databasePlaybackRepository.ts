@@ -2,6 +2,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
 import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 import { parseStoredJson, unknownRecordSchema } from './runtimeValidation.ts';
+import { parseSettingsJson } from './secureSettings.ts';
 
 export type SettingsData = Record<string, unknown>;
 
@@ -86,7 +87,7 @@ export function loadSettings(database: BetterSqlite3.Database): SettingsData | n
     settingsRowSchema.optional(),
     'application settings',
   );
-  return row ? parseStoredJson(row.data_json, unknownRecordSchema, {}) : null;
+  return row ? parseSettingsJson(row.data_json) : null;
 }
 
 export function saveSettings(database: BetterSqlite3.Database, settings: SettingsData): void {

@@ -238,12 +238,16 @@ impl MetadataProviderGateway {
     async fn request_tvmaze(&self, input: &Map<String, Value>) -> Result<Value> {
         let path = required_string(input, "path", 120, true)?;
         let parts: Vec<_> = path.split('/').collect();
-        let allowed = path == "search/shows" || (parts.len() >= 2
-            && parts[0] == "shows" && !parts[1].is_empty()
-            && parts[1].bytes().all(|byte| byte.is_ascii_digit())
-            && (parts.len() == 2 || (parts.len() == 3
-                && matches!(parts[2], "episodes" | "cast" | "images"))));
-        if !allowed { return Err(invalid("TVmaze path is not allowed.")); }
+        let allowed = path == "search/shows"
+            || (parts.len() >= 2
+                && parts[0] == "shows"
+                && !parts[1].is_empty()
+                && parts[1].bytes().all(|byte| byte.is_ascii_digit())
+                && (parts.len() == 2
+                    || (parts.len() == 3 && matches!(parts[2], "episodes" | "cast" | "images"))));
+        if !allowed {
+            return Err(invalid("TVmaze path is not allowed."));
+        }
         let mut url = fixed_url(&format!("https://api.tvmaze.com/{path}"))?;
         for (key, value) in optional_query(input, "query")? {
             if !matches!(key.as_str(), "q" | "embed" | "specials") {
@@ -252,7 +256,13 @@ impl MetadataProviderGateway {
             url.query_pairs_mut().append_pair(&key, &value);
         }
         validate_url_size(&url)?;
-        self.send_json(Request::new(Method::GET, url), "TVmaze", DEFAULT_RESPONSE_BYTES, 2).await
+        self.send_json(
+            Request::new(Method::GET, url),
+            "TVmaze",
+            DEFAULT_RESPONSE_BYTES,
+            2,
+        )
+        .await
     }
 
     async fn request_omdb(

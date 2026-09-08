@@ -2,12 +2,15 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { MAX_SUBTITLE_OUTLINE_WIDTH } from './constants';
 import { activeSubtitleText, type SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
+import { subtitleMediaSeconds } from './playbackClock';
 
 interface SubtitleOverlayProps {
   controlsVisible: boolean;
   cues: SubtitleCue[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
   currentTimeRef?: React.RefObject<number>;
+  timelineOffsetRef?: React.RefObject<number>;
+  seekableTimelineRef?: React.RefObject<boolean>;
   style: SubtitleStyleSettings;
   visible: boolean;
 }
@@ -35,6 +38,8 @@ function SubtitleOverlay({
   cues,
   videoRef,
   currentTimeRef,
+  timelineOffsetRef,
+  seekableTimelineRef,
   style,
   visible,
 }: SubtitleOverlayProps) {
@@ -66,8 +71,13 @@ function SubtitleOverlay({
       const video = videoRef.current;
       const nativeTime = currentTimeRef?.current;
       if (video || (typeof nativeTime === 'number' && Number.isFinite(nativeTime))) {
-        // Keep cue timing on the same clock as playback.
-        const time = typeof nativeTime === 'number' && Number.isFinite(nativeTime) ? nativeTime : video?.currentTime ?? 0;
+        // Cues use absolute media time, even when a restarted stream starts at zero.
+        const time = subtitleMediaSeconds(
+          video?.currentTime ?? 0,
+          nativeTime,
+          timelineOffsetRef?.current,
+          seekableTimelineRef?.current,
+        );
         const next = activeSubtitleText(sortedCues, time, prefixEndTimes);
         if (next !== textRef.current) {
           textRef.current = next;
@@ -79,7 +89,7 @@ function SubtitleOverlay({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, visible]);
+  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, timelineOffsetRef, seekableTimelineRef, visible]);
 
   const textShadow = useMemo(() => {
     const outlineWidth = style.borderEnabled

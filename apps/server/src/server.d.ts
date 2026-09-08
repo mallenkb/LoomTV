@@ -8,6 +8,7 @@ export interface CanonicalCompatibilityContext {
   clientState: unknown;
   mediaService: unknown;
   pairingService: unknown;
+  remotePolicy: unknown;
   persistence: unknown;
   deploymentMode: CanonicalDeploymentMode;
 }
@@ -61,7 +62,29 @@ export interface CanonicalRuntimeOptions {
     address: string;
     requestId: string;
   }) => boolean | { accountId?: string; permissions?: string[] } | Promise<boolean | { accountId?: string; permissions?: string[] }>;
-  [option: string]: unknown;
+  transcoder?: ReturnType<typeof import('./transcoder.js').createHeadlessTranscoder>;
+  bootstrapSecurity?: ReturnType<typeof import('./secure-bootstrap.js').createBootstrapSecurity>;
+  bootstrapSecret?: string;
+  bootstrapSecretFile?: string;
+  onBootstrapSecretGenerated?: (input: { secret: string; file: string }) => void;
+  onBootstrapWarning?: (message: string, error: unknown) => void;
+  clock?: (() => number) | {
+    now?: () => number;
+    setTimeout?: typeof setTimeout;
+    clearTimeout?: typeof clearTimeout;
+    setInterval?: typeof setInterval;
+    clearInterval?: typeof clearInterval;
+  };
+  playbackSessionRegistry?: ReturnType<typeof import('./playback-session-registry.js').createPlaybackSessionRegistry>;
+  playbackSessionOptions?: Parameters<typeof import('./playback-session-registry.js').createPlaybackSessionRegistry>[0];
+  transcodeAdmission?: ReturnType<typeof import('./transcode-admission.js').createTranscodeAdmission>;
+  transcodeAdmissionOptions?: Parameters<typeof import('./transcode-admission.js').createTranscodeAdmission>[0];
+  cacheQuotaOptions?: Parameters<typeof import('./transcode-cache-quota.js').createTranscodeCacheQuota>[0];
+  transcodeQuotaOptions?: Parameters<typeof import('./transcode-cache-quota.js').createTranscodeCacheQuota>[0];
+  cacheFileSystem?: NonNullable<Parameters<typeof import('./transcode-cache-quota.js').createTranscodeCacheQuota>[0]>['fileSystem'];
+  spawnProcess?: typeof import('node:child_process').spawn;
+  shutdownTimeoutMs?: number;
+  termGraceMs?: number;
 }
 
 export interface CanonicalVideoServer {

@@ -104,3 +104,13 @@ apps/mobile/release-evidence/**/verification/artifacts/
 
 # Rust/Cargo build artifacts
 target/
+
+# Local package stores and generated review artifacts
+.pnpm-store/
+pnpm-store/
+/.codex-design-qa/
+/design-qa/
+/screenshots/
+/loomtv-*.html
+apps/desktop/resources/libvlc/
+apps/desktop-tauri/src-tauri/resources/libvlc/

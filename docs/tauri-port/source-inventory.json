@@ -18668,7 +18668,7 @@
       "disposition": "pending-behavior-review"
     },
     {
-      "path": "design-qa.md",
+      "path": "docs/archive/audits/design-qa.md",
       "classification": "configuration-or-documentation",
       "status": "inventory-only",
       "disposition": "pending-behavior-review"

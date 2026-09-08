@@ -34,19 +34,26 @@ export const SUPPORTS_NOFOLLOW = O_NOFOLLOW !== 0;
 
 const MAX_PATH_LENGTH = 4_096;
 
+/** @param {string} code @param {string} message @param {number} status */
 export function mediaPathError(code, message, status) {
   return Object.assign(new Error(message), { status, code });
+}
+
+/** @param {unknown} error */
+function errorCode(error) {
+  return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
 }
 
 function escapeError() {
   return mediaPathError('media_path_escape', 'Media path is outside its configured root.', 403);
 }
 
+/** @param {unknown} error */
 function unavailableError(error) {
   return mediaPathError(
     'media_path_unavailable',
     'The media file is unavailable.',
-    error?.code === 'EACCES' || error?.code === 'EPERM' ? 403 : 409,
+    errorCode(error) === 'EACCES' || errorCode(error) === 'EPERM' ? 403 : 409,
   );
 }
 
@@ -61,6 +68,7 @@ function substitutedError() {
  * already end in one, so a filesystem root (`/`, `C:\`) is handled correctly
  * rather than being turned into `//`.
  */
+/** @param {unknown} parentPath @param {unknown} candidatePath */
 export function isPathWithin(parentPath, candidatePath) {
   if (typeof parentPath !== 'string' || typeof candidatePath !== 'string') return false;
   const parent = path.resolve(parentPath);
@@ -70,6 +78,7 @@ export function isPathWithin(parentPath, candidatePath) {
   return candidate.startsWith(parentPrefix);
 }
 
+/** @param {unknown} value @param {string} code @param {string} message @param {number} [status] @returns {asserts value is string} */
 function assertUsablePath(value, code, message, status = 400) {
   if (typeof value !== 'string' || !value.trim()) throw mediaPathError(code, message, status);
   if (value.length > MAX_PATH_LENGTH || value.includes('\u0000')) throw mediaPathError(code, message, status);
@@ -92,6 +101,7 @@ function assertUsablePath(value, code, message, status = 400) {
  * rather than thrown; only `allowMissing` treats a dangling final component as
  * a hard failure.
  */
+/** @param {string} resolvedPath */
 async function nearestExistingReal(resolvedPath) {
   const missing = [];
   let current = resolvedPath;
@@ -99,7 +109,7 @@ async function nearestExistingReal(resolvedPath) {
     try {
       return { real: await fs.realpath(current), missing: missing.reverse(), brokenLink: false };
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw unavailableError(error);
+      if (errorCode(error) !== 'ENOENT') throw unavailableError(error);
       const brokenLink = missing.length === 0 && Boolean(await fs.lstat(current).catch(() => null));
       const parent = path.dirname(current);
       if (parent === current) throw unavailableError(error);
@@ -146,6 +156,7 @@ export async function resolveContainedPath(rootPath, candidatePath, options = {}
   // path.resolve has already collapsed every '.' and '..', so a missing tail
   // can only be plain names. Rejecting anything else keeps a future caller
   // from handing this function an unresolved path.
+  /** @param {Awaited<ReturnType<typeof nearestExistingReal>>} nearest */
   const projected = (nearest) => {
     if (nearest.missing.some((segment) => !segment || segment === '.' || segment === '..')) throw escapeError();
     return nearest.missing.length ? path.join(nearest.real, ...nearest.missing) : nearest.real;
@@ -165,7 +176,7 @@ export async function resolveContainedPath(rootPath, candidatePath, options = {}
     (realPath) => ({ realPath, error: null }),
     (error) => ({ realPath: null, error }),
   );
-  if (strict.error) {
+  if (strict.realPath === null) {
     // Decide containment before reporting why the path could not be resolved.
     // A candidate that never could have been inside the root is an escape,
     // whether or not anything exists at the other end of it.
@@ -228,6 +239,7 @@ export async function openContainedFile(rootPath, candidatePath, options = {}) {
  * identity a later open must still see. Used where the consumer reopens the
  * path itself (FFmpeg) and where authorization runs earlier than the read.
  */
+/** @param {string} rootPath @param {string} candidatePath @param {{ expectedFileId?: {dev: number, ino: number} | null }} [options] */
 export async function statContainedFile(rootPath, candidatePath, options = {}) {
   const opened = await openContainedFile(rootPath, candidatePath, options);
   await opened.handle.close().catch(() => undefined);
@@ -239,6 +251,7 @@ export async function statContainedFile(rootPath, candidatePath, options = {}) {
  * this only decides how much of the verified path is safe to record: the part
  * below the root, never the root itself.
  */
+/** @param {string} rootRealPath @param {string} realPath */
 export function containedRelativePath(rootRealPath, realPath) {
   const relative = path.relative(rootRealPath, realPath);
   return !relative || relative.startsWith('..') || path.isAbsolute(relative) ? path.basename(realPath) : relative;

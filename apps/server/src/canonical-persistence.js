@@ -9,11 +9,13 @@ import { createRemotePolicyService } from './remote-policy.js';
  * Legacy route handlers receive these services as adapters and never construct a
  * second account, catalog, profile, or progress store.
  */
+/** @param {import('./server-state-types.js').PersistenceOptions} options */
 export function createCanonicalPersistence(options) {
   if (!options?.dataDir) throw new Error('Canonical persistence requires a data directory.');
   if (!options.bootstrapSecurity) throw new Error('Canonical persistence requires bootstrap security.');
 
   const store = createCanonicalStateStore({ dataDir: options.dataDir });
+  /** @type {ReturnType<typeof createHeadlessAdminService>} */
   let accountsAndCatalog;
   const pairing = createPairingService({
     store,
@@ -34,7 +36,7 @@ export function createCanonicalPersistence(options) {
     getSessions: options.getSessions,
     getClientState: () => profiles.exportState(),
     replaceClientState: (snapshot) => profiles.importState(snapshot),
-    replaceAllState: ({ adminState, clientState }) => store.replaceAllState({
+    replaceAllState: async ({ adminState, clientState }) => store.replaceAllState({
       adminState,
       clientState: normalizeHeadlessClientState(clientState),
     }),
@@ -60,6 +62,7 @@ export function createCanonicalPersistence(options) {
   });
 
   let started = false;
+  /** @type {Promise<void> | undefined} */
   let stopPromise;
 
   async function stopServices() {
@@ -102,6 +105,7 @@ export function createCanonicalPersistence(options) {
       return profiles.exportState();
     },
 
+    /** @param {unknown} snapshot */
     async replaceProfileState(snapshot) {
       return profiles.importState(snapshot);
     },

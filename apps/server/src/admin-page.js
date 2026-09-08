@@ -29,6 +29,15 @@ const FALLBACK_ADMIN_HTML = `<!doctype html>
 body{display:grid;min-height:100vh;place-items:center;margin:0;padding:24px}main{max-width:560px;padding:30px;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(23,23,23,.88)}h1{margin:0 0 10px;color:#FC9C03}p{line-height:1.6;color:#a3a3a3}code{color:#FC9C03}
 </style></head><body><main><h1>LoomTV server</h1><p>The admin UI asset was not copied into this server image. Mount or package <code>admin.html</code>, then configure the server with its path.</p></main></body></html>`;
 
+/**
+ * @typedef {import('node:http').IncomingMessage} Request
+ * @typedef {import('node:http').ServerResponse} Response
+ * @typedef {import('./server-admin-types.js').Principal} AdminPrincipal
+ * @typedef {ReturnType<typeof import('./admin-service.js').createHeadlessAdminService>} AdminService
+ * @typedef {import('./setup-page.js').SetupPageOptions & { iconsPath?: string, getIcons?: () => Promise<string> }} AdminPageOptions
+ */
+
+/** @param {AdminPageOptions} options */
 export async function readAdminPage(options = {}) {
   const htmlPath = options.htmlPath || DEFAULT_ADMIN_HTML_PATH;
   try {
@@ -38,6 +47,7 @@ export async function readAdminPage(options = {}) {
   }
 }
 
+/** @param {AdminPageOptions} options */
 export async function readAdminIcons(options = {}) {
   const iconsPath = options.iconsPath || DEFAULT_ADMIN_ICONS_PATH;
   return fs.readFile(iconsPath, 'utf8');
@@ -47,11 +57,13 @@ export async function readAdminIcons(options = {}) {
  * Return a tiny route adapter for a Node `http.createServer` listener.
  * Returning `false` means the caller should continue routing. The adapter
  * handles both `/admin` and `/admin/`, including HEAD and safe redirects.
+ * @param {AdminPageOptions} options
  */
 export function createAdminPage(options = {}) {
   const htmlProvider = options.getHtml || (() => readAdminPage(options));
   const iconsProvider = options.getIcons || (() => readAdminIcons(options));
   const setupGuard = createSetupRedirectGuard(options.getSetupStatus, 'admin');
+  /** @param {Request} req @param {Response} res */
   return async function handleAdminPage(req, res) {
     const pathname = new URL(req.url || '/', 'http://loomtv.local').pathname;
     const isAdminPage = pathname === '/admin' || pathname === HEADLESS_ADMIN_PATH;
@@ -82,16 +94,17 @@ export function createAdminPage(options = {}) {
   };
 }
 
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** @param {number} status @param {string} message */
 function requestError(status, message) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
+  return Object.assign(new Error(message), { status });
 }
 
+/** @param {unknown} value @param {string} field @param {number} maxLength */
 function requiredString(value, field, maxLength) {
   if (typeof value !== 'string' || !value.trim()) throw requestError(400, `${field} is required.`);
   const normalized = value.trim();
@@ -99,23 +112,27 @@ function requiredString(value, field, maxLength) {
   return normalized;
 }
 
+/** @param {unknown} value @param {string} field @param {number} maxLength */
 function optionalString(value, field, maxLength) {
   if (value === undefined || value === null || value === '') return undefined;
   return requiredString(value, field, maxLength);
 }
 
+/** @param {unknown} value @param {string} field @param {readonly string[]} allowed */
 function allowedValue(value, field, allowed) {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value !== 'string' || !allowed.includes(value)) throw requestError(400, `${field} is invalid.`);
   return value;
 }
 
+/** @param {unknown} value @param {string} field */
 function optionalBoolean(value, field) {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'boolean') throw requestError(400, `${field} must be a boolean.`);
   return value;
 }
 
+/** @param {Response} res @param {number} status @param {unknown} payload @param {import('node:http').OutgoingHttpHeaders} headers */
 function writeJson(res, status, payload, headers = {}) {
   if (status === 204) {
     res.writeHead(204, { 'Cache-Control': 'no-store', ...headers });
@@ -132,6 +149,7 @@ function writeJson(res, status, payload, headers = {}) {
   res.end(body);
 }
 
+/** @param {Response} res @param {string | Buffer} certificatePem */
 function writeCertificate(res, certificatePem) {
   const body = Buffer.isBuffer(certificatePem)
     ? certificatePem
@@ -145,6 +163,7 @@ function writeCertificate(res, certificatePem) {
   res.end(body);
 }
 
+/** @param {string} pathname @param {string} method @param {string} prefix */
 function permissionForRoute(pathname, method, prefix) {
   // Bootstrap is the authenticated capability snapshot. The service redacts
   // health, roots, users, and backup details for principals that lack the
@@ -171,6 +190,7 @@ function permissionForRoute(pathname, method, prefix) {
   return undefined;
 }
 
+/** @param {Request} req @param {number} maxBytes @returns {Promise<Record<string, unknown>>} */
 async function readJsonBody(req, maxBytes) {
   const declaredLength = Number(req.headers['content-length'] || 0);
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
@@ -187,12 +207,14 @@ async function readJsonBody(req, maxBytes) {
   }
   const raw = Buffer.concat(chunks, size).toString('utf8').trim();
   if (!raw) return {};
+  /** @type {unknown} */
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw requestError(400, 'Request body is not valid JSON.'); }
   if (!isObject(parsed)) throw requestError(400, 'JSON body must be an object.');
   return parsed;
 }
 
+/** @param {string | null} value */
 function limitFromQuery(value) {
   if (!value) return 100;
   const parsed = Number(value);
@@ -200,6 +222,7 @@ function limitFromQuery(value) {
   return parsed;
 }
 
+/** @param {URL} url */
 function logQueryFromUrl(url) {
   return {
     limit: limitFromQuery(url.searchParams.get('limit')),
@@ -223,6 +246,7 @@ function logQueryFromUrl(url) {
  * the same method names as `HeadlessAdminService` but is intentionally duck
  * typed so the standalone server can provide storage/scanner implementations
  * without a TypeScript or Electron dependency.
+ * @param {{ service?: AdminService, authorize?: (req: Request, permission?: string) => boolean | Promise<boolean>, authenticate?: (req: Request) => AdminPrincipal | null | Promise<AdminPrincipal | null>, authorizePrincipal?: (principal: AdminPrincipal, permission?: string) => boolean | Promise<boolean>, ownerConfigured?: () => Promise<boolean>, maxBodyBytes?: number, log?: (message: string, error: unknown) => void, requireSecureTransport?: boolean, requireBootstrapSecret?: boolean, proxyPolicy?: ReturnType<typeof createTrustedProxyPolicy>, certificatePem?: string | Buffer }} options
  */
 export function createAdminApiHandler(options = {}) {
   const service = options.service;
@@ -232,16 +256,19 @@ export function createAdminApiHandler(options = {}) {
   const authorizePrincipal = options.authorizePrincipal || service.authorizePrincipal;
   const ownerConfigured = options.ownerConfigured || (async () => (await service.getBootstrap()).ownerConfigured);
   const maxBodyBytes = options.maxBodyBytes || 128 * 1024;
+  /** @type {(message: string, error: unknown) => void} */
   const log = options.log || ((message, error) => console.error(`[headless-admin] ${message}`, error || ''));
   const requireSecureTransport = options.requireSecureTransport === true;
   const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   const proxyPolicy = options.proxyPolicy || createTrustedProxyPolicy();
   const certificatePem = options.certificatePem;
 
+  /** @param {Request} req */
   function isSecureRequest(req) {
     return proxyPolicy.isSecureRequest(req);
   }
 
+  /** @param {Request} req @param {Response} res */
   return async function handleAdminApi(req, res) {
     const url = new URL(req.url || '/', 'http://loomtv.local');
     const pathname = url.pathname;
@@ -296,7 +323,7 @@ export function createAdminApiHandler(options = {}) {
         }
       } catch (error) {
         log('admin authorization failed', error);
-        if (error?.status === 503) {
+        if (isObject(error) && error.status === 503) {
           writeJson(res, 503, { error: 'state_unavailable', message: 'The server account state is temporarily unavailable.' });
         } else {
           writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid LoomTV admin token is required.' });
@@ -476,7 +503,7 @@ export function createAdminApiHandler(options = {}) {
       writeJson(res, 404, { error: 'admin_route_not_found', message: 'The requested admin route does not exist.' });
       return true;
     } catch (error) {
-      if (error?.status) {
+      if (isObject(error) && typeof error.status === 'number' && error.status) {
         writeJson(res, error.status, {
           error: error.code || 'invalid_request',
           message: error.message,

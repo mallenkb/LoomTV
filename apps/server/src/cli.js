@@ -36,18 +36,24 @@ Environment aliases:
   TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES
 `;
 
+/**
+ * @typedef {'host' | 'port' | 'datadir' | 'cachedir' | 'mediadir' | 'ffmpegpath' | 'ffprobepath' | 'trustedproxies'} StringOption
+ * @typedef {Partial<Record<StringOption, string>> & { help?: boolean, requiresecuretransport?: boolean, requirebootstrapsecret?: boolean }} CliValues
+ */
+
+/** @param {string} message */
 function usageError(message) {
-  const error = new Error(`${message}\n\n${HELP}`);
-  error.code = 'USAGE';
-  return error;
+  return Object.assign(new Error(`${message}\n\n${HELP}`), { code: 'USAGE' });
 }
 
+/** @param {string[]} args @param {number} index @param {string} option */
 function readOptionValue(args, index, option) {
   const value = args[index + 1];
   if (!value || value.startsWith('--')) throw usageError(`${option} requires a value.`);
   return value;
 }
 
+/** @param {string} value @param {string} source */
 function parsePort(value, source) {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -56,6 +62,7 @@ function parsePort(value, source) {
   return port;
 }
 
+/** @param {string} shortName @param {string} longName */
 function readEnvironmentValue(shortName, longName) {
   const shortValue = process.env[shortName]?.trim();
   if (shortValue) return shortValue;
@@ -63,6 +70,7 @@ function readEnvironmentValue(shortName, longName) {
   return longValue || undefined;
 }
 
+/** @param {string | undefined} value @param {string} source */
 function parseBoolean(value, source) {
   if (value === undefined) return true;
   const normalized = value.trim().toLowerCase();
@@ -71,7 +79,9 @@ function parseBoolean(value, source) {
   throw usageError(`${source} must be true or false when a value is provided.`);
 }
 
+/** @param {string[]} args @returns {CliValues} */
 function parseArgs(args) {
+  /** @type {CliValues} */
   const values = {};
   const booleanOptions = new Set(['--require-secure-transport', '--require-bootstrap-secret']);
   for (let index = 0; index < args.length; index += 1) {
@@ -84,21 +94,24 @@ function parseArgs(args) {
       throw usageError(`Unknown option: ${argument}`);
     }
     if (booleanOptions.has(name)) {
-      values[name.slice(2).replaceAll('-', '')] = parseBoolean(inlineValue, name);
+      values[name === '--require-secure-transport' ? 'requiresecuretransport' : 'requirebootstrapsecret'] = parseBoolean(inlineValue, name);
       continue;
     }
     const value = inlineValue ?? readOptionValue(args, index++, name);
     if (!value.trim()) throw usageError(`${name} requires a non-empty value.`);
-    values[name.slice(2).replaceAll('-', '')] = value;
+    const key = /** @type {StringOption} */ (name.slice(2).replaceAll('-', ''));
+    values[key] = value;
   }
   return values;
 }
 
+/** @param {import('@loom-media-server/runtime-paths').RuntimePaths} paths */
 async function ensureRuntimeDirectories(paths) {
   await fs.mkdir(paths.dataDir, { recursive: true });
   await fs.mkdir(paths.cacheDir, { recursive: true });
 }
 
+/** @param {CliValues} cliValues */
 function buildConfig(cliValues) {
   const host = cliValues.host
     || readEnvironmentValue('HOST', 'LOOMTV_HOST')
@@ -149,6 +162,7 @@ async function run() {
   });
   let stopping = false;
 
+  /** @param {NodeJS.Signals} signal */
   const stop = async (signal) => {
     if (stopping) return;
     stopping = true;

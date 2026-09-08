@@ -50,8 +50,12 @@ corepack pnpm --filter loom-media-server-desktop dist
 
 ```text
 apps/
-  desktop/   Electron main process, renderer UI, local database, playback, probing, and packaging.
-  mobile/    Expo mobile client for pairing and playback experiments.
+  desktop/       Electron main process, renderer UI, local database, playback, probing, and packaging.
+  desktop-tauri/ Tauri desktop port and native bridge.
+  server/        Headless server, API, setup, and admin UI.
+  mobile/        Expo mobile client for pairing and playback experiments.
+  tv/            Expo client for Android TV and Fire TV.
+packages/    Shared contracts, media helpers, protocol types, and migration helpers.
 docs/        Screenshots, release notes, future work, and implementation notes.
 ```
 

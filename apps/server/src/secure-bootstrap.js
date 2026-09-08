@@ -10,6 +10,7 @@ const MAX_BOOTSTRAP_FAILURES = 5;
 const BOOTSTRAP_WINDOW_MS = 15 * 60 * 1_000;
 const BOOTSTRAP_LOCKOUT_MS = 15 * 60 * 1_000;
 
+/** @param {number} status @param {string} code @param {string} message @param {number} [retryAfter] */
 function bootstrapError(status, code, message, retryAfter) {
   return Object.assign(new Error(message), {
     status,
@@ -18,6 +19,7 @@ function bootstrapError(status, code, message, retryAfter) {
   });
 }
 
+/** @param {unknown} value @param {string} source */
 function normalizeSecret(value, source) {
   const secret = String(value ?? '').trim();
   const size = Buffer.byteLength(secret);
@@ -31,29 +33,36 @@ function normalizeSecret(value, source) {
   return secret;
 }
 
+/** @param {unknown} value */
 function secretDigest(value) {
   return createHash('sha256').update(String(value ?? ''), 'utf8').digest();
 }
 
+/** @param {unknown} left @param {unknown} right */
 function constantTimeSecretEqual(left, right) {
   return timingSafeEqual(secretDigest(left), secretDigest(right));
 }
 
+/** @param {unknown} address */
 function addressKey(address) {
   return createHash('sha256').update(String(address || 'unknown').slice(0, 256)).digest('hex');
 }
 
+/** @param {import('./server-admin-types.js').BootstrapOptions} options */
 export function createBootstrapSecurity(options) {
   const dataDir = path.resolve(options.dataDir);
   const required = options.required !== false;
   const configuredFile = options.secretFile ? path.resolve(options.secretFile) : null;
   const defaultFile = path.join(dataDir, DEFAULT_BOOTSTRAP_SECRET_FILENAME);
   const secretFile = configuredFile || defaultFile;
+  /** @type {Map<string, { failures: number, lastAttemptAt: number, lockedUntil: number }>} */
   const failures = new Map();
   let initialized = false;
+  /** @type {string | null} */
   let activeSecret = null;
   let generatedFile = false;
 
+  /** @param {string} key */
   function retryAfterFor(key, now = Date.now()) {
     const entry = failures.get(key);
     if (!entry) return 0;
@@ -62,10 +71,11 @@ export function createBootstrapSecurity(options) {
     return 0;
   }
 
+  /** @param {string} key */
   function rememberFailure(key, now = Date.now()) {
     const current = failures.get(key);
     if (!current || current.lastAttemptAt <= now - BOOTSTRAP_WINDOW_MS) {
-      if (!current && failures.size >= 1_024) failures.delete(failures.keys().next().value);
+      if (!current && failures.size >= 1_024) failures.delete(failures.keys().next().value || '');
       failures.set(key, { failures: 1, lastAttemptAt: now, lockedUntil: 0 });
       return;
     }
@@ -74,12 +84,13 @@ export function createBootstrapSecurity(options) {
     if (current.failures >= MAX_BOOTSTRAP_FAILURES) current.lockedUntil = now + BOOTSTRAP_LOCKOUT_MS;
   }
 
+  /** @param {string} filePath @param {string} source */
   async function readSecretFile(filePath, source) {
     let stat;
     try {
       stat = await fs.stat(filePath);
     } catch (error) {
-      if (error?.code === 'ENOENT') return null;
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
       throw error;
     }
     if (!stat.isFile()) {
@@ -96,6 +107,7 @@ export function createBootstrapSecurity(options) {
   }
 
   return {
+    /** @param {{ ownerConfigured: boolean }} input */
     async initialize({ ownerConfigured }) {
       if (initialized) return;
       if (!required) {
@@ -155,13 +167,14 @@ export function createBootstrapSecurity(options) {
           try { options.onWarning?.('Could not emit the generated bootstrap secret to the operator log.', error); } catch { /* logging must not break bootstrap */ }
         }
       } catch (error) {
-        if (error?.code !== 'EEXIST') throw error;
+        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error;
         activeSecret = await readSecretFile(defaultFile, 'The persisted bootstrap secret file');
         generatedFile = true;
         initialized = true;
       }
     },
 
+    /** @param {unknown} presentedSecret @param {unknown} address */
     authorize(presentedSecret, address) {
       if (!required) return;
       if (!initialized || !activeSecret) {

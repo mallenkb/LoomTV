@@ -170,6 +170,9 @@ export default function App() {
 
   useEffect(() => {
     if (!startupReady || !window.desktopApi) return undefined;
+    // Keep macOS WebKit available for input and the visible route. Intent-based
+    // router preloading still warms the destination on hover or focus.
+    if (document.documentElement.dataset.loomRenderer === 'webkit') return undefined;
     const preload = () => {
       void Promise.allSettled([
         MyList, Movies, Others, TVShows, MovieDetail, TVDetail, Settings,
@@ -534,7 +537,7 @@ function AppShell() {
         <motion.div
           key={location.pathname}
           className="loom-route-transition-frame"
-          initial={shouldReduceMotion ? false : { opacity: 0.82 }}
+          initial={shouldReduceMotion || document.documentElement.dataset.loomRenderer === 'webkit' ? false : { opacity: 0.82 }}
           animate={{ opacity: 1 }}
           transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
         >

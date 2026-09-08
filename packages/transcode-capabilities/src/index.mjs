@@ -166,7 +166,7 @@ function encoderCapability(ffmpegPath, backend, codec, encoder, device, options)
 }
 
 function cacheKey(ffmpegPath, options) {
-  let stamp = '';
+  let stamp;
   try {
     const stats = fs.statSync(ffmpegPath);
     stamp = `${stats.size}:${stats.mtimeMs}`;

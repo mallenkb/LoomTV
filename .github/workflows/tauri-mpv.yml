@@ -1,8 +1,9 @@
 name: Verify Tauri external-player continuation
+# Tauri development is preserved in codex/tauri-paused.
+# Run explicitly while Electron is the active development target.
 on:
-  push:
-    branches: [codex/tauri-react-port]
-    paths: ['.github/tauri-mpv/**', '.github/workflows/tauri-mpv.yml']
+  workflow_dispatch:
+
 permissions:
   contents: read
 jobs:

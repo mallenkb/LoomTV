@@ -33,22 +33,26 @@ export const USER_ROLES = Object.freeze(['viewer', 'user', 'admin']);
 export const MAX_DEVICE_IDS = 16;
 export const MAX_DEVICE_ID_LENGTH = 128;
 
+/** @type {Record<string, readonly string[]>} */
 const DEFAULT_ROLE_PERMISSIONS = {
   viewer: ['library.read', 'stream', 'account.password'],
   user: ['library.read', 'stream', 'transcode', 'account.password'],
   admin: AUTH_PERMISSIONS,
 };
 
+/** @param {unknown} value @param {readonly string[]} fallback */
 export function normalizePermissionList(value, fallback = []) {
   const source = Array.isArray(value) ? value : fallback;
   return [...new Set(source.filter((permission) => AUTH_PERMISSIONS.includes(permission)))];
 }
 
+/** @param {unknown} role @param {unknown} [override] */
 export function permissionsForRole(role, override) {
-  const normalizedRole = USER_ROLES.includes(role) ? role : 'viewer';
+  const normalizedRole = typeof role === 'string' && USER_ROLES.includes(role) ? role : 'viewer';
   return normalizePermissionList(override, DEFAULT_ROLE_PERMISSIONS[normalizedRole]);
 }
 
+/** @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} principal @param {string | null | undefined} permission */
 export function hasPermission(principal, permission) {
   if (!principal) return false;
   if (!permission) return true;
@@ -58,6 +62,7 @@ export function hasPermission(principal, permission) {
     || principal.permissions?.includes(permission) === true;
 }
 
+/** @param {unknown} value */
 export function isLocalNetworkAddress(value) {
   const address = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   if (address === 'localhost' || address === '::1') return true;
@@ -75,10 +80,12 @@ export function isLocalNetworkAddress(value) {
   return false;
 }
 
+/** @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} principal */
 export function isOwnerPrincipal(principal) {
   return principal?.type === 'owner' || principal?.role === 'owner';
 }
 
+/** @type {Readonly<Record<string, number>>} */
 const ROLE_RANK = Object.freeze({
   viewer: 0,
   user: 1,
@@ -91,22 +98,24 @@ const ROLE_RANK = Object.freeze({
  * Password verification for self-service changes remains the caller's
  * responsibility; this function only compares authorization scope.
  */
+/** @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} actor @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} target */
 export function canResetCredentials(actor, target) {
   if (!actor?.id || !target?.id) return false;
   if (isOwnerPrincipal(actor)) return true;
   if (actor.id === target.id) return true;
   if (isOwnerPrincipal(target) || !hasPermission(actor, 'users.manage')) return false;
 
-  const actorRank = ROLE_RANK[actor.role] ?? -1;
-  const targetRank = ROLE_RANK[target.role] ?? -1;
+  const actorRank = ROLE_RANK[actor.role || ''] ?? -1;
+  const targetRank = ROLE_RANK[target.role || ''] ?? -1;
   if (targetRank > actorRank) return false;
   if ((target.permissions || []).some((permission) => !hasPermission(actor, permission))) return false;
 
   if (actor.rootIds === null) return true;
   if (target.rootIds === null || !Array.isArray(actor.rootIds) || !Array.isArray(target.rootIds)) return false;
-  return target.rootIds.every((rootId) => actor.rootIds.includes(rootId));
+  return target.rootIds.every((rootId) => actor.rootIds?.includes(rootId) === true);
 }
 
+/** @param {unknown} value */
 export function normalizeRootIds(value) {
   if (value === null || value === undefined) return null;
   if (!Array.isArray(value)) return [];
@@ -118,6 +127,7 @@ export function normalizeRootIds(value) {
  * explicit list is an allow-list, used by deployments that want to bind an
  * account to known clients without storing device secrets.
  */
+/** @param {unknown} value */
 export function normalizeDeviceIds(value) {
   if (value === null || value === undefined) return null;
   if (!Array.isArray(value)) return null;
@@ -126,12 +136,14 @@ export function normalizeDeviceIds(value) {
     .map((deviceId) => deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH)))].slice(0, MAX_DEVICE_IDS);
 }
 
+/** @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} principal @param {string | null | undefined} rootId */
 export function canAccessRoot(principal, rootId) {
   if (!principal || !rootId) return false;
   if (isOwnerPrincipal(principal) || principal.rootIds === null) return true;
   return principal.rootIds?.includes(rootId) === true;
 }
 
+/** @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} principal */
 export function principalView(principal) {
   if (!principal) return null;
   return {
@@ -146,6 +158,7 @@ export function principalView(principal) {
   };
 }
 
+/** @param {import('./server-admin-types.js').User} user */
 export function userView(user) {
   return principalView({
     id: user.id,

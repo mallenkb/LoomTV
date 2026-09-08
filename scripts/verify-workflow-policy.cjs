@@ -29,7 +29,7 @@ const PUBLISH_COMMANDS = [
   /\belectron-builder\b[^\n]*--publish(?:\s+|=)(?!never\b)/i,
 ];
 const PUBLISHING_ACTIONS = [
-  /(?:^|[\/._-])(?:create-release|publish-release)(?:[\/._@-]|$)/i,
+  /(?:^|[/._-])(?:create-release|publish-release)(?:[/._@-]|$)/i,
   /action-gh-release/i,
   /action-automatic-releases/i,
   /upload-release-asset/i,

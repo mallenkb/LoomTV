@@ -38,7 +38,8 @@ export function subtitleSearchUrl(video: SubtitleVideo): string {
   if (video.type !== 'movie' && video.type !== 'series') throw new Error('This media type does not support online subtitles.');
   let id = video.imdbId;
   if (video.type === 'series') {
-    if (!Number.isSafeInteger(video.season) || video.season! < 0 || !Number.isSafeInteger(video.episode) || video.episode! < 1) {
+    if (typeof video.season !== 'number' || !Number.isSafeInteger(video.season) || video.season < 0
+      || typeof video.episode !== 'number' || !Number.isSafeInteger(video.episode) || video.episode < 1) {
       throw new Error('Choose a season and episode before searching for subtitles.');
     }
     id += `:${video.season}:${video.episode}`;
@@ -58,14 +59,19 @@ export function allowedSubtitleUrl(raw: string): boolean {
 
 async function readProviderText(url: string, signal?: AbortSignal, fetcher: typeof fetch = fetch): Promise<string> {
   const controller = new AbortController();
+  let timedOut = false;
   const abort = () => controller.abort();
   if (signal?.aborted) controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
-  const timeout = setTimeout(abort, 20_000);
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    abort();
+  }, 20_000);
   try {
     const response = await fetcher(url, {
       signal: controller.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
     });
+    controller.signal.throwIfAborted();
     if (!response.ok) throw new Error(`OpenSubtitles v3 returned HTTP ${response.status}. Try again later.`);
     if (Number(response.headers.get('content-length')) > MAX_BYTES) throw new Error('The subtitle response is too large.');
     const reader = response.body?.getReader();
@@ -75,6 +81,7 @@ async function readProviderText(url: string, signal?: AbortSignal, fetcher: type
     try {
       while (true) {
         const { done, value } = await reader.read();
+        controller.signal.throwIfAborted();
         if (done) break;
         size += value.byteLength;
         if (size > MAX_BYTES) throw new Error('The subtitle response is too large.');
@@ -88,6 +95,9 @@ async function readProviderText(url: string, signal?: AbortSignal, fetcher: type
     let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     return new TextDecoder().decode(bytes);
+  } catch (cause) {
+    if (timedOut && !signal?.aborted) throw new Error('OpenSubtitles v3 request timed out. Try again later.', { cause });
+    throw cause;
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', abort);

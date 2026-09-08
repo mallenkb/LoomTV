@@ -64,8 +64,10 @@ four reserved routes are `media.download.read` and `cast.sessions.create/update/
 | `scripts/verify-test-workspaces.cjs` | Registers `packages/video-contracts` and `packages/video-migration` | Statically verified + passing |
 | `docs/agent-tasks/opus-handoff-ledger.md` | This ledger | Implemented |
 
-Not touched, by instruction: `apps/mobile/app.json`, `design-qa.md`,
-`design-qa-mobile-phone.png`, `design-qa-mobile-tablet.png`.
+Not touched, by instruction: `apps/mobile/app.json`,
+`docs/archive/audits/design-qa.md`,
+`docs/archive/audits/design-qa-mobile-phone.png`,
+`docs/archive/audits/design-qa-mobile-tablet.png`.
 
 ---
 

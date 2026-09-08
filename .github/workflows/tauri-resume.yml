@@ -1,9 +1,9 @@
 name: Verify Tauri storage continuation
 
+# Tauri development is preserved in codex/tauri-paused.
+# Run explicitly while Electron is the active development target.
 on:
-  push:
-    branches: [codex/tauri-react-port]
-    paths: ['.github/tauri-resume/**', '.github/workflows/tauri-resume.yml']
+  workflow_dispatch:
 
 permissions:
   contents: read

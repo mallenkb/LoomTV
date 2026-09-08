@@ -45,6 +45,10 @@ import {
   type StoredProgress,
 } from './databasePlaybackRepository.ts';
 import {
+  createSecureSettingsPersistence,
+  type SecureSettingsCodec,
+} from './secureSettings.ts';
+import {
   createDatabaseSegmentsRepository,
   type SegmentAnalysisInventory,
   type StoredMediaFingerprint,
@@ -176,6 +180,17 @@ function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
   }, 30_000);
   timer.unref();
 }
+
+const secureSettingsCodec: SecureSettingsCodec = {
+  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable()
+    && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+  encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
+  decrypt: (value) => {
+    const bytes = Buffer.from(value, 'base64');
+    if (!bytes.length || bytes.toString('base64') !== value) throw new Error('Invalid encrypted settings encoding.');
+    return safeStorage.decryptString(bytes);
+  },
+};
 
 // A plain file copy of an open WAL database misses recent writes, so the
 // pre-migration backup uses VACUUM INTO and is verified before migrating.
@@ -429,12 +444,21 @@ export function getIptvDatabase(): BetterSqlite3.Database {
   return getDb();
 }
 
+function secureSettingsPersistence() {
+  const database = getDb();
+  return createSecureSettingsPersistence({
+    load: () => loadSettingsRecord(database),
+    save: (settings) => saveSettingsRecord(database, settings),
+    transaction: (action) => database.transaction(action)(),
+  }, secureSettingsCodec);
+}
+
 export function loadSettingsFromDatabase(): SettingsData | null {
-  return loadSettingsRecord(getDb());
+  return secureSettingsPersistence().load();
 }
 
 export function saveSettingsToDatabase(settings: SettingsData): void {
-  saveSettingsRecord(getDb(), settings);
+  secureSettingsPersistence().save(settings);
 }
 
 function stremioSecurePersistence(): StremioSecurePersistence {

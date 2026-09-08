@@ -172,13 +172,16 @@ impl StorageLease {
         let legacy_owned = if !marker.exists() && legacy_marker.exists() {
             regular_file(&legacy_marker)?;
             let mut value = Vec::new();
-            File::open(&legacy_marker)?.take(128).read_to_end(&mut value)?;
+            File::open(&legacy_marker)?
+                .take(128)
+                .read_to_end(&mut value)?;
             value == LEGACY_IDENTITY
         } else {
             false
         };
         // Check before creating a lock or changing permissions in an existing store.
-        if fs::symlink_metadata(&database).is_ok() && !marker.is_file() && !legacy_owned && !shared {
+        if fs::symlink_metadata(&database).is_ok() && !marker.is_file() && !legacy_owned && !shared
+        {
             return Err(Error::new("storage_not_owned", "This database is not Tauri-owned. Import a closed backup into a new directory instead."));
         }
         private_directory(directory)?;
@@ -312,7 +315,10 @@ fn validate_snapshot(db: &Connection) -> Result<()> {
         };
         let actual = columns(db)?;
         if actual.is_empty()
-            && matches!(table.as_str(), "playback_progress_legacy" | "playback_track_preferences_legacy")
+            && matches!(
+                table.as_str(),
+                "playback_progress_legacy" | "playback_track_preferences_legacy"
+            )
         {
             continue;
         }

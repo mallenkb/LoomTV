@@ -31,9 +31,12 @@ export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 export type LibraryScanMode = 'quick' | 'metadata' | 'full';
 export type MetadataApiKeys = Record<string, string>;
 export type MetadataProviderRequest =
+  | { provider: 'cinemeta'; path: string }
   | { provider: 'omdb'; query: Record<string, string | number | boolean> }
   | { provider: 'tmdb'; path: string; query?: Record<string, string | number | boolean> }
-  | { provider: 'anilist'; query: string; variables?: Record<string, unknown> };
+  | { provider: 'anilist'; query: string; variables?: Record<string, unknown> }
+  | { provider: 'jikan'; path: string; query?: Record<string, string | number | boolean> }
+  | { provider: 'tvmaze'; path: string; query?: Record<string, string | number | boolean> };
 
 export interface LibraryFolderGroups { movies: string[]; tvShows: string[]; anime: string[]; others: string[] }
 export interface LibraryFolderStatus {

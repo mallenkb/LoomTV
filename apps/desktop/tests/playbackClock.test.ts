@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { absoluteMediaSeconds, playerSecondsForAbsolute } from '../src/components/VideoPlayer/playbackClock.ts';
+import { absoluteMediaSeconds, playerSecondsForAbsolute, subtitleMediaSeconds } from '../src/components/VideoPlayer/playbackClock.ts';
 import {
   activeSkipSegmentAt,
   shouldShowSkipPrompt,
@@ -40,4 +40,20 @@ test('skip prompt follows marker timing without depending on transient player st
 test('outro and credits retain distinct labels', () => {
   assert.equal(skipPromptLabel('outro', true), 'Outro');
   assert.equal(skipPromptLabel('credits', false), 'Credits');
+});
+
+test('subtitle clock adds the resume offset only for linear browser transcodes', () => {
+  assert.equal(subtitleMediaSeconds(15, undefined, 600, false), 615);
+  assert.equal(subtitleMediaSeconds(0, undefined, 900, false), 900);
+  assert.equal(subtitleMediaSeconds(615, undefined, 600, true), 615);
+  assert.equal(subtitleMediaSeconds(615), 615);
+  assert.equal(subtitleMediaSeconds(615, undefined, undefined, false), 615);
+});
+
+test('subtitle clock prefers finite native time including zero without applying browser offsets', () => {
+  assert.equal(subtitleMediaSeconds(15, 615, 600, false), 615);
+  assert.equal(subtitleMediaSeconds(15, 0, 600, false), 0);
+  assert.equal(subtitleMediaSeconds(15, 615, 600, true), 615);
+  assert.equal(subtitleMediaSeconds(15, NaN, 600, false), 615);
+  assert.equal(subtitleMediaSeconds(615, Infinity, 600, true), 615);
 });

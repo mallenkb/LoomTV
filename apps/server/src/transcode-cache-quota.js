@@ -6,25 +6,30 @@ export const DEFAULT_MAX_SESSION_CACHE_BYTES = 4 * 1024 ** 3;
 export const DEFAULT_MIN_FREE_CACHE_BYTES = 256 * 1024 ** 2;
 export const DEFAULT_CACHE_QUOTA_SWEEP_INTERVAL_MS = 15 * 1000;
 
+/** @param {number | undefined} value @param {number} fallback */
 function boundedBytes(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
-  if (!Number.isFinite(value)) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(maximum, Math.trunc(value)));
 }
 
+/** @param {number | undefined} value @param {number} fallback */
 function nonNegativeBytes(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
-  if (!Number.isFinite(value)) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(maximum, Math.trunc(value)));
 }
 
+/** @param {number} status @param {string} code @param {string} message @param {{ cause?: unknown }} details */
 function quotaError(status, code, message, details = {}) {
   return Object.assign(new Error(message), { status, code, ...details });
 }
 
+/** @param {string} rootPath @param {string} candidate */
 function inside(rootPath, candidate) {
   const relative = path.relative(rootPath, candidate);
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+/** @param {{ bsize?: number | bigint, frsize?: number | bigint, bavail?: number | bigint, bfree?: number | bigint }} stats */
 function statfsFreeBytes(stats) {
   const blockSize = Number(stats?.bsize || stats?.frsize);
   const availableBlocks = Number(stats?.bavail ?? stats?.bfree);
@@ -36,6 +41,7 @@ function statfsFreeBytes(stats) {
  * A reservation-aware byte quota for transcode output. Reservations are made
  * before an output directory becomes visible; scans remain the source of
  * truth for already-created files and therefore also reconcile orphaned data.
+ * @param {{ rootPath?: string, fileSystem?: Pick<typeof fsPromises, 'readdir' | 'stat'> & Partial<Pick<typeof fsPromises, 'statfs'>>, now?: () => number, maxTotalBytes?: number, maxSessionBytes?: number, minFreeBytes?: number, sweepIntervalMs?: number }} options
  */
 export function createTranscodeCacheQuota(options = {}) {
   const rootPath = path.resolve(options.rootPath || '.');
@@ -44,11 +50,15 @@ export function createTranscodeCacheQuota(options = {}) {
   const maxTotalBytes = boundedBytes(options.maxTotalBytes, DEFAULT_MAX_TOTAL_CACHE_BYTES);
   const maxSessionBytes = boundedBytes(options.maxSessionBytes, DEFAULT_MAX_SESSION_CACHE_BYTES);
   const minFreeBytes = nonNegativeBytes(options.minFreeBytes, DEFAULT_MIN_FREE_CACHE_BYTES);
-  const sweepIntervalMs = Number.isFinite(options.sweepIntervalMs)
+  const sweepIntervalMs = typeof options.sweepIntervalMs === 'number' && Number.isFinite(options.sweepIntervalMs)
     ? Math.max(0, Math.trunc(options.sweepIntervalMs))
     : DEFAULT_CACHE_QUOTA_SWEEP_INTERVAL_MS;
+  /** @typedef {{ state: string, totalBytes: number, freeBytes: number | null, reservedBytes: number, maxTotalBytes: number, maxSessionBytes: number, minFreeBytes: number, sessionBytes: Map<string, number>, violations: string[], fileCount?: number, directoryCount?: number, error?: string }} QuotaStatus */
+  /** @type {Map<string, { id: string, principalId: string, bytes: number, createdAt: number }>} */
   const reservations = new Map();
+  /** @type {Promise<QuotaStatus> | null} */
   let scanPromise = null;
+  /** @type {QuotaStatus} */
   let lastStatus = {
     state: 'unknown',
     totalBytes: 0,
@@ -66,18 +76,22 @@ export function createTranscodeCacheQuota(options = {}) {
   }
 
   async function scanFiles() {
+    /** @type {Map<string, number>} */
     const sessionBytes = new Map();
     let totalBytes = 0;
     let fileCount = 0;
     let directoryCount = 0;
+    /** @type {Array<{ directory: string, sessionId: string | null }>} */
     const pending = [{ directory: rootPath, sessionId: null }];
     while (pending.length) {
-      const { directory, sessionId } = pending.pop();
+      const next = pending.pop();
+      if (!next) break;
+      const { directory, sessionId } = next;
       let entries;
       try {
         entries = await fileSystem.readdir(directory, { withFileTypes: true });
       } catch (error) {
-        if (error?.code === 'ENOENT') continue;
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
         throw quotaError(503, 'transcode_cache_unavailable', 'The transcode cache could not be inspected.', { cause: error });
       }
       directoryCount += 1;
@@ -108,6 +122,7 @@ export function createTranscodeCacheQuota(options = {}) {
     return { totalBytes, freeBytes, sessionBytes, fileCount, directoryCount };
   }
 
+  /** @param {QuotaStatus} status */
   function violationsFor(status) {
     const violations = [];
     if (status.totalBytes + status.reservedBytes >= maxTotalBytes) violations.push('total_bytes');
@@ -171,6 +186,7 @@ export function createTranscodeCacheQuota(options = {}) {
     return current;
   }
 
+  /** @param {string} id @param {string} principalId */
   async function reserve(id, principalId, bytes = maxSessionBytes) {
     if (reservations.has(id)) return reservations.get(id);
     const reservationBytes = boundedBytes(bytes, maxSessionBytes);
@@ -191,6 +207,7 @@ export function createTranscodeCacheQuota(options = {}) {
     return reservation;
   }
 
+  /** @param {string} id */
   function release(id) {
     const reservation = reservations.get(id);
     if (!reservation) return false;
@@ -216,6 +233,7 @@ export function createTranscodeCacheQuota(options = {}) {
     };
   }
 
+  /** @param {string} sessionId */
   async function sessionBytes(sessionId) {
     const current = await status();
     return {

@@ -23,21 +23,30 @@ const FALLBACK_SETUP_HTML = `<!doctype html>
 body{display:grid;min-height:100vh;place-items:center;margin:0;padding:24px}main{max-width:560px}h1{margin:0 0 10px;color:#FC9C03}p{line-height:1.6;color:#a3a3a3}code{color:#FC9C03}</style></head>
 <body><main><h1>LoomTV setup</h1><p>The setup page asset was not packaged with this server. Copy <code>setup.html</code> next to the server and restart it.</p></main></body></html>`;
 
+/**
+ * @typedef {() => Promise<{ required: boolean } | null>} SetupStatusProvider
+ * @typedef {{ getHtml?: () => Promise<string>, htmlPath?: string, getSetupStatus?: SetupStatusProvider }} SetupPageOptions
+ */
+
+/** @param {import('node:http').ServerResponse} res @param {string} location */
 function redirect(res, location) {
   res.writeHead(302, { Location: location, 'Cache-Control': 'no-store', 'Content-Length': '0' });
   res.end();
 }
 
 /** `?return=admin` survives the round trip so completion lands where you began. */
+/** @param {unknown} value */
 export function setupReturnTarget(value) {
   return value === 'admin' ? 'admin' : 'app';
 }
 
+/** @param {SetupPageOptions} options */
 export function createSetupPage(options = {}) {
   const htmlProvider = options.getHtml
     || (() => fs.readFile(options.htmlPath || DEFAULT_SETUP_HTML_PATH, 'utf8').catch(() => FALLBACK_SETUP_HTML));
   const getSetupStatus = options.getSetupStatus;
 
+  /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res */
   return async function handleSetupPage(req, res) {
     const url = new URL(req.url || '/', 'http://loomtv.local');
     if (url.pathname !== '/setup' && url.pathname !== SETUP_PATH) return false;
@@ -74,6 +83,9 @@ export function createSetupPage(options = {}) {
 /**
  * Guard for `/app` and `/admin`: an unclaimed or half-configured server sends
  * every visitor to the one setup flow, tagged with where they started.
+ * @param {SetupStatusProvider | undefined} getSetupStatus
+ * @param {'admin' | 'app'} from
+ * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<boolean>}
  */
 export function createSetupRedirectGuard(getSetupStatus, from) {
   if (typeof getSetupStatus !== 'function') return async () => false;

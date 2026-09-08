@@ -4,8 +4,24 @@ import { createHash, randomUUID } from 'node:crypto';
 import { classifyVideoFile, createMediaItemId, isVideoFilePath } from '@loom-media-server/media-core';
 import { isPathWithin } from './media-path-guard.js';
 const CHECKPOINT_EVERY_FILES = 50;
+/** @type {Readonly<Record<string, string>>} */
 const SUBTITLE_FORMATS = Object.freeze({ '.srt': 'subrip', '.vtt': 'webvtt', '.ass': 'ass', '.ssa': 'ssa' });
 
+/**
+ * @typedef {{ id: string, path: string, lastScanAt?: number }} ScanRoot
+ * @typedef {ReturnType<typeof import('@loom-media-server/media-core').parseFfprobeMediaProbe>} MediaProbe
+ * @typedef {{ rootId: string, path: string, code: string, message: string }} ScanError
+ * @typedef {{ id?: string, state: string, mode?: string, rootId?: string, startedAt?: number, scannedFiles?: number, indexedFiles?: number, completedAt?: number, offlineRoots?: string[], errors?: ScanError[], warning?: string, error?: string }} ScanStatus
+ * @typedef {{ id: string, rootId: string, path: string, relativePath: string, type: string, title: string, kind: import('@loom-media-server/video-contracts').CatalogKind, seriesId?: string, year?: number, animeLikely?: boolean, series?: { title: string, season?: number, episode?: number | null }, extension: string, sizeBytes: number, modifiedAtMs: number, available: boolean, indexedAt: number, subtitleSidecars?: Awaited<ReturnType<typeof subtitleSidecarsFor>>, sourceId?: string, localMetadata?: MediaProbe }} ScanMediaRecord
+ * @typedef {{ catalog: ScanMediaRecord[], roots: ScanRoot[], scan?: ScanStatus | null }} ScannerState
+ */
+
+/** @param {unknown} error @param {string} fallback */
+function errorCode(error, fallback) {
+  return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : fallback;
+}
+
+/** @param {import('node:fs').Dirent[]} entries @param {string} videoPath */
 async function subtitleSidecarsFor(entries, videoPath) {
   const directory = path.dirname(videoPath);
   const videoBase = path.basename(videoPath, path.extname(videoPath));
@@ -43,10 +59,12 @@ function scanCancelledError() {
   return Object.assign(new Error('The library scan was cancelled.'), { code: 'scan_cancelled' });
 }
 
+/** @param {AbortSignal | undefined} signal */
 function throwIfAborted(signal) {
   if (signal?.aborted) throw scanCancelledError();
 }
 
+/** @param {ScanRoot} root @param {string} filePath @param {import('node:fs').Stats} stats @param {Awaited<ReturnType<typeof subtitleSidecarsFor>>} subtitleSidecars @returns {ScanMediaRecord} */
 function mediaRecord(root, filePath, stats, subtitleSidecars = []) {
   const relativePath = path.relative(root.path, filePath);
   // Shared classification keeps the headless catalog structurally identical
@@ -86,12 +104,18 @@ function mediaRecord(root, filePath, stats, subtitleSidecars = []) {
  * second half of that guarantee: every path handed to `onFile` is checked
  * against the root's canonical path, so a directory replaced mid-scan cannot
  * smuggle an entry into the catalog either.
+ * @param {string} rootPath
+ * @param {string} containmentRoot
+ * @param {(filePath: string, stats: import('node:fs').Stats, sidecars: Awaited<ReturnType<typeof subtitleSidecarsFor>>) => Promise<void>} onFile
+ * @param {(filePath: string, error: unknown) => void} onError
+ * @param {{ signal?: AbortSignal }} options
  */
 async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { signal } = {}) {
   const pending = [rootPath];
   while (pending.length > 0) {
     throwIfAborted(signal);
     const current = pending.pop();
+    if (!current) continue;
     // One canonicalization per directory rather than per file: the Dirent
     // filter already rules out symlinked files, so a directory that resolves
     // outside the root is the only way a discovered path can escape.
@@ -120,16 +144,19 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { sign
         throwIfAborted(signal);
         await onFile(fullPath, await fs.stat(fullPath), await subtitleSidecarsFor(entries, fullPath));
       } catch (error) {
-        if (error?.code === 'scan_cancelled') throw error;
+        if (errorCode(error, '') === 'scan_cancelled') throw error;
         onError(fullPath, error);
       }
     }
   }
 }
 
+/** @param {{ loadState: () => Promise<ScannerState>, saveState: (state: ScannerState) => Promise<unknown>, appendLog: (level: string, message: string, details: Record<string, string | number>) => Promise<unknown>, probeMedia?: ((filePath: string, options: { sourceId: string, signal: AbortSignal }) => Promise<MediaProbe | null>) | null }} options */
 export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, probeMedia = null }) {
+  /** @type {{ controller: AbortController, promise: Promise<ScanStatus | null | undefined> } | null} */
   let activeScan = null;
 
+  /** @param {string} scanId @param {Partial<ScanStatus>} update */
   async function finish(scanId, update) {
     const state = await loadState();
     if (state.scan?.id !== scanId) return state.scan;
@@ -138,12 +165,16 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
     return state.scan;
   }
 
+  /** @param {string} scanId @param {string} mode @param {ScanRoot[]} roots @param {AbortSignal} signal */
   async function runScan(scanId, mode, roots, signal) {
     const state = await loadState();
     const existing = Array.isArray(state.catalog) ? state.catalog : [];
     const existingById = new Map(existing.map((item) => [item.id, item]));
+    /** @type {Map<string, { records: ScanMediaRecord[], preserveExisting: boolean }>} */
     const discoveredByRoot = new Map();
+    /** @type {ScanError[]} */
     const errors = [];
+    /** @type {string[]} */
     const offlineRoots = [];
     let scannedFiles = 0;
 
@@ -160,10 +191,11 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
         // Scan status is readable by any account holding library.read, so the
         // reported path stays root-relative. The root itself is identified by
         // rootId, which the caller is already allowed to see.
-        errors.push({ rootId: root.id, path: '.', code: error?.code || 'EUNAVAILABLE', message: 'Library root is unavailable; existing records were preserved.' });
+        errors.push({ rootId: root.id, path: '.', code: errorCode(error, 'EUNAVAILABLE'), message: 'Library root is unavailable; existing records were preserved.' });
         continue;
       }
 
+      /** @type {ScanMediaRecord[]} */
       const discovered = [];
       let rootHadTraversalErrors = false;
       await walkVideoFiles(
@@ -189,7 +221,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
                 record.localMetadata = previous.localMetadata;
               }
             } catch (error) {
-              if (error?.code === 'scan_cancelled' || signal?.aborted) throw scanCancelledError();
+              if (errorCode(error, '') === 'scan_cancelled' || signal?.aborted) throw scanCancelledError();
               if (sameFileIdentity && Array.isArray(previous?.localMetadata?.tracks)) {
                 record.localMetadata = previous.localMetadata;
               }
@@ -197,7 +229,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
               errors.push({
                 rootId: root.id,
                 path: !relative || relative.startsWith('..') || path.isAbsolute(relative) ? path.basename(filePath) : relative,
-                code: error?.code || 'EPROBE',
+                code: errorCode(error, 'EPROBE'),
                 message: 'Media analysis failed; the file was indexed and can be analysed later.',
               });
             }
@@ -213,13 +245,13 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
           }
         },
         (failedPath, error) => {
-          if (error?.code === 'scan_cancelled') return;
+          if (errorCode(error, '') === 'scan_cancelled') return;
           rootHadTraversalErrors = true;
           const relative = path.relative(root.path, failedPath);
           errors.push({
             rootId: root.id,
             path: !relative || relative.startsWith('..') || path.isAbsolute(relative) ? path.basename(failedPath) : relative,
-            code: error?.code || 'EIO',
+            code: errorCode(error, 'EIO'),
             message: 'A folder or file could not be read; existing records were preserved for that root.',
           });
         },
@@ -235,6 +267,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
     //   routine rescans.
     // - metadata/full: every discovered file gets a freshly rebuilt record
     //   with re-derived classification.
+    /** @param {ScanMediaRecord} record */
     const mergeRecord = (record) => {
       const previous = mode === 'quick' ? existingById.get(record.id) : null;
       return previous && previous.sizeBytes === record.sizeBytes && previous.modifiedAtMs === record.modifiedAtMs
@@ -304,11 +337,13 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
       return Array.isArray(state.catalog) ? state.catalog : [];
     },
 
+    /** @param {string} itemId */
     async getItem(itemId) {
       const items = await this.listItems();
       return items.find((item) => item.id === itemId) || null;
     },
 
+    /** @param {{ rootId?: string, mode?: string }} input */
     async start(input = {}) {
       if (activeScan) return (await loadState()).scan;
       const state = await loadState();

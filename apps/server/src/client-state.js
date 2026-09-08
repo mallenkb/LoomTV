@@ -10,34 +10,44 @@ const MAX_PROGRESS = 20_000;
 const MAX_NAME_LENGTH = 80;
 const PROFILE_UNLOCK_TTL_MS = 30 * 60 * 1000;
 const MAX_PIN_FAILURES = 2_048;
+/** @type {(password: string, salt: Buffer, keylen: number, options: import('node:crypto').ScryptOptions) => Promise<Buffer>} */
 const scrypt = promisify(scryptCallback);
 
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) { return value !== null && typeof value === 'object'; }
+
+/** @param {unknown} value */
 const safeNumber = (value, fallback = 0) => {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : fallback;
 };
 
+/** @param {unknown} value */
 function assignmentAccess(value) {
   if (value === 'use' || value === 'manage') return value;
   throw Object.assign(new Error('Profile assignment access is invalid.'), { status: 422, code: 'profile_assignment_invalid' });
 }
 
+/** @param {unknown} value */
 function persistedProfileKind(value) {
   try { return canonicalProfileKind(value); } catch { return migrateLegacyProfileKind(value); }
 }
 
+/** @param {import('./server-state-types.js').ProfileInput} input @param {import('@loom-media-server/video-contracts').ProfileKind} [fallback] @returns {import('@loom-media-server/video-contracts').ProfileKind} */
 function profileKindInput(input, fallback = 'adult') {
   if (input?.kind !== undefined) return canonicalProfileKind(input.kind);
   if (input?.type !== undefined) return migrateLegacyProfileKind(input.type);
   return fallback;
 }
 
+/** @param {import('@loom-media-server/video-contracts').ProfileKind} kind */
 function legacyProfileType(kind) {
   if (kind === 'adult') return 'standard';
   if (kind === 'child') return 'kid';
   return 'guest';
 }
 
+/** @param {Record<string, unknown>} profile @returns {import('./server-state-types.js').Profile} */
 function normalizeProfile(profile) {
   const kind = persistedProfileKind(profile.kind ?? profile.type);
   return {
@@ -56,10 +66,12 @@ function normalizeProfile(profile) {
   };
 }
 
+/** @template T @param {unknown} value @returns {T[]} */
 function normalizeCarrierArray(value) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object').map((item) => ({ ...item })) : [];
 }
 
+/** @param {Record<string, unknown>} value @returns {import('@loom-media-server/video-contracts').ProfilePreferences} */
 function canonicalPreferencesInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw Object.assign(new Error('Profile preferences must be an object.'), { status: 400, code: 'invalid_request' });
@@ -68,16 +80,17 @@ function canonicalPreferencesInput(value) {
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw Object.assign(new Error('Profile preferences contain an unsupported field.'), { status: 400, code: 'invalid_request' });
   }
+  /** @type {import('@loom-media-server/video-contracts').ProfilePreferences} */
   const result = {};
   if (value.themeMode !== undefined) {
-    if (!['dark','light'].includes(value.themeMode)) throw Object.assign(new Error('themeMode is invalid.'), { status: 400, code: 'invalid_request' });
+    if (value.themeMode !== 'dark' && value.themeMode !== 'light') throw Object.assign(new Error('themeMode is invalid.'), { status: 400, code: 'invalid_request' });
     result.themeMode = value.themeMode;
   }
   if (value.themeColor !== undefined) {
-    if (!['orange','yellow','red','blue','twitch'].includes(value.themeColor)) throw Object.assign(new Error('themeColor is invalid.'), { status: 400, code: 'invalid_request' });
+    if (value.themeColor !== 'orange' && value.themeColor !== 'yellow' && value.themeColor !== 'red' && value.themeColor !== 'blue' && value.themeColor !== 'twitch') throw Object.assign(new Error('themeColor is invalid.'), { status: 400, code: 'invalid_request' });
     result.themeColor = value.themeColor;
   }
-  for (const key of ['showProviderRatingBadges','autoplayNextEnabled']) {
+  for (const key of /** @type {const} */ (['showProviderRatingBadges','autoplayNextEnabled'])) {
     if (value[key] !== undefined) {
       if (typeof value[key] !== 'boolean') throw Object.assign(new Error(`${key} must be boolean.`), { status: 400, code: 'invalid_request' });
       result[key] = value[key];
@@ -90,9 +103,9 @@ function canonicalPreferencesInput(value) {
     }
     result.sidebarNavOrder = [...new Set(value.sidebarNavOrder)];
   }
-  for (const key of ['skipBackSeconds','skipForwardSeconds']) {
+  for (const key of /** @type {const} */ (['skipBackSeconds','skipForwardSeconds'])) {
     if (value[key] !== undefined) {
-      if (!Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > 600) {
+      if (typeof value[key] !== 'number' || !Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > 600) {
         throw Object.assign(new Error(`${key} is invalid.`), { status: 400, code: 'invalid_request' });
       }
       result[key] = value[key];
@@ -101,35 +114,39 @@ function canonicalPreferencesInput(value) {
   return result;
 }
 
+/** @param {Record<string, unknown>} value @returns {import('./server-state-types.js').TrackPreferences} */
 function trackPreferencesInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !['audio','subtitle'].includes(key))) {
     throw Object.assign(new Error('Track preferences are invalid.'), { status: 400, code: 'invalid_request' });
   }
+  /** @type {import('./server-state-types.js').TrackPreferences} */
   const result = {};
-  for (const kind of ['audio','subtitle']) {
+  for (const kind of /** @type {const} */ (['audio','subtitle'])) {
     const preference = value[kind];
     if (preference === undefined) continue;
-    if (!preference || typeof preference !== 'object' || Array.isArray(preference)
+    if (!isRecord(preference) || Array.isArray(preference)
       || Object.keys(preference).some((key) => !['enabled','trackId','index','language','title','codec','forced'].includes(key))
       || typeof preference.enabled !== 'boolean'
-      || (preference.index !== undefined && (!Number.isSafeInteger(preference.index) || preference.index < 0))
+      || (preference.index !== undefined && (typeof preference.index !== 'number' || !Number.isSafeInteger(preference.index) || preference.index < 0))
       || ['trackId','language','title','codec'].some((key) => preference[key] !== undefined
         && (typeof preference[key] !== 'string' || preference[key].length > 128 || preference[key].includes('\u0000')))
       || (preference.forced !== undefined && typeof preference.forced !== 'boolean')) {
       throw Object.assign(new Error(`${kind} track preference is invalid.`), { status: 400, code: 'invalid_request' });
     }
-    result[kind] = { ...preference };
+    result[kind] = /** @type {import('@loom-media-server/video-contracts').TrackPreference} */ ({ ...preference, enabled: preference.enabled });
   }
   return result;
 }
 
+/** @param {unknown} raw @returns {import('./server-state-types.js').ClientState} */
 export function normalizeHeadlessClientState(raw) {
+  /** @type {import('./server-state-types.js').ClientState} */
   const state = {
     profiles: [], profileCredentials: [], assignments: [], selections: [], progress: [], history: [],
     profilePreferences: [], profileRestrictions: [], profileListEntries: [], trackPreferences: [],
   };
-  if (!raw || typeof raw !== 'object') return state;
+  if (!isRecord(raw)) return state;
   state.profiles = (Array.isArray(raw.profiles) ? raw.profiles : [])
     .filter((profile) => profile && typeof profile.id === 'string')
     .map(normalizeProfile).slice(0, MAX_PROFILES);
@@ -158,8 +175,8 @@ export function normalizeHeadlessClientState(raw) {
       ...(item.selectedAt === undefined ? {} : { selectedAt: safeNumber(item.selectedAt) }),
     }));
   } else if (raw.selections && typeof raw.selections === 'object') {
-    state.selections = Object.entries(raw.selections).filter(([, profileId]) => typeof profileId === 'string').map(([accountId, profileId]) => ({
-      accountId: accountId.slice(0, 128), deviceId: `account:${accountId}`.slice(0, 128), profileId: profileId.slice(0, 128),
+    state.selections = Object.entries(raw.selections).filter((entry) => typeof entry[1] === 'string').map(([accountId, profileId]) => ({
+      accountId: accountId.slice(0, 128), deviceId: `account:${accountId}`.slice(0, 128), profileId: /** @type {string} */ (profileId).slice(0, 128),
       revision: 0, automaticSignIn: false, selectedAt: Date.now(),
     }));
   }
@@ -174,20 +191,23 @@ export function normalizeHeadlessClientState(raw) {
     for (const [profileId, entries] of Object.entries(raw.progress)) {
       if (!entries || typeof entries !== 'object' || Array.isArray(entries)) continue;
       for (const [mediaId, item] of Object.entries(entries).slice(0, MAX_PROGRESS)) {
-        if (!item || typeof item !== 'object') continue;
+        if (!isRecord(item)) continue;
         state.progress.push({ profileId: profileId.slice(0, 128), mediaId: mediaId.slice(0, 128),
           positionSeconds: safeNumber(item.position), durationSeconds: safeNumber(item.duration),
           watched: item.watched === true, updatedAt: safeNumber(item.updatedAt, Date.now()) });
       }
     }
   }
-  for (const key of ['profileCredentials','profilePreferences','profileRestrictions','profileListEntries','trackPreferences']) {
-    state[key] = normalizeCarrierArray(raw[key]).filter((item) => profileIds.has(item.profileId));
-  }
-  state.history = normalizeCarrierArray(raw.history).filter((item) => profileIds.has(item.profileId));
+  state.profileCredentials = /** @type {import('./server-state-types.js').ClientState['profileCredentials']} */ (normalizeCarrierArray(raw.profileCredentials)).filter((item) => profileIds.has(item.profileId));
+  state.profilePreferences = /** @type {import('./server-state-types.js').ClientState['profilePreferences']} */ (normalizeCarrierArray(raw.profilePreferences)).filter((item) => profileIds.has(item.profileId));
+  state.profileRestrictions = /** @type {import('./server-state-types.js').ClientState['profileRestrictions']} */ (normalizeCarrierArray(raw.profileRestrictions)).filter((item) => profileIds.has(item.profileId));
+  state.profileListEntries = /** @type {import('./server-state-types.js').ClientState['profileListEntries']} */ (normalizeCarrierArray(raw.profileListEntries)).filter((item) => profileIds.has(item.profileId));
+  state.trackPreferences = /** @type {import('./server-state-types.js').ClientState['trackPreferences']} */ (normalizeCarrierArray(raw.trackPreferences)).filter((item) => profileIds.has(item.profileId));
+  state.history = /** @type {import('./server-state-types.js').ClientState['history']} */ (normalizeCarrierArray(raw.history)).filter((item) => profileIds.has(item.profileId));
   return state;
 }
 
+/** @param {import('./server-state-types.js').Profile} profile @returns {import('@loom-media-server/video-contracts').ViewingProfile} */
 function publicProfile(profile) {
   return {
     id: profile.id, name: profile.name, kind: profile.kind,
@@ -198,14 +218,17 @@ function publicProfile(profile) {
   };
 }
 
+/** @param {import('./server-state-types.js').ClientState} state @returns {import('./server-state-types.js').LegacyClientSnapshot} */
 function legacySnapshot(state) {
   const owners = new Map();
   for (const assignment of state.assignments) if (assignment.access === 'manage' && !owners.has(assignment.profileId)) owners.set(assignment.profileId, assignment.accountId);
+  /** @type {import('./server-state-types.js').LegacyClientSnapshot['progress']} */
   const progress = {};
   for (const item of state.progress) {
     progress[item.profileId] ||= {};
     progress[item.profileId][item.mediaId] = { position: item.positionSeconds, duration: item.durationSeconds, watched: item.watched, updatedAt: item.updatedAt };
   }
+  /** @type {Record<string, string>} */
   const selections = {};
   for (const item of state.selections) if (item.profileId) selections[item.accountId] = item.profileId;
   return {
@@ -217,17 +240,22 @@ function legacySnapshot(state) {
   };
 }
 
+/** @param {{ store: import('./server-state-types.js').StateStore; validateAccount?: (accountId: string) => Promise<boolean> }} options */
 export function createHeadlessClientState({ store, validateAccount = async () => false }) {
   if (!store) throw new Error('createHeadlessClientState requires the canonical state store.');
+  /** @type {Map<string, {revision: number; expiresAt: number}>} */
   const unlockedSelections = new Map();
+  /** @type {Map<string, {failures: number; blockedUntil: number; lastAttemptAt: number}>} */
   const pinFailures = new Map();
+  /** @param {string} accountId @param {string} deviceId @param {string} profileId */
   const unlockKey = (accountId, deviceId, profileId) => `${accountId}\u0000${deviceId}\u0000${profileId}`;
   const prunePinState = () => {
     const current = Date.now();
     for (const [key, value] of unlockedSelections) if (value.expiresAt <= current) unlockedSelections.delete(key);
     for (const [key, value] of pinFailures) if (current - value.lastAttemptAt > 24 * 60 * 60 * 1000) pinFailures.delete(key);
-    while (pinFailures.size > MAX_PIN_FAILURES) pinFailures.delete(pinFailures.keys().next().value);
+    while (pinFailures.size > MAX_PIN_FAILURES) pinFailures.delete(/** @type {string} */ (pinFailures.keys().next().value));
   };
+  /** @param {unknown} pin @param {import('./server-state-types.js').ProfileCredential | undefined} credential */
   const verifyPin = async (pin, credential) => {
     try {
       if (!/^\d{4}$/.test(String(pin || '')) || !credential) return false;
@@ -238,14 +266,16 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       return actual.length === expected.length && timingSafeEqual(actual, expected);
     } catch { return false; }
   };
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} profileId @param {string} accountId @param {boolean} canSeeAll @returns {{ profile: import('./server-state-types.js').Profile; assignment: Pick<import('@loom-media-server/video-contracts').ProfileAssignment, 'access'> }} */
   const requireProfile = (state, profileId, accountId, canSeeAll) => {
     const profile = state.profiles.find((item) => item.id === profileId);
     if (!profile) throw Object.assign(new Error('Profile was not found.'), { status: 404, code: 'profile_not_found' });
-    const assignment = canSeeAll ? { access: 'manage' } : state.assignments.find((item) => item.profileId === profileId && item.accountId === accountId);
+    const assignment = canSeeAll ? { access: /** @type {const} */ ('manage') } : state.assignments.find((item) => item.profileId === profileId && item.accountId === accountId);
     if (!assignment) throw Object.assign(new Error('That profile is not available to this account.'), { status: 403, code: 'profile_forbidden' });
     return { profile, assignment };
   };
 
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {import('./server-state-types.js').Profile} profile @param {Pick<import('@loom-media-server/video-contracts').ProfileAssignment, 'access'>} assignment @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {{ deviceId: string; selectionRevision: number }} context @returns {import('./server-state-types.js').PlaybackProfileContext} */
   const restrictedProfileContext = (state, accountId, profile, assignment, media, context) => {
     const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
     if (profile.kind === 'child' && !restrictions) {
@@ -253,17 +283,17 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     }
     if (restrictions && media) {
       if (restrictions.allowedRootIds !== null
-        && (!Array.isArray(restrictions.allowedRootIds) || !restrictions.allowedRootIds.includes(media.rootId))) {
+        && (!Array.isArray(restrictions.allowedRootIds) || !restrictions.allowedRootIds.includes(media.rootId ?? ''))) {
         throw Object.assign(new Error('The active profile cannot access this library root.'), { status: 403, code: 'permission_denied' });
       }
       const country = String(restrictions.country || '').toUpperCase();
       const ratingEntry = Object.entries(media.contentRatings || {}).find(([key]) => key.toUpperCase() === country)?.[1];
-      const contentAge = Number(ratingEntry?.minimumAge ?? media.maximumAge ?? media.ageRating ?? media.localMetadata?.maximumAge);
+      const contentAge = Number(ratingEntry?.minimumAge ?? media.maximumAge ?? media.ageRating ?? (isRecord(media.localMetadata) ? media.localMetadata.maximumAge : undefined));
       const rated = Number.isFinite(contentAge) && contentAge >= 0;
       if (!rated && restrictions.allowUnrated === false) {
         throw Object.assign(new Error('The active profile does not allow unrated media.'), { status: 403, code: 'permission_denied' });
       }
-      if (rated && Number.isFinite(restrictions.maximumAge) && contentAge > restrictions.maximumAge) {
+      if (rated && typeof restrictions.maximumAge === 'number' && Number.isFinite(restrictions.maximumAge) && contentAge > restrictions.maximumAge) {
         throw Object.assign(new Error('The active profile age limit excludes this media.'), { status: 403, code: 'permission_denied' });
       }
     }
@@ -275,6 +305,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     };
   };
 
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string | undefined} deviceId @param {import('./server-state-types.js').ProfileMedia | undefined} media */
   const playbackContext = (state, accountId, deviceId, media) => {
     const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
     const selection = state.selections.find((item) => item.accountId === accountId && item.deviceId === normalizedDeviceId);
@@ -297,16 +328,19 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
   return {
     async ready() {},
     async exportState() { return legacySnapshot(store.readClientState()); },
+    /** @param {unknown} raw */
     async importState(raw) {
       const normalized = normalizeHeadlessClientState(raw);
       store.replaceClientState(normalized);
       return legacySnapshot(normalized);
     },
+    /** @param {string} accountId */
     async listProfiles(accountId, canSeeAll = false) {
       const state = store.readClientState();
       const allowed = canSeeAll ? null : new Set(state.assignments.filter((item) => item.accountId === accountId).map((item) => item.profileId));
       return state.profiles.filter((profile) => !allowed || allowed.has(profile.id)).map(publicProfile);
     },
+    /** @param {import('./server-state-types.js').ProfileInput} input @param {string} accountId */
     async createProfile(input, accountId) {
       return store.mutateClientState((state) => {
         if (state.profiles.length >= MAX_PROFILES || state.assignments.filter((item) => item.accountId === accountId && item.access === 'manage').length >= 10) {
@@ -325,6 +359,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         return publicProfile(profile);
       });
     },
+    /** @param {string} profileId @param {import('./server-state-types.js').ProfileInput} input @param {string} accountId */
     async updateProfile(profileId, input, accountId, canSeeAll = false) {
       return store.mutateClientState((state) => {
         const { profile, assignment } = requireProfile(state, profileId, accountId, canSeeAll);
@@ -341,15 +376,21 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         return publicProfile(profile);
       });
     },
+    /** @param {string} profileId @param {string} accountId */
     async removeProfile(profileId, accountId, canSeeAll = false) {
       const removed = store.mutateClientState((state) => {
         const { assignment } = requireProfile(state, profileId, accountId, canSeeAll);
         if (assignment.access !== 'manage') throw Object.assign(new Error('That account cannot manage this profile.'), { status: 403, code: 'profile_forbidden' });
         if (state.profiles.length <= 1) throw Object.assign(new Error('The last viewing profile cannot be removed.'), { status: 409, code: 'conflict' });
         state.profiles = state.profiles.filter((item) => item.id !== profileId);
-        for (const key of ['profileCredentials','assignments','progress','history','profilePreferences','profileRestrictions','profileListEntries','trackPreferences']) {
-          state[key] = state[key].filter((item) => item.profileId !== profileId);
-        }
+        state.profileCredentials = state.profileCredentials.filter((item) => item.profileId !== profileId);
+        state.assignments = state.assignments.filter((item) => item.profileId !== profileId);
+        state.progress = state.progress.filter((item) => item.profileId !== profileId);
+        state.history = state.history.filter((item) => item.profileId !== profileId);
+        state.profilePreferences = state.profilePreferences.filter((item) => item.profileId !== profileId);
+        state.profileRestrictions = state.profileRestrictions.filter((item) => item.profileId !== profileId);
+        state.profileListEntries = state.profileListEntries.filter((item) => item.profileId !== profileId);
+        state.trackPreferences = state.trackPreferences.filter((item) => item.profileId !== profileId);
         for (const selection of state.selections) if (selection.profileId === profileId) {
           selection.profileId = null;
           selection.automaticSignIn = false;
@@ -363,6 +404,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       for (const key of pinFailures.keys()) if (key.endsWith(suffix)) pinFailures.delete(key);
       return removed;
     },
+    /** @param {string} profileId @param {unknown} pin @param {string} accountId */
     async updateProfilePin(profileId, pin, accountId, canSeeAll = false) {
       const before = store.readClientState();
       const { profile, assignment } = requireProfile(before, profileId, accountId, canSeeAll);
@@ -370,6 +412,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       if (profile.kind === 'guest') throw Object.assign(new Error('Guest profiles cannot have a PIN.'), { status: 409, code: 'conflict' });
       const remove = pin === null || pin === undefined || pin === '';
       if (!remove && !/^\d{4}$/.test(String(pin))) throw Object.assign(new Error('A profile PIN must contain exactly four digits.'), { status: 400, code: 'invalid_request' });
+      /** @type {import('./server-state-types.js').ProfileCredential | null} */
       let credential = null;
       if (!remove) {
         const salt = randomBytes(16);
@@ -394,7 +437,8 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       for (const key of pinFailures.keys()) if (key.endsWith(suffix)) pinFailures.delete(key);
       return result;
     },
-    async selectProfile(profileId, accountId, canSeeAll = false, deviceId = undefined, pin = undefined, address = '') {
+    /** @param {string} profileId @param {string} accountId @param {boolean | undefined} _canSeeAll @param {string | undefined} [deviceId] @param {unknown} [pin] */
+    async selectProfile(profileId, accountId, _canSeeAll, deviceId = undefined, pin = undefined, address = '') {
       const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
       const before = store.readClientState();
       const { profile } = requireProfile(before, profileId, accountId, false);
@@ -406,7 +450,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
           `address\u0000${remoteAddress}\u0000${profileId}`,
           `device\u0000${accountId}\u0000${normalizedDeviceId}\u0000${profileId}`,
         ];
-        const failureStates = failureKeys.map((key) => pinFailures.get(key)).filter(Boolean);
+        const failureStates = failureKeys.map((key) => pinFailures.get(key)).filter((entry) => entry !== undefined);
         const current = Date.now();
         const blockedUntil = Math.max(0, ...failureStates.map((entry) => entry.blockedUntil));
         if (blockedUntil > current) throw Object.assign(new Error('That PIN could not be accepted.'), {
@@ -437,9 +481,11 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       });
       return selected;
     },
+    /** @param {string} accountId @param {string | undefined} deviceId @param {import('./server-state-types.js').ProfileMedia | undefined} [media] */
     async requireActivePlaybackProfile(accountId, deviceId, media = undefined) {
       return playbackContext(store.readClientState(), accountId, deviceId, media);
     },
+    /** @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} [media] @param {string | undefined} [deviceId] */
     async requireScopedProfile(accountId, profileId, media = undefined, deviceId = undefined) {
       const state = store.readClientState();
       const { profile, assignment } = requireProfile(state, profileId, accountId, false);
@@ -449,6 +495,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         selectionRevision: Number(restrictions?.revision || 0),
       });
     },
+    /** @param {string} accountId @param {string | undefined} deviceId */
     async getActiveProfileState(accountId, deviceId) {
       prunePinState();
       const state = store.readClientState();
@@ -466,6 +513,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         locked: Boolean(profile?.hasPin && (!unlocked || unlocked.revision !== selection?.revision || unlocked.expiresAt <= Date.now())),
       };
     },
+    /** @param {string} accountId @param {string | undefined} deviceId */
     async lockActiveProfile(accountId, deviceId) {
       const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
       const state = store.readClientState();
@@ -477,6 +525,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       });
       return this.getActiveProfileState(accountId, normalizedDeviceId);
     },
+    /** @param {string} accountId @param {string | undefined} deviceId */
     async clearActiveProfile(accountId, deviceId) {
       const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
       const before = store.readClientState().selections.find((item) => item.accountId === accountId && item.deviceId === normalizedDeviceId);
@@ -491,6 +540,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       });
       return this.getActiveProfileState(accountId, normalizedDeviceId);
     },
+    /** @param {string} accountId @param {string | undefined} deviceId @param {boolean} enabled */
     async setAutomaticSignIn(accountId, deviceId, enabled) {
       const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
       store.mutateClientState((state) => {
@@ -505,6 +555,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       });
       return this.getActiveProfileState(accountId, normalizedDeviceId);
     },
+    /** @param {string} accountId @param {string | undefined} deviceId @param {unknown} revision */
     async assertSelectionRevision(accountId, deviceId, revision) {
       const active = await this.getActiveProfileState(accountId, deviceId);
       if (!Number.isSafeInteger(Number(revision)) || Number(revision) !== active.selectionRevision) {
@@ -512,11 +563,13 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       }
       return active;
     },
+    /** @param {string} profileId @param {string} accountId */
     async getProfilePreferences(profileId, accountId, canSeeAll = false) {
       const state = store.readClientState();
       requireProfile(state, profileId, accountId, canSeeAll);
       return { ...(state.profilePreferences.find((item) => item.profileId === profileId)?.preferences || {}) };
     },
+    /** @param {string} profileId @param {Record<string, unknown>} preferences @param {string} accountId */
     async saveProfilePreferences(profileId, preferences, accountId, canSeeAll = false) {
       return store.mutateClientState((state) => {
         requireProfile(state, profileId, accountId, canSeeAll);
@@ -527,14 +580,16 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         return { ...next.preferences };
       });
     },
+    /** @param {string} profileId @param {string | undefined} kind @param {string} accountId */
     async getProfileLists(profileId, kind, accountId, canSeeAll = false) {
       const state = store.readClientState();
       requireProfile(state, profileId, accountId, canSeeAll);
       if (kind && !['watchlist', 'favorite', 'watched'].includes(kind)) throw Object.assign(new Error('The profile list kind is invalid.'), { status: 400, code: 'invalid_request' });
       return state.profileListEntries.filter((item) => item.profileId === profileId && (!kind || item.kind === kind)).map((item) => ({ ...item }));
     },
+    /** @param {string} profileId @param {string} mediaId @param {string} kind @param {boolean} enabled @param {string} accountId */
     async setProfileListEntry(profileId, mediaId, kind, enabled, accountId, canSeeAll = false) {
-      if (!['watchlist', 'favorite', 'watched'].includes(kind)) throw Object.assign(new Error('The profile list kind is invalid.'), { status: 400, code: 'invalid_request' });
+      if (kind !== 'watchlist' && kind !== 'favorite' && kind !== 'watched') throw Object.assign(new Error('The profile list kind is invalid.'), { status: 400, code: 'invalid_request' });
       return store.mutateClientState((state) => {
         requireProfile(state, profileId, accountId, canSeeAll);
         state.profileListEntries = state.profileListEntries.filter((item) => !(item.profileId === profileId && item.mediaId === mediaId && item.kind === kind));
@@ -542,26 +597,33 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         return state.profileListEntries.filter((item) => item.profileId === profileId).map((item) => ({ ...item }));
       });
     },
+    /** @param {string} profileId @param {string} scope @param {string} accountId */
     async getTrackPreferences(profileId, scope, accountId, canSeeAll = false) {
       const state = store.readClientState();
       requireProfile(state, profileId, accountId, canSeeAll);
       const item = state.trackPreferences.find((entry) => entry.profileId === profileId && entry.scope === scope);
       if (!item) return {};
-      const { profileId: _profileId, scope: _scope, updatedAt: _updatedAt, preferences, ...canonical } = item;
+      /** @type {Partial<import('./server-state-types.js').StoredTrackPreferences>} */
+      const { preferences, ...canonical } = item;
+      delete canonical.profileId;
+      delete canonical.scope;
+      delete canonical.updatedAt;
       return { ...(preferences || canonical) };
     },
+    /** @param {string} profileId @param {string} scope @param {Record<string, unknown>} preferences @param {string} accountId */
     async saveTrackPreferences(profileId, scope, preferences, accountId, canSeeAll = false) {
       return store.mutateClientState((state) => {
         requireProfile(state, profileId, accountId, canSeeAll);
         const normalizedScope = String(scope || '').trim().slice(0, 128);
         if (!normalizedScope) throw Object.assign(new Error('Track preference scope is required.'), { status: 400, code: 'invalid_request' });
-        const next = { profileId, scope: normalizedScope, ...trackPreferencesInput(preferences), updatedAt: Date.now() };
+        const saved = trackPreferencesInput(preferences);
+        const next = { profileId, scope: normalizedScope, ...saved, updatedAt: Date.now() };
         const index = state.trackPreferences.findIndex((item) => item.profileId === profileId && item.scope === next.scope);
         if (index >= 0) state.trackPreferences[index] = next; else state.trackPreferences.push(next);
-        const { profileId: _profileId, scope: _scope, updatedAt: _updatedAt, ...saved } = next;
         return saved;
       });
     },
+    /** @param {string | undefined} deviceId */
     async revokeDeviceAccess(deviceId) {
       const marker = `\u0000${String(deviceId)}\u0000`;
       for (const key of unlockedSelections.keys()) if (key.includes(marker)) unlockedSelections.delete(key);
@@ -573,12 +635,14 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       pinFailures.clear();
       return true;
     },
+    /** @param {string} profileId @param {string} accountId */
     async listProfileAssignments(profileId, accountId, canSeeAll = false) {
       const state = store.readClientState();
       const { assignment } = requireProfile(state, profileId, accountId, canSeeAll);
       if (assignment.access !== 'manage') throw Object.assign(new Error('That account cannot manage this profile.'), { status: 403, code: 'profile_forbidden' });
       return state.assignments.filter((item) => item.profileId === profileId);
     },
+    /** @param {string} profileId @param {string} targetAccountId @param {unknown} access @param {string} accountId */
     async assignProfile(profileId, targetAccountId, access, accountId, canSeeAll = false) {
       const normalizedAccountId = String(targetAccountId || '').trim().slice(0, 128);
       if (!normalizedAccountId) throw Object.assign(new Error('An account is required.'), { status: 400, code: 'invalid_request' });
@@ -593,18 +657,21 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         return { ...(existing || state.assignments.at(-1)) };
       });
     },
+    /** @param {string} profileId @param {string} accountId */
     async listProgress(profileId, accountId, canSeeAll = false) {
       const state = store.readClientState();
       requireProfile(state, profileId, accountId, canSeeAll);
       return Object.fromEntries(state.progress.filter((item) => item.profileId === profileId).map((item) => [item.mediaId,
         { position: item.positionSeconds, duration: item.durationSeconds, watched: item.watched, updatedAt: item.updatedAt }]));
     },
+    /** @param {string} profileId @param {string} mediaId @param {string} accountId */
     async getProgress(profileId, mediaId, accountId, canSeeAll = false) {
       const state = store.readClientState();
       requireProfile(state, profileId, accountId, canSeeAll);
       const item = state.progress.find((entry) => entry.profileId === profileId && entry.mediaId === String(mediaId));
       return item ? { position: item.positionSeconds, duration: item.durationSeconds, watched: item.watched, updatedAt: item.updatedAt } : null;
     },
+    /** @param {string} profileId @param {string} mediaId @param {{position?: unknown; duration?: unknown; watched?: unknown}} input @param {string} accountId */
     async saveProgress(profileId, mediaId, input, accountId, canSeeAll = false) {
       return store.mutateClientState((state) => {
         requireProfile(state, profileId, accountId, canSeeAll);

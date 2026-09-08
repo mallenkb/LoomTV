@@ -23,8 +23,9 @@ ledger.
 
 Preserve the user's existing `apps/mobile/app.json` changes. Make a change there
 only when the TV or mobile implementation cannot work without it, and record the
-exact reviewed delta. Do not change `design-qa.md`,
-`design-qa-mobile-phone.png`, or `design-qa-mobile-tablet.png`.
+exact reviewed delta. Do not change `docs/archive/audits/design-qa.md`,
+`docs/archive/audits/design-qa-mobile-phone.png`, or
+`docs/archive/audits/design-qa-mobile-tablet.png`.
 
 The user's latest instruction authorizes focused tests and verification
 commands. Implementation comes first. The primary agent will run an independent

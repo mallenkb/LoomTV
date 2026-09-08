@@ -24,7 +24,7 @@ let runtimeManifest
 try {
   runtimeManifest = JSON.parse(runtimeManifestSource)
 } catch (error) {
-  throw new Error(`Invalid native runtime provenance manifest ${runtimeManifestPath}: ${String(error)}`)
+  throw new Error(`Invalid native runtime provenance manifest ${runtimeManifestPath}: ${String(error)}`, { cause: error })
 }
 if (
   runtimeManifest.manifestVersion !== 1

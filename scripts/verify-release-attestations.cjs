@@ -82,7 +82,7 @@ function verifySubject(filePath, repository, tag, sourceDigest, trustedBuilder, 
   try {
     records = JSON.parse(result.stdout);
   } catch (error) {
-    throw new Error(`gh attestation verify returned invalid JSON for ${path.basename(filePath)}: ${String(error)}`);
+    throw new Error(`gh attestation verify returned invalid JSON for ${path.basename(filePath)}: ${String(error)}`, { cause: error });
   }
   if (!Array.isArray(records) || records.length === 0) {
     throw new Error(`No verified GitHub/SLSA attestation was returned for ${path.basename(filePath)}.`);

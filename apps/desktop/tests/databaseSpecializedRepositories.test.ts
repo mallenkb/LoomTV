@@ -193,10 +193,13 @@ test('artwork repository persists custom artwork and maintains the disk cache th
     },
   });
 
-  repository.importCustomArtwork({ movie: { poster: 'data:image/png;base64,poster', empty: '' } });
-  assert.deepEqual(repository.getCustomArtwork('movie'), { poster: 'data:image/png;base64,poster' });
-  assert.equal(repository.getCustomArtworkData('movie', 'poster')?.dataUrl, 'data:image/png;base64,poster');
-  assert.equal(repository.getCustomArtworkMap().get('movie')?.get('poster'), 'data:image/png;base64,poster');
+  const poster = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/dsAAAAASUVORK5CYII=';
+  repository.importCustomArtwork({ movie: { poster, cover: '' } });
+  assert.deepEqual(repository.getCustomArtwork('movie'), { poster });
+  assert.equal(repository.getCustomArtworkData('movie', 'poster')?.dataUrl, poster);
+  assert.equal(repository.getCustomArtworkMap().get('movie')?.get('poster'), poster);
+  assert.throws(() => repository.importCustomArtwork({ movie: { cover: 'https://example.com/cover.png' }, bad: { poster: 'javascript:alert(1)' } }));
+  assert.deepEqual(repository.getCustomArtwork('movie'), { poster });
 
   const firstUrl = 'https://image.tmdb.org/first.png';
   const first = await repository.cacheArtworkSource(firstUrl);

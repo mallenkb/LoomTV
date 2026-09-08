@@ -155,6 +155,7 @@ Desktop build output goes to `apps/desktop/out/`. Electron Builder writes instal
 ```text
 apps/
   desktop/       Electron host, desktop UI, native playback, and packaging
+  desktop-tauri/ Tauri desktop port and native bridge
   server/        Main server, API, setup, hosted app, and admin UI
   mobile/        Expo app for iOS and Android
   tv/            Expo app for Android TV and Fire TV
@@ -165,12 +166,15 @@ packages/
   transcode-capabilities/ Client capability and transcode decisions
   lan-protocol/           LAN discovery, pairing, and transport types
   plugin-protocol/        Plugin protocol and sandbox types
+  video-migration/        Canonical state migration helpers
 deploy/
   docker/        Headless Docker files
   systemd/       Linux service files
 docs/            Deployment, architecture, status, security, and release notes
 scripts/         Release, policy, audit, and evidence tools
 ```
+
+The recursive test command covers every test-bearing workspace. `packages/lan-protocol` is intentionally typecheck-only and has no test script.
 
 ## Packaging and releases
 

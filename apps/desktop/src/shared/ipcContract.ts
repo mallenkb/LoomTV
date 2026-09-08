@@ -1,3 +1,5 @@
+import type { LibVlcAvailability, LibVlcPlaybackState, LibVlcStartResult } from '../lib/desktopApi';
+import type { PlaybackCommand, PlaybackStartOptions, PlaybackViewport } from './playbackProtocol';
 import type {
   MediaSessionCommand,
   MediaSessionDiagnostics,
@@ -78,6 +80,16 @@ import type {
 type ImportedProgress = Record<string, number | { position?: number; duration?: number; updatedAt?: number }>;
 
 export interface IpcContract {
+  'libvlc:availability': { args: []; result: LibVlcAvailability };
+  'libvlc:refresh-availability': { args: []; result: LibVlcAvailability };
+  'libvlc:start': { args: [filePath: string, options?: PlaybackStartOptions]; result: LibVlcStartResult };
+  'libvlc:command': { args: [sessionId: string, command: PlaybackCommand]; result: boolean };
+  'libvlc:stop': { args: [sessionId: string]; result: boolean };
+  'libvlc:sync-surface': { args: []; result: boolean };
+  'libvlc:set-fullscreen-transition': { args: [transitioning: boolean, waitForFinalViewport?: boolean]; result: boolean };
+  'libvlc:set-viewport': { args: [viewport: PlaybackViewport]; result: boolean };
+  'window:set-chrome-visible': { args: [visible: boolean]; result: boolean };
+  'window:set-fullscreen': { args: [enabled: boolean]; result: boolean };
   'artwork:apply-official': { args: [mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget]; result: OfficialArtworkResult };
   'artwork:get': { args: [mediaId: string]; result: Record<string, string> };
   'artwork:import': { args: [entries: Record<string, Record<string, string>>]; result: boolean };
@@ -211,6 +223,8 @@ export interface IpcContract {
 export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
+  'libvlc:state': { args: [state: LibVlcPlaybackState] };
+  'window:fullscreen-changed': { args: [fullscreen: boolean] };
   'media-control:command': { args: [command: MediaSessionCommand, handledInMain: boolean] };
   'library:scan-progress': { args: [progress: import('./desktopProtocol.ts').LibraryScanProgress] };
   'profile:active-changed': { args: [state: ActiveProfileState] };

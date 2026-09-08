@@ -6,6 +6,11 @@ import { z } from 'zod';
 import type { LibraryData } from './appContracts.ts';
 import { artworkCacheFileName, collectArtworkSourcesForCache } from './artworkCache.ts';
 import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
+import {
+  assertArtworkStorageTarget,
+  prepareCustomArtworkImport,
+  validateArtworkValue,
+} from '../lib/artworkInputValidation.ts';
 
 export type CachedArtwork = {
   dataUrl?: string;
@@ -52,6 +57,10 @@ export function createDatabaseArtworkRepository(
   const pendingArtwork = new Map<string, Promise<CachedArtwork | null>>();
 
   function saveCustomArtwork(mediaId: string, target: string, dataUrl: string): void {
+    if (typeof mediaId !== 'string' || !mediaId.trim() || mediaId.length > 1024) throw new Error('Artwork media id is invalid.');
+    assertArtworkStorageTarget(target);
+    const validation = validateArtworkValue(dataUrl);
+    if (!validation.ok) throw new Error(validation.message);
     database.prepare(`
       INSERT OR REPLACE INTO custom_artwork (media_id, target, data_url, updated_at)
       VALUES (?, ?, ?, ?)
@@ -78,12 +87,9 @@ export function createDatabaseArtworkRepository(
   }
 
   function importCustomArtwork(entries: Record<string, Record<string, string>>): void {
+    const records = prepareCustomArtworkImport(entries);
     const tx = database.transaction(() => {
-      for (const [mediaId, targets] of Object.entries(entries || {})) {
-        for (const [target, dataUrl] of Object.entries(targets || {})) {
-          if (dataUrl) saveCustomArtwork(mediaId, target, dataUrl);
-        }
-      }
+      for (const record of records) saveCustomArtwork(record.mediaId, record.target, record.dataUrl);
     });
     tx();
   }

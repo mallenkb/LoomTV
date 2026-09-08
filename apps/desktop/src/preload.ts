@@ -1,9 +1,7 @@
 import { contextBridge, ipcRenderer as electronIpcRenderer } from 'electron';
 import type {
   DesktopBridgeApi,
-  LibVlcAvailability,
   LibVlcPlaybackState,
-  LibVlcStartResult,
 } from './lib/desktopApi';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackViewport } from './shared/playbackProtocol';
 import type {
@@ -111,12 +109,12 @@ const desktopApi = {
   getFileInfo: (filePath: string) => ipcRenderer.invoke('media:get-file-info', filePath),
   getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port) => `http://127.0.0.1:${port}`),
   getRendererSession: () => ipcRenderer.invoke('renderer:session'),
-  setFullscreen: (enabled: boolean) => electronIpcRenderer.invoke('window:set-fullscreen', enabled) as Promise<boolean>,
-  setWindowChromeVisible: (visible: boolean) => electronIpcRenderer.invoke('window:set-chrome-visible', visible) as Promise<boolean>,
+  setFullscreen: (enabled: boolean) => ipcRenderer.invoke('window:set-fullscreen', enabled),
+  setWindowChromeVisible: (visible: boolean) => ipcRenderer.invoke('window:set-chrome-visible', visible),
   onFullscreenChanged: (callback: (fullscreen: boolean) => void) => {
     const handler = (_: Electron.IpcRendererEvent, fullscreen: boolean) => callback(Boolean(fullscreen));
-    electronIpcRenderer.on('window:fullscreen-changed', handler);
-    return () => electronIpcRenderer.removeListener('window:fullscreen-changed', handler);
+    ipcRenderer.on('window:fullscreen-changed', handler);
+    return () => ipcRenderer.removeListener('window:fullscreen-changed', handler);
   },
   publishMediaSession: (snapshot: MediaSessionSnapshot): Promise<MediaSessionDiagnostics> =>
     ipcRenderer.invoke('media-control:publish', snapshot),
@@ -316,21 +314,21 @@ const desktopApi = {
   },
 
   libvlc: {
-    availability: () => electronIpcRenderer.invoke('libvlc:availability') as Promise<LibVlcAvailability>,
-    refreshAvailability: () => electronIpcRenderer.invoke('libvlc:refresh-availability') as Promise<LibVlcAvailability>,
+    availability: () => ipcRenderer.invoke('libvlc:availability'),
+    refreshAvailability: () => ipcRenderer.invoke('libvlc:refresh-availability'),
     start: (filePath: string, options?: PlaybackStartOptions) =>
-      electronIpcRenderer.invoke('libvlc:start', filePath, options || {}) as Promise<LibVlcStartResult>,
+      ipcRenderer.invoke('libvlc:start', filePath, options || {}),
     command: (sessionId: string, command: PlaybackCommand) =>
-      electronIpcRenderer.invoke('libvlc:command', sessionId, command) as Promise<boolean>,
-    stop: (sessionId: string) => electronIpcRenderer.invoke('libvlc:stop', sessionId) as Promise<boolean>,
-    syncSurface: () => electronIpcRenderer.invoke('libvlc:sync-surface') as Promise<boolean>,
+      ipcRenderer.invoke('libvlc:command', sessionId, command),
+    stop: (sessionId: string) => ipcRenderer.invoke('libvlc:stop', sessionId),
+    syncSurface: () => ipcRenderer.invoke('libvlc:sync-surface'),
     setFullscreenTransition: (transitioning: boolean, waitForFinalViewport = true) =>
-      electronIpcRenderer.invoke('libvlc:set-fullscreen-transition', transitioning, waitForFinalViewport) as Promise<boolean>,
-    setViewport: (viewport: PlaybackViewport) => electronIpcRenderer.invoke('libvlc:set-viewport', viewport) as Promise<boolean>,
+      ipcRenderer.invoke('libvlc:set-fullscreen-transition', transitioning, waitForFinalViewport),
+    setViewport: (viewport: PlaybackViewport) => ipcRenderer.invoke('libvlc:set-viewport', viewport),
     onState: (callback: (state: LibVlcPlaybackState) => void) => {
       const handler = (_: Electron.IpcRendererEvent, state: LibVlcPlaybackState) => callback(state);
-      electronIpcRenderer.on('libvlc:state', handler);
-      return () => electronIpcRenderer.removeListener('libvlc:state', handler);
+      ipcRenderer.on('libvlc:state', handler);
+      return () => ipcRenderer.removeListener('libvlc:state', handler);
     },
   },
 

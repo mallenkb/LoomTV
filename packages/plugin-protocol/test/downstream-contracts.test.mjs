@@ -24,7 +24,6 @@ import {
   authorizeVerifiedPluginUpdate,
   createHostMarketplaceVerificationContext,
   createHostUpdateAuthorizationContext,
-  parseWireMarketplaceIndex,
   parseWireSignedCatalog,
   projectMarketplaceIndexForRenderer,
   projectSignedCatalogForRenderer,

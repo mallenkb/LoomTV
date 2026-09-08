@@ -1,10 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FileText, FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, Type, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
 import { useToast } from '@/components/ToastProvider';
 import { desktopApi, type OfficialArtworkRefreshTarget, type OfficialMetadataApplyTarget, type OfficialMetadataCandidate } from '@/lib/desktopApi';
+import {
+  ARTWORK_FILE_ACCEPT,
+  ARTWORK_FORMAT_LABEL,
+  validateArtworkDimensions,
+  validateArtworkFile,
+  validateArtworkBytes,
+} from '@/lib/artworkInputValidation';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
 export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster' | 'logo', string>>;
@@ -23,6 +30,12 @@ type ArtworkPreview = {
 type ArtworkPrepareState = {
   target: ArtworkTarget;
   name: string;
+};
+
+type ArtworkWork = {
+  id: number;
+  controller: AbortController;
+  reader: FileReader | null;
 };
 
 type MetadataArtworkChoice = {
@@ -175,36 +188,116 @@ function fileManagerActionLabel(): string {
   return 'Show in File Manager';
 }
 
-function cropArtworkToDataUrl(preview: ArtworkPreview): Promise<string> {
+function artworkAbortError(): DOMException {
+  return new DOMException('Artwork preparation was cancelled.', 'AbortError');
+}
+
+function loadArtworkDimensions(dataUrl: string, signal: AbortSignal): Promise<ArtworkDimensions> {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image();
+    let settled = false;
+    const cleanup = () => {
+      signal.removeEventListener('abort', handleAbort);
+      image.onload = null;
+      image.onerror = null;
+      image.removeAttribute('src');
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const handleAbort = () => fail(artworkAbortError());
+
+    if (signal.aborted) {
+      fail(artworkAbortError());
+      return;
+    }
+    signal.addEventListener('abort', handleAbort, { once: true });
+    image.onload = () => {
+      const dimensions = { width: image.naturalWidth, height: image.naturalHeight };
+      const validation = validateArtworkDimensions(dimensions.width, dimensions.height);
+      if (!validation.ok) {
+        fail(new Error(validation.message));
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(dimensions);
+    };
+    image.onerror = () => fail(new Error(`Unable to load selected artwork. Choose a ${ARTWORK_FORMAT_LABEL} image.`));
+    image.src = dataUrl;
+  });
+}
+
+function cropArtworkToDataUrl(preview: ArtworkPreview, signal: AbortSignal): Promise<string> {
   const target = ARTWORK_TARGETS[preview.target];
   const targetAspect = target.outputWidth / target.outputHeight;
 
   return new Promise((resolve, reject) => {
     const image = new window.Image();
+    let settled = false;
+    const cleanup = () => {
+      signal.removeEventListener('abort', handleAbort);
+      image.onload = null;
+      image.onerror = null;
+      image.removeAttribute('src');
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const handleAbort = () => fail(artworkAbortError());
+
+    if (signal.aborted) {
+      fail(artworkAbortError());
+      return;
+    }
+    signal.addEventListener('abort', handleAbort, { once: true });
     image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = target.outputWidth;
-      canvas.height = target.outputHeight;
-      const context = canvas.getContext('2d');
-      if (!context) {
-        reject(new Error('Unable to prepare artwork crop.'));
+      const validation = validateArtworkDimensions(image.naturalWidth, image.naturalHeight);
+      if (!validation.ok) {
+        fail(new Error(validation.message));
         return;
       }
 
-      const imageAspect = image.naturalWidth / image.naturalHeight;
-      const baseCropWidth = imageAspect > targetAspect ? image.naturalHeight * targetAspect : image.naturalWidth;
-      const baseCropHeight = imageAspect > targetAspect ? image.naturalHeight : image.naturalWidth / targetAspect;
-      const cropWidth = Math.min(image.naturalWidth, baseCropWidth / preview.zoom);
-      const cropHeight = Math.min(image.naturalHeight, baseCropHeight / preview.zoom);
-      const positionX = clampPercent(50 + preview.offsetX) / 100;
-      const positionY = clampPercent(50 + preview.offsetY) / 100;
-      const cropX = Math.max(0, Math.min(image.naturalWidth - cropWidth, (image.naturalWidth - cropWidth) * positionX));
-      const cropY = Math.max(0, Math.min(image.naturalHeight - cropHeight, (image.naturalHeight - cropHeight) * positionY));
+      const canvas = document.createElement('canvas');
+      try {
+        canvas.width = target.outputWidth;
+        canvas.height = target.outputHeight;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          fail(new Error('Unable to prepare artwork crop.'));
+          return;
+        }
 
-      context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, target.outputWidth, target.outputHeight);
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
+        const imageAspect = image.naturalWidth / image.naturalHeight;
+        const baseCropWidth = imageAspect > targetAspect ? image.naturalHeight * targetAspect : image.naturalWidth;
+        const baseCropHeight = imageAspect > targetAspect ? image.naturalHeight : image.naturalWidth / targetAspect;
+        const cropWidth = Math.min(image.naturalWidth, baseCropWidth / preview.zoom);
+        const cropHeight = Math.min(image.naturalHeight, baseCropHeight / preview.zoom);
+        const positionX = clampPercent(50 + preview.offsetX) / 100;
+        const positionY = clampPercent(50 + preview.offsetY) / 100;
+        const cropX = Math.max(0, Math.min(image.naturalWidth - cropWidth, (image.naturalWidth - cropWidth) * positionX));
+        const cropY = Math.max(0, Math.min(image.naturalHeight - cropHeight, (image.naturalHeight - cropHeight) * positionY));
+
+        context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, target.outputWidth, target.outputHeight);
+        const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        canvas.width = 0;
+        canvas.height = 0;
+        settled = true;
+        cleanup();
+        resolve(croppedDataUrl);
+      } catch (error) {
+        canvas.width = 0;
+        canvas.height = 0;
+        fail(error instanceof Error ? error : new Error('Unable to prepare artwork crop.'));
+      }
     };
-    image.onerror = () => reject(new Error('Unable to load selected artwork.'));
+    image.onerror = () => fail(new Error(`Unable to load selected artwork. Choose a ${ARTWORK_FORMAT_LABEL} image.`));
     image.src = preview.url;
   });
 }
@@ -260,6 +353,9 @@ export default function ArtworkEditorControls({
   const artworkMenuRef = useRef<HTMLDivElement | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
+  const artworkWorkRef = useRef<ArtworkWork | null>(null);
+  const artworkWorkIdRef = useRef(0);
+  const artworkObjectUrlRef = useRef<string | null>(null);
   const { showToast } = useToast();
   const revealLabel = fileManagerActionLabel();
   const canRevealLocalFile = Boolean(
@@ -267,6 +363,43 @@ export default function ArtworkEditorControls({
     && typeof window !== 'undefined'
     && window.desktopApi?.openFolderPath,
   );
+
+  const cancelArtworkWork = useCallback(() => {
+    artworkWorkIdRef.current += 1;
+    const work = artworkWorkRef.current;
+    artworkWorkRef.current = null;
+    if (!work) return;
+    work.controller.abort();
+    const reader = work.reader;
+    work.reader = null;
+    if (!reader) return;
+    reader.onload = null;
+    reader.onerror = null;
+    reader.onabort = null;
+    if (reader.readyState === FileReader.LOADING) reader.abort();
+  }, []);
+
+  const beginArtworkWork = useCallback((): ArtworkWork => {
+    cancelArtworkWork();
+    setIsFetchingArtwork(false);
+    setApplyingCandidateId('');
+    const work: ArtworkWork = {
+      id: artworkWorkIdRef.current,
+      controller: new AbortController(),
+      reader: null,
+    };
+    artworkWorkRef.current = work;
+    return work;
+  }, [cancelArtworkWork]);
+
+  const isCurrentArtworkWork = (work: ArtworkWork): boolean => (
+    artworkWorkRef.current === work && !work.controller.signal.aborted
+  );
+
+  const releaseArtworkObjectUrl = useCallback(() => {
+    if (artworkObjectUrlRef.current) URL.revokeObjectURL(artworkObjectUrlRef.current);
+    artworkObjectUrlRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!artworkMenuOpen) return;
@@ -289,12 +422,15 @@ export default function ArtworkEditorControls({
     };
   }, [artworkMenuOpen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    cancelArtworkWork();
+    releaseArtworkObjectUrl();
     setArtworkMenuOpen(false);
     setArtworkPreview(null);
     setArtworkPrepareState(null);
     setArtworkSaveError('');
     setIsSavingArtwork(false);
+    setIsFetchingArtwork(false);
     setMetadataCandidates([]);
     setMetadataDialogOpen(false);
     setMetadataApplyTarget('all');
@@ -303,7 +439,8 @@ export default function ArtworkEditorControls({
     setFailedMetadataArtwork(new Set());
     setMetadataArtworkDimensions({});
     setVisibleMetadataArtworkCount(METADATA_ARTWORK_BATCH_SIZE);
-  }, [mediaId]);
+    return () => { cancelArtworkWork(); releaseArtworkObjectUrl(); };
+  }, [cancelArtworkWork, releaseArtworkObjectUrl, mediaId]);
 
   useEffect(() => {
     const scrollContainer = artworkMenuRef.current?.closest('.overflow-y-auto');
@@ -336,8 +473,10 @@ export default function ArtworkEditorControls({
 
   const saveOfficialArtwork = async (
     refreshedArtwork: OfficialArtworkResult | null,
+    work: ArtworkWork,
     target: OfficialArtworkRefreshTarget = 'all',
   ) => {
+    if (!isCurrentArtworkWork(work)) return false;
     const thumbnailSource = target !== 'cover' && target !== 'logo' ? (
       preferredArtworkSource(
         [
@@ -380,8 +519,11 @@ export default function ArtworkEditorControls({
     }
 
     if (thumbnailSource) await saveCustomArtwork(mediaId, 'thumbnail', thumbnailSource, legacyStorageKey);
+    if (!isCurrentArtworkWork(work)) return false;
     if (coverSource) await saveCustomArtwork(mediaId, 'cover', coverSource, legacyStorageKey);
+    if (!isCurrentArtworkWork(work)) return false;
     if (logoSource) await saveCustomArtwork(mediaId, 'logo', logoSource, legacyStorageKey);
+    if (!isCurrentArtworkWork(work)) return false;
     onCustomArtworkChange((current) => ({
       ...current,
       ...(thumbnailSource ? { thumbnail: thumbnailSource, poster: thumbnailSource } : {}),
@@ -395,7 +537,7 @@ export default function ArtworkEditorControls({
 
   const openMetadataCandidates = async (target: OfficialMetadataApplyTarget = 'all') => {
     if (!mediaId || isFetchingArtwork) return;
-
+    const work = beginArtworkWork();
     setArtworkMenuOpen(false);
     setMetadataApplyTarget(target);
     setIsFetchingArtwork(true);
@@ -405,6 +547,7 @@ export default function ArtworkEditorControls({
     try {
       if (onFetchOfficialArtworkCandidates) {
         const candidates = await onFetchOfficialArtworkCandidates();
+        if (!isCurrentArtworkWork(work)) return;
         setMetadataCandidates(candidates);
         setMetadataDialogOpen(true);
         if (candidates.length === 0) {
@@ -419,6 +562,7 @@ export default function ArtworkEditorControls({
 
       const artworkTarget = target === 'poster' || target === 'cover' || target === 'logo' ? target : 'all';
       const refreshedArtwork = onFetchOfficialArtwork ? await onFetchOfficialArtwork(artworkTarget) : null;
+      if (!isCurrentArtworkWork(work)) return;
       const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover || refreshedArtwork?.logo);
       if (onFetchOfficialArtwork && !hasFreshOfficialArtwork) {
         showToast({
@@ -431,20 +575,22 @@ export default function ArtworkEditorControls({
           tone: 'warning',
         });
       }
-      await saveOfficialArtwork(refreshedArtwork, artworkTarget);
+      await saveOfficialArtwork(refreshedArtwork, work, artworkTarget);
     } catch {
+      if (!isCurrentArtworkWork(work)) return;
       setMetadataError(
         'No artwork could be loaded from the connected metadata providers. You can keep the current artwork or upload a poster image instead.',
       );
       setMetadataDialogOpen(true);
     } finally {
-      setIsFetchingArtwork(false);
+      if (isCurrentArtworkWork(work)) setIsFetchingArtwork(false);
     }
   };
 
   const applyMetadataCandidate = async (candidate: OfficialMetadataCandidate) => {
     if (applyingCandidateId) return;
     if (metadataApplyTarget !== 'logo' && !onApplyOfficialArtworkCandidate) return;
+    const work = beginArtworkWork();
     setApplyingCandidateId(candidate.id);
     setMetadataError('');
     try {
@@ -452,8 +598,10 @@ export default function ArtworkEditorControls({
         const selectedLogo = candidate.logo || candidate.logoCandidates?.find(Boolean) || '';
         if (!selectedLogo) throw new Error('The selected logo is unavailable.');
         await saveCustomArtwork(mediaId, 'logo', selectedLogo, legacyStorageKey);
+        if (!isCurrentArtworkWork(work)) return;
         onCustomArtworkChange((current) => ({ ...current, logo: selectedLogo }));
         await onSaved?.();
+        if (!isCurrentArtworkWork(work)) return;
         setMetadataDialogOpen(false);
         showToast({
           title: 'Logo updated',
@@ -487,6 +635,7 @@ export default function ArtworkEditorControls({
           }
         : candidate;
       const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidateToApply, metadataApplyTarget);
+      if (!isCurrentArtworkWork(work)) return;
       if (metadataApplyTarget === 'episodes' || metadataApplyTarget === 'summary') {
         try {
           await onSaved?.();
@@ -494,8 +643,9 @@ export default function ArtworkEditorControls({
           console.error('Metadata was saved, but the refreshed library view could not be loaded.', error);
         }
       } else {
-        await saveOfficialArtwork(refreshedArtwork, metadataApplyTarget);
+        await saveOfficialArtwork(refreshedArtwork, work, metadataApplyTarget);
       }
+      if (!isCurrentArtworkWork(work)) return;
       setMetadataDialogOpen(false);
       const appliedLabel = metadataApplyTarget === 'poster'
         ? 'Poster'
@@ -512,62 +662,107 @@ export default function ArtworkEditorControls({
         tone: 'success',
       });
     } catch {
+      if (!isCurrentArtworkWork(work)) return;
       setMetadataError(metadataApplyTarget === 'logo'
         ? 'That logo could not be saved. Choose another clear logo and try again.'
         : metadataApplyTarget === 'summary'
           ? 'That description could not be saved. Choose another provider result and try again.'
           : 'That artwork could not be applied. Choose another image or upload a poster image instead.');
     } finally {
-      setApplyingCandidateId('');
+      if (isCurrentArtworkWork(work)) setApplyingCandidateId('');
     }
   };
 
   const handleArtworkFileChange = (target: ArtworkTarget, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || !file.type.startsWith('image/')) return;
-
+    cancelArtworkWork();
+    releaseArtworkObjectUrl();
+    setIsFetchingArtwork(false);
+    setApplyingCandidateId('');
+    setMetadataDialogOpen(false);
     setArtworkPreview(null);
-    setArtworkPrepareState({ target, name: file.name });
+    setArtworkPrepareState(null);
     setArtworkSaveError('');
+    setIsSavingArtwork(false);
+    if (!file) return;
 
+    const fileValidation = validateArtworkFile(file);
+    if (!fileValidation.ok) {
+      setArtworkSaveError(fileValidation.message);
+      return;
+    }
+
+    setArtworkPrepareState({ target, name: file.name });
+
+    const work = beginArtworkWork();
     const reader = new FileReader();
+    work.reader = reader;
+    const clearReader = () => {
+      if (work.reader === reader) work.reader = null;
+      reader.onload = null;
+      reader.onerror = null;
+      reader.onabort = null;
+    };
     reader.onload = () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-      if (!dataUrl) {
+      clearReader();
+      if (!isCurrentArtworkWork(work)) return;
+      if (!(reader.result instanceof ArrayBuffer) || !fileValidation.mimeType) {
         setArtworkPrepareState(null);
         setArtworkSaveError('Unable to read selected artwork.');
         return;
       }
-
-      const image = new window.Image();
-      image.onload = () => {
-        setArtworkPreview({
-          target,
-          url: dataUrl,
-          name: file.name,
-          width: image.naturalWidth,
-          height: image.naturalHeight,
-          zoom: 1,
-          offsetX: 0,
-          offsetY: 0,
+      const bytes = new Uint8Array(reader.result);
+      const headerValidation = validateArtworkBytes(bytes, fileValidation.mimeType);
+      if (!headerValidation.ok) {
+        setArtworkPrepareState(null);
+        setArtworkSaveError(headerValidation.message);
+        return;
+      }
+      const dataUrl = URL.createObjectURL(new Blob([reader.result], { type: fileValidation.mimeType }));
+      artworkObjectUrlRef.current = dataUrl;
+      void loadArtworkDimensions(dataUrl, work.controller.signal)
+        .then((dimensions) => {
+          if (!isCurrentArtworkWork(work)) return;
+          setArtworkPreview({
+            target,
+            url: dataUrl,
+            name: file.name,
+            width: dimensions.width,
+            height: dimensions.height,
+            zoom: 1,
+            offsetX: 0,
+            offsetY: 0,
+          });
+          setArtworkPrepareState(null);
+        })
+        .catch((error) => {
+          if (!isCurrentArtworkWork(work) || error instanceof DOMException && error.name === 'AbortError') return;
+          setArtworkPrepareState(null);
+          setArtworkSaveError(error instanceof Error ? error.message : 'Unable to prepare selected artwork.');
         });
-        setArtworkPrepareState(null);
-      };
-      image.onerror = () => {
-        setArtworkPrepareState(null);
-        setArtworkSaveError('Unable to load selected artwork. Try a JPG, PNG, or WebP image.');
-      };
-      image.src = dataUrl;
     };
     reader.onerror = () => {
+      clearReader();
+      if (!isCurrentArtworkWork(work)) return;
       setArtworkPrepareState(null);
       setArtworkSaveError('Unable to read selected artwork.');
     };
-    reader.readAsDataURL(file);
+    reader.onabort = clearReader;
+    try {
+      reader.readAsArrayBuffer(file);
+    } catch (error) {
+      clearReader();
+      if (isCurrentArtworkWork(work)) {
+        setArtworkPrepareState(null);
+        setArtworkSaveError(error instanceof Error ? error.message : 'Unable to read selected artwork.');
+      }
+    }
   };
 
   const closeArtworkPreview = () => {
+    cancelArtworkWork();
+    releaseArtworkObjectUrl();
     setArtworkPreview(null);
     setArtworkPrepareState(null);
     setArtworkSaveError('');
@@ -580,12 +775,16 @@ export default function ArtworkEditorControls({
 
   const applyArtworkPreview = async () => {
     if (!artworkPreview || !mediaId) return;
+    const preview = artworkPreview;
+    const work = beginArtworkWork();
     setIsSavingArtwork(true);
     setArtworkSaveError('');
     try {
-      const { target } = artworkPreview;
-      const croppedArtwork = await cropArtworkToDataUrl(artworkPreview);
+      const { target } = preview;
+      const croppedArtwork = await cropArtworkToDataUrl(preview, work.controller.signal);
+      if (!isCurrentArtworkWork(work)) return;
       await saveCustomArtwork(mediaId, target, croppedArtwork, legacyStorageKey);
+      if (!isCurrentArtworkWork(work)) return;
       onCustomArtworkChange((current) => {
         if (target === 'thumbnail') {
           return { ...current, thumbnail: croppedArtwork, poster: croppedArtwork };
@@ -593,8 +792,10 @@ export default function ArtworkEditorControls({
         return { ...current, cover: croppedArtwork };
       });
       await onSaved?.();
+      if (!isCurrentArtworkWork(work)) return;
       closeArtworkPreview();
     } catch (error) {
+      if (!isCurrentArtworkWork(work)) return;
       setArtworkSaveError(error instanceof Error ? error.message : 'Unable to save artwork.');
       setIsSavingArtwork(false);
     }
@@ -843,14 +1044,14 @@ export default function ArtworkEditorControls({
         <input
           ref={thumbnailInputRef}
           type="file"
-          accept="image/*"
+          accept={ARTWORK_FILE_ACCEPT}
           className="hidden"
           onChange={(event) => handleArtworkFileChange('thumbnail', event)}
         />
         <input
           ref={coverInputRef}
           type="file"
-          accept="image/*"
+          accept={ARTWORK_FILE_ACCEPT}
           className="hidden"
           onChange={(event) => handleArtworkFileChange('cover', event)}
         />
@@ -984,7 +1185,11 @@ export default function ArtworkEditorControls({
       <Dialog
         open={metadataDialogOpen}
         onOpenChange={(open) => {
-          if (!open && !applyingCandidateId) setMetadataDialogOpen(false);
+          if (!open && !applyingCandidateId) {
+            cancelArtworkWork();
+            setIsFetchingArtwork(false);
+            setMetadataDialogOpen(false);
+          }
         }}
         contentClassName="max-h-[calc(100vh-8rem)] max-w-[min(944px,calc(100vw-2rem))] overflow-hidden border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
       >
@@ -995,7 +1200,7 @@ export default function ArtworkEditorControls({
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setMetadataDialogOpen(false)}
+              onClick={() => { cancelArtworkWork(); setIsFetchingArtwork(false); setMetadataDialogOpen(false); }}
               disabled={Boolean(applyingCandidateId)}
               aria-label="Close metadata picker"
               className="absolute right-3 top-3 h-9 w-9 rounded-lg text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"

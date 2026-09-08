@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query';
+import { isCancelledError, QueryClient } from '@tanstack/react-query';
 import { getDesktopLibraryMode, getRemoteDesktopSession } from './remoteDesktop';
 
 export const queryClient = new QueryClient({
@@ -37,6 +37,15 @@ export function queryScope(): readonly unknown[] {
 // This bounds metadata entries, not decoded WebKit images. Active queries are
 // retained; inactive results have both a TTL and a count limit.
 let trimming = false;
+let trimScheduled = false;
+function scheduleQueryCacheTrim(): void {
+  if (trimScheduled) return;
+  trimScheduled = true;
+  setTimeout(() => {
+    trimScheduled = false;
+    trimQueryCache();
+  }, 0);
+}
 const sizes = new Map<string, number>();
 function approximateBytes(value: unknown, seen = new WeakSet<object>(), budget = 8 * 1024 * 1024): number {
   if (typeof value === 'string') return value.length * 2;
@@ -54,7 +63,8 @@ export function trimQueryCache(): void {
   if (trimming) return;
   trimming = true;
   try {
-    const idle = queryClient.getQueryCache().getAll()
+    const cache = queryClient.getQueryCache();
+    const idle = cache.getAll()
       .filter(query => query.getObserversCount() === 0 && query.state.fetchStatus === 'idle')
       .sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt);
     const counts = new Map<string, number>();
@@ -63,21 +73,28 @@ export function trimQueryCache(): void {
       const limit = family === 'discover' ? 12 : family === 'detail' || family === 'explore' || family === 'discover-detail' ? 24 : 96;
       const count = (counts.get(family) || 0) + 1;
       counts.set(family, count);
-      if (count > limit) queryClient.removeQueries({ queryKey: query.queryKey, exact: true });
+      // We already have the query. Avoid scanning and matching the whole cache
+      // again for each eviction in a burst of completed native reads.
+      if (count > limit) cache.remove(query);
     }
-    const remaining = queryClient.getQueryCache().getAll().length;
+    const remaining = cache.getAll().length;
     let excess = Math.max(0, remaining - 160);
     for (const query of idle) {
       if (excess <= 0) break;
-      if (!queryClient.getQueryCache().get(query.queryHash)) continue;
-      queryClient.removeQueries({ queryKey: query.queryKey, exact: true });
+      if (cache.get(query.queryHash) !== query) continue;
+      cache.remove(query);
       excess -= 1;
     }
-    let bytes = [...sizes.values()].reduce((sum, value) => sum + value, 0);
+    // Only charge entries eligible for eviction. An active large result must
+    // not force every unrelated inactive result out of the cache.
+    let bytes = idle.reduce((sum, query) => sum + (
+      cache.get(query.queryHash) === query ? sizes.get(query.queryHash) || 0 : 0
+    ), 0);
     for (const query of idle) {
       if (bytes <= 8 * 1024 * 1024) break;
+      if (cache.get(query.queryHash) !== query) continue;
       bytes -= sizes.get(query.queryHash) || 0;
-      queryClient.removeQueries({ queryKey: query.queryKey, exact: true });
+      cache.remove(query);
     }
   } finally { trimming = false; }
 }
@@ -85,7 +102,7 @@ queryClient.getQueryCache().subscribe(event => {
   if (event.type === 'removed') sizes.delete(event.query.queryHash);
   if (event.type === 'updated' && event.action.type === 'success') {
     sizes.set(event.query.queryHash, approximateBytes(event.query.state.data));
-    trimQueryCache();
+    scheduleQueryCacheTrim();
   }
 });
 
@@ -115,8 +132,23 @@ async function scheduledRead<T>(read: () => Promise<T>, signal: AbortSignal): Pr
 
 export async function cachedDesktopRead<T>(family: string, args: readonly unknown[], read: () => Promise<T>, staleTime = 60_000): Promise<T> {
   const expensive = family === 'getThumbnail' || family === 'requestMetadataProvider' || family === 'getMediaSegments';
-  return queryClient.fetchQuery({ queryKey: [family, ...queryScope(), ...args],
-    queryFn: ({ signal }) => expensive ? scheduledRead(read, signal) : read(), staleTime });
+  const scope = queryScope();
+  const identity = JSON.stringify(scope);
+  const options = {
+    queryKey: [family, ...scope, ...args],
+    queryFn: ({ signal }: { signal: AbortSignal }) => expensive ? scheduledRead(read, signal) : read(),
+    staleTime,
+  };
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await queryClient.fetchQuery(options);
+    } catch (error) {
+      // Imperative reads have no observers. Invalidating them during a write
+      // cancels their promises even while a page is waiting for the result.
+      // Restart against the updated cache, but never cross a profile/session.
+      if (!isCancelledError(error) || attempt >= 2 || JSON.stringify(queryScope()) !== identity) throw error;
+    }
+  }
 }
 
 export function invalidateDesktopData(families?: readonly string[]): void {

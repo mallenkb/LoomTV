@@ -5,6 +5,10 @@ on:
     paths:
       - 'apps/tv/**'
       - 'apps/mobile/modules/loomtv-secure-transport/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/tv-release-gate.yml'
   workflow_dispatch:
 

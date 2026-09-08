@@ -61,10 +61,12 @@ impl Store {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600))?;
         }
-        if !shared { db.execute(
-            "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-primary'",
-            [],
-        )?; }
+        if !shared {
+            db.execute(
+                "DELETE FROM profiles WHERE is_guest=1 AND guest_device_id='desktop-primary'",
+                [],
+            )?;
+        }
         let revision = db.query_row("SELECT revision FROM device_profile_selection_revisions WHERE device_id = 'desktop-primary'", [], |r| r.get(0)).optional()?.unwrap_or(0);
         let active = db.query_row("SELECT s.profile_id FROM device_profile_selections s JOIN profiles p ON p.id=s.profile_id WHERE s.device_id='desktop-primary' AND s.automatic_sign_in=1 AND p.pin_hash IS NULL", [], |r| r.get(0)).optional()?;
         Ok(Self {

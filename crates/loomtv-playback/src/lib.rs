@@ -13,7 +13,9 @@ use tokio::sync::oneshot;
 
 type Reply = oneshot::Sender<Result<Value, String>>;
 enum Request {
-    Availability { reply: Reply },
+    Availability {
+        reply: Reply,
+    },
     Start {
         source: String,
         options: Value,
@@ -153,16 +155,28 @@ struct WarmRuntime {
     instance: *mut c_void,
 }
 impl WarmRuntime {
-    unsafe fn open(path: &std::path::Path, plugins: Option<&std::path::Path>) -> Result<Self, String> {
+    unsafe fn open(
+        path: &std::path::Path,
+        plugins: Option<&std::path::Path>,
+    ) -> Result<Self, String> {
         // The VLC app normally loads this dependency before libvlc. Tauri has
         // no VLC executable rpath, so retain the sibling core for the process lifetime.
-        let core_name = if cfg!(windows) { "libvlccore.dll" } else { "libvlccore.dylib" };
+        let core_name = if cfg!(windows) {
+            "libvlccore.dll"
+        } else {
+            "libvlccore.dylib"
+        };
         let core_path = path.with_file_name(core_name);
         let core_library = if core_path.is_file() {
-            Some(Library::new(&core_path).map_err(|error| format!("LibVLC core could not be loaded: {error}"))?)
-        } else { None };
-        let library = Library::new(path)
-            .map_err(|error| format!("LibVLC could not be loaded: {error}"))?;
+            Some(
+                Library::new(&core_path)
+                    .map_err(|error| format!("LibVLC core could not be loaded: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let library =
+            Library::new(path).map_err(|error| format!("LibVLC could not be loaded: {error}"))?;
         let version = library
             .get::<unsafe extern "C" fn() -> *const c_char>(b"libvlc_get_version\0")
             .map_err(|_| "The LibVLC version API is unavailable.")?();
@@ -177,7 +191,9 @@ impl WarmRuntime {
         let mut arguments = vec!["--no-plugins-cache"];
         if std::env::var("LOOMTV_DEBUG_LIBVLC").as_deref() == Ok("1") {
             arguments.extend(["--no-quiet", "--verbose=2"]);
-        } else { arguments.push("--quiet"); }
+        } else {
+            arguments.push("--quiet");
+        }
         let arguments = arguments
             .iter()
             .map(|s| CString::new(*s))
@@ -192,17 +208,26 @@ impl WarmRuntime {
         let instance = new(pointers.len() as c_int, pointers.as_ptr());
         if let Some(previous) = previous_plugin_path {
             std::env::set_var("VLC_PLUGIN_PATH", previous);
-        } else { std::env::remove_var("VLC_PLUGIN_PATH"); }
+        } else {
+            std::env::remove_var("VLC_PLUGIN_PATH");
+        }
         if instance.is_null() {
             return Err("LibVLC initialization failed.".into());
         }
-        Ok(Self { library, _core_library: core_library, instance })
+        Ok(Self {
+            library,
+            _core_library: core_library,
+            instance,
+        })
     }
 }
 impl Drop for WarmRuntime {
     fn drop(&mut self) {
         unsafe {
-            if let Ok(release) = self.library.get::<unsafe extern "C" fn(*mut c_void)>(b"libvlc_release\0") {
+            if let Ok(release) = self
+                .library
+                .get::<unsafe extern "C" fn(*mut c_void)>(b"libvlc_release\0")
+            {
                 release(self.instance);
             }
         }
@@ -225,7 +250,9 @@ struct Player {
 
 impl std::ops::Deref for Player {
     type Target = WarmRuntime;
-    fn deref(&self) -> &Self::Target { &self.runtime }
+    fn deref(&self) -> &Self::Target {
+        &self.runtime
+    }
 }
 
 macro_rules! vlc {
@@ -726,7 +753,6 @@ impl Player {
                 }
                 self.media = std::ptr::null_mut();
             }
-
         }
     }
 }

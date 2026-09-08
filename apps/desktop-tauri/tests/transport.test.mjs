@@ -94,3 +94,76 @@ test('one failed native cleanup cannot prevent the other subscriptions from stop
   f.pending[1].resolve(() => { stopped = true; }); await flush();
   f.dispose(); assert.equal(stopped, true); assert.equal(f.errors.length, 1);
 });
+
+// Load the bridge with native API mocks, without a WebView or Tauri runtime.
+async function rendererFixture() {
+  const [{ readFile }, { createRequire }, { runInNewContext }] = await Promise.all([
+    import('node:fs/promises'), import('node:module'), import('node:vm'),
+  ]);
+  const require = createRequire(import.meta.url);
+  const ts = require('typescript');
+  const source = await readFile(new URL('../src/bridge/tauriBridge.ts', import.meta.url), 'utf8');
+  const calls = [];
+  let attachResolve;
+  let attachReject;
+  let pagehide;
+  const ready = new Promise((resolve, reject) => { attachResolve = resolve; attachReject = reject; });
+  const nativeInvoke = async (command, args) => {
+    calls.push({ command, ...args });
+    if (args.channel === 'renderer:attach') return ready;
+    return true;
+  };
+  const exports = {};
+  runInNewContext(ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, {
+    exports,
+    require(name) {
+      if (name === '@tauri-apps/api/core') return { invoke: nativeInvoke };
+      if (name === '@tauri-apps/api/event') return { listen: async () => () => {} };
+      if (name === './transport') return { createTauriTransport };
+      if (name.endsWith('/createDesktopBridge')) return { createDesktopBridge: transport => transport };
+      throw new Error(`Unexpected import: ${name}`);
+    },
+    crypto: { randomUUID: () => '00000000-0000-4000-8000-000000000001' },
+    window: { addEventListener(name, callback) { assert.equal(name, 'pagehide'); pagehide = callback; } },
+  });
+  return { transport: exports.createTauriBridge(), calls, attachResolve, attachReject, hide: () => pagehide() };
+}
+
+test('renderer waits for attach before sending commands and detaches with its owner ID', async () => {
+  const f = await rendererFixture();
+  const result = f.transport.invoke('mpv:start', 'movie');
+  await flush();
+  assert.equal(f.calls.length, 1);
+  f.attachResolve(true);
+  assert.equal(await result, true);
+  assert.equal(f.calls[1].channel, 'mpv:start');
+  assert.equal(f.calls[1].rendererId, f.calls[0].args[0]);
+  f.hide();
+  await flush();
+  assert.equal(f.calls[2].channel, 'renderer:detach');
+  assert.equal(f.calls[2].args[0], f.calls[0].args[0]);
+});
+
+test('pagehide during attach prevents queued playback and still detaches after attach', async () => {
+  const f = await rendererFixture();
+  const result = f.transport.invoke('mpv:start', 'movie');
+  const rejected = assert.rejects(result, { code: 'bridge_closed' });
+  f.hide();
+  f.attachResolve(true);
+  await rejected;
+  await flush();
+  assert.deepEqual(f.calls.map(call => call.channel), ['renderer:attach', 'renderer:detach']);
+});
+
+test('failed renderer handoff rejects playback without sending it', async () => {
+  const f = await rendererFixture();
+  const result = f.transport.invoke('mpv:start', 'movie');
+  const rejected = assert.rejects(result, { code: 'libmpv_error' });
+  f.attachReject({ code: 'libmpv_error', message: 'Stop failed.' });
+  await rejected;
+  f.hide();
+  await flush();
+  assert.deepEqual(f.calls.map(call => call.channel), ['renderer:attach']);
+});

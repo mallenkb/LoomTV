@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'scripts/verify-mobile-release-boundaries.mjs'
       - '.github/workflows/mobile-release-gate.yml'
   workflow_dispatch:

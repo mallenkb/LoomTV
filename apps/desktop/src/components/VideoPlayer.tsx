@@ -41,8 +41,6 @@ import {
   MAX_AUDIO_REAPPLY_ATTEMPTS,
   NEXT_EPISODE_PROMPT_REMAINING_SECONDS,
   REPLAY_FROM_START_REMAINING_SECONDS,
-  SUBTITLE_DELAY_FINE_STEP_SECONDS,
-  SUBTITLE_DELAY_STEP_SECONDS,
   TRANSCODE_SEEK_DEBOUNCE_MS,
   TRANSCODE_SEEK_HOLD_TIMEOUT_MS,
   WATCHED_THRESHOLD,
@@ -109,7 +107,6 @@ import {
   sortedSeasonNumbers,
 } from './VideoPlayer/episodeIndex';
 import {
-  clampSubtitleDelay,
   hasReachedInitialResumePosition,
   isEditableShortcutTarget,
   initialHlsStartPosition,
@@ -3041,20 +3038,6 @@ export default function VideoPlayer({
     }));
   }, [setLiveSubtitleStyle]);
 
-  const adjustSubtitleDelay = useCallback((deltaSeconds: number) => {
-    setLiveSubtitleStyle((current) => ({
-      ...current,
-      delaySeconds: clampSubtitleDelay(current.delaySeconds + deltaSeconds),
-    }));
-  }, [setLiveSubtitleStyle]);
-
-  const resetSubtitleDelay = useCallback(() => {
-    setLiveSubtitleStyle((current) => ({
-      ...current,
-      delaySeconds: 0,
-    }));
-  }, [setLiveSubtitleStyle]);
-
   const updateAudioDelay = useCallback((seconds: number) => {
     const nextDelay = Math.max(-60, Math.min(60, seconds));
     audioDelayRef.current = nextDelay;
@@ -3570,24 +3553,6 @@ export default function VideoPlayer({
           e.preventDefault();
           seekTo(duration);
           break;
-        case 'z':
-        case 'Z':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          adjustSubtitleDelay(-(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS));
-          break;
-        case 'x':
-        case 'X':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          adjustSubtitleDelay(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS);
-          break;
-        case 'c':
-        case 'C':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          resetSubtitleDelay();
-          break;
         default:
           if (/^[0-9]$/.test(e.key) && duration > 0) {
             resetSurfaceDoubleClickGuard();
@@ -3622,8 +3587,6 @@ export default function VideoPlayer({
     handlePrevEpisode,
     paused,
     resetPlaybackRate,
-    adjustSubtitleDelay,
-    resetSubtitleDelay,
     runMediaSessionCommand,
     skipBackSeconds,
     skipForwardSeconds,
@@ -4028,6 +3991,8 @@ export default function VideoPlayer({
             cues={activeOnlineCaption?.cues ?? subtitleCues}
             videoRef={videoRef}
             currentTimeRef={nativePlaybackActive ? playbackPositionRef : undefined}
+            timelineOffsetRef={streamIsTranscoded ? transcodeStartSecondsRef : undefined}
+            seekableTimelineRef={streamIsSeekableRef}
             style={subtitleStyle}
             visible={Boolean(activeOnlineCaption) || showSubtitleOverlay}
           />
@@ -4279,19 +4244,20 @@ export default function VideoPlayer({
                     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
                     let item = items.find(candidate => candidate.id === mediaId)
                       || items.find(candidate => candidate.filePath === filePath || candidate.episodeFiles?.some(episode => episode.filePath === filePath));
-                    if (!item?.providerIds?.imdbId && (mediaId || item?.id)) {
-                      item = (await desktopApi.getLibraryItem(mediaId || item!.id))?.item || item;
+                    const libraryItemId = mediaId || item?.id;
+                    if (!item?.providerIds?.imdbId && libraryItemId) {
+                      item = (await desktopApi.getLibraryItem(libraryItemId))?.item || item;
                     }
                     if (!item?.providerIds?.imdbId) throw new Error('Match this title to an IMDb entry in your library before searching for subtitles.');
                     return { imdbId: item.providerIds.imdbId, type: item.type === 'movie' ? 'movie' : 'series', season: currentSeason, episode: currentEpisode };
                   }}
-                  onSelect={async (subtitle, text) => {
+                  onSelect={async (subtitle, text, signal) => {
                     const cues = parseVttCues(text);
                     if (!cues.length) throw new Error('This subtitle has no readable timed captions. Choose another result.');
-                    if (onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
+                    if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
                     const engine = playbackEngineRef.current;
                     if (engine) await engine.selectSubtitle(null);
-                    if (onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
+                    if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
                     selectSubtitleTrack(-1, true);
                     setOnlineCaption({ key: onlinePlaybackKey, subtitle, cues });
                   }}

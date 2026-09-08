@@ -14,7 +14,7 @@ import {
   CANONICAL_API_VERSION,
   CANONICAL_API_VERSION_HEADER,
 } from '@loom-media-server/video-contracts';
-import { canonicalPublicError } from './public-error.js';
+import { canonicalPublicError, errorDetails } from './public-error.js';
 import { createCastSessionRegistry } from './cast-session-registry.js';
 import { publicCatalog } from './public-catalog.js';
 
@@ -26,10 +26,20 @@ const MAX_BODY_BYTES = 128 * 1024;
 const SESSION_COOKIE = '__Host-loomtv_session';
 const CSRF_COOKIE = '__Host-loomtv_csrf';
 
+/**
+ * @typedef {import('./api-types.js').ApiRequest} ApiRequest
+ * @typedef {import('./api-types.js').ApiResponse} ApiResponse
+ * @typedef {import('./api-types.js').Principal & import('./server-admin-types.js').Principal} Principal
+ * @typedef {import('./api-types.js').MediaItem} MediaItem
+ * @typedef {import('./api-types.js').ProfileContext} ProfileContext
+ */
+
+/** @param {number} status @param {string} code @param {string} message */
 function requestError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
 }
 
+/** @param {ApiResponse} res @param {number} status @param {unknown} payload @param {import('node:http').OutgoingHttpHeaders} headers */
 function writeJson(res, status, payload, headers = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -42,14 +52,17 @@ function writeJson(res, status, payload, headers = {}) {
   res.end(body);
 }
 
+/** @param {ApiResponse} res @param {number} status @param {string} code @param {string} message @param {Record<string, unknown>} details @param {import('node:http').OutgoingHttpHeaders} headers */
 function writeError(res, status, code, message, details = {}, headers = {}) {
   writeJson(res, status, { ok: false, error: { code, message, ...details } }, headers);
 }
 
+/** @param {ApiResponse} res @param {number} status @param {unknown} data @param {import('node:http').OutgoingHttpHeaders} headers */
 function writeData(res, status, data, headers = {}) {
   writeJson(res, status, { ok: true, data }, headers);
 }
 
+/** @param {unknown} value @param {string} field */
 function requiredString(value, field, max = 4_096) {
   if (typeof value !== 'string' || !value.trim()) throw requestError(400, `${field}_required`, `${field} is required.`);
   const normalized = value.trim();
@@ -57,15 +70,46 @@ function requiredString(value, field, max = 4_096) {
   return normalized;
 }
 
+/** @param {unknown} value @param {string} field */
 function optionalString(value, field, max = 4_096) {
   if (value === undefined || value === null || value === '') return undefined;
   return requiredString(value, field, max);
 }
 
+/** @param {unknown} value @param {string} field */
+function optionalNumber(value, field) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw requestError(400, 'invalid_request', `${field} must be a finite number.`);
+  return value;
+}
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** @param {unknown} value @returns {Record<string, unknown>} */
+function recordOf(value) {
+  return value && typeof value === 'object' ? /** @type {Record<string, unknown>} */ (value) : {};
+}
+
+/** @param {unknown} value @returns {{ id: string } | null} */
+function auditPrincipal(value) {
+  const actor = recordOf(value);
+  return typeof actor.id === 'string' && actor.id ? { id: actor.id } : null;
+}
+
+/** @param {unknown} value @returns {value is string[]} */
+function isStringArray(value) {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+/** @param {unknown} value @returns {value is 'movies' | 'tvShows' | 'anime' | 'others'} */
+function isLibraryRootKind(value) {
+  return value === 'movies' || value === 'tvShows' || value === 'anime' || value === 'others';
+}
+
+/** @param {ApiRequest} req @param {string} name */
 function requestCookie(req, name) {
   const raw = Array.isArray(req.headers.cookie) ? req.headers.cookie.join(';') : String(req.headers.cookie || '');
   if (!raw || raw.length > 8_192) return null;
@@ -76,12 +120,24 @@ function requestCookie(req, name) {
   return null;
 }
 
+/** @param {ApiRequest} req @param {string} authorization @returns {ApiRequest} */
+function requestWithAuthorization(req, authorization) {
+  const authenticatedRequest = /** @type {ApiRequest} */ (Object.assign(
+    Object.create(Object.getPrototypeOf(req)),
+    req,
+  ));
+  authenticatedRequest.headers = { ...req.headers, authorization };
+  return authenticatedRequest;
+}
+
+/** @param {unknown} left @param {unknown} right */
 function safeStringEqual(left, right) {
   const actual = Buffer.from(String(left || ''), 'utf8');
   const expected = Buffer.from(String(right || ''), 'utf8');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+/** @param {ApiRequest} req */
 function sameOriginRequest(req) {
   const origin = Array.isArray(req.headers.origin) ? '' : String(req.headers.origin || '');
   const host = Array.isArray(req.headers.host) ? '' : String(req.headers.host || '');
@@ -91,6 +147,7 @@ function sameOriginRequest(req) {
   } catch { return false; }
 }
 
+/** @param {string} token @param {string} csrfToken @param {number} expiresAt */
 function cookieSessionHeaders(token, csrfToken, expiresAt) {
   const maxAge = Math.max(1, Math.floor((Number(expiresAt) - Date.now()) / 1_000));
   return { 'Set-Cookie': [
@@ -106,6 +163,7 @@ function clearCookieSessionHeaders() {
   ] };
 }
 
+/** @param {ApiRequest} req @returns {Promise<Record<string, unknown>>} */
 async function readJsonBody(req) {
   const declaredLength = Number(req.headers['content-length'] || 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
@@ -131,6 +189,7 @@ async function readJsonBody(req) {
   }
 }
 
+/** @param {string} value */
 function decodeSegment(value, field = 'id') {
   try {
     const decoded = decodeURIComponent(value);
@@ -143,6 +202,7 @@ function decodeSegment(value, field = 'id') {
   }
 }
 
+/** @param {URL} url @param {string} mediaId @param {string} action */
 function pathForMedia(url, mediaId, action) {
   const query = new URLSearchParams(url.searchParams);
   query.set('itemId', mediaId);
@@ -154,6 +214,7 @@ function pathForMedia(url, mediaId, action) {
   return new URL(`${path}?${query.toString()}`, 'http://loomtv.local');
 }
 
+/** @param {ApiRequest} req @param {Principal} principal */
 function deviceIdForRequest(req, principal) {
   const raw = Array.isArray(req.headers['x-loom-device-id'])
     ? req.headers['x-loom-device-id'][0]
@@ -166,6 +227,7 @@ function deviceIdForRequest(req, principal) {
   return authenticated;
 }
 
+/** @template {object} T @param {T} profileContext @param {Principal} principal */
 function bindAuthenticationSession(profileContext, principal) {
   return {
     ...profileContext,
@@ -175,6 +237,7 @@ function bindAuthenticationSession(profileContext, principal) {
   };
 }
 
+/** @param {import('./api-types.js').RuntimeHealth | null | undefined} health */
 export function publicHealthSummary(health) {
   const media = health?.media || {};
   const transcoder = health?.transcoder || {};
@@ -182,10 +245,10 @@ export function publicHealthSummary(health) {
   const transcoderStates = new Set(['available', 'limited', 'unavailable']);
   const publicStatuses = new Set(['ready', 'draining']);
   return {
-    status: publicStatuses.has(health?.status) ? health.status : 'unknown',
+    status: health && publicStatuses.has(health.status || '') ? health.status : 'unknown',
     media: {
       configured: Boolean(media.configured),
-      state: mediaStates.has(media.state) ? media.state : 'unknown',
+      state: mediaStates.has(media.state || '') ? media.state : 'unknown',
       readable: media.readable === true,
     },
     transcoder: {
@@ -194,22 +257,25 @@ export function publicHealthSummary(health) {
       recommendedBackend: typeof transcoder.recommendedBackend === 'string'
         ? transcoder.recommendedBackend.slice(0, 32)
         : 'software',
-      state: transcoderStates.has(transcoder.state) ? transcoder.state : 'unavailable',
+      state: transcoderStates.has(transcoder.state || '') ? transcoder.state : 'unavailable',
     },
   };
 }
 
-function publicLibraryItem(item) {
-  if (!item || typeof item !== 'object') return item;
+/** @param {unknown} value @returns {import('./public-catalog.js').PublicCatalogItem} */
+function publicLibraryItem(value) {
+  const item = recordOf(value);
+  /** @type {import('./public-catalog.js').PublicCatalogItem} */
   const safeItem = {};
-  for (const field of ['id', 'title', 'kind', 'seriesId']) {
+  for (const field of /** @type {const} */ (['id', 'title', 'kind', 'seriesId'])) {
     if (typeof item[field] === 'string' && item[field].length <= 500 && !item[field].includes('\u0000')) safeItem[field] = item[field];
   }
-  for (const field of ['year', 'seasonNumber', 'episodeNumber', 'rating', 'createdAt', 'updatedAt']) {
+  for (const field of /** @type {const} */ (['year', 'seasonNumber', 'episodeNumber', 'rating', 'createdAt', 'updatedAt'])) {
     if (Number.isFinite(item[field])) safeItem[field] = Number(item[field]);
   }
-  if (safeItem.seasonNumber === undefined && Number.isFinite(item.series?.season)) safeItem.seasonNumber = Number(item.series.season);
-  if (safeItem.episodeNumber === undefined && Number.isFinite(item.series?.episode)) safeItem.episodeNumber = Number(item.series.episode);
+  const series = recordOf(item.series);
+  if (safeItem.seasonNumber === undefined && Number.isFinite(series.season)) safeItem.seasonNumber = Number(series.season);
+  if (safeItem.episodeNumber === undefined && Number.isFinite(series.episode)) safeItem.episodeNumber = Number(series.episode);
   safeItem.available = item.available === true;
   if (Array.isArray(item.sourceIds)) safeItem.sourceIds = item.sourceIds
     .filter((sourceId) => typeof sourceId === 'string' && sourceId.length <= 256 && !sourceId.includes('\u0000'))
@@ -232,22 +298,27 @@ function publicLibraryItem(item) {
   return safeItem;
 }
 
-function publicLibraryRoot(root) {
-  if (!root || typeof root !== 'object') return root;
+/** @param {unknown} value */
+function publicLibraryRoot(value) {
+  const root = recordOf(value);
+  /** @type {Record<string, unknown>} */
   const safeRoot = {};
   for (const field of ['id']) {
     if (typeof root[field] === 'string' && root[field].length <= 128 && !root[field].includes('\u0000')) safeRoot[field] = root[field];
   }
-  safeRoot.kind = root.kind === 'tvShows' ? 'tv' : ['movies','tv','anime','others'].includes(root.kind) ? root.kind : 'others';
+  safeRoot.kind = root.kind === 'tvShows' ? 'tv' : typeof root.kind === 'string' && ['movies','tv','anime','others'].includes(root.kind) ? root.kind : 'others';
   safeRoot.state = root.state === 'degraded' ? 'unreadable'
-    : ['online','offline','unreadable','missing'].includes(root.state) ? root.state : 'missing';
+    : typeof root.state === 'string' && ['online','offline','unreadable','missing'].includes(root.state) ? root.state : 'missing';
   for (const field of ['createdAt', 'lastScanAt']) {
     if (Number.isFinite(root[field])) safeRoot[field] = Number(root[field]);
   }
   return safeRoot;
 }
 
-function publicPlaybackPlan(plan) {
+/** @param {unknown} value */
+function publicPlaybackPlan(value) {
+  const plan = recordOf(value);
+  /** @type {Record<string, unknown>} */
   const result = {};
   for (const field of [
     'contractVersion', 'mode', 'transport', 'reasonCode', 'sourceId',
@@ -260,8 +331,11 @@ function publicPlaybackPlan(plan) {
   return result;
 }
 
-function publicMediaProbe(probe) {
-  if (!probe || typeof probe !== 'object') return null;
+/** @param {unknown} value */
+function publicMediaProbe(value) {
+  if (!value || typeof value !== 'object') return null;
+  const probe = recordOf(value);
+  /** @type {Record<string, unknown>} */
   const result = {};
   for (const field of ['sourceId','container','videoCodec','audioCodec','hdrFormat']) {
     if (typeof probe[field] === 'string' && probe[field].length <= 256 && !probe[field].includes('\u0000')) result[field] = probe[field];
@@ -273,6 +347,7 @@ function publicMediaProbe(probe) {
   result.tracks = (Array.isArray(probe.tracks) ? probe.tracks : []).slice(0, 256).flatMap((track) => {
     if (!track || typeof track !== 'object' || typeof track.id !== 'string'
       || !Number.isSafeInteger(track.index) || !['video','audio','subtitle','data','unknown'].includes(track.kind)) return [];
+    /** @type {Record<string, unknown>} */
     const safe = { id: track.id.slice(0, 128), index: track.index, kind: track.kind,
       default: track.default === true, forced: track.forced === true };
     for (const field of ['codec','language','title','profile','pixelFormat','colorTransfer','colorPrimaries','colorSpace']) {
@@ -295,6 +370,7 @@ function publicMediaProbe(probe) {
   return result;
 }
 
+/** @param {string} version @param {import('./api-types.js').RuntimeHealth} health */
 function discoveryDocument(version, health) {
   return {
     apiVersion: PUBLIC_API_VERSION,
@@ -337,6 +413,7 @@ function discoveryDocument(version, health) {
   };
 }
 
+/** @template {{ paths: Record<string, Record<string, { responses?: unknown, parameters?: unknown, [key: string]: unknown }>> }} T @param {T} document */
 function completeOpenApi(document) {
   for (const [route, pathItem] of Object.entries(document.paths || {})) {
     const parameterNames = [...route.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
@@ -456,16 +533,20 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
 /**
  * Versioned viewer/client API. Existing `/api/admin` and `/api/media` routes
  * remain intact; this handler is a stable adapter around those services.
+ * @param {import('./api-types.js').PublicApiOptions} options
  */
 export function createPublicApiHandler({ service, clientState, mediaService, pairingService, remotePolicy, setupService, setupHooks = {}, getRuntimeHealth, version, requireSecureTransport = false, requireBootstrapSecret = true, proxyPolicy = createTrustedProxyPolicy(), castSessions = createCastSessionRegistry(), desktopSetupChannel, pickFolder, deploymentMode = 'standalone' }) {
   if (!service || !clientState || !mediaService || !pairingService || !remotePolicy) throw new Error('createPublicApiHandler requires server services.');
   const desktopChannel = desktopSetupChannel || createDesktopSetupChannel({ clientAddress: (req) => proxyPolicy.clientAddress(req) });
 
+  /** @param {import('./api-types.js').ScanStatus | null | undefined} scan @param {Principal} principal @param {ApiResponse} res */
   async function waitForSetupScan(scan, principal, res) {
     if (!scan || scan.state !== 'scanning') return scan;
     let pollTimer;
     let stopped = false;
-    let rejectWait;
+    /** @type {(reason: unknown) => void} */
+    let rejectWait = (error) => { throw error; };
+    /** @type {Promise<never>} */
     const interrupted = new Promise((_, reject) => { rejectWait = reject; });
     const disconnect = () => rejectWait(requestError(499, 'request_cancelled', 'The setup client disconnected.'));
     const deadline = setTimeout(() => rejectWait(requestError(504, 'setup_scan_timeout', 'The library is still scanning. Check scan status and retry setup completion.')), 30_000);
@@ -493,10 +574,12 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     }
   }
 
+  /** @param {ApiRequest} req */
   function isSecureRequest(req) {
     return proxyPolicy.isSecureRequest(req);
   }
 
+  /** @param {ApiRequest} req */
   async function principalForRequest(req) {
     const invitation = await remotePolicy.authenticateInvitation(req);
     if (invitation) return invitation;
@@ -506,7 +589,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     if (!isSecureRequest(req)) {
       throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require HTTPS.');
     }
-    if (!['GET','HEAD','OPTIONS'].includes(req.method)) {
+    if (!['GET','HEAD','OPTIONS'].includes(req.method || '')) {
       const csrfCookie = requestCookie(req, CSRF_COOKIE);
       const csrfHeader = Array.isArray(req.headers['x-loom-csrf']) ? '' : String(req.headers['x-loom-csrf'] || '');
       if (!sameOriginRequest(req) || !csrfCookie || !safeStringEqual(csrfCookie, csrfHeader)) {
@@ -514,12 +597,35 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       }
     }
     req.__loomCookieSessionToken = sessionToken;
-    return service.authenticateRequest({ ...req, headers: { ...req.headers, authorization: `Bearer ${sessionToken}` } });
+    return service.authenticateRequest(requestWithAuthorization(req, `Bearer ${sessionToken}`));
   }
 
+  /** @param {ApiRequest} req @param {string} [permission] @returns {Promise<Principal>} */
   async function requirePrincipal(req, permission) {
-    const principal = await principalForRequest(req);
-    if (!principal) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
+    const authenticated = await principalForRequest(req);
+    if (!authenticated || typeof authenticated.id !== 'string' || !authenticated.id) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
+    const account = recordOf(authenticated);
+    if (typeof account.name !== 'string' || typeof account.type !== 'string' || typeof account.role !== 'string'
+      || !isStringArray(account.permissions)
+      || !(account.rootIds === null || isStringArray(account.rootIds))
+      || !(account.deviceIds === null || isStringArray(account.deviceIds))
+      || !(account.maxSessions === null || typeof account.maxSessions === 'number')) {
+      throw requestError(401, 'auth_required', 'The authenticated account record is incomplete.');
+    }
+    /** @type {Principal} */
+    const principal = {
+      ...authenticated,
+      id: authenticated.id,
+      name: account.name,
+      type: account.type,
+      role: account.role,
+      permissions: account.permissions,
+      rootIds: account.rootIds,
+      deviceIds: account.deviceIds,
+      maxSessions: account.maxSessions,
+      deviceId: authenticated.deviceId || undefined,
+      invitationMediaIds: authenticated.invitationMediaIds || undefined,
+    };
     if (principal.authentication === 'invitation-session') {
       const pathname = new URL(req.url || '/', 'https://loomtv.local').pathname;
       const invitationRoute = pathname.startsWith(`${PUBLIC_API_PREFIX}/library`)
@@ -537,6 +643,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     return principal;
   }
 
+  /** @param {Principal} principal */
   function canSeeAllProfiles(principal) {
     return hasPermission(principal, 'users.manage');
   }
@@ -551,6 +658,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
    * is still savable — the caller decides — because a NAS that is asleep at
    * setup time is a normal thing, not a configuration mistake.
    */
+  /** @param {string} target */
   async function inspectSetupFolder(target) {
     try {
       const stats = await fs.stat(target);
@@ -560,7 +668,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       await fs.access(target);
       return { accessible: true, retryable: false, reason: 'online', message: 'The server can read this folder.' };
     } catch (error) {
-      if (error?.code === 'EACCES') {
+      if (errorDetails(error).code === 'EACCES') {
         return { accessible: false, retryable: true, reason: 'permission_denied', message: 'The server cannot read that folder. Check its permissions, or save it and retry later.' };
       }
       return { accessible: false, retryable: true, reason: 'unavailable', message: 'That folder is not reachable right now. Save it and LoomTV will pick it up once the share is back.' };
@@ -568,11 +676,13 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
   }
 
   /** Validate one of the keyed metadata providers without storing its secret. */
+  /** @param {string} provider @param {string} apiKey */
   async function testMetadataProvider(provider, apiKey) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     const id = ['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].includes(provider) ? provider : 'tmdb';
     const isReadToken = id === 'tmdb' && /^ey[A-Za-z0-9._-]{20,}$/.test(apiKey);
+    /** @type {Record<string, { endpoint: string, method?: string, headers: Record<string, string>, body?: string }>} */
     const requests = {
       tmdb: {
         endpoint: isReadToken
@@ -593,6 +703,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         body: JSON.stringify({ apikey: apiKey }),
       },
     };
+    /** @type {Record<string, string>} */
     const labels = { tmdb: 'TMDB', fanart: 'Fanart.tv', omdb: 'OMDb', opensubtitles: 'OpenSubtitles', tvdb: 'TheTVDB' };
     const request = requests[id];
     try {
@@ -619,8 +730,8 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     } catch (error) {
       return {
         ok: false,
-        code: error?.name === 'AbortError' ? 'timeout' : 'unreachable',
-        message: error?.name === 'AbortError'
+        code: errorDetails(error).name === 'AbortError' ? 'timeout' : 'unreachable',
+        message: errorDetails(error).name === 'AbortError'
           ? `${labels[id]} did not answer in time.`
           : `LoomTV could not reach ${labels[id]}. Check this server's internet access.`,
       };
@@ -629,6 +740,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     }
   }
 
+  /** @param {string} provider @param {string} apiKey */
   async function testSetupMetadata(provider, apiKey) {
     if (typeof setupHooks.testMetadata !== 'function') return testMetadataProvider(provider, apiKey);
     const verdict = await setupHooks.testMetadata({ provider, apiKey });
@@ -639,13 +751,16 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     };
   }
 
+  /** @param {Principal} principal @param {ApiRequest} req @param {MediaItem} [media] */
   async function playbackProfileContext(principal, req, media = undefined) {
-    if (principal.authentication === 'invitation-session') {
-      return remotePolicy.invitationProfileContext(principal, media);
-    }
-    return clientState.requireActivePlaybackProfile(principal.id, deviceIdForRequest(req, principal), media);
+    const profile = principal.authentication === 'invitation-session'
+      ? await remotePolicy.invitationProfileContext(principal, media)
+      : await clientState.requireActivePlaybackProfile(principal.id, deviceIdForRequest(req, principal), media);
+    if (!profile) throw requestError(403, 'permission_denied', 'An active unlocked profile is required.');
+    return profile;
   }
 
+  /** @param {Principal} principal @param {ApiRequest} req @param {string} profileId @param {MediaItem} [media] */
   async function requireSelectedProfile(principal, req, profileId, media = undefined) {
     const active = await playbackProfileContext(principal, req, media);
     if (active.profileId !== profileId) throw requestError(403, 'permission_denied', 'The requested profile is not the active unlocked profile.');
@@ -653,6 +768,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
   }
 
   const catalogCache = new Map();
+  /** @param {Principal} principal @param {ApiRequest} req */
   async function profileCatalog(principal, req) {
     // Always authenticate and unlock the active profile before looking up a
     // projection. Never reuse data across changed identities/restrictions.
@@ -680,6 +796,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     return result;
   }
 
+  /** @param {Principal} principal @param {ApiRequest} req */
   async function profileVisibleItems(principal, req) {
     await playbackProfileContext(principal, req);
     const visible = [];
@@ -688,13 +805,14 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         await playbackProfileContext(principal, req, item);
         visible.push(item);
       } catch (error) {
-        if (error?.code === 'permission_denied') continue;
+        if (errorDetails(error).code === 'permission_denied') continue;
         throw error;
       }
     }
     return visible;
   }
 
+  /** @param {ApiRequest} req @param {Principal} principal @param {import('./cast-session-registry.js').CastRecord | null} record */
   async function requireLiveCastBinding(req, principal, record) {
     if (!record || record.principalId !== principal.id) {
       throw requestError(404, 'not_found', 'Cast session was not found.');
@@ -719,6 +837,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     return { item, profile };
   }
 
+  /** @param {ApiRequest} req @param {ApiResponse} res @param {URL} url @param {string} mediaId @param {string} action */
   async function handleMedia(req, res, url, mediaId, action) {
     const queryUrl = pathForMedia(url, mediaId, action);
     res.__loomtvPublicApi = true;
@@ -731,6 +850,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     return result !== false;
   }
 
+  /** @param {ApiRequest} req @param {ApiResponse} res */
   return async function handlePublicApi(req, res) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'loomtv.local'}`);
     const pathname = url.pathname;
@@ -807,7 +927,8 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const match = /^LoomPairing\s+([A-Za-z0-9_-]{32,256})$/.exec(authorization.trim());
         if (!match) throw requestError(401, 'auth_required', 'A pairing request capability is required.');
         const result = await pairingService.status(decodeSegment(segments[2], 'requestId'), match[1], proxyPolicy.clientAddress(req));
-        writeData(res, result.status === 'pending' ? 202 : 200, result);
+        const status = 'status' in result ? result.status : result.state;
+        writeData(res, status === 'pending' ? 202 : 200, { ...result, status });
         return true;
       }
       if (resource === 'pairing' && segments[1] === 'requests' && segments.length === 4
@@ -924,7 +1045,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           authenticationSessionId: principal.sessionId,
           invitationSessionId: principal.invitationSessionId,
           profileId: profile.profileId,
-          deviceId: profile.deviceId,
+          deviceId: requiredString(profile.deviceId, 'deviceId', 128),
           selectionRevision: profile.selectionRevision,
           mediaId,
           sourceId: source.sourceId,
@@ -946,6 +1067,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const principal = await requirePrincipal(req, 'stream');
         const castSessionId = decodeSegment(segments[2], 'castSessionId');
         const record = castSessions.read(castSessionId);
+        if (!record) throw requestError(404, 'not_found', 'Cast session was not found.');
         await requireLiveCastBinding(req, principal, record);
         if (req.method === 'DELETE') {
           castSessions.remove(castSessionId);
@@ -960,9 +1082,10 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         if (!renewed) throw requestError(401, 'playback_session_invalid', 'The cast capability expired or was revoked.');
         const updated = castSessions.update(castSessionId, {
           state: optionalString(body.state, 'state', 16),
-          positionSeconds: body.positionSeconds,
+          positionSeconds: optionalNumber(body.positionSeconds, 'positionSeconds'),
         });
-        remotePolicy.audit('cast.session.update', 'updated', req.__loomRemoteContext, principal, { castSessionId, transport: record.transport });
+        if (!updated) throw requestError(404, 'not_found', 'Cast session was not found.');
+        remotePolicy.audit('cast.session.update', 'allowed', req.__loomRemoteContext, principal, { castSessionId, transport: record.transport });
         writeData(res, 200, {
           session: updated.session,
           mediaUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(record.mediaId)}/direct?token=${encodeURIComponent(renewed.token)}`,
@@ -998,7 +1121,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
         const body = await readJsonBody(req);
         const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
-        if (!['bearer','cookie'].includes(sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
+        if (!['bearer','cookie'].some((mode) => mode === sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
         if (sessionMode === 'cookie' && (!isSecureRequest(req) || !sameOriginRequest(req))) {
           throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require same-origin HTTPS.');
         }
@@ -1026,13 +1149,13 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         // The owner should land on a library, not on an empty profile chooser.
         let defaultProfile = null;
         try {
-          defaultProfile = await clientState.createProfile({ name }, result.user?.id);
+          if (result.user?.id) defaultProfile = await clientState.createProfile({ name }, result.user.id);
         } catch (error) {
-          if (error?.code !== 'profile_exists') {
+          if (errorDetails(error).code !== 'profile_exists') {
             await service.appendOperationalLog?.('warn', 'The default owner profile could not be created during setup.');
           }
         }
-        remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, result.user || null);
+        remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, auditPrincipal(result.user));
         const data = {
           user: result.user,
           expiresAt: result.expiresAt,
@@ -1057,10 +1180,10 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const principal = await requirePrincipal(req, 'library.manage');
         const body = await readJsonBody(req);
         const requested = requiredString(body.path, 'path', 4_096);
-        const kind = ['movies', 'tvShows', 'anime', 'others'].includes(body.kind) ? body.kind : 'others';
+        const kind = ['movies', 'tvShows', 'anime', 'others'].some((kind) => kind === body.kind) ? body.kind : 'others';
         const inspection = await inspectSetupFolder(path.resolve(requested));
         if (!inspection.accessible && body.allowUnavailable !== true) {
-          writeJson(res, 409, { ok: false, error: { code: 'folder_unavailable', message: inspection.message, ...inspection } });
+          writeJson(res, 409, { ok: false, error: { code: 'folder_unavailable', ...inspection } });
           return true;
         }
         const root = await service.addLibraryRoot({ path: requested, kind }, principal);
@@ -1130,7 +1253,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const body = await readJsonBody(req);
         const skipped = body.skip === true;
         const supportedProviders = ['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'];
-        const suppliedKeys = body.keys && typeof body.keys === 'object' && !Array.isArray(body.keys) ? body.keys : {};
+        const suppliedKeys = isObject(body.keys) ? body.keys : {};
         const keys = skipped ? {} : Object.fromEntries(supportedProviders.flatMap((provider) => {
           const value = provider === 'tmdb' && suppliedKeys[provider] === undefined ? body.apiKey : suppliedKeys[provider];
           const key = optionalString(value, `${provider}ApiKey`, 512);
@@ -1140,9 +1263,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           for (const [provider, apiKey] of Object.entries(keys)) {
             const verdict = await testSetupMetadata(provider, apiKey);
             if (!verdict.ok) {
-              const error = requestError(400, verdict.code, verdict.message);
-              error.provider = provider;
-              throw error;
+              throw Object.assign(requestError(400, verdict.code || 'invalid_key', verdict.message), { provider });
             }
           }
         }
@@ -1167,7 +1288,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const provider = optionalString(body.provider, 'provider', 32) || 'tmdb';
         if (!['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].includes(provider)) throw requestError(400, 'invalid_request', 'Unknown metadata provider.');
         const verdict = await testSetupMetadata(provider, requiredString(body.apiKey, 'apiKey', 512));
-        if (!verdict.ok) throw requestError(400, verdict.code, verdict.message);
+        if (!verdict.ok) throw requestError(400, verdict.code || 'invalid_key', verdict.message);
         writeData(res, 200, verdict);
         return true;
       }
@@ -1182,8 +1303,14 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       if (resource === 'setup' && segments[1] === 'complete' && segments.length === 2 && req.method === 'POST') {
         const setup = requireSetupService();
         const principal = await requirePrincipal(req, 'library.manage');
-        const body = await readJsonBody(req).catch(() => ({}));
+        const body = await readJsonBody(req).catch(() => /** @type {Record<string, unknown>} */ ({}));
         const roots = await service.listLibraryRoots(principal);
+        const setupRoots = roots.map((root) => {
+          if (!isLibraryRootKind(root.kind)) {
+            throw requestError(500, 'invalid_library_state', 'A saved library root has an invalid kind.');
+          }
+          return { id: root.id, path: root.path, kind: root.kind, state: root.state };
+        });
         let scan = null;
         if (roots.some((root) => root.state === 'online')) {
           scan = await service.startLibraryScan({ mode: 'quick' }, principal).catch(() => null);
@@ -1191,7 +1318,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const record = setup.read();
         const desktopCompletion = typeof setupHooks.complete === 'function'
           ? Promise.resolve(setupHooks.complete({
-            roots,
+            roots: setupRoots,
             ownerName: record.ownerName,
             serverName: record.serverName,
             language: record.language,
@@ -1217,7 +1344,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
         const body = await readJsonBody(req);
         const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
-        if (!['bearer','cookie'].includes(sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
+        if (!['bearer','cookie'].some((mode) => mode === sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
         if (sessionMode === 'cookie' && (!isSecureRequest(req) || !sameOriginRequest(req))) {
           throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require same-origin HTTPS.');
         }
@@ -1227,7 +1354,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           ...(requireBootstrapSecret ? { bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024) } : { trustedChannel: true }),
           address: proxyPolicy.clientAddress(req),
         });
-        remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, result.user || null);
+        remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, auditPrincipal(result.user));
         if (sessionMode === 'cookie') {
           const csrfToken = randomBytes(32).toString('base64url');
           const { adminToken, ...safeResult } = result;
@@ -1238,7 +1365,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       if (resource === 'auth' && segments[1] === 'session' && req.method === 'POST') {
         const body = await readJsonBody(req);
         const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
-        if (!['bearer','cookie'].includes(sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
+        if (!['bearer','cookie'].some((mode) => mode === sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
         if (sessionMode === 'cookie' && (!isSecureRequest(req) || !sameOriginRequest(req))) {
           throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require same-origin HTTPS.');
         }
@@ -1248,7 +1375,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           address: proxyPolicy.clientAddress(req),
           deviceId: optionalString(req.headers['x-loom-device-id'], 'deviceId', 128),
         });
-        remotePolicy.audit('auth.session.create', 'created', req.__loomRemoteContext, result.user || null);
+        remotePolicy.audit('auth.session.create', 'created', req.__loomRemoteContext, auditPrincipal(result.user));
         if (sessionMode === 'cookie') {
           const csrfToken = randomBytes(32).toString('base64url');
           const { adminToken, ...safeResult } = result;
@@ -1259,13 +1386,14 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       if (resource === 'auth' && segments[1] === 'session' && req.method === 'DELETE') {
         const principal = await requirePrincipal(req);
         if (principal.authentication === 'device-credential') {
+          if (!principal.deviceId) throw requestError(401, 'auth_required', 'The device credential has no device identity.');
           await pairingService.revokeSelf(principal.deviceId, principal, 'device_signed_out');
           await service.revokeDeviceSessions?.(principal.deviceId, 'device_signed_out');
           await clientState.revokeDeviceAccess?.(principal.deviceId);
           await mediaService.revokeDevice?.(principal.deviceId, 'device_signed_out');
         } else if (principal.authentication === 'account-session' || principal.authentication === 'device-session') {
           const revokeRequest = req.__loomCookieSessionToken
-            ? { ...req, headers: { ...req.headers, authorization: `Bearer ${req.__loomCookieSessionToken}` } }
+            ? requestWithAuthorization(req, `Bearer ${req.__loomCookieSessionToken}`)
             : req;
           await service.revokeRequest(revokeRequest);
           if (principal.sessionId) {
@@ -1329,6 +1457,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const principal = await requirePrincipal(req, 'library.read');
         const items = await profileVisibleItems(principal, req);
         const canonicalSeries = new Map(items.filter((item) => item.kind === 'series').map((item) => [item.id, item]));
+        /** @type {Map<string, { id: string | null, title: string, animeLikely: boolean, seasons: Map<number, { season: number, episodes: import('./public-catalog.js').PublicCatalogItem[] }> }>} */
         const seriesByKey = new Map();
         for (const item of items) {
           if (item.kind !== 'episode' || !item.series?.title) continue;
@@ -1394,7 +1523,9 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         if (req.method === 'GET') writeData(res, 200, await service.getScanStatus(principal));
         else {
           const body = await readJsonBody(req);
-          writeData(res, 202, await service.startLibraryScan({ mode: body.mode, rootId: body.rootId }, principal));
+          const mode = optionalString(body.mode, 'mode', 32);
+          const rootId = optionalString(body.rootId, 'rootId', 128);
+          writeData(res, 202, await service.startLibraryScan({ mode, rootId }, principal));
         }
         return true;
       }
@@ -1403,7 +1534,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const item = await service.getLibraryItem(decodeSegment(segments[1], 'mediaId'), principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
         try { await playbackProfileContext(principal, req, item); } catch (error) {
-          if (error?.code === 'permission_denied') throw requestError(404, 'media_not_found', 'Media item was not found.');
+          if (errorDetails(error).code === 'permission_denied') throw requestError(404, 'media_not_found', 'Media item was not found.');
           throw error;
         }
         writeData(res, 200, { item: publicLibraryItem(item) });
@@ -1421,7 +1552,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         return true;
       }
       if (resource === 'profiles' && segments[1] === 'selection' && segments.length === 2
-        && ['GET','PATCH','DELETE'].includes(req.method)) {
+        && ['GET','PATCH','DELETE'].includes(req.method || '')) {
         const principal = await requirePrincipal(req);
         const deviceId = deviceIdForRequest(req, principal);
         let selection;
@@ -1441,7 +1572,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         writeData(res, 200, { selection: await clientState.lockActiveProfile(principal.id, deviceIdForRequest(req, principal)) });
         return true;
       }
-      if (resource === 'profiles' && segments.length === 2 && ['PATCH','DELETE'].includes(req.method)) {
+      if (resource === 'profiles' && segments.length === 2 && ['PATCH','DELETE'].includes(req.method || '')) {
         const principal = await requirePrincipal(req);
         const profileId = decodeSegment(segments[1], 'profileId');
         if (req.method === 'DELETE') {
@@ -1473,7 +1604,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         return true;
       }
       if (resource === 'profiles' && segments.length === 3 && segments[2] === 'preferences'
-        && ['GET','PATCH'].includes(req.method)) {
+        && ['GET','PATCH'].includes(req.method || '')) {
         const principal = await requirePrincipal(req);
         const profileId = decodeSegment(segments[1], 'profileId');
         await requireSelectedProfile(principal, req, profileId);
@@ -1488,13 +1619,13 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const profileId = decodeSegment(segments[1], 'profileId');
         await requireSelectedProfile(principal, req, profileId);
         if (segments.length === 3 && req.method === 'GET') {
-          const kind = url.searchParams.get('kind') || undefined;
+          const kind = url.searchParams.get('kind') || '';
           const entries = await clientState.getProfileLists(profileId, kind, principal.id, false);
           const visibleIds = new Set((await profileVisibleItems(principal, req)).map((item) => item.id));
           writeData(res, 200, { entries: entries.filter((entry) => visibleIds.has(entry.mediaId)) });
           return true;
         }
-        if (segments.length === 5 && ['PUT','DELETE'].includes(req.method)) {
+        if (segments.length === 5 && ['PUT','DELETE'].includes(req.method || '')) {
           const kind = decodeSegment(segments[3], 'kind');
           const mediaId = decodeSegment(segments[4], 'mediaId');
           if (req.method === 'PUT') {
@@ -1508,7 +1639,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         }
       }
       if (resource === 'profiles' && segments.length === 4 && segments[2] === 'track-preferences'
-        && ['GET','PUT'].includes(req.method)) {
+        && ['GET','PUT'].includes(req.method || '')) {
         const principal = await requirePrincipal(req);
         const profileId = decodeSegment(segments[1], 'profileId');
         const scope = decodeSegment(segments[3], 'scope');
@@ -1544,8 +1675,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const mediaId = decodeSegment(segments[1], 'mediaId');
         const item = await service.getLibraryItem(mediaId, principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
-        const deviceId = deviceIdForRequest(req, principal);
-        const profileContext = await playbackProfileContext(principal, req, item);
+        await playbackProfileContext(principal, req, item);
         writeData(res, 200, {
           item: publicLibraryItem(item),
           playbackPlanUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/playback-plan`,
@@ -1573,6 +1703,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           subtitleTrackId: body.subtitleTrackId === null ? null : optionalString(body.subtitleTrackId, 'subtitleTrackId', 128),
           startSeconds: Number.isFinite(body.startSeconds) ? Math.max(0, Number(body.startSeconds)) : 0,
         }, principal, profileContext);
+        /** @param {string | null | undefined} token */
         const tokenQuery = (token) => token ? `?token=${encodeURIComponent(token)}` : '';
         const boundProfileContext = bindAuthenticationSession({
           ...profileContext, sourceId: plan.sourceId, fileId: sourceIdentity.fileId,
@@ -1587,7 +1718,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const directToken = directLease?.token || null;
         const transcodePlan = plan.sourceAction === 'transcode'
           ? mediaService.issueTranscodePlan(mediaId, principal.id, plan, probe, {
-            startSeconds: body.startSeconds,
+            startSeconds: optionalNumber(body.startSeconds, 'startSeconds'),
             externalSubtitle,
           }, boundProfileContext, sourceIdentity)
           : null;
@@ -1640,8 +1771,8 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         }
         const permission = 'stream';
         const hasAuthenticatedBearer = Boolean(req.headers.authorization || req.headers['x-loom-admin-token']);
-        const sessionIdentifier = url.searchParams.get('sessionId') || body.sessionId;
-        let capabilityToken = url.searchParams.get('token') || body.token;
+        const sessionIdentifier = url.searchParams.get('sessionId') || optionalString(body.sessionId, 'sessionId', 512);
+        let capabilityToken = url.searchParams.get('token') || optionalString(body.token, 'token', 512);
         let principal = null;
         if (hasAuthenticatedBearer) {
           try {
@@ -1649,7 +1780,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           } catch (error) {
             if (!capabilityToken) capabilityToken = req.headers.authorization?.startsWith('Bearer ')
               ? req.headers.authorization.slice(7).trim()
-              : req.headers['x-loom-admin-token'];
+              : optionalString(req.headers['x-loom-admin-token'], 'token', 512);
             if (!capabilityToken) throw error;
           }
         }
@@ -1673,7 +1804,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
             : {
               directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery}`,
               ...(renewed.profile?.externalSubtitleTrackId ? {
-                subtitleUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/subtitles/${encodeURIComponent(renewed.profile.externalSubtitleTrackId)}${tokenQuery}`,
+                subtitleUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/subtitles/${encodeURIComponent(requiredString(renewed.profile.externalSubtitleTrackId, 'subtitleTrackId', 128))}${tokenQuery}`,
               } : {}),
             }),
         });
@@ -1683,8 +1814,8 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const mediaId = decodeSegment(segments[1], 'mediaId');
         const body = await readJsonBody(req);
         const hasAuthenticatedBearer = Boolean(req.headers.authorization || req.headers['x-loom-admin-token']);
-        const sessionIdentifier = url.searchParams.get('sessionId') || body.sessionId;
-        let capabilityToken = url.searchParams.get('token') || body.token;
+        const sessionIdentifier = url.searchParams.get('sessionId') || optionalString(body.sessionId, 'sessionId', 512);
+        let capabilityToken = url.searchParams.get('token') || optionalString(body.token, 'token', 512);
         let principal = null;
         if (hasAuthenticatedBearer) {
           try {
@@ -1692,7 +1823,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           } catch (error) {
             if (!capabilityToken) capabilityToken = req.headers.authorization?.startsWith('Bearer ')
               ? req.headers.authorization.slice(7).trim()
-              : req.headers['x-loom-admin-token'];
+              : optionalString(req.headers['x-loom-admin-token'], 'token', 512);
             if (!capabilityToken) throw error;
           }
         }
@@ -1808,15 +1939,16 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       return true;
     } catch (error) {
       if (res.destroyed) return true;
+      const details = errorDetails(error);
       const { status, code } = canonicalPublicError(error);
       if (resource === 'auth' || resource === 'pairing' || resource === 'devices') {
         remotePolicy.audit(`api.${resource}`, 'failed', req.__loomRemoteContext, null, { code, status });
       }
-      const message = error?.code === 'setup_scan_timeout'
+      const message = details.code === 'setup_scan_timeout'
         ? 'The library is still scanning. Check scan status and retry setup completion.'
-        : status >= 500 ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.';
-      const retryAfterSeconds = Number.isFinite(error?.retryAfter)
-        ? Math.max(1, Math.ceil(error.retryAfter))
+        : status >= 500 ? 'The hosted API request could not be completed.' : details.message || 'The request was rejected.';
+      const retryAfterSeconds = typeof details.retryAfter === 'number' && Number.isFinite(details.retryAfter)
+        ? Math.max(1, Math.ceil(details.retryAfter))
         : undefined;
       writeError(
         res,
@@ -1824,8 +1956,8 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         code,
         message,
         {
-          ...(error?.retryable !== undefined ? { retryable: error.retryable === true } : {}),
-          ...(error?.provider ? { provider: error.provider } : {}),
+          ...(details.retryable !== undefined ? { retryable: details.retryable } : {}),
+          ...(details.provider ? { provider: details.provider } : {}),
           ...(retryAfterSeconds ? { retryAfterMs: retryAfterSeconds * 1_000 } : {}),
         },
         retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {},

@@ -15,10 +15,12 @@ import { isIP } from 'node:net';
 export const DESKTOP_SETUP_HEADER = 'x-loomtv-desktop-setup';
 const MIN_TOKEN_BYTES = 32;
 
+/** @param {unknown} value */
 function digest(value) {
   return createHash('sha256').update(String(value ?? ''), 'utf8').digest();
 }
 
+/** @param {unknown} value */
 function isLoopbackAddress(value) {
   const address = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   if (address === 'localhost' || address === '::1' || address === '::ffff:127.0.0.1') return true;
@@ -26,6 +28,7 @@ function isLoopbackAddress(value) {
   return false;
 }
 
+/** @param {{ token?: string, clientAddress?: (req: import('node:http').IncomingMessage) => string }} options */
 export function createDesktopSetupChannel({ token, clientAddress } = {}) {
   const configured = typeof token === 'string' && Buffer.byteLength(token.trim()) >= MIN_TOKEN_BYTES
     ? token.trim()
@@ -35,6 +38,7 @@ export function createDesktopSetupChannel({ token, clientAddress } = {}) {
       code: 'desktop_setup_token_invalid',
     });
   }
+  /** @type {(req: import('node:http').IncomingMessage) => string} */
   const addressOf = typeof clientAddress === 'function'
     ? clientAddress
     : (req) => req?.socket?.remoteAddress || '';
@@ -43,7 +47,9 @@ export function createDesktopSetupChannel({ token, clientAddress } = {}) {
     get enabled() {
       return Boolean(configured);
     },
-    /** True only for a loopback request carrying this run's desktop token. */
+    /** True only for a loopback request carrying this run's desktop token.
+     * @param {import('node:http').IncomingMessage | null | undefined} req
+     */
     isTrustedRequest(req) {
       if (!configured || !req) return false;
       const presented = Array.isArray(req.headers?.[DESKTOP_SETUP_HEADER])

@@ -9,8 +9,11 @@ type GatewayDependencies = {
 };
 
 const TMDB_PATH_PATTERN = /^[a-z0-9_/-]+$/i;
+const JIKAN_PATHS = new Set(['anime', 'genres/anime', 'seasons/now', 'top/anime']);
+const TVMAZE_PATHS = new Set(['schedule', 'schedule/web', 'search/shows']);
 const finiteNumber = z.number().finite();
 export const metadataProviderRequestSchema: z.ZodType<MetadataProviderRequest> = z.discriminatedUnion('provider', [
+  z.object({ provider: z.literal('cinemeta'), path: z.string().min(1).max(4000) }),
   z.object({
     provider: z.literal('omdb'),
     query: z.record(z.string(), z.union([z.string(), finiteNumber, z.boolean()])),
@@ -24,6 +27,16 @@ export const metadataProviderRequestSchema: z.ZodType<MetadataProviderRequest> =
     provider: z.literal('anilist'),
     query: z.string().trim().min(1).max(30_000),
     variables: z.record(z.string(), z.unknown()).optional(),
+  }),
+  z.object({
+    provider: z.literal('jikan'),
+    path: z.string().trim().min(1).max(64),
+    query: z.record(z.string(), z.union([z.string(), finiteNumber, z.boolean()])).optional(),
+  }),
+  z.object({
+    provider: z.literal('tvmaze'),
+    path: z.string().trim().min(1).max(64),
+    query: z.record(z.string(), z.union([z.string(), finiteNumber, z.boolean()])).optional(),
   }),
 ]);
 
@@ -45,6 +58,7 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
       throw new Error('Metadata offline mode is enabled. Turn it off to contact metadata providers.');
     }
     if (request.provider === 'anilist') {
+      // GraphQL requests use the provider's fixed endpoint below.
       const response = await safeFetch('https://graphql.anilist.co', {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -58,6 +72,18 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
       return responseJson(response, 'AniList');
     }
 
+    if (request.provider === 'cinemeta') {
+      if (!/^(?:manifest\.json|catalog\/(?:movie|series)\/(?:top|year|imdbRating)(?:\/[^/?#]+)?\.json)$/.test(request.path)
+        || request.path.includes('..')) throw new Error('Cinemeta path is not allowed.');
+      const response = await safeFetch(`https://v3-cinemeta.strem.io/${request.path}`, {
+        headers: { accept: 'application/json' },
+      }, {
+        allowedHosts: ['v3-cinemeta.strem.io'], maxBytes: 4 * 1024 * 1024,
+        retries: 2, provider: 'cinemeta', operation: 'metadata.cinemeta.catalog',
+      });
+      return responseJson(response, 'Cinemeta');
+    }
+
     if (request.provider === 'omdb') {
       const apiKey = deps.getMetadataApiKey(settings, 'omdb');
       if (!apiKey) throw new Error('OMDb API key is missing.');
@@ -69,6 +95,34 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
         operation: 'metadata.omdb.lookup',
       });
       return responseJson(response, 'OMDb');
+    }
+
+    if (request.provider === 'jikan') {
+      if (!JIKAN_PATHS.has(request.path)) throw new Error('Jikan path is not allowed.');
+      const url = queryUrl(`https://api.jikan.moe/v4/${request.path}`, request.query);
+      const response = await safeFetch(url, { headers: { accept: 'application/json' } }, {
+        allowedHosts: ['api.jikan.moe'],
+        maxBytes: 4 * 1024 * 1024,
+        retries: 2,
+        provider: 'jikan',
+        operation: `metadata.jikan.${request.path.replaceAll('/', '.')}`,
+      });
+      return responseJson(response, 'Jikan');
+    }
+
+    if (request.provider === 'tvmaze') {
+      if (!TVMAZE_PATHS.has(request.path)) throw new Error('TVmaze path is not allowed.');
+      const url = queryUrl(`https://api.tvmaze.com/${request.path}`, request.query);
+      const response = await safeFetch(url, {
+        headers: { accept: 'application/json', 'user-agent': 'LoomTV/desktop' },
+      }, {
+        allowedHosts: ['api.tvmaze.com'],
+        maxBytes: 4 * 1024 * 1024,
+        retries: 2,
+        provider: 'tvmaze',
+        operation: `metadata.tvmaze.${request.path.replaceAll('/', '.')}`,
+      });
+      return responseJson(response, 'TVmaze');
     }
 
     if (!TMDB_PATH_PATTERN.test(request.path) || request.path.includes('..')) {

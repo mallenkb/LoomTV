@@ -31,7 +31,7 @@ const approvedPlaybackHookSet = new Set(APPROVED_PLAYBACK_PROVIDER_HOOKS);
 const fullSemVerPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 const stableSemVerPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const pluginIdPattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
-const controlCharacterPattern = /[\u0000-\u001f\u007f]/;
+const controlCharacterPattern = /[^\x20-\x7e\u0080-\uffff]/;
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

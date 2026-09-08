@@ -8,6 +8,7 @@ import { probeTranscodeCapabilities } from '@loom-media-server/transcode-capabil
 
 const execFileAsync = promisify(execFile);
 
+/** @param {string | null | undefined} candidate */
 function existingExecutable(candidate) {
   if (!candidate) return null;
   try {
@@ -17,6 +18,7 @@ function existingExecutable(candidate) {
   }
 }
 
+/** @param {string | undefined} configuredPath */
 function resolveFfmpeg(configuredPath) {
   const explicit = existingExecutable(configuredPath || process.env.LOOMTV_FFMPEG_PATH || process.env.FFMPEG_PATH);
   if (explicit) return explicit;
@@ -32,6 +34,7 @@ function resolveFfmpeg(configuredPath) {
   }
 }
 
+/** @param {string | undefined} configuredPath @param {string | null} ffmpegPath */
 function resolveFfprobe(configuredPath, ffmpegPath) {
   const explicit = existingExecutable(configuredPath || process.env.LOOMTV_FFPROBE_PATH || process.env.FFPROBE_PATH);
   if (explicit) return explicit;
@@ -52,15 +55,18 @@ function resolveFfprobe(configuredPath, ffmpegPath) {
   }
 }
 
+/** @param {{ ffmpegPath?: string, ffprobePath?: string }} options */
 export function createHeadlessTranscoder(options = {}) {
   const ffmpegPath = resolveFfmpeg(options.ffmpegPath);
   const ffprobePath = resolveFfprobe(options.ffprobePath, ffmpegPath);
+  /** @type {import('@loom-media-server/transcode-capabilities').TranscodeCapabilities | undefined} */
   let lastProbe;
   let lastProbeAt = 0;
 
   return {
     path: ffmpegPath,
     probePath: ffprobePath,
+    /** @param {string} filePath @param {{ sourceId?: string, signal?: AbortSignal }} options */
     async probeMedia(filePath, { sourceId = 'primary', signal } = {}) {
       if (!ffprobePath) throw Object.assign(new Error('FFprobe is not available on this host.'), {
         code: 'media_probe_unavailable', status: 503, retryable: true,
@@ -71,11 +77,11 @@ export function createHeadlessTranscoder(options = {}) {
         });
         return parseFfprobeMediaProbe(stdout, { sourceId });
       } catch (error) {
-        if (error?.code === 'media_probe_invalid') throw error;
-        if (error?.name === 'AbortError') throw Object.assign(new Error('The media probe was cancelled.'), {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'media_probe_invalid') throw error;
+        if (error instanceof Error && error.name === 'AbortError') throw Object.assign(new Error('The media probe was cancelled.', { cause: error }), {
           code: 'operation_cancelled', status: 503, retryable: true,
         });
-        throw Object.assign(new Error('The selected media source could not be probed.'), {
+        throw Object.assign(new Error('The selected media source could not be probed.', { cause: error }), {
           code: 'media_probe_failed', status: 422, retryable: false,
         });
       }

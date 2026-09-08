@@ -41,7 +41,12 @@ const CANONICAL_RESTORE_DELETE_ORDER = Object.freeze([
 ]);
 const CANONICAL_TRANSIENT_TABLES = CANONICAL_BACKUP_TRANSIENT_TABLES;
 
+/** @param {unknown} value */
 const json = (value) => JSON.stringify(value ?? null);
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) { return value !== null && typeof value === 'object'; }
+/** @template [T=Record<string, unknown>] @param {unknown} value @param {string} field @returns {T} */
 function parseRequiredJson(value, field) {
   if (typeof value !== 'string') throw codedError('canonical_state_invalid', `Canonical ${field} JSON is missing.`);
   try { return JSON.parse(value); } catch {
@@ -49,14 +54,17 @@ function parseRequiredJson(value, field) {
   }
 }
 
+/** @template T @param {Record<string, import("node:sqlite").SQLOutputValue> | undefined} row @param {T} fallback @param {string} field @returns {T} */
 function parseOptionalRowJson(row, fallback, field) {
   return row ? parseRequiredJson(row.payload_json, field) : fallback;
 }
 
+/** @param {string} code @param {string} message @param {Record<string, unknown>} [details] */
 function codedError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, ...details });
 }
 
+/** @template T @param {DatabaseSync} database @param {() => T} operation @returns {T} */
 function inTransaction(database, operation) {
   database.exec('BEGIN IMMEDIATE');
   try {
@@ -69,10 +77,12 @@ function inTransaction(database, operation) {
   }
 }
 
+/** @param {object} item @param {Set<string>} authoritative */
 function extensionFrom(item, authoritative) {
   return Object.fromEntries(Object.entries(item || {}).filter(([key]) => !authoritative.has(key)));
 }
 
+/** @param {DatabaseSync} database */
 function initializeSchema(database) {
   database.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   database.exec(`
@@ -240,6 +250,7 @@ function initializeSchema(database) {
   database.prepare('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)').run('schema_version', String(CANONICAL_SCHEMA_VERSION));
 }
 
+/** @param {DatabaseSync} database */
 function ensureRemoteSchema(database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS remote_policy (
@@ -300,12 +311,14 @@ function ensureRemoteSchema(database) {
   `);
 }
 
+/** @param {DatabaseSync} database @param {string} table @param {string} name @param {string} declaration */
 function addColumnIfMissing(database, table, name, declaration) {
-  if (!database.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === name)) {
+  if (!/** @type {Array<{name: string}>} */ (database.prepare(`PRAGMA table_info(${table})`).all()).some((row) => row.name === name)) {
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
   }
 }
 
+/** @param {DatabaseSync} database */
 function ensureRuntimeSchema(database) {
   addColumnIfMissing(database, 'devices', 'permissions_json', "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(database, 'devices', 'certificate_fingerprint', 'TEXT');
@@ -339,8 +352,9 @@ function ensureRuntimeSchema(database) {
   ensureRemoteSchema(database);
 }
 
+/** @param {DatabaseSync} database @returns {import('./server-state-types.js').MigrationMarker | null} */
 function migrationMarker(database) {
-  const row = database.prepare("SELECT * FROM migration_markers WHERE state='committed'").get();
+  const row = /** @type {(import('./server-state-types.js').SqlRows['migration_markers']) | undefined} */ (database.prepare("SELECT * FROM migration_markers WHERE state='committed'").get());
   if (!row) return null;
   return {
     id: row.id, format: row.format, schemaVersion: Number(row.schema_version), sourceFingerprint: row.source_fingerprint,
@@ -355,6 +369,7 @@ function migrationMarker(database) {
   };
 }
 
+/** @param {DatabaseSync} database */
 function verifyOpenDatabase(database) {
   const integrity = database.prepare('PRAGMA quick_check').get();
   if (integrity?.quick_check !== 'ok') throw codedError('canonical_state_invalid', 'Canonical state failed its integrity check.');
@@ -369,6 +384,7 @@ function verifyOpenDatabase(database) {
   return marker;
 }
 
+/** @param {DatabaseSync} database @param {import('./server-state-types.js').StoredAccount} account @param {'owner'|'user'} accountType */
 function upsertAccount(database, account, accountType) {
   database.prepare(`INSERT INTO accounts(
     id,name,account_type,role,permissions_json,root_ids_json,device_ids_json,max_sessions,disabled,created_at,updated_at
@@ -376,7 +392,7 @@ function upsertAccount(database, account, accountType) {
     name=excluded.name,account_type=excluded.account_type,role=excluded.role,permissions_json=excluded.permissions_json,
     root_ids_json=excluded.root_ids_json,device_ids_json=excluded.device_ids_json,max_sessions=excluded.max_sessions,
     disabled=excluded.disabled,updated_at=excluded.updated_at`).run(
-    account.id, account.name, accountType, accountType === 'owner' ? 'owner' : account.role,
+    account.id, account.name, accountType, accountType === 'owner' ? 'owner' : account.role ?? null,
     json(accountType === 'owner' ? ['*'] : account.permissions || []),
     accountType === 'owner' || account.rootIds === null ? null : json(account.rootIds || []),
     accountType === 'owner' || account.deviceIds === null ? null : json(account.deviceIds || []),
@@ -390,8 +406,9 @@ function upsertAccount(database, account, accountType) {
     .run(account.id, account.salt, account.hash, Number(account.updatedAt) || Date.now());
 }
 
+/** @param {DatabaseSync} database @param {Partial<import('./server-state-types.js').AdminState>} state */
 function replaceAdminState(database, state) {
-  const currentOwnerId = database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get()?.account_id;
+  const currentOwnerId = /** @type {(import('./server-state-types.js').SqlRows['owner_account']) | undefined} */ (database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get())?.account_id;
   if (currentOwnerId && state.owner?.id && currentOwnerId !== state.owner.id) {
     throw codedError('owner_identity_change_forbidden', 'A restore cannot replace the configured owner identity.');
   }
@@ -400,11 +417,11 @@ function replaceAdminState(database, state) {
     upsertAccount(database, state.owner, 'owner');
     desiredAccounts.add(state.owner.id);
     database.prepare('INSERT INTO owner_account(singleton,account_id) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET account_id=excluded.account_id').run(state.owner.id);
-  } else if (database.prepare('SELECT 1 FROM owner_account').get()) {
+  } else if (/** @type {(import('./server-state-types.js').SqlRows['owner_account']) | undefined} */ (database.prepare('SELECT 1 FROM owner_account').get())) {
     throw codedError('owner_required', 'A configured owner account cannot be removed.');
   }
   for (const user of state.users || []) { upsertAccount(database, user, 'user'); desiredAccounts.add(user.id); }
-  for (const { id, account_type: type } of database.prepare('SELECT id,account_type FROM accounts').all()) {
+  for (const { id, account_type: type } of /** @type {Array<import('./server-state-types.js').SqlRows['accounts']>} */ (database.prepare('SELECT id,account_type FROM accounts').all())) {
     if (!desiredAccounts.has(id) && type !== 'owner') database.prepare('DELETE FROM accounts WHERE id=?').run(id);
   }
 
@@ -413,7 +430,7 @@ function replaceAdminState(database, state) {
     id,token_hash,account_id,device_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,revoked_at,revoked_reason
   ) VALUES(?,?,?,?,?,?,?,?,?,?)`);
   for (const session of state.sessions || []) {
-    if (!desiredAccounts.has(session.userId)) continue;
+    if (!session.userId || !desiredAccounts.has(session.userId)) continue;
     const absolute = Number(session.absoluteExpiresAt ?? session.expiresAt);
     const idle = Math.min(Number(session.idleExpiresAt ?? absolute), absolute);
     const sessionId = session.id || `legacy-${createHash('sha256').update(`session:${session.tokenHash}`).digest('hex')}`;
@@ -430,7 +447,7 @@ function replaceAdminState(database, state) {
     desiredRoots.add(root.id);
     upsertRoot.run(root.id, root.path, root.kind, root.createdAt, root.lastScanAt ?? null);
   }
-  for (const { id } of database.prepare('SELECT id FROM library_roots').all()) {
+  for (const { id } of /** @type {Array<import('./server-state-types.js').SqlRows['library_roots']>} */ (database.prepare('SELECT id FROM library_roots').all())) {
     if (!desiredRoots.has(id)) {
       database.prepare("UPDATE media_sources SET state='offline' WHERE root_id=?").run(id);
       database.prepare("UPDATE library_roots SET state='removed' WHERE id=?").run(id);
@@ -473,7 +490,9 @@ function replaceAdminState(database, state) {
   for (const entry of state.logs || []) insertLog.run(Number(entry.timestamp) || Date.now(), json(entry));
 }
 
+/** @param {import('./server-state-types.js').SqlRows['accounts'] & import('./server-state-types.js').SqlRows['account_credentials'] | undefined} row @returns {import('./server-state-types.js').StoredAccount} */
 function accountView(row) {
+  if (!row) throw codedError('canonical_state_invalid', 'A required canonical record is missing.');
   return {
     id: row.id, name: row.name, salt: row.password_salt, hash: row.password_hash,
     ...(row.account_type === 'user' ? {
@@ -486,26 +505,28 @@ function accountView(row) {
   };
 }
 
+/** @param {DatabaseSync} database @returns {import('./server-state-types.js').ReadAdminState} */
 function readAdminState(database) {
   const credentialsJoin = 'JOIN account_credentials c ON c.account_id=a.id';
-  const owner = database.prepare(`SELECT a.*,c.password_salt,c.password_hash FROM owner_account o JOIN accounts a ON a.id=o.account_id ${credentialsJoin} WHERE o.singleton=1`).get();
+  const owner = /** @type {(import('./server-state-types.js').SqlRows['accounts'] & import('./server-state-types.js').SqlRows['account_credentials']) | undefined} */ (database.prepare(`SELECT a.*,c.password_salt,c.password_hash FROM owner_account o JOIN accounts a ON a.id=o.account_id ${credentialsJoin} WHERE o.singleton=1`).get());
+  /** @type {Map<string, string[]>} */
   const legacyIdsByMedia = new Map();
-  for (const alias of database.prepare('SELECT media_id,alias FROM media_identity_aliases ORDER BY created_at').all()) {
+  for (const alias of /** @type {Array<import('./server-state-types.js').SqlRows['media_identity_aliases']>} */ (database.prepare('SELECT media_id,alias FROM media_identity_aliases ORDER BY created_at').all())) {
     const legacyIds = legacyIdsByMedia.get(alias.media_id) || [];
     legacyIds.push(alias.alias);
     legacyIdsByMedia.set(alias.media_id, legacyIds);
   }
-  const catalog = database.prepare(`SELECT c.*,s.id source_id,s.root_id,s.relative_path,s.locator,s.state source_state,
+  const catalog = /** @type {Array<import('./server-state-types.js').SqlRows['catalog_items'] & import('./server-state-types.js').SqlRows['media_sources'] & {source_id: string; source_state: 'online' | 'offline' | 'unreadable' | 'missing'}>} */ (database.prepare(`SELECT c.*,s.id source_id,s.root_id,s.relative_path,s.locator,s.state source_state,
     s.file_extension,s.size_bytes,s.modified_at_ms,s.indexed_at,s.probe_json FROM catalog_items c
     LEFT JOIN media_sources s ON s.id=(SELECT s2.id FROM media_sources s2 WHERE s2.media_id=c.id ORDER BY s2.state='online' DESC,s2.indexed_at DESC LIMIT 1)
-    ORDER BY c.title`).all().map((row) => ({
+    ORDER BY c.title`).all()).map((row) => ({
       ...parseRequiredJson(row.extension_json, 'catalog extension'), id: row.id, rootId: row.root_id, path: row.locator,
       relativePath: row.relative_path, type: row.media_type, kind: row.media_kind, title: row.title,
       ...(row.year === null ? {} : { year: Number(row.year) }), ...(row.anime_likely === 1 ? { animeLikely: true } : {}),
       ...(row.series_title ? { series: { title: row.series_title, season: row.series_season, episode: row.series_episode } } : {}),
       extension: row.file_extension, ...(row.size_bytes === null ? {} : { sizeBytes: Number(row.size_bytes) }),
       ...(row.modified_at_ms === null ? {} : { modifiedAtMs: Number(row.modified_at_ms) }),
-      ...(row.probe_json ? { localMetadata: parseRequiredJson(row.probe_json, 'media probe') } : {}),
+      ...(row.probe_json ? { localMetadata: /** @type {import('@loom-media-server/video-contracts').MediaProbe} */ (parseRequiredJson(row.probe_json, 'media probe')) } : {}),
       available: row.source_state === 'online', indexedAt: Number(row.indexed_at), sourceId: row.source_id,
       legacyIds: legacyIdsByMedia.get(row.id) || [], createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
       ...(row.series_season === null ? {} : { seasonNumber: Number(row.series_season) }),
@@ -513,28 +534,29 @@ function readAdminState(database) {
     }));
   return {
     owner: owner ? accountView(owner) : null,
-    users: database.prepare(`SELECT a.*,c.password_salt,c.password_hash FROM accounts a ${credentialsJoin} WHERE a.account_type='user' ORDER BY a.created_at`).all().map(accountView),
-    sessions: database.prepare('SELECT * FROM account_sessions ORDER BY created_at').all().map((row) => ({
+    users: /** @type {Array<import('./server-state-types.js').SqlRows['accounts'] & import('./server-state-types.js').SqlRows['account_credentials']>} */ (database.prepare(`SELECT a.*,c.password_salt,c.password_hash FROM accounts a ${credentialsJoin} WHERE a.account_type='user' ORDER BY a.created_at`).all()).map(accountView),
+    sessions: /** @type {Array<import('./server-state-types.js').SqlRows['account_sessions']>} */ (database.prepare('SELECT * FROM account_sessions ORDER BY created_at').all()).map((row) => ({
       id: row.id, tokenHash: row.token_hash, userId: row.account_id, deviceId: row.device_id, createdAt: Number(row.created_at),
       lastSeenAt: Number(row.last_seen_at), idleExpiresAt: Number(row.idle_expires_at),
       absoluteExpiresAt: Number(row.absolute_expires_at), expiresAt: Number(row.absolute_expires_at),
       ...(row.revoked_at === null ? {} : { revokedAt: Number(row.revoked_at), revokedReason: row.revoked_reason }),
     })),
-    loginAttempts: database.prepare('SELECT * FROM login_attempts ORDER BY last_attempt_at').all().map((row) => ({
+    loginAttempts: /** @type {Array<import('./server-state-types.js').SqlRows['login_attempts']>} */ (database.prepare('SELECT * FROM login_attempts ORDER BY last_attempt_at').all()).map((row) => ({
       key: row.key, failures: Number(row.failures), firstAttemptAt: Number(row.first_attempt_at),
       lastAttemptAt: Number(row.last_attempt_at), lockedUntil: Number(row.locked_until),
     })),
-    roots: database.prepare("SELECT * FROM library_roots WHERE state!='removed' ORDER BY created_at").all().map((row) => ({
+    roots: /** @type {Array<import('./server-state-types.js').SqlRows['library_roots']>} */ (database.prepare("SELECT * FROM library_roots WHERE state!='removed' ORDER BY created_at").all()).map((row) => ({
       id: row.id, path: row.locator, kind: row.kind, createdAt: Number(row.created_at),
       ...(row.last_scan_at === null ? {} : { lastScanAt: Number(row.last_scan_at) }),
     })),
     catalog, profiles: [], watchState: {},
-    scan: parseOptionalRowJson(database.prepare('SELECT payload_json FROM scan_state WHERE singleton=1').get(), { state: 'idle' }, 'scan state'),
-    backup: parseOptionalRowJson(database.prepare('SELECT payload_json FROM backup_state WHERE singleton=1').get(), { state: 'never' }, 'backup state'),
-    logs: database.prepare('SELECT payload_json FROM operational_logs ORDER BY sequence').all().map((row) => parseRequiredJson(row.payload_json, 'operational log')),
+    scan: parseOptionalRowJson(/** @type {(import('./server-state-types.js').SqlRows['scan_state']) | undefined} */ (database.prepare('SELECT payload_json FROM scan_state WHERE singleton=1').get()), { state: 'idle' }, 'scan state'),
+    backup: parseOptionalRowJson(/** @type {(import('./server-state-types.js').SqlRows['backup_state']) | undefined} */ (database.prepare('SELECT payload_json FROM backup_state WHERE singleton=1').get()), { state: 'never' }, 'backup state'),
+    logs: /** @type {Array<import('./server-state-types.js').SqlRows['operational_logs']>} */ (database.prepare('SELECT payload_json FROM operational_logs ORDER BY sequence').all()).map((row) => parseRequiredJson(row.payload_json, 'operational log')),
   };
 }
 
+/** @param {DatabaseSync} database @param {Partial<import('./server-state-types.js').ClientState>} state */
 function replaceClientState(database, state) {
   const managedProfiles = new Set((state.assignments || []).filter((item) => item.access === 'manage').map((item) => item.profileId));
   const unmanaged = (state.profiles || []).find((profile) => !managedProfiles.has(profile.id));
@@ -551,7 +573,7 @@ function replaceClientState(database, state) {
       profile.hasPin === true ? 1 : 0, profile.guestDeviceId || null, Number(profile.sortOrder) || 0,
       Number(profile.createdAt) || Date.now(), Number(profile.updatedAt) || Date.now(), profile.lastUsedAt ?? null);
   }
-  for (const { id } of database.prepare('SELECT id FROM profiles').all()) if (!desired.has(id)) database.prepare('DELETE FROM profiles WHERE id=?').run(id);
+  for (const { id } of /** @type {Array<import('./server-state-types.js').SqlRows['profiles']>} */ (database.prepare('SELECT id FROM profiles').all())) if (!desired.has(id)) database.prepare('DELETE FROM profiles WHERE id=?').run(id);
   database.exec(`DELETE FROM profile_credentials; DELETE FROM profile_assignments; DELETE FROM profile_selections;
     DELETE FROM watch_progress; DELETE FROM watch_history; DELETE FROM profile_preferences; DELETE FROM profile_restrictions;
     DELETE FROM profile_list_entries; DELETE FROM track_preferences;`);
@@ -581,50 +603,52 @@ function replaceClientState(database, state) {
   }
 }
 
+/** @param {DatabaseSync} database @returns {import('./server-state-types.js').ClientState} */
 function readClientState(database) {
   return {
-    profiles: database.prepare('SELECT * FROM profiles ORDER BY sort_order,created_at').all().map((row) => ({
+    profiles: /** @type {Array<import('./server-state-types.js').SqlRows['profiles']>} */ (database.prepare('SELECT * FROM profiles ORDER BY sort_order,created_at').all()).map((row) => ({
       id: row.id, name: row.name, kind: row.kind, avatarKey: row.avatar_key, colorKey: row.color_key,
       hasPin: row.has_pin === 1, isGuest: row.kind === 'guest', ...(row.guest_device_id ? { guestDeviceId: row.guest_device_id } : {}),
       sortOrder: Number(row.sort_order), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
       ...(row.last_used_at === null ? {} : { lastUsedAt: Number(row.last_used_at) }),
     })),
-    profileCredentials: database.prepare('SELECT * FROM profile_credentials').all().map((row) => ({
+    profileCredentials: /** @type {Array<import('./server-state-types.js').SqlRows['profile_credentials']>} */ (database.prepare('SELECT * FROM profile_credentials').all()).map((row) => ({
       profileId: row.profile_id, pinSalt: row.pin_salt, pinHash: row.pin_hash, pinAlgorithm: row.pin_algorithm, updatedAt: Number(row.updated_at),
     })),
-    assignments: database.prepare('SELECT * FROM profile_assignments ORDER BY created_at').all().map((row) => ({
+    assignments: /** @type {Array<import('./server-state-types.js').SqlRows['profile_assignments']>} */ (database.prepare('SELECT * FROM profile_assignments ORDER BY created_at').all()).map((row) => ({
       profileId: row.profile_id, accountId: row.account_id, access: row.access, createdAt: Number(row.created_at),
     })),
-    selections: database.prepare('SELECT * FROM profile_selections').all().map((row) => ({
+    selections: /** @type {Array<import('./server-state-types.js').SqlRows['profile_selections']>} */ (database.prepare('SELECT * FROM profile_selections').all()).map((row) => ({
       accountId: row.account_id, deviceId: row.device_id, profileId: row.profile_id, revision: Number(row.revision),
       automaticSignIn: row.automatic_sign_in === 1, ...(row.selected_at === null ? {} : { selectedAt: Number(row.selected_at) }),
     })),
-    progress: database.prepare('SELECT * FROM watch_progress').all().map((row) => ({
+    progress: /** @type {Array<import('./server-state-types.js').SqlRows['watch_progress']>} */ (database.prepare('SELECT * FROM watch_progress').all()).map((row) => ({
       profileId: row.profile_id, mediaId: row.media_id, positionSeconds: Number(row.position_seconds),
       durationSeconds: Number(row.duration_seconds), watched: row.watched === 1, updatedAt: Number(row.updated_at),
     })),
-    history: database.prepare('SELECT * FROM watch_history ORDER BY occurred_at').all().map((row) => ({
+    history: /** @type {Array<import('./server-state-types.js').SqlRows['watch_history']>} */ (database.prepare('SELECT * FROM watch_history ORDER BY occurred_at').all()).map((row) => ({
       id: row.id, profileId: row.profile_id, mediaId: row.media_id, event: row.event,
       positionSeconds: Number(row.position_seconds), occurredAt: Number(row.occurred_at),
     })),
-    profilePreferences: database.prepare('SELECT * FROM profile_preferences').all().map((row) => ({
+    profilePreferences: /** @type {Array<import('./server-state-types.js').SqlRows['profile_preferences']>} */ (database.prepare('SELECT * FROM profile_preferences').all()).map((row) => ({
       profileId: row.profile_id, preferences: parseRequiredJson(row.payload_json, 'profile preferences'), updatedAt: Number(row.updated_at),
     })),
-    profileRestrictions: database.prepare('SELECT * FROM profile_restrictions').all().map((row) => ({
+    profileRestrictions: /** @type {Array<import('./server-state-types.js').SqlRows['profile_restrictions']>} */ (database.prepare('SELECT * FROM profile_restrictions').all()).map((row) => ({
       ...parseRequiredJson(row.payload_json, 'profile restrictions'), profileId: row.profile_id,
       allowedRootIds: row.allowed_root_ids_json === null ? null : parseRequiredJson(row.allowed_root_ids_json, 'profile restriction roots'),
       revision: Number(row.revision),
     })),
-    profileListEntries: database.prepare('SELECT * FROM profile_list_entries').all().map((row) => ({
+    profileListEntries: /** @type {Array<import('./server-state-types.js').SqlRows['profile_list_entries']>} */ (database.prepare('SELECT * FROM profile_list_entries').all()).map((row) => ({
       profileId: row.profile_id, mediaId: row.media_id, kind: row.kind, createdAt: Number(row.created_at),
     })),
-    trackPreferences: database.prepare('SELECT * FROM track_preferences').all().map((row) => ({
+    trackPreferences: /** @type {Array<import('./server-state-types.js').SqlRows['track_preferences']>} */ (database.prepare('SELECT * FROM track_preferences').all()).map((row) => ({
       ...parseRequiredJson(row.payload_json, 'track preferences'), profileId: row.profile_id, scope: row.scope,
       updatedAt: Number(row.updated_at),
     })),
   };
 }
 
+/** @param {DatabaseSync} database @param {import('./server-state-types.js').CanonicalState} [state] */
 function replaceIdentityState(database, state = {}) {
   if (Array.isArray(state.mediaIdentityAliases)) {
     database.exec('DELETE FROM media_identity_aliases');
@@ -638,6 +662,7 @@ function replaceIdentityState(database, state = {}) {
   }
 }
 
+/** @param {DatabaseSync} database @param {import('./server-state-types.js').CanonicalState} [state] */
 function replaceProjectedMediaState(database, state = {}) {
   const itemFields = new Set(['id','kind','title','year','seasonNumber','episodeNumber','animeLikely','available','sourceIds','legacyIds','createdAt','updatedAt']);
   const upsertItem = database.prepare(`INSERT INTO catalog_items(
@@ -663,6 +688,7 @@ function replaceProjectedMediaState(database, state = {}) {
   );
 }
 
+/** @param {DatabaseSync} database @param {import('./server-state-types.js').CanonicalState} [state] */
 function replaceDeviceState(database, state = {}) {
   if (!Array.isArray(state.devices)) return;
   database.exec('DELETE FROM pairing_requests; DELETE FROM device_credentials; DELETE FROM devices;');
@@ -684,6 +710,7 @@ function replaceDeviceState(database, state = {}) {
   );
 }
 
+/** @param {DatabaseSync} database @param {import('./server-state-types.js').CanonicalState} state */
 function replaceAllState(database, state) {
   replaceAdminState(database, state.adminState || {});
   replaceDeviceState(database, state);
@@ -692,11 +719,13 @@ function replaceAllState(database, state) {
   replaceIdentityState(database, state);
 }
 
+/** @param {DatabaseSync} database */
 function targetCounts(database) {
   return Object.fromEntries(Object.entries(LIVE_TABLES).map(([category, table]) => [category,
-    Number(database.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count)]));
+    Number(/** @type {{count: number}} */ (database.prepare(`SELECT COUNT(*) count FROM ${table}`).get()).count)]));
 }
 
+/** @param {Record<string, number>} sourceCounts @param {Record<string, import('./legacy-state-import.js').MigrationReconciliation>} reconciliation @param {Record<string, number>} actualTargetCounts */
 function validateReconciliation(sourceCounts, reconciliation, actualTargetCounts) {
   for (const [category, sourceValue] of Object.entries(sourceCounts || {})) {
     const source = Number(sourceValue);
@@ -712,6 +741,7 @@ function validateReconciliation(sourceCounts, reconciliation, actualTargetCounts
   }
 }
 
+/** @param {string} targetPath */
 async function digestPath(targetPath) {
   const hash = createHash('sha256');
   let sizeBytes = 0;
@@ -722,12 +752,15 @@ async function digestPath(targetPath) {
   return { path: targetPath, sha256: hash.digest('hex'), sizeBytes };
 }
 
+/** @param {string} directoryPath */
 async function syncDirectory(directoryPath) {
   const directory = await fs.open(directoryPath, 'r');
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
+/** @param {import('./server-state-types.js').MigrationMarker} marker */
 async function evidenceAvailability(marker) {
+  /** @param {string | null} targetPath @param {string | null} expectedDigest @param {number | null} expectedSize */
   async function matches(targetPath, expectedDigest, expectedSize) {
     if (!targetPath) return null;
     try {
@@ -741,24 +774,28 @@ async function evidenceAvailability(marker) {
   };
 }
 
+/** @param {import('./server-state-types.js').MigrationMarker | null} marker @param {import('./server-state-types.js').EvidenceAvailability} availability */
 function redactedMarker(marker, availability) {
   if (!marker) return null;
   const { backupPath, reportPath, ...safe } = marker;
   return { ...safe, backupPath: backupPath ? '[redacted]' : null, reportPath: reportPath ? '[redacted]' : null, evidenceAvailable: availability };
 }
 
+/** @param {DatabaseSync} database @param {string} table */
 function tableColumns(database, table) {
-  const columns = database.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+  const columns = /** @type {Array<{name: string}>} */ (database.prepare(`PRAGMA table_info(${table})`).all()).map((row) => row.name);
   if (!columns.length) throw codedError('canonical_backup_incompatible', `Canonical backup table ${table} is unavailable.`);
   return columns;
 }
 
+/** @param {DatabaseSync} database @param {number} [createdAt] @returns {import('./server-state-types.js').StateSnapshot} */
 function exportCanonicalSnapshot(database, createdAt = Date.now()) {
+  /** @type {import('./server-state-types.js').StateSnapshot['tables']} */
   const tables = {};
   database.exec('BEGIN');
   try {
     for (const table of CANONICAL_BACKUP_TABLES) {
-      tables[table] = database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+      tables[table] = /** @type {Array<Record<string, string | number | null>>} */ (database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     }
     database.exec('COMMIT');
   } catch (error) {
@@ -779,6 +816,7 @@ function exportCanonicalSnapshot(database, createdAt = Date.now()) {
   };
 }
 
+/** @param {import('./server-state-types.js').StateSnapshot} snapshot @param {DatabaseSync} database */
 function validateCanonicalSnapshot(snapshot, database) {
   if (!snapshot || snapshot.format !== CANONICAL_STATE_SNAPSHOT_FORMAT
     || snapshot.version !== CANONICAL_STATE_SNAPSHOT_VERSION
@@ -797,6 +835,7 @@ function validateCanonicalSnapshot(snapshot, database) {
   if (json(tableNames) !== json([...CANONICAL_BACKUP_TABLES].sort())) {
     throw codedError('canonical_backup_incompatible', 'The canonical backup table inventory is incomplete.');
   }
+  /** @type {Record<string, string[]>} */
   const columnsByTable = {};
   for (const table of CANONICAL_BACKUP_TABLES) {
     const columns = tableColumns(database, table);
@@ -813,11 +852,14 @@ function validateCanonicalSnapshot(snapshot, database) {
   return columnsByTable;
 }
 
+/** @param {DatabaseSync} database */
 function validateCanonicalJsonState(database) {
+  /** @type {Set<string>} */
   const permissionSet = new Set(ACCOUNT_PERMISSIONS);
-  const rootIds = new Set(database.prepare('SELECT id FROM library_roots').all().map((row) => row.id));
-  const profileIds = new Set(database.prepare('SELECT id FROM profiles').all().map((row) => row.id));
-  const mediaIds = new Set(database.prepare('SELECT id FROM catalog_items').all().map((row) => row.id));
+  const rootIds = new Set(/** @type {Array<import('./server-state-types.js').SqlRows['library_roots']>} */ (database.prepare('SELECT id FROM library_roots').all()).map((row) => row.id));
+  const profileIds = new Set(/** @type {Array<import('./server-state-types.js').SqlRows['profiles']>} */ (database.prepare('SELECT id FROM profiles').all()).map((row) => row.id));
+  const mediaIds = new Set(/** @type {Array<import('./server-state-types.js').SqlRows['catalog_items']>} */ (database.prepare('SELECT id FROM catalog_items').all()).map((row) => row.id));
+  /** @param {unknown} value @param {string} field @returns {Record<string, unknown>} */
   const objectJson = (value, field) => {
     let parsed;
     try { parsed = parseRequiredJson(value, field); } catch {
@@ -828,6 +870,7 @@ function validateCanonicalJsonState(database) {
     }
     return parsed;
   };
+  /** @param {unknown} value @param {string} field @returns {unknown[]} */
   const arrayJson = (value, field) => {
     let parsed;
     try { parsed = parseRequiredJson(value, field); } catch {
@@ -836,7 +879,7 @@ function validateCanonicalJsonState(database) {
     if (!Array.isArray(parsed)) throw codedError('canonical_backup_invalid', `Canonical ${field} JSON must be an array.`);
     return parsed;
   };
-  for (const row of database.prepare('SELECT account_type,permissions_json,root_ids_json,device_ids_json FROM accounts').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['accounts']>} */ (database.prepare('SELECT account_type,permissions_json,root_ids_json,device_ids_json FROM accounts').all())) {
     const permissions = arrayJson(row.permissions_json, 'account permissions');
     const validOwnerWildcard = row.account_type === 'owner' && permissions.length === 1 && permissions[0] === '*';
     if (!validOwnerWildcard && permissions.some((value) => typeof value !== 'string' || !permissionSet.has(value))) {
@@ -849,30 +892,30 @@ function validateCanonicalJsonState(database) {
       throw codedError('canonical_backup_invalid', 'Canonical account devices are invalid.');
     }
   }
-  for (const row of database.prepare('SELECT extension_json FROM catalog_items').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['catalog_items']>} */ (database.prepare('SELECT extension_json FROM catalog_items').all())) {
     const extension = objectJson(row.extension_json, 'catalog extension');
     const authoritative = new Set(['id','rootId','path','relativePath','locator','type','kind','title','year','animeLikely','series','seriesId','seasonNumber','episodeNumber','extension','sizeBytes','modifiedAtMs','available','indexedAt','sourceId','sourceIds','legacyIds','localMetadata','createdAt','updatedAt']);
     if (Object.keys(extension).some((key) => authoritative.has(key))) {
       throw codedError('canonical_backup_invalid', 'Canonical catalog extension JSON duplicates authoritative state.');
     }
   }
-  for (const row of database.prepare('SELECT extension_json FROM media_sources').all()) objectJson(row.extension_json, 'media source extension');
-  for (const row of database.prepare('SELECT id,probe_json FROM media_sources WHERE probe_json IS NOT NULL').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['media_sources']>} */ (database.prepare('SELECT extension_json FROM media_sources').all())) objectJson(row.extension_json, 'media source extension');
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['media_sources']>} */ (database.prepare('SELECT id,probe_json FROM media_sources WHERE probe_json IS NOT NULL').all())) {
     const probe = objectJson(row.probe_json, 'media probe');
     const probeFields = new Set(['sourceId','container','durationSeconds','bitrateKbps','width','height','videoCodec','audioCodec','hdr','hdrFormat','tracks','chapters','adapterGaps','probedAt']);
     const trackFields = new Set(['id','index','kind','codec','language','title','channels','width','height','profile','pixelFormat','colorTransfer','colorPrimaries','colorSpace','frameRate','default','forced','external']);
     if (Object.keys(probe).some((key) => !probeFields.has(key))
       || probe.sourceId !== row.id || typeof probe.hdr !== 'boolean' || !Array.isArray(probe.tracks)
-      || !Number.isSafeInteger(probe.probedAt) || probe.probedAt < 0
+      || typeof probe.probedAt !== 'number' || !Number.isSafeInteger(probe.probedAt) || probe.probedAt < 0
       || probe.tracks.some((track) => !track || typeof track !== 'object' || Array.isArray(track)
         || Object.keys(track).some((key) => !trackFields.has(key))
         || typeof track.id !== 'string' || !Number.isSafeInteger(track.index) || track.index < 0
         || !['video','audio','subtitle','data','unknown'].includes(track.kind)
         || typeof track.default !== 'boolean' || typeof track.forced !== 'boolean')
-      || (probe.hdrFormat !== undefined && !['hdr10','hdr10-plus','hlg','dolby-vision'].includes(probe.hdrFormat))
+      || (probe.hdrFormat !== undefined && (typeof probe.hdrFormat !== 'string' || !['hdr10','hdr10-plus','hlg','dolby-vision'].includes(probe.hdrFormat)))
       || ['container','videoCodec','audioCodec'].some((key) => probe[key] !== undefined && typeof probe[key] !== 'string')
       || ['durationSeconds','bitrateKbps','width','height'].some((key) => probe[key] !== undefined
-        && (!Number.isFinite(probe[key]) || probe[key] < 0))
+        && (typeof probe[key] !== 'number' || !Number.isFinite(probe[key]) || probe[key] < 0))
       || probe.tracks.some((track) => ['codec','language','title','profile','pixelFormat','colorTransfer','colorPrimaries','colorSpace']
         .some((key) => track[key] !== undefined && typeof track[key] !== 'string')
         || ['channels','width','height','frameRate'].some((key) => track[key] !== undefined
@@ -887,26 +930,26 @@ function validateCanonicalJsonState(database) {
       throw codedError('canonical_backup_invalid', 'Canonical media probe JSON is invalid.');
     }
   }
-  for (const row of database.prepare('SELECT payload_json FROM scan_state').all()) objectJson(row.payload_json, 'scan state');
-  for (const row of database.prepare('SELECT payload_json FROM backup_state').all()) objectJson(row.payload_json, 'backup state');
-  for (const row of database.prepare('SELECT payload_json FROM operational_logs').all()) objectJson(row.payload_json, 'operational log');
-  for (const row of database.prepare('SELECT payload_json FROM profile_preferences').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['scan_state']>} */ (database.prepare('SELECT payload_json FROM scan_state').all())) objectJson(row.payload_json, 'scan state');
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['backup_state']>} */ (database.prepare('SELECT payload_json FROM backup_state').all())) objectJson(row.payload_json, 'backup state');
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['operational_logs']>} */ (database.prepare('SELECT payload_json FROM operational_logs').all())) objectJson(row.payload_json, 'operational log');
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['profile_preferences']>} */ (database.prepare('SELECT payload_json FROM profile_preferences').all())) {
     const preferences = objectJson(row.payload_json, 'profile preferences');
     const allowed = new Set(['themeMode','themeColor','showProviderRatingBadges','sidebarNavOrder','autoplayNextEnabled','skipBackSeconds','skipForwardSeconds']);
     if (Object.keys(preferences).some((key) => !allowed.has(key))
-      || (preferences.themeMode !== undefined && !['dark','light'].includes(preferences.themeMode))
-      || (preferences.themeColor !== undefined && !['orange','yellow','red','blue','twitch'].includes(preferences.themeColor))
+      || (preferences.themeMode !== undefined && (typeof preferences.themeMode !== 'string' || !['dark','light'].includes(preferences.themeMode)))
+      || (preferences.themeColor !== undefined && (typeof preferences.themeColor !== 'string' || !['orange','yellow','red','blue','twitch'].includes(preferences.themeColor)))
       || (preferences.showProviderRatingBadges !== undefined && typeof preferences.showProviderRatingBadges !== 'boolean')
       || (preferences.autoplayNextEnabled !== undefined && typeof preferences.autoplayNextEnabled !== 'boolean')
-      || (preferences.skipBackSeconds !== undefined && (!Number.isSafeInteger(preferences.skipBackSeconds) || preferences.skipBackSeconds < 0 || preferences.skipBackSeconds > 600))
-      || (preferences.skipForwardSeconds !== undefined && (!Number.isSafeInteger(preferences.skipForwardSeconds) || preferences.skipForwardSeconds < 0 || preferences.skipForwardSeconds > 600))
+      || (preferences.skipBackSeconds !== undefined && (typeof preferences.skipBackSeconds !== 'number' || !Number.isSafeInteger(preferences.skipBackSeconds) || preferences.skipBackSeconds < 0 || preferences.skipBackSeconds > 600))
+      || (preferences.skipForwardSeconds !== undefined && (typeof preferences.skipForwardSeconds !== 'number' || !Number.isSafeInteger(preferences.skipForwardSeconds) || preferences.skipForwardSeconds < 0 || preferences.skipForwardSeconds > 600))
       || (preferences.sidebarNavOrder !== undefined && (!Array.isArray(preferences.sidebarNavOrder)
         || preferences.sidebarNavOrder.length > 32
         || preferences.sidebarNavOrder.some((value) => typeof value !== 'string' || !value.trim() || value.length > 64)))) {
       throw codedError('canonical_backup_invalid', 'Canonical profile preferences are invalid.');
     }
   }
-  for (const row of database.prepare('SELECT allowed_root_ids_json,payload_json FROM profile_restrictions').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['profile_restrictions']>} */ (database.prepare('SELECT allowed_root_ids_json,payload_json FROM profile_restrictions').all())) {
     if (row.allowed_root_ids_json !== null
       && arrayJson(row.allowed_root_ids_json, 'profile restriction roots').some((value) => typeof value !== 'string' || !rootIds.has(value))) {
       throw codedError('canonical_backup_invalid', 'Canonical profile restriction roots are invalid.');
@@ -914,17 +957,18 @@ function validateCanonicalJsonState(database) {
     const restrictions = objectJson(row.payload_json, 'profile restrictions');
     if (Object.keys(restrictions).some((key) => !['country','maximumAge','allowUnrated'].includes(key))
       || typeof restrictions.country !== 'string' || !restrictions.country.trim() || restrictions.country.length > 8
-      || !(restrictions.maximumAge === null || (Number.isFinite(restrictions.maximumAge) && restrictions.maximumAge >= 0))
+      || !(restrictions.maximumAge === null || (typeof restrictions.maximumAge === 'number' && Number.isFinite(restrictions.maximumAge) && restrictions.maximumAge >= 0))
       || typeof restrictions.allowUnrated !== 'boolean') {
       throw codedError('canonical_backup_invalid', 'Canonical profile restrictions are invalid.');
     }
   }
-  for (const row of database.prepare('SELECT payload_json FROM track_preferences').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['track_preferences']>} */ (database.prepare('SELECT payload_json FROM track_preferences').all())) {
     const preferences = objectJson(row.payload_json, 'track preferences');
-    const validTrack = (track) => track === undefined || (track && typeof track === 'object' && !Array.isArray(track)
+    /** @param {unknown} track */
+    const validTrack = (track) => track === undefined || (isRecord(track) && !Array.isArray(track)
       && typeof track.enabled === 'boolean'
       && (track.trackId === undefined || typeof track.trackId === 'string')
-      && (track.index === undefined || (Number.isSafeInteger(track.index) && track.index >= 0))
+      && (track.index === undefined || (typeof track.index === 'number' && Number.isSafeInteger(track.index) && track.index >= 0))
       && ['trackId','language','title','codec'].every((key) => track[key] === undefined
         || (typeof track[key] === 'string' && track[key].length <= 128 && !track[key].includes('\u0000')))
       && (track.forced === undefined || typeof track.forced === 'boolean'));
@@ -933,30 +977,31 @@ function validateCanonicalJsonState(database) {
       throw codedError('canonical_backup_invalid', 'Canonical track preferences are invalid.');
     }
   }
-  for (const row of database.prepare('SELECT permissions_json FROM devices').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['devices']>} */ (database.prepare('SELECT permissions_json FROM devices').all())) {
     const permissions = arrayJson(row.permissions_json, 'device permissions');
     if (permissions.some((value) => typeof value !== 'string' || !permissionSet.has(value))) {
       throw codedError('canonical_backup_invalid', 'Canonical device permissions are invalid.');
     }
   }
-  for (const row of database.prepare('SELECT source_counts_json,reconciliation_json,target_counts_json FROM migration_markers').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['migration_markers']>} */ (database.prepare('SELECT source_counts_json,reconciliation_json,target_counts_json FROM migration_markers').all())) {
     const sourceCounts = objectJson(row.source_counts_json, 'migration source counts');
     const reconciliation = objectJson(row.reconciliation_json, 'migration reconciliation');
     const targetCounts = objectJson(row.target_counts_json, 'migration target counts');
-    const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
+    /** @param {unknown} value @returns {value is number} */
+    const validCount = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     const accountingTyped = Object.values(sourceCounts).every(validCount)
       && Object.values(targetCounts).every(validCount)
-      && Object.values(reconciliation).every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      && Object.values(reconciliation).every((entry) => isRecord(entry) && !Array.isArray(entry)
         && validCount(entry.source) && validCount(entry.imported || 0) && validCount(entry.merged || 0) && validCount(entry.generated || 0)
         && validCount(entry.legacyOnly || 0) && Array.isArray(entry.rejected)
         && entry.rejected.every((rejection) => rejection && typeof rejection === 'object' && !Array.isArray(rejection)
           && typeof rejection.reason === 'string' && validCount(rejection.count)));
     if (!accountingTyped) throw codedError('canonical_backup_invalid', 'Canonical migration accounting JSON is invalid.');
-    try { validateReconciliation(sourceCounts, reconciliation, targetCounts); } catch {
+    try { validateReconciliation(/** @type {Record<string, number>} */ (sourceCounts), /** @type {Record<string, import('./legacy-state-import.js').MigrationReconciliation>} */ (reconciliation), /** @type {Record<string, number>} */ (targetCounts)); } catch {
       throw codedError('canonical_backup_invalid', 'Canonical migration reconciliation JSON is invalid.');
     }
   }
-  for (const row of database.prepare('SELECT scope_json FROM invitations').all()) {
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['invitations']>} */ (database.prepare('SELECT scope_json FROM invitations').all())) {
     const scope = objectJson(row.scope_json, 'invitation scope');
     if (Object.keys(scope).some((key) => !['profileId','rootIds','mediaIds','permissions','downloadQuotaBytes'].includes(key))
       || typeof scope.profileId !== 'string' || !profileIds.has(scope.profileId) || !Array.isArray(scope.rootIds)
@@ -964,26 +1009,27 @@ function validateCanonicalJsonState(database) {
       || !(scope.mediaIds === null || Array.isArray(scope.mediaIds)) || !Array.isArray(scope.permissions)
       || (Array.isArray(scope.mediaIds) && scope.mediaIds.some((value) => typeof value !== 'string' || !mediaIds.has(value)))
       || scope.permissions.some((value) => !['library.read','stream','downloads'].includes(value))
-      || !Number.isSafeInteger(scope.downloadQuotaBytes) || scope.downloadQuotaBytes < 0) {
+      || typeof scope.downloadQuotaBytes !== 'number' || !Number.isSafeInteger(scope.downloadQuotaBytes) || scope.downloadQuotaBytes < 0) {
       throw codedError('canonical_backup_invalid', 'Canonical invitation scope JSON is invalid.');
     }
   }
-  for (const row of database.prepare('SELECT details_json FROM audit_events').all()) objectJson(row.details_json, 'audit details');
-  if (database.prepare(`SELECT 1 FROM accounts a WHERE NOT EXISTS (
+  for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['audit_events']>} */ (database.prepare('SELECT details_json FROM audit_events').all())) objectJson(row.details_json, 'audit details');
+  if (/** @type {(import('./server-state-types.js').SqlRows['accounts']) | undefined} */ (database.prepare(`SELECT 1 FROM accounts a WHERE NOT EXISTS (
     SELECT 1 FROM account_credentials c WHERE c.account_id=a.id
-  ) LIMIT 1`).get()) throw codedError('canonical_backup_invalid', 'Every restored account requires a credential.');
-  if (database.prepare(`SELECT 1 FROM profiles p WHERE NOT EXISTS (
+  ) LIMIT 1`).get())) throw codedError('canonical_backup_invalid', 'Every restored account requires a credential.');
+  if (/** @type {(import('./server-state-types.js').SqlRows['profiles'] & import('./server-state-types.js').SqlRows['accounts']) | undefined} */ (database.prepare(`SELECT 1 FROM profiles p WHERE NOT EXISTS (
     SELECT 1 FROM profile_assignments a JOIN accounts account ON account.id=a.account_id
     WHERE a.profile_id=p.id AND a.access='manage' AND account.disabled=0
-  ) LIMIT 1`).get()) throw codedError('canonical_backup_invalid', 'Every restored profile requires a manage assignment.');
-  if (database.prepare(`SELECT 1 FROM profiles p WHERE p.has_pin != EXISTS (
+  ) LIMIT 1`).get())) throw codedError('canonical_backup_invalid', 'Every restored profile requires a manage assignment.');
+  if (/** @type {(import('./server-state-types.js').SqlRows['profiles']) | undefined} */ (database.prepare(`SELECT 1 FROM profiles p WHERE p.has_pin != EXISTS (
     SELECT 1 FROM profile_credentials c WHERE c.profile_id=p.id
-  ) LIMIT 1`).get()) throw codedError('canonical_backup_invalid', 'Restored profile PIN state is inconsistent.');
+  ) LIMIT 1`).get())) throw codedError('canonical_backup_invalid', 'Restored profile PIN state is inconsistent.');
 }
 
+/** @param {DatabaseSync} database @param {import('./server-state-types.js').StateSnapshot} snapshot @param {number} [restoredAt] */
 function replaceFromCanonicalSnapshot(database, snapshot, restoredAt = Date.now()) {
   const columnsByTable = validateCanonicalSnapshot(snapshot, database);
-  const currentOwnerId = database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get()?.account_id;
+  const currentOwnerId = /** @type {(import('./server-state-types.js').SqlRows['owner_account']) | undefined} */ (database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get())?.account_id;
   const snapshotOwnerRows = snapshot.tables.owner_account;
   if (!currentOwnerId || snapshotOwnerRows.length !== 1 || snapshotOwnerRows[0].account_id !== currentOwnerId) {
     throw codedError('canonical_owner_mismatch', 'A backup cannot replace the configured owner identity.');
@@ -995,15 +1041,15 @@ function replaceFromCanonicalSnapshot(database, snapshot, restoredAt = Date.now(
       const placeholders = columns.map(() => '?').join(',');
       const insert = database.prepare(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${placeholders})`);
       for (const sourceRow of snapshot.tables[table]) {
-        const row = table === 'invitations' && ['pending', 'accepted'].includes(sourceRow.state)
+        const row = table === 'invitations' && (sourceRow.state === 'pending' || sourceRow.state === 'accepted')
           ? { ...sourceRow, state: 'revoked', revoked_at: sourceRow.revoked_at ?? restoredAt,
             revoked_reason: sourceRow.revoked_reason || 'backup_restored' }
           : sourceRow;
         insert.run(...columns.map((column) => row[column]));
       }
     }
-    const ownerCount = Number(database.prepare('SELECT COUNT(*) count FROM owner_account').get()?.count || 0);
-    const ownerAccountCount = Number(database.prepare("SELECT COUNT(*) count FROM accounts WHERE account_type='owner' AND disabled=0").get()?.count || 0);
+    const ownerCount = Number(/** @type {{count: number}} */ (database.prepare('SELECT COUNT(*) count FROM owner_account').get())?.count || 0);
+    const ownerAccountCount = Number(/** @type {{count: number}} */ (database.prepare("SELECT COUNT(*) count FROM accounts WHERE account_type='owner' AND disabled=0").get())?.count || 0);
     if (ownerCount !== 1 || ownerAccountCount !== 1) {
       throw codedError('canonical_backup_invalid', 'The canonical backup must contain exactly one enabled owner.');
     }
@@ -1019,6 +1065,7 @@ function replaceFromCanonicalSnapshot(database, snapshot, restoredAt = Date.now(
   });
 }
 
+/** @param {DatabaseSync} database @param {number} [currentTime] */
 function pruneRemoteState(database, currentTime = Date.now()) {
   database.prepare("UPDATE invitations SET state='expired' WHERE state='pending' AND expires_at<=?").run(currentTime);
   database.prepare(`UPDATE invitation_sessions SET revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,'expired')
@@ -1030,7 +1077,9 @@ function pruneRemoteState(database, currentTime = Date.now()) {
       (SELECT id FROM invitation_sessions WHERE revoked_at IS NOT NULL))`).run(currentTime, currentTime);
 }
 
+/** @param {import('./server-state-types.js').SqlRows['remote_policy'] | undefined} row  @returns {import('@loom-media-server/video-contracts').RemotePolicy} */
 function remotePolicyView(row) {
+  if (!row) throw codedError('canonical_state_invalid', 'A required canonical record is missing.');
   return {
     enabled: row.enabled === 1,
     downloadQuotaBytes: Number(row.download_quota_bytes),
@@ -1041,7 +1090,9 @@ function remotePolicyView(row) {
   };
 }
 
+/** @param {import('./server-state-types.js').SqlRows['invitations'] | undefined} row @param {boolean} [includeSecretHash] @returns {import('./server-state-types.js').InvitationRecord} */
 function invitationView(row, includeSecretHash = false) {
+  if (!row) throw codedError('canonical_state_invalid', 'A required canonical record is missing.');
   return {
     id: row.id, issuerAccountId: row.issuer_account_id,
     scope: parseRequiredJson(row.scope_json, 'invitation scope'), state: row.state,
@@ -1052,7 +1103,9 @@ function invitationView(row, includeSecretHash = false) {
   };
 }
 
+/** @param {import('./server-state-types.js').SqlRows['invitation_sessions'] & Pick<import('./server-state-types.js').SqlRows['invitations'], 'issuer_account_id' | 'scope_json'> | undefined} row @param {boolean} [includeSecretHash] @returns {import('./server-state-types.js').InvitationSessionRecord} */
 function invitationSessionView(row, includeSecretHash = false) {
+  if (!row) throw codedError('canonical_state_invalid', 'A required canonical record is missing.');
   return {
     id: row.id, invitationId: row.invitation_id, issuerAccountId: row.issuer_account_id,
     deviceId: row.device_id, scope: parseRequiredJson(row.scope_json, 'invitation session scope'),
@@ -1063,7 +1116,9 @@ function invitationSessionView(row, includeSecretHash = false) {
   };
 }
 
+/** @param {import('./server-state-types.js').SqlRows['offline_download_leases'] | undefined} row @param {boolean} [includeSecretHash] @returns {import('./server-state-types.js').DownloadLeaseRecord} */
 function downloadLeaseView(row, includeSecretHash = false) {
+  if (!row) throw codedError('canonical_state_invalid', 'A required canonical record is missing.');
   return {
     id: row.id, ...(row.account_id ? { accountId: row.account_id } : {}),
     ...(row.invitation_session_id ? { invitationSessionId: row.invitation_session_id } : {}),
@@ -1076,12 +1131,16 @@ function downloadLeaseView(row, includeSecretHash = false) {
   };
 }
 
+/** @param {{ dataDir: string }} options */
 export function createCanonicalStateStore({ dataDir }) {
   const databasePath = path.join(path.resolve(dataDir), CANONICAL_STATE_FILENAME);
+  /** @type {DatabaseSync | null} */
   let database = null;
   let generation = 0;
   let heartbeatChanges = 0;
+  /** @type {import('./server-state-types.js').MigrationMarker | null} */
   let marker = null;
+  /** @type {import('./server-state-types.js').EvidenceAvailability} */
   let availability = { backup: null, report: null };
   const requireDatabase = () => {
     if (!database) throw codedError('canonical_state_closed', 'Canonical state is not open.');
@@ -1093,8 +1152,8 @@ export function createCanonicalStateStore({ dataDir }) {
       const active = requireDatabase();
       // Own writes and commits from other connections both invalidate cached
       // projections, including permission changes and snapshot restores.
-      const own = Number(active.prepare('SELECT total_changes() AS value').get().value) - heartbeatChanges;
-      const external = active.prepare('PRAGMA data_version').get().data_version;
+      const own = Number(/** @type {{value: number}} */ (active.prepare('SELECT total_changes() AS value').get()).value) - heartbeatChanges;
+      const external = /** @type {{data_version: number}} */ (active.prepare('PRAGMA data_version').get()).data_version;
       return `${generation}:${own}:${external}`;
     },
     async start() {
@@ -1135,6 +1194,7 @@ export function createCanonicalStateStore({ dataDir }) {
     exportCanonicalSnapshot() {
       return exportCanonicalSnapshot(requireDatabase());
     },
+    /** @param {import('./server-state-types.js').StateSnapshot} snapshot */
     async restoreCanonicalSnapshot(snapshot, restoredAt = Date.now()) {
       const active = requireDatabase();
       replaceFromCanonicalSnapshot(active, snapshot, restoredAt);
@@ -1145,10 +1205,12 @@ export function createCanonicalStateStore({ dataDir }) {
       return { marker: redactedMarker(marker, availability), restoredAt };
     },
     readAdminState: () => readAdminState(requireDatabase()),
+    /** @param {import('./server-state-types.js').AdminState['backup']} state */
     updateBackupState(state) {
       requireDatabase().prepare('INSERT OR REPLACE INTO backup_state(singleton,payload_json) VALUES(1,?)').run(json(state));
       return true;
     },
+    /** @param {import('./server-state-types.js').AdminState['logs'][number]} entry */
     appendOperationalLog(entry, currentTime = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
@@ -1162,12 +1224,13 @@ export function createCanonicalStateStore({ dataDir }) {
       });
     },
     readRemotePolicy() {
-      return remotePolicyView(requireDatabase().prepare('SELECT * FROM remote_policy WHERE singleton=1').get());
+      return remotePolicyView(/** @type {(import('./server-state-types.js').SqlRows['remote_policy']) | undefined} */ (requireDatabase().prepare('SELECT * FROM remote_policy WHERE singleton=1').get()));
     },
+    /** @param {Omit<Partial<import('@loom-media-server/video-contracts').RemotePolicy>, 'enabled'> & {enabled?: unknown}} input @param {string} actorId */
     updateRemotePolicy(input, actorId, updatedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
-        const current = remotePolicyView(active.prepare('SELECT * FROM remote_policy WHERE singleton=1').get());
+        const current = remotePolicyView(/** @type {(import('./server-state-types.js').SqlRows['remote_policy']) | undefined} */ (active.prepare('SELECT * FROM remote_policy WHERE singleton=1').get()));
         const next = {
           enabled: input.enabled === undefined ? current.enabled : input.enabled === true,
           downloadQuotaBytes: input.downloadQuotaBytes ?? current.downloadQuotaBytes,
@@ -1179,9 +1242,10 @@ export function createCanonicalStateStore({ dataDir }) {
           next.enabled ? 1 : 0, next.downloadQuotaBytes, next.downloadLeaseTtlMs,
           next.invitationTtlMs, updatedAt, actorId || null,
         );
-        return remotePolicyView(active.prepare('SELECT * FROM remote_policy WHERE singleton=1').get());
+        return remotePolicyView(/** @type {(import('./server-state-types.js').SqlRows['remote_policy']) | undefined} */ (active.prepare('SELECT * FROM remote_policy WHERE singleton=1').get()));
       });
     },
+    /** @param {import('@loom-media-server/video-contracts').AuditEvent & { addressHash?: string }} event */
     appendAuditEvent(event) {
       requireDatabase().prepare(`INSERT INTO audit_events(id,occurred_at,request_class,actor_type,actor_id,action,outcome,address_hash,details_json)
         VALUES(?,?,?,?,?,?,?,?,?)`).run(event.id, event.occurredAt, event.requestClass, event.actorType,
@@ -1193,36 +1257,40 @@ export function createCanonicalStateStore({ dataDir }) {
       return true;
     },
     listAuditEvents({ limit = 100, before = Number.MAX_SAFE_INTEGER } = {}) {
-      return requireDatabase().prepare('SELECT * FROM audit_events WHERE occurred_at<? ORDER BY occurred_at DESC LIMIT ?')
-        .all(before, limit).map((row) => ({ id: row.id, occurredAt: Number(row.occurred_at), requestClass: row.request_class,
+      return /** @type {Array<import('./server-state-types.js').SqlRows['audit_events']>} */ (requireDatabase().prepare('SELECT * FROM audit_events WHERE occurred_at<? ORDER BY occurred_at DESC LIMIT ?')
+        .all(before, limit)).map((row) => ({ id: row.id, occurredAt: Number(row.occurred_at), requestClass: row.request_class,
           actorType: row.actor_type, ...(row.actor_id ? { actorId: row.actor_id } : {}), action: row.action,
           outcome: row.outcome, details: parseRequiredJson(row.details_json, 'audit details') }));
     },
+    /** @param {import('@loom-media-server/video-contracts').Invitation & { secretHash: string }} input */
     createInvitation(input) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
         pruneRemoteState(active, input.createdAt);
-        const count = Number(active.prepare("SELECT COUNT(*) count FROM invitations WHERE issuer_account_id=? AND state='pending'").get(input.issuerAccountId)?.count || 0);
+        const count = Number(/** @type {{count: number}} */ (active.prepare("SELECT COUNT(*) count FROM invitations WHERE issuer_account_id=? AND state='pending'").get(input.issuerAccountId))?.count || 0);
         if (count >= 128) throw codedError('invitation_capacity_exceeded', 'Too many invitations are pending.');
         active.prepare(`INSERT INTO invitations(id,issuer_account_id,secret_hash,scope_json,state,created_at,expires_at)
           VALUES(?,?,?,?,'pending',?,?)`).run(input.id, input.issuerAccountId, input.secretHash, json(input.scope), input.createdAt, input.expiresAt);
-        return invitationView(active.prepare('SELECT * FROM invitations WHERE id=?').get(input.id));
+        return invitationView(/** @type {(import('./server-state-types.js').SqlRows['invitations']) | undefined} */ (active.prepare('SELECT * FROM invitations WHERE id=?').get(input.id)));
       });
     },
+    /** @param {string} id */
     readInvitation(id, includeSecretHash = false) {
-      const row = requireDatabase().prepare('SELECT * FROM invitations WHERE id=?').get(id);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['invitations']) | undefined} */ (requireDatabase().prepare('SELECT * FROM invitations WHERE id=?').get(id));
       return row ? invitationView(row, includeSecretHash) : null;
     },
+    /** @param {string} issuerAccountId */
     listInvitations(issuerAccountId) {
       pruneRemoteState(requireDatabase());
-      return requireDatabase().prepare('SELECT * FROM invitations WHERE issuer_account_id=? ORDER BY created_at DESC LIMIT 256')
-        .all(issuerAccountId).map((row) => invitationView(row));
+      return /** @type {Array<import('./server-state-types.js').SqlRows['invitations']>} */ (requireDatabase().prepare('SELECT * FROM invitations WHERE issuer_account_id=? ORDER BY created_at DESC LIMIT 256')
+        .all(issuerAccountId)).map((row) => invitationView(row));
     },
+    /** @param {{ invitationId: string; invitationSecretHash: string; sessionId: string; sessionSecretHash: string; deviceId: string; createdAt: number; idleExpiresAt: number; absoluteExpiresAt: number }} input */
     acceptInvitation(input) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
         pruneRemoteState(active, input.createdAt);
-        const invitation = active.prepare('SELECT * FROM invitations WHERE id=? AND secret_hash=?').get(input.invitationId, input.invitationSecretHash);
+        const invitation = /** @type {(import('./server-state-types.js').SqlRows['invitations']) | undefined} */ (active.prepare('SELECT * FROM invitations WHERE id=? AND secret_hash=?').get(input.invitationId, input.invitationSecretHash));
         if (!invitation) throw codedError('invitation_not_found', 'Invitation was not found.');
         if (invitation.state === 'expired' || invitation.expires_at <= input.createdAt) throw codedError('invitation_expired', 'Invitation expired.');
         if (invitation.state !== 'pending') throw codedError('invitation_unavailable', 'Invitation is no longer available.');
@@ -1230,22 +1298,27 @@ export function createCanonicalStateStore({ dataDir }) {
           VALUES(?,?,?,?,?,?,?,?)`).run(input.sessionId, input.invitationId, input.sessionSecretHash, input.deviceId,
           input.createdAt, input.createdAt, input.idleExpiresAt, Math.min(input.absoluteExpiresAt, invitation.expires_at));
         active.prepare("UPDATE invitations SET state='accepted',accepted_at=? WHERE id=? AND state='pending'").run(input.createdAt, input.invitationId);
-        return this.readInvitationSession(input.sessionId, true);
+        const session = this.readInvitationSession(input.sessionId, true);
+        if (!session) throw codedError('canonical_state_invalid', 'The created invitation session is missing.');
+        return session;
       });
     },
+    /** @param {string} id */
     readInvitationSession(id, includeSecretHash = false) {
-      const row = requireDatabase().prepare(`SELECT s.*,i.issuer_account_id,i.scope_json FROM invitation_sessions s
-        JOIN invitations i ON i.id=s.invitation_id WHERE s.id=?`).get(id);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['invitation_sessions'] & import('./server-state-types.js').SqlRows['invitations']) | undefined} */ (requireDatabase().prepare(`SELECT s.*,i.issuer_account_id,i.scope_json FROM invitation_sessions s
+        JOIN invitations i ON i.id=s.invitation_id WHERE s.id=?`).get(id));
       return row ? invitationSessionView(row, includeSecretHash) : null;
     },
+    /** @param {string} id @param {number} seenAt @param {number} idleExpiresAt */
     touchInvitationSession(id, seenAt, idleExpiresAt) {
       return requireDatabase().prepare(`UPDATE invitation_sessions SET last_seen_at=?,idle_expires_at=MIN(absolute_expires_at,?)
         WHERE id=? AND revoked_at IS NULL AND idle_expires_at>? AND absolute_expires_at>?`).run(seenAt, idleExpiresAt, id, seenAt, seenAt).changes === 1;
     },
+    /** @param {string} id @param {string} issuerAccountId */
     revokeInvitation(id, issuerAccountId, reason = 'revoked', revokedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
-        const row = active.prepare('SELECT id FROM invitations WHERE id=? AND issuer_account_id=?').get(id, issuerAccountId);
+        const row = /** @type {(import('./server-state-types.js').SqlRows['invitations']) | undefined} */ (active.prepare('SELECT id FROM invitations WHERE id=? AND issuer_account_id=?').get(id, issuerAccountId));
         if (!row) throw codedError('invitation_not_found', 'Invitation was not found.');
         active.prepare("UPDATE invitations SET state='revoked',revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,?) WHERE id=?")
           .run(revokedAt, reason, id);
@@ -1256,6 +1329,7 @@ export function createCanonicalStateStore({ dataDir }) {
         return true;
       });
     },
+    /** @param {string} id */
     revokeInvitationSession(id, reason = 'revoked', revokedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
@@ -1266,12 +1340,13 @@ export function createCanonicalStateStore({ dataDir }) {
         return changed;
       });
     },
+    /** @param {import('./server-state-types.js').DownloadLeaseRecord & { secretHash: string; quotaOwner: string }} input @param {number} quotaBytes */
     createDownloadLease(input, quotaBytes) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
         pruneRemoteState(active, input.createdAt);
-        const reserved = Number(active.prepare(`SELECT COALESCE(SUM(size_bytes),0) total FROM offline_download_leases
-          WHERE quota_owner=? AND revoked_at IS NULL AND expires_at>?`).get(input.quotaOwner, input.createdAt)?.total || 0);
+        const reserved = Number(/** @type {{total: number} | undefined} */ (active.prepare(`SELECT COALESCE(SUM(size_bytes),0) total FROM offline_download_leases
+          WHERE quota_owner=? AND revoked_at IS NULL AND expires_at>?`).get(input.quotaOwner, input.createdAt))?.total || 0);
         if (reserved + input.sizeBytes > quotaBytes) throw codedError('download_quota_exceeded', 'The offline download quota is exhausted.');
         active.prepare(`INSERT INTO offline_download_leases(id,secret_hash,account_id,invitation_session_id,quota_owner,device_id,
           profile_id,selection_revision,root_id,media_id,source_id,file_version,size_bytes,allow_ranges,created_at,expires_at)
@@ -1279,37 +1354,41 @@ export function createCanonicalStateStore({ dataDir }) {
           input.invitationSessionId || null, input.quotaOwner, input.deviceId, input.profileId, input.selectionRevision,
           input.rootId, input.mediaId, input.sourceId, input.fileVersion, input.sizeBytes, input.allowRanges ? 1 : 0,
           input.createdAt, input.expiresAt);
-        return downloadLeaseView(active.prepare('SELECT * FROM offline_download_leases WHERE id=?').get(input.id));
+        return downloadLeaseView(/** @type {(import('./server-state-types.js').SqlRows['offline_download_leases']) | undefined} */ (active.prepare('SELECT * FROM offline_download_leases WHERE id=?').get(input.id)));
       });
     },
+    /** @param {string} id */
     readDownloadLease(id, includeSecretHash = false) {
       pruneRemoteState(requireDatabase());
-      const row = requireDatabase().prepare('SELECT * FROM offline_download_leases WHERE id=?').get(id);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['offline_download_leases']) | undefined} */ (requireDatabase().prepare('SELECT * FROM offline_download_leases WHERE id=?').get(id));
       return row ? downloadLeaseView(row, includeSecretHash) : null;
     },
+    /** @param {{ accountId?: string; invitationSessionId?: string }} owner */
     listDownloadLeases({ accountId, invitationSessionId }) {
       pruneRemoteState(requireDatabase());
       const rows = invitationSessionId
-        ? requireDatabase().prepare('SELECT * FROM offline_download_leases WHERE invitation_session_id=? ORDER BY created_at DESC LIMIT 512').all(invitationSessionId)
-        : requireDatabase().prepare('SELECT * FROM offline_download_leases WHERE account_id=? ORDER BY created_at DESC LIMIT 512').all(accountId);
+        ? /** @type {Array<import('./server-state-types.js').SqlRows['offline_download_leases']>} */ (requireDatabase().prepare('SELECT * FROM offline_download_leases WHERE invitation_session_id=? ORDER BY created_at DESC LIMIT 512').all(invitationSessionId))
+        : /** @type {Array<import('./server-state-types.js').SqlRows['offline_download_leases']>} */ (requireDatabase().prepare('SELECT * FROM offline_download_leases WHERE account_id=? ORDER BY created_at DESC LIMIT 512').all(accountId ?? null));
       return rows.map((row) => downloadLeaseView(row));
     },
+    /** @param {string} id @param {{ accountId?: string; invitationSessionId?: string }} owner */
     revokeDownloadLease(id, owner, reason = 'revoked', revokedAt = Date.now()) {
       const clause = owner.invitationSessionId ? 'invitation_session_id=?' : 'account_id=?';
       const ownerId = owner.invitationSessionId || owner.accountId;
       return requireDatabase().prepare(`UPDATE offline_download_leases SET revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,?)
-        WHERE id=? AND ${clause}`).run(revokedAt, reason, id, ownerId).changes === 1;
+        WHERE id=? AND ${clause}`).run(revokedAt, reason, id, ownerId ?? null).changes === 1;
     },
+    /** @param {import('./server-state-types.js').PairingRequestInput} input */
     createPairingRequest(input) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
         const now = Number(input.createdAt) || Date.now();
-        for (const expired of active.prepare("SELECT device_id FROM pairing_requests WHERE state='approved' AND expires_at<=?").all(now)) {
+        for (const expired of /** @type {Array<import('./server-state-types.js').SqlRows['pairing_requests']>} */ (active.prepare("SELECT device_id FROM pairing_requests WHERE state='approved' AND expires_at<=?").all(now))) {
           active.prepare('DELETE FROM devices WHERE id=?').run(expired.device_id);
         }
         active.prepare(`UPDATE pairing_requests SET state='expired',credential_ciphertext=NULL,credential_iv=NULL,credential_tag=NULL
           WHERE state IN ('pending','approved') AND expires_at<=?`).run(now);
-        const pendingCount = Number(active.prepare("SELECT COUNT(*) count FROM pairing_requests WHERE state='pending' AND expires_at>?").get(now)?.count || 0);
+        const pendingCount = Number(/** @type {{count: number}} */ (active.prepare("SELECT COUNT(*) count FROM pairing_requests WHERE state='pending' AND expires_at>?").get(now))?.count || 0);
         if (pendingCount >= 64) throw codedError('pairing_capacity_exceeded', 'Too many pairing requests are pending.');
         active.prepare(`INSERT INTO pairing_requests(
           id,request_secret_hash,credential_id,credential_secret_hash,credential_ciphertext,credential_iv,credential_tag,
@@ -1323,8 +1402,9 @@ export function createCanonicalStateStore({ dataDir }) {
         return { id: input.id, expiresAt: input.expiresAt, state: 'pending' };
       });
     },
+    /** @param {string} requestId @returns {import('./server-state-types.js').PairingRequestRecord | null} */
     readPairingRequest(requestId) {
-      const row = requireDatabase().prepare('SELECT * FROM pairing_requests WHERE id=?').get(requestId);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['pairing_requests']) | undefined} */ (requireDatabase().prepare('SELECT * FROM pairing_requests WHERE id=?').get(requestId));
       if (!row) return null;
       return {
         id: row.id, requestSecretHash: row.request_secret_hash, credentialId: row.credential_id,
@@ -1340,10 +1420,11 @@ export function createCanonicalStateStore({ dataDir }) {
         ...(row.consumed_at === null ? {} : { consumedAt: Number(row.consumed_at) }),
       };
     },
+    /** @param {import('./server-state-types.js').PairingApprovalInput} input */
     approvePairingRequest(input) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
-        const row = active.prepare('SELECT * FROM pairing_requests WHERE id=?').get(input.requestId);
+        const row = /** @type {(import('./server-state-types.js').SqlRows['pairing_requests']) | undefined} */ (active.prepare('SELECT * FROM pairing_requests WHERE id=?').get(input.requestId));
         if (!row) throw codedError('pairing_request_not_found', 'Pairing request was not found.');
         const now = Number(input.approvedAt) || Date.now();
         if (row.expires_at <= now) {
@@ -1351,7 +1432,7 @@ export function createCanonicalStateStore({ dataDir }) {
           throw codedError('pairing_request_expired', 'Pairing request expired.');
         }
         if (row.state !== 'pending') throw codedError('pairing_request_decided', 'Pairing request was already decided.');
-        const account = active.prepare('SELECT id,disabled FROM accounts WHERE id=?').get(input.accountId);
+        const account = /** @type {(import('./server-state-types.js').SqlRows['accounts']) | undefined} */ (active.prepare('SELECT id,disabled FROM accounts WHERE id=?').get(input.accountId));
         if (!account || account.disabled === 1) throw codedError('account_not_found', 'The target account is unavailable or disabled.');
         active.prepare(`INSERT INTO devices(
           id,account_id,name,kind,disabled,permissions_json,certificate_fingerprint,created_at,updated_at,last_seen_at
@@ -1371,6 +1452,7 @@ export function createCanonicalStateStore({ dataDir }) {
           createdAt: now, expiresAt: input.credentialExpiresAt };
       });
     },
+    /** @param {string} requestId */
     denyPairingRequest(requestId, decidedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const result = requireDatabase().prepare(`UPDATE pairing_requests SET state='denied',decided_at=?,
@@ -1380,10 +1462,11 @@ export function createCanonicalStateStore({ dataDir }) {
         return true;
       });
     },
+    /** @param {string} requestId @param {string} requestSecretHash @returns {import('./server-state-types.js').PairingConsumption | null} */
     consumePairingRequest(requestId, requestSecretHash, consumedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
-        const row = active.prepare('SELECT * FROM pairing_requests WHERE id=? AND request_secret_hash=?').get(requestId, requestSecretHash);
+        const row = /** @type {(import('./server-state-types.js').SqlRows['pairing_requests']) | undefined} */ (active.prepare('SELECT * FROM pairing_requests WHERE id=? AND request_secret_hash=?').get(requestId, requestSecretHash));
         if (!row) return null;
         if (row.expires_at <= consumedAt && (row.state === 'pending' || row.state === 'approved')) {
           if (row.state === 'approved') active.prepare('DELETE FROM devices WHERE id=?').run(row.device_id);
@@ -1397,7 +1480,7 @@ export function createCanonicalStateStore({ dataDir }) {
             .run(consumedAt, requestId);
           if (claimed.changes !== 1) return null;
           return { state: 'approved', deviceId: row.device_id, credentialId: row.credential_id,
-            accountId: row.account_id, permissions: parseRequiredJson(row.approved_permissions_json, 'pairing approved permissions'),
+            accountId: /** @type {string} */ (row.account_id), permissions: parseRequiredJson(row.approved_permissions_json, 'pairing approved permissions'),
             certificateFingerprint: row.certificate_fingerprint || undefined,
             encryptedSecret: { ciphertext: row.credential_ciphertext, iv: row.credential_iv, tag: row.credential_tag } };
         }
@@ -1408,10 +1491,11 @@ export function createCanonicalStateStore({ dataDir }) {
         return null;
       });
     },
+    /** @param {string} [accountId] @returns {Array<Omit<import('@loom-media-server/video-contracts').Device, 'accountId' | 'revokedReason'> & {accountId: string | null; revokedReason?: string | null}>} */
     listDevices(accountId = undefined) {
       const rows = accountId
-        ? requireDatabase().prepare('SELECT * FROM devices WHERE account_id=? ORDER BY created_at').all(accountId)
-        : requireDatabase().prepare('SELECT * FROM devices ORDER BY created_at').all();
+        ? /** @type {Array<import('./server-state-types.js').SqlRows['devices']>} */ (requireDatabase().prepare('SELECT * FROM devices WHERE account_id=? ORDER BY created_at').all(accountId))
+        : /** @type {Array<import('./server-state-types.js').SqlRows['devices']>} */ (requireDatabase().prepare('SELECT * FROM devices ORDER BY created_at').all());
       return rows.map((row) => ({
         id: row.id, accountId: row.account_id, name: row.name, kind: row.kind,
         permissions: parseRequiredJson(row.permissions_json, 'device permissions'), disabled: row.disabled === 1,
@@ -1421,25 +1505,29 @@ export function createCanonicalStateStore({ dataDir }) {
         ...(row.revoked_at === null ? {} : { revokedAt: Number(row.revoked_at), revokedReason: row.revoked_reason }),
       }));
     },
+    /** @param {string} credentialId @returns {import('./server-state-types.js').StoredDeviceAuthentication | null} */
     readDeviceCredential(credentialId) {
-      const row = requireDatabase().prepare(`SELECT c.*,d.account_id,d.name,d.kind,d.permissions_json,d.disabled,d.revoked_at
-        FROM device_credentials c JOIN devices d ON d.id=c.device_id WHERE c.id=?`).get(credentialId);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['device_credentials'] & import('./server-state-types.js').SqlRows['devices']) | undefined} */ (requireDatabase().prepare(`SELECT c.*,d.account_id,d.name,d.kind,d.permissions_json,d.disabled,d.revoked_at
+        FROM device_credentials c JOIN devices d ON d.id=c.device_id WHERE c.id=?`).get(credentialId));
       if (!row) return null;
       return { id: row.id, deviceId: row.device_id, accountId: row.account_id, name: row.name, kind: row.kind,
         permissions: parseRequiredJson(row.permissions_json, 'device credential permissions'), secretHash: row.secret_hash, algorithm: row.algorithm,
         disabled: row.disabled === 1, revokedAt: row.revoked_at === null ? undefined : Number(row.revoked_at),
         createdAt: Number(row.created_at), expiresAt: Number(row.expires_at) };
     },
+    /** @param {string} deviceId */
     readDeviceCredentialForDevice(deviceId) {
-      const row = requireDatabase().prepare(`SELECT c.id FROM device_credentials c JOIN devices d ON d.id=c.device_id
-        WHERE c.device_id=? AND d.disabled=0 AND d.revoked_at IS NULL`).get(deviceId);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['device_credentials'] & import('./server-state-types.js').SqlRows['devices'] & {IS: number | null}) | undefined} */ (requireDatabase().prepare(`SELECT c.id FROM device_credentials c JOIN devices d ON d.id=c.device_id
+        WHERE c.device_id=? AND d.disabled=0 AND d.revoked_at IS NULL`).get(deviceId));
       return row ? this.readDeviceCredential(row.id) : null;
     },
+    /** @param {string} accountId @param {string} deviceId */
     resolveBoundDevice(accountId, deviceId) {
-      const row = requireDatabase().prepare(`SELECT id FROM devices WHERE id=? AND account_id=? AND disabled=0
-        AND revoked_at IS NULL`).get(deviceId, accountId);
+      const row = /** @type {(import('./server-state-types.js').SqlRows['devices']) | undefined} */ (requireDatabase().prepare(`SELECT id FROM devices WHERE id=? AND account_id=? AND disabled=0
+        AND revoked_at IS NULL`).get(deviceId, accountId));
       return row?.id || null;
     },
+    /** @param {string} deviceId */
     touchDevice(deviceId, seenAt = Date.now()) {
       const changed = Number(requireDatabase().prepare(`UPDATE devices SET last_seen_at=?,updated_at=? WHERE id=? AND disabled=0 AND revoked_at IS NULL`)
         .run(seenAt, seenAt, deviceId).changes);
@@ -1449,10 +1537,11 @@ export function createCanonicalStateStore({ dataDir }) {
       heartbeatChanges += changed;
       return changed === 1;
     },
+    /** @param {string} deviceId */
     revokeDevice(deviceId, reason = 'device_revoked', revokedAt = Date.now()) {
       return inTransaction(requireDatabase(), () => {
         const active = requireDatabase();
-        const row = active.prepare('SELECT id,account_id,disabled FROM devices WHERE id=?').get(deviceId);
+        const row = /** @type {(import('./server-state-types.js').SqlRows['devices']) | undefined} */ (active.prepare('SELECT id,account_id,disabled FROM devices WHERE id=?').get(deviceId));
         if (!row) return null;
         active.prepare('UPDATE devices SET disabled=1,revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,?),updated_at=? WHERE id=?')
           .run(revokedAt, String(reason).slice(0, 64), revokedAt, deviceId);
@@ -1469,13 +1558,14 @@ export function createCanonicalStateStore({ dataDir }) {
         return { id: row.id, accountId: row.account_id, alreadyRevoked: row.disabled === 1 };
       });
     },
+    /** @param {string} mediaId @param {string} [sourceId] */
     readMediaSource(mediaId, sourceId = undefined) {
       const row = sourceId
-        ? requireDatabase().prepare(`SELECT s.*,r.locator root_locator,r.state root_state FROM media_sources s
-          LEFT JOIN library_roots r ON r.id=s.root_id WHERE s.media_id=? AND s.id=?`).get(mediaId, sourceId)
-        : requireDatabase().prepare(`SELECT s.*,r.locator root_locator,r.state root_state FROM media_sources s
+        ? /** @type {(import('./server-state-types.js').SqlRows['media_sources'] & import('./server-state-types.js').SqlRows['library_roots'] & {root_locator: string; root_state: 'online' | 'offline' | 'unreadable' | 'missing'}) | undefined} */ (requireDatabase().prepare(`SELECT s.*,r.locator root_locator,r.state root_state FROM media_sources s
+          LEFT JOIN library_roots r ON r.id=s.root_id WHERE s.media_id=? AND s.id=?`).get(mediaId, sourceId))
+        : /** @type {(import('./server-state-types.js').SqlRows['media_sources'] & import('./server-state-types.js').SqlRows['library_roots'] & {root_locator: string; root_state: 'online' | 'offline' | 'unreadable' | 'missing'}) | undefined} */ (requireDatabase().prepare(`SELECT s.*,r.locator root_locator,r.state root_state FROM media_sources s
           LEFT JOIN library_roots r ON r.id=s.root_id WHERE s.media_id=?
-          ORDER BY s.state='online' DESC,s.last_seen_at DESC,s.indexed_at DESC LIMIT 1`).get(mediaId);
+          ORDER BY s.state='online' DESC,s.last_seen_at DESC,s.indexed_at DESC LIMIT 1`).get(mediaId));
       if (!row) return null;
       return {
         id: row.id, mediaId: row.media_id, rootId: row.root_id, rootPath: row.root_locator,
@@ -1486,16 +1576,18 @@ export function createCanonicalStateStore({ dataDir }) {
         ...(row.probe_json ? { probe: parseRequiredJson(row.probe_json, 'media probe') } : {}),
       };
     },
+    /** @param {string} mediaId */
     listMediaSources(mediaId) {
-      return requireDatabase().prepare(`SELECT s.id,s.media_id,s.root_id,s.state,s.file_extension,s.size_bytes,s.modified_at_ms,
+      return /** @type {Array<import('./server-state-types.js').SqlRows['media_sources']>} */ (requireDatabase().prepare(`SELECT s.id,s.media_id,s.root_id,s.state,s.file_extension,s.size_bytes,s.modified_at_ms,
         s.indexed_at,s.last_seen_at FROM media_sources s WHERE s.media_id=?
-        ORDER BY s.state='online' DESC,s.last_seen_at DESC,s.indexed_at DESC`).all(mediaId).map((row) => ({
+        ORDER BY s.state='online' DESC,s.last_seen_at DESC,s.indexed_at DESC`).all(mediaId)).map((row) => ({
         id: row.id, mediaId: row.media_id, rootId: row.root_id, state: row.state,
         extension: row.file_extension,
         ...(row.size_bytes === null ? {} : { sizeBytes: Number(row.size_bytes) }),
         ...(row.modified_at_ms === null ? {} : { modifiedAtMs: Number(row.modified_at_ms) }),
       }));
     },
+    /** @param {string} mediaId @param {string} sourceId @param {import('@loom-media-server/video-contracts').MediaProbe | import('./server-admin-types.js').Probe} probe */
     recordMediaProbe(mediaId, sourceId, probe) {
       const result = requireDatabase().prepare('UPDATE media_sources SET probe_json=? WHERE media_id=? AND id=?')
         .run(json(probe), mediaId, sourceId);
@@ -1507,10 +1599,12 @@ export function createCanonicalStateStore({ dataDir }) {
      * server identity chosen during setup. Reserved keys used by the schema
      * itself (`schema_version`) are not writable through this door.
      */
+    /** @param {string} key */
     readMeta(key) {
-      const row = requireDatabase().prepare('SELECT value FROM meta WHERE key=?').get(String(key));
+      const row = /** @type {(import('./server-state-types.js').SqlRows['meta']) | undefined} */ (requireDatabase().prepare('SELECT value FROM meta WHERE key=?').get(String(key)));
       return row ? String(row.value) : null;
     },
+    /** @param {string} key @param {unknown} value */
     writeMeta(key, value) {
       const name = String(key);
       if (name === 'schema_version') throw codedError('meta_key_reserved', 'The schema version is managed by the store.');
@@ -1520,10 +1614,14 @@ export function createCanonicalStateStore({ dataDir }) {
       }
       requireDatabase().prepare('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)').run(name, String(value));
     },
+    /** @param {Partial<import('./server-state-types.js').AdminState>} state */
     replaceAdminState: (state) => inTransaction(requireDatabase(), () => replaceAdminState(requireDatabase(), state)),
     readClientState: () => readClientState(requireDatabase()),
+    /** @param {Partial<import('./server-state-types.js').ClientState>} state */
     replaceClientState: (state) => inTransaction(requireDatabase(), () => replaceClientState(requireDatabase(), state)),
+    /** @param {import('./server-state-types.js').CanonicalState} state */
     replaceAllState: (state) => inTransaction(requireDatabase(), () => replaceAllState(requireDatabase(), state)),
+    /** @template T @param {(state: import('./server-state-types.js').ClientState) => T} mutation @returns {T} */
     mutateClientState(mutation) {
       return inTransaction(requireDatabase(), () => {
         const state = readClientState(requireDatabase());
@@ -1542,6 +1640,7 @@ export function createCanonicalStateStore({ dataDir }) {
   };
 }
 
+/** @param {{dataDir: string; migrationId: string; sourceFingerprint: string; sourceCounts: Record<string, number>; reconciliation: Record<string, import('./legacy-state-import.js').MigrationReconciliation>; state: import('./server-state-types.js').CanonicalState; backupPath: string; reportPath: string}} options */
 export async function createCanonicalImportStage({ dataDir, migrationId, sourceFingerprint, sourceCounts, reconciliation, state, backupPath, reportPath }) {
   if (!SAFE_MIGRATION_ID.test(String(migrationId || ''))) throw codedError('migration_id_invalid', 'Migration id must use 1 to 96 safe filename characters.');
   const resolvedDir = path.resolve(dataDir);
@@ -1614,6 +1713,7 @@ export async function createCanonicalImportStage({ dataDir, migrationId, sourceF
   return { migrationId, stagedPath, canonicalPath, recovered: false };
 }
 
+/** @param {{dataDir: string; migrationId: string; stagedPath: string}} options */
 export async function finalizeCanonicalImport({ dataDir, migrationId, stagedPath }) {
   if (!SAFE_MIGRATION_ID.test(String(migrationId || ''))) throw codedError('migration_id_invalid', 'Migration id must use 1 to 96 safe filename characters.');
   const resolvedDir = path.resolve(dataDir);

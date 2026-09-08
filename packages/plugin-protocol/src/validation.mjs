@@ -34,7 +34,7 @@ export const REVERSE_DNS_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z
 export const OPAQUE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$/;
 export const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 export const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-export const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+export const CONTROL_CHARACTER_PATTERN = /[^\x20-\x7e\u0080-\uffff]/;
 
 export function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

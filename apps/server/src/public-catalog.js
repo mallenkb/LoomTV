@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 
 // All input must already be filtered for the active profile. Only the public
 // serializer may copy fields from stored media into this response.
+/** @typedef {{ id?: string, kind?: string, title?: string, available?: boolean, animeLikely?: boolean, seriesId?: string, year?: number, seasonNumber?: number, episodeNumber?: number, rating?: number, createdAt?: number, updatedAt?: number, sourceIds?: string[], legacyIds?: string[], summary?: string, genres?: string[], providerIds?: Record<string, string> }} PublicCatalogItem */
+/**
+ * @template {{ kind?: string, seriesId?: string, series?: { title: string }, animeLikely?: boolean }} StoredItem
+ * @param {StoredItem[]} source
+ * @param {(item: StoredItem) => PublicCatalogItem} serialize
+ */
 export function publicCatalog(source, serialize) {
   const items = source.map(serialize);
   const series = new Map(items.filter((item) => item.kind === 'series').map((item) => [item.id, item]));
@@ -15,7 +21,8 @@ export function publicCatalog(source, serialize) {
     if (!series.has(seriesId)) {
       series.set(seriesId, { id: seriesId, kind: 'series', title: title || 'Untitled', available: true, animeLikely: stored.animeLikely === true });
     } else if (stored.animeLikely) {
-      series.set(seriesId, { ...series.get(seriesId), animeLikely: true });
+      const existing = series.get(seriesId);
+      if (existing) series.set(seriesId, { ...existing, animeLikely: true });
     }
   }
   const result = [...items.filter((item) => item.kind !== 'series'), ...series.values()];

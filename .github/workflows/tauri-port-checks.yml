@@ -1,35 +1,8 @@
 name: Tauri port checks
 
+# Tauri development is preserved in codex/tauri-paused.
+# Run explicitly while Electron is the active development target.
 on:
-  push:
-    branches: [codex/tauri-react-port]
-    paths:
-      - 'apps/desktop-tauri/**'
-      - 'apps/desktop/src/**'
-      - 'crates/**'
-      - 'packages/**'
-      - 'scripts/tauri/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.github/workflows/tauri-port-checks.yml'
-  pull_request:
-    paths:
-      - 'apps/desktop-tauri/**'
-      - 'apps/desktop/src/**'
-      - 'crates/**'
-      - 'packages/**'
-      - 'scripts/tauri/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.github/workflows/tauri-port-checks.yml'
   workflow_dispatch:
 
 permissions:
