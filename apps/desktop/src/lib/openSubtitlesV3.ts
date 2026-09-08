@@ -38,10 +38,12 @@ export function subtitleSearchUrl(video: SubtitleVideo): string {
   if (video.type !== 'movie' && video.type !== 'series') throw new Error('This media type does not support online subtitles.');
   let id = video.imdbId;
   if (video.type === 'series') {
-    if (!Number.isSafeInteger(video.season) || video.season! < 0 || !Number.isSafeInteger(video.episode) || video.episode! < 1) {
+    const { season, episode } = video;
+    if (typeof season !== 'number' || !Number.isSafeInteger(season) || season < 0
+      || typeof episode !== 'number' || !Number.isSafeInteger(episode) || episode < 1) {
       throw new Error('Choose a season and episode before searching for subtitles.');
     }
-    id += `:${video.season}:${video.episode}`;
+    id += `:${season}:${episode}`;
   }
   return `${ORIGIN}/subtitles/${video.type}/${encodeURIComponent(id)}.json`;
 }

@@ -4274,8 +4274,9 @@ export default function VideoPlayer({
                     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
                     let item = items.find(candidate => candidate.id === mediaId)
                       || items.find(candidate => candidate.filePath === filePath || candidate.episodeFiles?.some(episode => episode.filePath === filePath));
-                    if (!item?.providerIds?.imdbId && (mediaId || item?.id)) {
-                      item = (await desktopApi.getLibraryItem(mediaId || item!.id))?.item || item;
+                    const lookupId = mediaId || item?.id;
+                    if (!item?.providerIds?.imdbId && lookupId) {
+                      item = (await desktopApi.getLibraryItem(lookupId))?.item || item;
                     }
                     if (!item?.providerIds?.imdbId) throw new Error('Match this title to an IMDb entry in your library before searching for subtitles.');
                     return { imdbId: item.providerIds.imdbId, type: item.type === 'movie' ? 'movie' : 'series', season: currentSeason, episode: currentEpisode };
