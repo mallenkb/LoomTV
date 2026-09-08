@@ -571,7 +571,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
   async function testMetadataProvider(provider, apiKey) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
-    const id = ['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].includes(provider) ? provider : 'tmdb';
+    const id = ['tmdb', 'fanart', 'omdb', 'tvdb'].includes(provider) ? provider : 'tmdb';
     const isReadToken = id === 'tmdb' && /^ey[A-Za-z0-9._-]{20,}$/.test(apiKey);
     const requests = {
       tmdb: {
@@ -582,10 +582,6 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       },
       fanart: { endpoint: `https://webservice.fanart.tv/v3/movies/120?api_key=${encodeURIComponent(apiKey)}`, headers: {} },
       omdb: { endpoint: `https://www.omdbapi.com/?apikey=${encodeURIComponent(apiKey)}&i=tt0133093`, headers: {} },
-      opensubtitles: {
-        endpoint: 'https://api.opensubtitles.com/api/v1/infos/languages',
-        headers: { 'Api-Key': apiKey, 'User-Agent': 'LoomTV v1' },
-      },
       tvdb: {
         endpoint: 'https://api4.thetvdb.com/v4/login',
         method: 'POST',
@@ -593,7 +589,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         body: JSON.stringify({ apikey: apiKey }),
       },
     };
-    const labels = { tmdb: 'TMDB', fanart: 'Fanart.tv', omdb: 'OMDb', opensubtitles: 'OpenSubtitles', tvdb: 'TheTVDB' };
+    const labels = { tmdb: 'TMDB', fanart: 'Fanart.tv', omdb: 'OMDb', tvdb: 'TheTVDB' };
     const request = requests[id];
     try {
       const response = await fetch(request.endpoint, {
@@ -1129,7 +1125,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         await requirePrincipal(req, 'library.manage');
         const body = await readJsonBody(req);
         const skipped = body.skip === true;
-        const supportedProviders = ['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'];
+        const supportedProviders = ['tmdb', 'fanart', 'omdb', 'tvdb'];
         const suppliedKeys = body.keys && typeof body.keys === 'object' && !Array.isArray(body.keys) ? body.keys : {};
         const keys = skipped ? {} : Object.fromEntries(supportedProviders.flatMap((provider) => {
           const value = provider === 'tmdb' && suppliedKeys[provider] === undefined ? body.apiKey : suppliedKeys[provider];
@@ -1165,7 +1161,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         await requirePrincipal(req, 'library.manage');
         const body = await readJsonBody(req);
         const provider = optionalString(body.provider, 'provider', 32) || 'tmdb';
-        if (!['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].includes(provider)) throw requestError(400, 'invalid_request', 'Unknown metadata provider.');
+        if (!['tmdb', 'fanart', 'omdb', 'tvdb'].includes(provider)) throw requestError(400, 'invalid_request', 'Unknown metadata provider.');
         const verdict = await testSetupMetadata(provider, requiredString(body.apiKey, 'apiKey', 512));
         if (!verdict.ok) throw requestError(400, verdict.code, verdict.message);
         writeData(res, 200, verdict);

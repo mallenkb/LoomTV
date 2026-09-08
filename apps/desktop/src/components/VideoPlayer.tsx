@@ -435,7 +435,6 @@ export default function VideoPlayer({
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [selectedSecondarySubtitleTrackIndex, setSelectedSecondarySubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
-  const [openSubtitlesEnabled, setOpenSubtitlesEnabled] = useState(false);
   const autoplayNextEnabled = true;
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
@@ -660,7 +659,6 @@ export default function VideoPlayer({
             : 0,
         );
         if (settings.skipAnalysis?.promptTypes) setSkipPromptTypes(settings.skipAnalysis.promptTypes);
-        setOpenSubtitlesEnabled(Boolean(settings.openSubtitlesAutoDownload));
       })
       .catch(() => {
         if (cancelled) return;
@@ -713,10 +711,7 @@ export default function VideoPlayer({
   const hasEpisodes = episodes.length > 0 && episodeFiles.length > 0;
   const videoTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'video'), [mediaTracks]);
   const audioTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'audio'), [mediaTracks]);
-  const visibleSubtitles = useMemo(
-    () => subtitles.filter((subtitle) => subtitle.source !== 'opensubtitles' || openSubtitlesEnabled),
-    [openSubtitlesEnabled, subtitles],
-  );
+  const visibleSubtitles = subtitles;
   const visibleSubtitlesRef = useRef(visibleSubtitles);
   visibleSubtitlesRef.current = visibleSubtitles;
   const externalSubtitleTracks = useMemo<MediaTrack[]>(
