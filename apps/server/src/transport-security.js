@@ -1,9 +1,11 @@
 import net from 'node:net';
 
+/** @param {string} message */
 function configurationError(message) {
   return Object.assign(new Error(message), { code: 'INSECURE_TRANSPORT_CONFIGURATION' });
 }
 
+/** @param {unknown} host */
 export function isLoopbackBindHost(host) {
   const normalized = String(host || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   if (normalized === 'localhost' || normalized === '::1') return true;
@@ -11,9 +13,12 @@ export function isLoopbackBindHost(host) {
   return false;
 }
 
+/**
+ * @param {{ host?: string, directTls?: boolean, proxyPolicy?: { trustedProxies: readonly string[] }, requireSecureTransport?: boolean, developmentAllowInsecureNonLoopback?: boolean }} options
+ */
 export function assertTransportConfiguration(options) {
   const directTls = options.directTls === true;
-  const trustedProxyConfigured = options.proxyPolicy?.trustedProxies?.length > 0;
+  const trustedProxyConfigured = (options.proxyPolicy?.trustedProxies?.length || 0) > 0;
   const secureProxy = trustedProxyConfigured && options.requireSecureTransport === true;
   if (trustedProxyConfigured && options.requireSecureTransport !== true) {
     throw configurationError(

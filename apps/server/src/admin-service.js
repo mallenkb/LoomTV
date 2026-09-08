@@ -31,6 +31,37 @@ import {
   userView,
 } from './auth-policy.js';
 
+/**
+ * @typedef {import('./server-admin-types.js').AdminState} AdminState
+ * @typedef {import('./server-admin-types.js').AdminOptions} AdminOptions
+ * @typedef {import('./server-admin-types.js').Principal} Principal
+ * @typedef {import('./server-admin-types.js').Account} Account
+ * @typedef {import('./server-admin-types.js').User} User
+ * @typedef {import('./server-admin-types.js').Root} Root
+ * @typedef {import('./server-admin-types.js').BackupStatus} BackupStatus
+ * @typedef {import('./server-admin-types.js').Probe} Probe
+ * @typedef {import('./server-admin-types.js').Media} Media
+ * @typedef {import('@loom-media-server/video-contracts').CatalogKind} CatalogKind
+ * @typedef {import('node:http').IncomingMessage} Request
+ */
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) { return value !== null && typeof value === 'object'; }
+/** @param {unknown} value @returns {Record<string, unknown>[]} */
+function records(value) { return Array.isArray(value) ? value.filter(isRecord) : []; }
+/** @template {string} K @param {Record<string, unknown>} value @param {K[]} keys @returns {value is Record<string, unknown> & Record<K, string>} */
+function hasStrings(value, keys) { return keys.every((key) => typeof value[key] === 'string'); }
+/** @param {unknown} value @returns {value is number} */
+function finiteNumber(value) { return typeof value === 'number' && Number.isFinite(value); }
+/** @param {unknown} value @returns {value is CatalogKind} */
+function isCatalogKind(value) { return typeof value === 'string' && ['movie', 'series', 'episode', 'video'].includes(value); }
+/** @param {unknown} value @returns {CatalogKind} */
+function catalogKind(value) { return isCatalogKind(value) ? value : 'movie'; }
+/** @param {unknown} value @returns {value is number} */
+function safeInteger(value) { return typeof value === 'number' && Number.isSafeInteger(value); }
+/** @param {unknown} error */
+function errorCode(error) { return isRecord(error) && typeof error.code === 'string' ? error.code : ''; }
+
 const scrypt = promisify(scryptCallback);
 const PASSWORD_BYTES = 64;
 const ADMIN_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
@@ -67,9 +98,10 @@ const STORAGE_PROBE_PREFIX = '.loomtv-storage-probe-';
  * }} StorageHealthStatus
  */
 
+/** @param {unknown} error @param {StorageHealthState} fallback @returns {StorageHealthState} */
 function storageStateForError(error, fallback) {
-  if (error?.storageState) return error.storageState;
-  switch (error?.code) {
+  if (isRecord(error) && ['writable', 'missing', 'not-directory', 'permission-denied', 'read-only', 'write-failed', 'cleanup-failed', 'probe-timeout', 'unavailable'].includes(String(error.storageState))) return /** @type {StorageHealthState} */ (error.storageState);
+  switch (errorCode(error)) {
     case 'ENOENT': return 'missing';
     case 'ENOTDIR': return 'not-directory';
     case 'EACCES':
@@ -87,16 +119,19 @@ function storageProbeTimeoutError() {
   });
 }
 
+/** @param {number} timeoutMs */
 function createStorageDeadline(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  /** @template T @param {() => T | PromiseLike<T>} operation @returns {Promise<T>} */
   return async function withinStorageDeadline(operation) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) throw storageProbeTimeoutError();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
     let timeout;
     try {
       return await Promise.race([
         Promise.resolve().then(operation),
-        new Promise((_, reject) => {
+        new Promise(/** @param {(value: never) => void} _ */ (_, reject) => {
           timeout = setTimeout(() => reject(storageProbeTimeoutError()), remainingMs);
         }),
       ]);
@@ -106,6 +141,7 @@ function createStorageDeadline(timeoutMs) {
   };
 }
 
+/** @param {typeof fs} fileSystem @param {string} probePath */
 async function removeStorageProbe(fileSystem, probePath) {
   try {
     await fileSystem.rm(probePath, { force: true });
@@ -113,7 +149,7 @@ async function removeStorageProbe(fileSystem, probePath) {
     try {
       await fileSystem.unlink(probePath);
     } catch (unlinkError) {
-      if (unlinkError?.code === 'ENOENT') return;
+      if (errorCode(unlinkError) === 'ENOENT') return;
       throw Object.assign(new Error('Persistent storage probe file could not be removed.'), {
         storageState: 'cleanup-failed',
         cause: unlinkError,
@@ -123,6 +159,7 @@ async function removeStorageProbe(fileSystem, probePath) {
   }
 }
 
+/** @param {string} _targetPath @param {{ fileSystem: typeof fs, probePath: string }} options */
 async function atomicStorageWriteProbe(_targetPath, { fileSystem, probePath }) {
   let handle;
   let operationError;
@@ -148,6 +185,7 @@ async function atomicStorageWriteProbe(_targetPath, { fileSystem, probePath }) {
   if (operationError) throw operationError;
 }
 
+/** @param {import('node:fs').StatsFs} stats */
 function storageCapacity(stats) {
   const blockSize = Number(stats?.bsize);
   const blocks = Number(stats?.blocks);
@@ -160,6 +198,7 @@ function storageCapacity(stats) {
   };
 }
 
+/** @param {StorageHealthStatus} storage */
 function storageCheckMessage(storage) {
   if (storage.writable) {
     return `${storage.freeBytes == null ? 'Available' : `${Math.round(storage.freeBytes / 1024 / 1024)} MB free`}.`;
@@ -176,10 +215,12 @@ function storageCheckMessage(storage) {
   }
 }
 
+/** @param {string} message */
 function invalidInput(message) {
   return Object.assign(new Error(message), { status: 400, code: 'invalid_request' });
 }
 
+/** @param {unknown} value @param {string} role @param {string[] | undefined} [fallback] */
 function permissionsInput(value, role, fallback) {
   if (value === undefined) return fallback === undefined ? permissionsForRole(role) : fallback;
   if (!Array.isArray(value)) throw invalidInput('permissions must be an array.');
@@ -189,6 +230,9 @@ function permissionsInput(value, role, fallback) {
   return permissionsForRole(role, value);
 }
 
+/** @overload @param {unknown} value @param {false} [preserveUndefined] @returns {string[] | null} */
+/** @overload @param {unknown} value @param {boolean} preserveUndefined @returns {string[] | null | undefined} */
+/** @param {unknown} value */
 function rootIdsInput(value, preserveUndefined = false) {
   if (value === undefined && preserveUndefined) return undefined;
   if (value !== undefined && value !== null && !Array.isArray(value)) {
@@ -202,6 +246,9 @@ function rootIdsInput(value, preserveUndefined = false) {
   return normalizeRootIds(value);
 }
 
+/** @overload @param {unknown} value @param {false} [preserveUndefined] @returns {string[] | null} */
+/** @overload @param {unknown} value @param {boolean} preserveUndefined @returns {string[] | null | undefined} */
+/** @param {unknown} value */
 function deviceIdsInput(value, preserveUndefined = false) {
   if (value === undefined && preserveUndefined) return undefined;
   if (value !== undefined && value !== null && !Array.isArray(value)) {
@@ -218,23 +265,29 @@ function deviceIdsInput(value, preserveUndefined = false) {
   return Array.isArray(normalized) && normalized.length === 0 ? null : normalized;
 }
 
+/** @overload @param {unknown} value @param {false} [preserveUndefined] @returns {number | null} */
+/** @overload @param {unknown} value @param {boolean} preserveUndefined @returns {number | null | undefined} */
+/** @param {unknown} value */
 function maxSessionsInput(value, preserveUndefined = false) {
   if (value === undefined && preserveUndefined) return undefined;
   if (value === undefined || value === null || value === '') return null;
-  if (!Number.isSafeInteger(value) || value < 1 || value > 32) {
+  if (!safeInteger(value) || value < 1 || value > 32) {
     throw invalidInput('maxSessions must be an integer between 1 and 32, or null.');
   }
   return value;
 }
 
+/** @param {string} message */
 function backupError(message) {
   return Object.assign(new Error(message), { status: 422, code: 'invalid_backup' });
 }
 
+/** @param {unknown} value */
 function stableChecksum(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+/** @param {AdminState | Record<string, unknown>} state @param {unknown} clientState */
 function backupDataFromState(state, clientState) {
   return {
     stateVersion: STATE_VERSION,
@@ -253,6 +306,7 @@ function backupDataFromState(state, clientState) {
   };
 }
 
+/** @param {AdminState} state @param {string | undefined} sourceVersion @param {unknown} clientState */
 function legacyBackupEnvelopeFromState(state, sourceVersion, clientState) {
   const data = backupDataFromState(state, clientState);
   return {
@@ -265,6 +319,7 @@ function legacyBackupEnvelopeFromState(state, sourceVersion, clientState) {
   };
 }
 
+/** @param {import('@loom-media-server/video-contracts/server').CanonicalStateSnapshot} snapshot @param {string | undefined} sourceVersion */
 function canonicalBackupEnvelope(snapshot, sourceVersion) {
   const data = snapshot;
   return {
@@ -278,9 +333,10 @@ function canonicalBackupEnvelope(snapshot, sourceVersion) {
   };
 }
 
+/** @param {unknown} value @returns {import('./server-admin-types.js').BackupHistory[]} */
 function normalizeBackupHistory(value) {
   if (!Array.isArray(value)) return [];
-  return value
+  return records(value)
     .filter((entry) => entry && typeof entry === 'object' && typeof entry.kind === 'string')
     .map((entry) => ({
       kind: entry.kind === 'restore' ? 'restore' : 'backup',
@@ -295,10 +351,11 @@ function normalizeBackupHistory(value) {
     .slice(0, MAX_BACKUP_HISTORY);
 }
 
+/** @param {unknown} value @returns {BackupStatus} */
 function normalizeBackupStatus(value) {
-  const status = value && typeof value === 'object' ? value : {};
+  const status = isRecord(value) ? value : {};
   return {
-    state: ['never', 'running', 'completed', 'failed', 'restored'].includes(status.state) ? status.state : 'never',
+    state: typeof status.state === 'string' && ['never', 'running', 'completed', 'failed', 'restored'].includes(status.state) ? status.state : 'never',
     lastBackupAt: Number.isFinite(status.lastBackupAt) ? Number(status.lastBackupAt) : undefined,
     lastRestoreAt: Number.isFinite(status.lastRestoreAt) ? Number(status.lastRestoreAt) : undefined,
     destination: typeof status.destination === 'string' ? status.destination.slice(0, 4_096) : undefined,
@@ -312,14 +369,15 @@ function normalizeBackupStatus(value) {
   };
 }
 
+/** @param {unknown} value @param {{ requireCanonical?: boolean }} [options] */
 function validateBackupEnvelope(value, { requireCanonical = false } = {}) {
-  if (requireCanonical && value?.format !== BACKUP_FORMAT) {
+  if (requireCanonical && (!isRecord(value) || value.format !== BACKUP_FORMAT)) {
     throw backupError('Legacy partial-state backups cannot replace the canonical store. Import them through the migration workflow.');
   }
   // Backups created before the checksummed envelope were raw admin-state JSON
   // files. Accept them as a one-time migration so an upgrade cannot strand a
   // NAS owner with an otherwise valid recovery point.
-  if (value && typeof value === 'object' && !value.format && value.owner && Array.isArray(value.roots)) {
+  if (isRecord(value) && !value.format && value.owner && Array.isArray(value.roots)) {
     const data = backupDataFromState(value, undefined);
     return {
       format: LEGACY_BACKUP_FORMAT,
@@ -331,12 +389,12 @@ function validateBackupEnvelope(value, { requireCanonical = false } = {}) {
       legacy: true,
     };
   }
-  if (!value || typeof value !== 'object'
+  if (!isRecord(value) || typeof value.format !== 'string'
     || ![BACKUP_FORMAT, LEGACY_BACKUP_FORMAT].includes(value.format)) {
     throw backupError('The selected file is not a LoomTV backup.');
   }
   const expectedVersion = value.format === BACKUP_FORMAT ? BACKUP_VERSION : LEGACY_BACKUP_VERSION;
-  if (value.version !== expectedVersion || !value.data || typeof value.data !== 'object') {
+  if (value.version !== expectedVersion || !isRecord(value.data)) {
     throw backupError('This LoomTV backup format is not supported by this server.');
   }
   if (typeof value.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(value.checksum)) {
@@ -351,41 +409,51 @@ function validateBackupEnvelope(value, { requireCanonical = false } = {}) {
   if (value.format === LEGACY_BACKUP_FORMAT && (!value.data.owner || typeof value.data.owner !== 'object')) {
     throw backupError('The backup does not contain an owner account.');
   }
-  return value;
+  return { ...value, format: value.format, version: expectedVersion, checksum: value.checksum, data: value.data };
 }
 
+/** @param {string} value */
 function hashToken(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/** @param {unknown} left @param {unknown} right */
 function timingSafeStringEqual(left, right) {
   const expected = Buffer.from(String(left || ''), 'utf8');
   const actual = Buffer.from(String(right || ''), 'utf8');
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+/** @param {unknown} value */
 function normalizedIdentity(value) {
   return String(value || '').trim().toLocaleLowerCase();
 }
 
+/** @param {unknown} value */
 function requestAddress(value) {
   return normalizeIpAddress(value) || 'unknown';
 }
 
+/** @param {string} kind @param {unknown} value */
 function authAttemptKey(kind, value) {
   return hashToken(`${kind}:${normalizedIdentity(value)}`);
 }
 
+/** @param {number} milliseconds */
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+/** @param {unknown} addressFailures */
 export function loginThrottleDelayMs(addressFailures) {
   const failures = Number.isFinite(Number(addressFailures)) ? Math.max(0, Math.floor(Number(addressFailures))) : 0;
   const bucket = Math.min(3, Math.floor(failures / MAX_LOGIN_ATTEMPTS));
   return LOGIN_DELAY_MS * (2 ** bucket);
 }
 
+/** @overload @param {Account} owner @returns {Principal} */
+/** @overload @param {Account | null | undefined} owner @returns {Principal | null} */
+/** @param {Account | null | undefined} owner @returns {Principal | null} */
 function publicOwnerPrincipal(owner) {
   return owner ? {
     id: owner.id,
@@ -399,6 +467,9 @@ function publicOwnerPrincipal(owner) {
   } : null;
 }
 
+/** @overload @param {User} user @returns {Principal} */
+/** @overload @param {User | null | undefined} user @returns {Principal | null} */
+/** @param {User | undefined} user @returns {Principal | null} */
 function publicUserPrincipal(user) {
   return user ? {
     id: user.id,
@@ -412,11 +483,13 @@ function publicUserPrincipal(user) {
   } : null;
 }
 
+/** @param {string} password @param {string} [salt] */
 async function hashPassword(password, salt = randomBytes(16).toString('hex')) {
   const value = await scrypt(password, salt, PASSWORD_BYTES);
   return { salt, hash: Buffer.from(value).toString('base64') };
 }
 
+/** @param {string} password @param {string} salt @param {string} expectedHash */
 async function verifyPassword(password, salt, expectedHash) {
   const value = await scrypt(password, salt, PASSWORD_BYTES);
   const actual = Buffer.from(value);
@@ -424,10 +497,12 @@ async function verifyPassword(password, salt, expectedHash) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+/** @param {string} rootPath */
 function rootIdFor(rootPath) {
   return createHash('sha256').update(path.resolve(rootPath)).digest('hex').slice(0, 24);
 }
 
+/** @param {string} rootPath */
 function isNetworkLikePath(rootPath) {
   const normalized = rootPath.replaceAll('\\', '/');
   return normalized.startsWith('/Volumes/')
@@ -437,6 +512,7 @@ function isNetworkLikePath(rootPath) {
     || /^\/\/[^/]+\/[^/]+/.test(normalized);
 }
 
+/** @returns {AdminState} */
 function defaultState() {
   return {
     owner: null,
@@ -453,10 +529,11 @@ function defaultState() {
   };
 }
 
+/** @param {unknown} raw @returns {AdminState} */
 function normalizeState(raw) {
-  if (!raw || typeof raw !== 'object') return defaultState();
+  if (!isRecord(raw)) return defaultState();
   const state = defaultState();
-  if (raw.owner && typeof raw.owner === 'object'
+  if (isRecord(raw.owner)
     && typeof raw.owner.id === 'string'
     && typeof raw.owner.name === 'string'
     && typeof raw.owner.salt === 'string'
@@ -469,19 +546,18 @@ function normalizeState(raw) {
     };
   }
   if (Array.isArray(raw.users)) {
-    state.users = raw.users
-      .filter((entry) => entry && typeof entry.id === 'string' && typeof entry.name === 'string'
-        && typeof entry.salt === 'string' && typeof entry.hash === 'string')
+    state.users = records(raw.users)
+      .filter((entry) => hasStrings(entry, ['id', 'name', 'salt', 'hash']))
       .map((entry) => ({
         id: entry.id.slice(0, 100),
         name: entry.name.trim().slice(0, 80),
         salt: entry.salt,
         hash: entry.hash,
-        role: USER_ROLES.includes(entry.role) ? entry.role : 'viewer',
+        role: typeof entry.role === 'string' && USER_ROLES.includes(entry.role) ? entry.role : 'viewer',
         permissions: permissionsForRole(entry.role, entry.permissions),
         rootIds: normalizeRootIds(entry.rootIds),
         deviceIds: normalizeDeviceIds(entry.deviceIds),
-        maxSessions: Number.isSafeInteger(entry.maxSessions) && entry.maxSessions >= 1 && entry.maxSessions <= 32
+        maxSessions: safeInteger(entry.maxSessions) && entry.maxSessions >= 1 && entry.maxSessions <= 32
           ? entry.maxSessions
           : null,
         disabled: entry.disabled === true,
@@ -491,8 +567,9 @@ function normalizeState(raw) {
       .slice(0, MAX_USERS);
   }
   if (Array.isArray(raw.sessions)) {
-    state.sessions = raw.sessions
-      .filter((entry) => entry && typeof entry.tokenHash === 'string' && Number.isFinite(entry.expiresAt))
+    state.sessions = records(raw.sessions)
+      .filter((entry) => hasStrings(entry, ['tokenHash']))
+      .filter((entry) => finiteNumber(entry.expiresAt))
       .map((entry) => ({
         id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 128) : randomUUID(),
         tokenHash: entry.tokenHash,
@@ -513,8 +590,9 @@ function normalizeState(raw) {
       .slice(-MAX_SESSIONS);
   }
   if (Array.isArray(raw.loginAttempts)) {
-    state.loginAttempts = raw.loginAttempts
-      .filter((entry) => entry && typeof entry.key === 'string' && Number.isFinite(entry.lastAttemptAt))
+    state.loginAttempts = records(raw.loginAttempts)
+      .filter((entry) => hasStrings(entry, ['key']))
+      .filter((entry) => finiteNumber(entry.lastAttemptAt))
       .map((entry) => ({
         key: entry.key.slice(0, 128),
         failures: Math.max(0, Math.min(MAX_SHARED_ADDRESS_FAILURES, Number(entry.failures) || 0)),
@@ -525,14 +603,15 @@ function normalizeState(raw) {
       .slice(-256);
   }
   if (Array.isArray(raw.roots)) {
-    state.roots = raw.roots
-      .filter((entry) => entry && typeof entry.path === 'string' && entry.path.trim())
+    state.roots = records(raw.roots)
+      .filter((entry) => hasStrings(entry, ['path']))
+      .filter((entry) => entry.path.trim())
       .map((entry) => {
         const rootPath = path.resolve(entry.path);
         return {
           id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 100) : rootIdFor(rootPath),
           path: rootPath,
-          kind: ['movies', 'tvShows', 'anime', 'others'].includes(entry.kind) ? entry.kind : 'others',
+          kind: typeof entry.kind === 'string' && ['movies', 'tvShows', 'anime', 'others'].includes(entry.kind) ? entry.kind : 'others',
           createdAt: Number(entry.createdAt) || Date.now(),
           lastScanAt: Number.isFinite(entry.lastScanAt) ? Number(entry.lastScanAt) : undefined,
         };
@@ -540,40 +619,40 @@ function normalizeState(raw) {
       .slice(0, MAX_ROOTS);
   }
   if (Array.isArray(raw.catalog)) {
-    state.catalog = raw.catalog
-      .filter((entry) => entry && typeof entry.id === 'string' && typeof entry.rootId === 'string' && typeof entry.path === 'string')
+    state.catalog = records(raw.catalog)
+      .filter((entry) => hasStrings(entry, ['id', 'rootId', 'path']))
       .map((entry) => ({
         id: entry.id.slice(0, 128),
         rootId: entry.rootId.slice(0, 128),
         path: path.resolve(entry.path),
         relativePath: typeof entry.relativePath === 'string' ? entry.relativePath.slice(0, 4_096) : path.basename(entry.path),
-        type: entry.type === 'tv' || ['series','episode'].includes(entry.kind) ? 'tv' : 'movie',
+        type: entry.type === 'tv' || (typeof entry.kind === 'string' && ['series','episode'].includes(entry.kind)) ? 'tv' : 'movie',
         title: typeof entry.title === 'string' ? entry.title.slice(0, 500) : path.basename(entry.path),
-        kind: ['movie','series','episode','video'].includes(entry.kind) ? entry.kind : 'movie',
-        ...(Number.isSafeInteger(entry.year) && entry.year > 1900 && entry.year < 2200 ? { year: entry.year } : {}),
+        kind: catalogKind(entry.kind),
+        ...(safeInteger(entry.year) && entry.year > 1900 && entry.year < 2200 ? { year: entry.year } : {}),
         ...(entry.animeLikely === true ? { animeLikely: true } : {}),
         ...(typeof entry.seriesId === 'string' && entry.seriesId.length <= 128 ? { seriesId: entry.seriesId } : {}),
-        ...(Number.isSafeInteger(entry.seasonNumber) && entry.seasonNumber >= 0 ? { seasonNumber: entry.seasonNumber } : {}),
-        ...(Number.isSafeInteger(entry.episodeNumber) && entry.episodeNumber >= 0 ? { episodeNumber: entry.episodeNumber } : {}),
-        ...(entry.series && typeof entry.series === 'object' && typeof entry.series.title === 'string'
+        ...(safeInteger(entry.seasonNumber) && entry.seasonNumber >= 0 ? { seasonNumber: entry.seasonNumber } : {}),
+        ...(safeInteger(entry.episodeNumber) && entry.episodeNumber >= 0 ? { episodeNumber: entry.episodeNumber } : {}),
+        ...(isRecord(entry.series) && typeof entry.series.title === 'string'
           ? {
             series: {
               title: entry.series.title.slice(0, 500),
-              season: Number.isSafeInteger(entry.series.season) && entry.series.season >= 0 ? entry.series.season : 1,
-              episode: Number.isSafeInteger(entry.series.episode) && entry.series.episode >= 0 ? entry.series.episode : null,
+              season: safeInteger(entry.series.season) && entry.series.season >= 0 ? entry.series.season : 1,
+              episode: safeInteger(entry.series.episode) && entry.series.episode >= 0 ? entry.series.episode : null,
             },
           }
           : {}),
         extension: typeof entry.extension === 'string' ? entry.extension.slice(0, 16) : path.extname(entry.path).slice(1).toLowerCase(),
         sizeBytes: Number.isFinite(entry.sizeBytes) ? Number(entry.sizeBytes) : undefined,
         modifiedAtMs: Number.isFinite(entry.modifiedAtMs) ? Number(entry.modifiedAtMs) : undefined,
-        ...(entry.localMetadata && typeof entry.localMetadata === 'object' && !Array.isArray(entry.localMetadata)
+        ...(isRecord(entry.localMetadata) && !Array.isArray(entry.localMetadata)
           ? { localMetadata: entry.localMetadata }
           : {}),
-        ...(entry.contentRatings && typeof entry.contentRatings === 'object' && !Array.isArray(entry.contentRatings)
+        ...(isRecord(entry.contentRatings) && !Array.isArray(entry.contentRatings)
           ? {
             contentRatings: Object.fromEntries(Object.entries(entry.contentRatings).slice(0, 64).flatMap(([country, rating]) => (
-              /^[A-Za-z]{2,3}$/.test(country) && rating && Number.isFinite(rating.minimumAge)
+              /^[A-Za-z]{2,3}$/.test(country) && isRecord(rating) && finiteNumber(rating.minimumAge)
                 ? [[country.toUpperCase(), { ...rating, minimumAge: Math.max(0, Math.min(21, Number(rating.minimumAge))) }]]
                 : []
             ))),
@@ -583,13 +662,13 @@ function normalizeState(raw) {
         ...(Number.isFinite(entry.rating) ? { rating: Number(entry.rating) } : {}),
         ...(Array.isArray(entry.genres) ? { genres: entry.genres
           .filter((genre) => typeof genre === 'string' && genre.length <= 128).slice(0, 128) } : {}),
-        ...(entry.providerIds && typeof entry.providerIds === 'object' && !Array.isArray(entry.providerIds)
+        ...(isRecord(entry.providerIds) && !Array.isArray(entry.providerIds)
           ? { providerIds: Object.fromEntries(Object.entries(entry.providerIds).slice(0, 64).flatMap(([provider, value]) => (
             typeof value === 'string' && provider.length <= 64 && value.length <= 256 ? [[provider, value]] : []
           ))) } : {}),
-        ...(Array.isArray(entry.subtitleSidecars) ? { subtitleSidecars: entry.subtitleSidecars.slice(0, 64).flatMap((sidecar) => {
+        ...(Array.isArray(entry.subtitleSidecars) ? { subtitleSidecars: records(entry.subtitleSidecars).slice(0, 64).flatMap((sidecar) => {
           if (!sidecar || typeof sidecar !== 'object' || typeof sidecar.id !== 'string' || !sidecar.id.startsWith('sidecar:')
-            || typeof sidecar.path !== 'string' || !['srt','vtt','ass','ssa'].includes(sidecar.format)) return [];
+            || typeof sidecar.path !== 'string' || typeof sidecar.format !== 'string' || !['srt','vtt','ass','ssa'].includes(sidecar.format)) return [];
           return [{
             id: sidecar.id.slice(0, 128), path: path.resolve(sidecar.path),
             relativeName: typeof sidecar.relativeName === 'string' ? sidecar.relativeName.slice(0, 500) : path.basename(sidecar.path),
@@ -610,7 +689,7 @@ function normalizeState(raw) {
       }));
   }
   if (Array.isArray(raw.profiles)) state.profiles = raw.profiles.slice(0, 4_096);
-  if (raw.watchState && typeof raw.watchState === 'object' && !Array.isArray(raw.watchState)) {
+  if (isRecord(raw.watchState) && !Array.isArray(raw.watchState)) {
     try {
       const serialized = JSON.stringify(raw.watchState);
       if (serialized.length <= 8 * 1024 * 1024) state.watchState = JSON.parse(serialized);
@@ -630,19 +709,21 @@ function normalizeState(raw) {
   state.backup = normalizeBackupStatus(raw.backup);
   if (Array.isArray(raw.logs)) {
     const cutoff = Date.now() - LOG_RETENTION_MS;
-    state.logs = raw.logs
+    state.logs = records(raw.logs).map((entry) => ({ ...entry, timestamp: entry.timestamp }))
       .filter((entry) => entry && Number(entry.timestamp) > cutoff)
       .slice(0, MAX_LOGS);
   }
   return state;
 }
 
+/** @param {AdminOptions} options */
 export function createHeadlessAdminService(options) {
   if (!options.bootstrapSecurity) throw new Error('createHeadlessAdminService requires bootstrapSecurity.');
   const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   const dataDir = path.resolve(options.dataDir);
   const statePath = path.join(dataDir, STATE_FILENAME);
   const mediaDir = options.mediaDir ? path.resolve(options.mediaDir) : null;
+  /** @type {() => Promise<import('./server-admin-types.js').RuntimeHealth>} */
   const getRuntimeHealth = options.getRuntimeHealth || (async () => ({}));
   const getSessions = options.getSessions || (async () => []);
   const getClientState = options.getClientState || (async () => null);
@@ -670,29 +751,37 @@ export function createHeadlessAdminService(options) {
     : fs;
   const storageWriteProbe = options.storageWriteProbe || atomicStorageWriteProbe;
   const storageProbeTimeoutMs = Number.isFinite(options.storageProbeTimeoutMs)
-    ? Math.max(10, Math.min(10_000, Math.trunc(options.storageProbeTimeoutMs)))
+    ? Math.max(10, Math.min(10_000, Math.trunc(options.storageProbeTimeoutMs ?? STORAGE_PROBE_TIMEOUT_MS)))
     : STORAGE_PROBE_TIMEOUT_MS;
+  /** @type {Map<string, Promise<unknown>>} */
   const storageOperations = new Map();
+  /** @type {Promise<AdminState> | undefined} */
   let statePromise;
   let writeQueue = Promise.resolve();
+  /** @type {ReturnType<typeof issueToken> | null} */
   let ownerCreationPromise = null;
+  /** @type {Promise<BackupStatus> | null} */
   let backupPromise = null;
 
+  /** @param {string} principalId @param {string} reason */
   async function notifyPlaybackSessionsRevoked(principalId, reason) {
     if (!onPlaybackSessionsRevoked || !principalId) return;
     try { await onPlaybackSessionsRevoked(principalId, reason); } catch { /* playback cleanup is best effort */ }
   }
 
+  /** @param {string} itemId @param {string} reason */
   async function notifyPlaybackSessionsRevokedForItem(itemId, reason) {
     if (!onPlaybackSessionsRevokedForItem || !itemId) return;
     try { await onPlaybackSessionsRevokedForItem(itemId, reason); } catch { /* playback cleanup is best effort */ }
   }
 
+  /** @param {string} sessionId @param {string} reason */
   async function notifyAuthenticationSessionRevoked(sessionId, reason) {
     if (!onAuthenticationSessionRevoked || !sessionId) return;
     try { await onAuthenticationSessionRevoked(sessionId, reason); } catch { /* playback cleanup is best effort */ }
   }
 
+  /** @param {string} reason */
   async function notifyAllPlaybackSessionsRevoked(reason, strict = false) {
     if (!onAllPlaybackSessionsRevoked) return;
     try { await onAllPlaybackSessionsRevoked(reason); } catch (error) {
@@ -701,6 +790,7 @@ export function createHeadlessAdminService(options) {
     }
   }
 
+  /** @param {AdminState} state */
   async function saveState(state) {
     writeQueue = writeQueue.catch(() => undefined).then(async () => {
       if (stateStore) {
@@ -715,6 +805,7 @@ export function createHeadlessAdminService(options) {
     return writeQueue;
   }
 
+  /** @param {BackupStatus} status */
   async function saveBackupStatus(status) {
     if (stateStore?.updateBackupState) {
       stateStore.updateBackupState(status);
@@ -725,6 +816,7 @@ export function createHeadlessAdminService(options) {
     await saveState(state);
   }
 
+  /** @param {string} destination @param {{ checksum: string }} envelope */
   async function writeBackupFile(destination, envelope) {
     const serialized = JSON.stringify(envelope, null, 2);
     if (Buffer.byteLength(serialized) > MAX_BACKUP_BYTES) throw backupError('The backup is larger than the supported limit.');
@@ -749,10 +841,11 @@ export function createHeadlessAdminService(options) {
     return { sizeBytes: stats.size, checksum: envelope.checksum };
   }
 
+  /** @template T @param {string} operationName @param {string} targetPath @param {() => Promise<T>} operation @returns {Promise<T>} */
   function sharedStorageOperation(operationName, targetPath, operation) {
     const key = `${operationName}:${targetPath}`;
     const existing = storageOperations.get(key);
-    if (existing) return existing;
+    if (existing) return /** @type {Promise<T>} */ (existing);
     const pending = Promise.resolve().then(operation);
     storageOperations.set(key, pending);
     const clear = () => {
@@ -763,6 +856,7 @@ export function createHeadlessAdminService(options) {
   }
 
   /** @returns {Promise<StorageHealthStatus>} */
+  /** @param {string} targetPath @returns {Promise<StorageHealthStatus>} */
   async function storageStatus(targetPath) {
     const withinDeadline = createStorageDeadline(storageProbeTimeoutMs);
     let stats;
@@ -821,6 +915,7 @@ export function createHeadlessAdminService(options) {
     };
   }
 
+  /** @param {AdminState} state */
   function pruneLogs(state, now = Date.now()) {
     const before = state.logs.length;
     state.logs = state.logs
@@ -829,13 +924,14 @@ export function createHeadlessAdminService(options) {
     return state.logs.length !== before;
   }
 
+  /** @returns {Promise<AdminState>} */
   async function loadState() {
     if (!statePromise) {
       statePromise = (stateStore
         ? Promise.resolve(normalizeState(stateStore.readAdminState()))
         : fs.readFile(statePath, 'utf8').then((contents) => normalizeState(JSON.parse(contents))))
         .catch(async (error) => {
-          if (error?.code === 'ENOENT') {
+          if (errorCode(error) === 'ENOENT') {
             const state = defaultState();
             await saveState(state);
             return state;
@@ -851,6 +947,7 @@ export function createHeadlessAdminService(options) {
     return statePromise;
   }
 
+  /** @param {string} level @param {string} message @param {unknown} [details] */
   async function appendLog(level, message, details) {
     const state = await loadState();
     state.logs.unshift({
@@ -866,6 +963,7 @@ export function createHeadlessAdminService(options) {
     else await saveState(state);
   }
 
+  /** @param {Root} root */
   async function rootView(root) {
     try {
       const stats = await fs.stat(root.path);
@@ -879,20 +977,81 @@ export function createHeadlessAdminService(options) {
     } catch (error) {
       return {
         ...root,
-        state: error?.code === 'EACCES' ? 'degraded' : 'offline',
+        state: errorCode(error) === 'EACCES' ? 'degraded' : 'offline',
         isNetworkLike: isNetworkLikePath(root.path),
-        message: error?.code === 'EACCES' ? 'Permission denied.' : 'Folder is unavailable; reconnect the share before scanning.',
+        message: errorCode(error) === 'EACCES' ? 'Permission denied.' : 'Folder is unavailable; reconnect the share before scanning.',
       };
     }
   }
 
   const scanner = createHeadlessLibraryScanner({
-    loadState,
-    saveState,
+    loadState: async () => {
+      const state = await loadState();
+      return {
+        catalog: state.catalog.map((item) => ({
+          id: item.id,
+          rootId: item.rootId,
+          path: item.path,
+          relativePath: item.relativePath,
+          type: item.type,
+          title: item.title,
+          kind: item.kind,
+          extension: item.extension,
+          // Older admin-state files may predate persisted file statistics. A
+          // negative sentinel guarantees that the next quick scan refreshes
+          // the record instead of mistaking it for an unchanged file.
+          sizeBytes: item.sizeBytes ?? -1,
+          modifiedAtMs: item.modifiedAtMs ?? -1,
+          available: item.available,
+          indexedAt: item.indexedAt,
+          ...(item.sourceId ? { sourceId: item.sourceId } : {}),
+          ...(item.seriesId ? { seriesId: item.seriesId } : {}),
+          ...(item.year !== undefined ? { year: item.year } : {}),
+          ...(item.animeLikely !== undefined ? { animeLikely: item.animeLikely } : {}),
+          ...(item.series ? { series: item.series } : {}),
+        })),
+        roots: state.roots,
+        scan: state.scan,
+      };
+    },
+    saveState: async (scannerState) => {
+      const state = await loadState();
+      const scannerRoots = new Map(scannerState.roots.map((root) => [root.id, root]));
+      if (scannerRoots.size !== state.roots.length || state.roots.some((root) => !scannerRoots.has(root.id))) {
+        throw Object.assign(new Error('Library scanner returned an inconsistent root set.'), {
+          code: 'scanner_state_invalid',
+        });
+      }
+      const existingCatalog = new Map(state.catalog.map((item) => [item.id, item]));
+      state.catalog = scannerState.catalog.map((item) => {
+        const existing = existingCatalog.get(item.id);
+        const preserveEnrichment = existing && (
+          scannerState.scan?.state !== 'completed'
+          || item.available === false
+          || (scannerState.scan.mode === 'quick'
+            && existing.sizeBytes === item.sizeBytes
+            && existing.modifiedAtMs === item.modifiedAtMs)
+        );
+        if (!preserveEnrichment) return item;
+        return {
+          ...existing,
+          ...item,
+          sizeBytes: item.sizeBytes < 0 ? existing.sizeBytes : item.sizeBytes,
+          modifiedAtMs: item.modifiedAtMs < 0 ? existing.modifiedAtMs : item.modifiedAtMs,
+        };
+      });
+      state.roots = state.roots.map((root) => {
+        const scannedRoot = scannerRoots.get(root.id);
+        return scannedRoot?.lastScanAt === undefined ? root : { ...root, lastScanAt: scannedRoot.lastScanAt };
+      });
+      if (scannerState.scan) state.scan = scannerState.scan;
+      await saveState(state);
+    },
     appendLog,
     probeMedia: typeof options.probeMedia === 'function' ? options.probeMedia : null,
   });
 
+  /** @param {Request} req */
   function tokenFromRequest(req) {
     const header = req?.headers?.authorization || '';
     if (header.startsWith('Bearer ')) return header.slice(7).trim();
@@ -900,6 +1059,7 @@ export function createHeadlessAdminService(options) {
     return typeof token === 'string' ? token.trim() : '';
   }
 
+  /** @param {AdminState} state @param {string | undefined} userId */
   function principalForUserId(state, userId) {
     if (!userId) return null;
     if (state.owner?.id === userId) return publicOwnerPrincipal(state.owner);
@@ -907,27 +1067,31 @@ export function createHeadlessAdminService(options) {
     return publicUserPrincipal(user);
   }
 
+  /** @param {Principal | null | undefined} principal @param {User} user */
   function principalCanManageUser(principal, user) {
     if (!principal || isOwnerPrincipal(principal) || principal.rootIds === null) return true;
     if (user.rootIds === null) return false;
-    return user.rootIds.every((rootId) => principal.rootIds.includes(rootId));
+    return user.rootIds.every((rootId) => principal.rootIds?.includes(rootId) === true);
   }
 
+  /** @param {Principal | null | undefined} principal @param {User} user */
   function ensureUserScope(principal, user) {
     if (!principalCanManageUser(principal, user)) {
       throw permissionDenied('You cannot manage an account outside your library roots.');
     }
   }
 
+  /** @param {string} [message] */
   function permissionDenied(message = 'This account is not allowed to perform that action.') {
     return Object.assign(new Error(message), { status: 403, code: 'permission_denied' });
   }
 
+  /** @param {Principal | null | undefined} principal @param {string | null | undefined} permission @returns {asserts principal is Principal} */
   function ensurePrincipalPermission(principal, permission) {
     if (!hasPermission(principal, permission)) throw permissionDenied();
-    return principal;
   }
 
+  /** @param {AdminState} state @param {unknown} name */
   function userByName(state, name) {
     const identity = normalizedIdentity(name);
     if (!identity) return null;
@@ -938,6 +1102,7 @@ export function createHeadlessAdminService(options) {
     return user ? { record: user, principal: publicUserPrincipal(user), type: 'user' } : null;
   }
 
+  /** @param {string} identity @param {unknown} address @param {ReturnType<typeof userByName>} match */
   function loginKeys(identity, address, match) {
     const submittedIdentity = identity || 'owner';
     const canonicalIdentity = match?.record?.id
@@ -961,12 +1126,14 @@ export function createHeadlessAdminService(options) {
     };
   }
 
+  /** @param {AdminState} state */
   function pruneLoginAttempts(state, now = Date.now()) {
     state.loginAttempts = state.loginAttempts.filter((entry) => (
       entry.lastAttemptAt > now - LOGIN_WINDOW_MS || entry.lockedUntil > now
     ));
   }
 
+  /** @param {AdminState} state @param {string | string[]} identityKeys */
   function loginLock(state, identityKeys, now = Date.now()) {
     pruneLoginAttempts(state, now);
     const candidates = Array.isArray(identityKeys) ? identityKeys : [identityKeys];
@@ -974,12 +1141,14 @@ export function createHeadlessAdminService(options) {
     return locked ? Math.ceil((locked.lockedUntil - now) / 1000) : 0;
   }
 
+  /** @param {AdminState} state @param {string} key */
   function loginFailureCount(state, key, now = Date.now()) {
     pruneLoginAttempts(state, now);
     const entry = state.loginAttempts.find((candidate) => candidate.key === key);
     return entry && entry.lastAttemptAt > now - LOGIN_WINDOW_MS ? entry.failures : 0;
   }
 
+  /** @param {AdminState} state @param {ReturnType<typeof loginKeys>} keys */
   function reconcileIdentityAttempts(state, keys, now = Date.now()) {
     pruneLoginAttempts(state, now);
     const candidates = new Set(keys.identityCandidates);
@@ -1002,6 +1171,7 @@ export function createHeadlessAdminService(options) {
     });
   }
 
+  /** @param {AdminState} state @param {Record<string, string>} keys */
   function rememberLoginFailure(state, keys, now = Date.now()) {
     pruneLoginAttempts(state, now);
     for (const [kind, key] of Object.entries(keys)) {
@@ -1018,18 +1188,21 @@ export function createHeadlessAdminService(options) {
     state.loginAttempts = state.loginAttempts.slice(-256);
   }
 
+  /** @param {AdminState} state @param {string[]} keys */
   function clearLoginAttempts(state, keys) {
     state.loginAttempts = state.loginAttempts.filter((entry) => !keys.includes(entry.key));
   }
 
+  /** @param {AdminState} state @param {string | undefined} userId */
   function activeUserSessions(state, userId) {
     const now = Date.now();
     return state.sessions.filter((entry) => entry.userId === userId && !entry.revokedAt && entry.expiresAt > now);
   }
 
+  /** @param {AdminState} state @param {Principal} principal @param {string | null} deviceId */
   function enforceSessionPolicy(state, principal, deviceId) {
     if (!principal || isOwnerPrincipal(principal)) return;
-    if (principal.deviceIds !== null && !principal.deviceIds.includes(deviceId)) {
+    if (principal.deviceIds !== null && !principal.deviceIds.includes(deviceId || '')) {
       throw Object.assign(new Error('This account is not enabled on the requested device.'), {
         status: 403,
         code: 'device_not_allowed',
@@ -1043,6 +1216,7 @@ export function createHeadlessAdminService(options) {
     }
   }
 
+  /** @param {AdminState} state @param {Principal} principal @param {string | null} [deviceId] */
   async function issueToken(state, principal, deviceId = null) {
     enforceSessionPolicy(state, principal, deviceId);
     const token = randomBytes(32).toString('base64url');
@@ -1065,9 +1239,11 @@ export function createHeadlessAdminService(options) {
     return { adminToken: token, expiresAt: session.expiresAt, user: principalView(principal) };
   }
 
+  /** @param {Request} req @returns {Promise<Principal | null>} */
   async function authenticateRequest(req) {
     const deviceCredential = await options.pairingService?.authenticate(req?.headers?.authorization);
     if (deviceCredential) {
+      if (!deviceCredential.accountId) return null;
       const state = await loadState();
       const account = principalForUserId(state, deviceCredential.accountId);
       if (!account) return null;
@@ -1098,6 +1274,7 @@ export function createHeadlessAdminService(options) {
     }
     if (!session) return null;
     const principal = principalForUserId(state, session.userId);
+    if (!principal) return null;
     if (session.deviceId) {
       const device = await options.pairingService?.resolveSessionDevice(principal.id, session.deviceId);
       if (!device) {
@@ -1134,10 +1311,12 @@ export function createHeadlessAdminService(options) {
       return Boolean((await loadState()).owner);
     },
 
+    /** @param {Request} req @returns {Promise<Principal | null>} */
     async authenticateRequest(req) {
       return authenticateRequest(req);
     },
 
+    /** @param {string | undefined} userId */
     async getPrincipalById(userId) {
       return principalForUserId(await loadState(), userId);
     },
@@ -1146,6 +1325,7 @@ export function createHeadlessAdminService(options) {
       return publicOwnerPrincipal((await loadState()).owner);
     },
 
+    /** @param {string} sessionId @param {string} accountId @param {string | null} [deviceId] */
     async isSessionActive(sessionId, accountId, deviceId = null) {
       if (!sessionId || !accountId) return false;
       const now = Date.now();
@@ -1155,24 +1335,31 @@ export function createHeadlessAdminService(options) {
       ));
     },
 
+    /** @param {Pick<import('./server-admin-types.js').DeviceCredential, 'accountId' | 'deviceId'>} credential */
     async issueDeviceSession(credential) {
+      if (!credential?.accountId || !credential.deviceId) throw Object.assign(new Error('The device credential is invalid.'), {
+        status: 401, code: 'device_revoked',
+      });
       const state = await loadState();
-      const principal = principalForUserId(state, credential?.accountId);
-      if (!principal || !credential?.deviceId) throw Object.assign(new Error('The device credential is invalid.'), {
+      const principal = principalForUserId(state, credential.accountId);
+      if (!principal) throw Object.assign(new Error('The device credential is invalid.'), {
         status: 401, code: 'device_revoked',
       });
       return issueToken(state, principal, credential.deviceId);
     },
 
+    /** @param {Request} req @param {string | null | undefined} permission */
     async authorizeRequest(req, permission) {
       const principal = await authenticateRequest(req);
       return Boolean(principal && (!permission || hasPermission(principal, permission)));
     },
 
+    /** @param {import('./server-admin-types.js').PolicyPrincipal | null | undefined} principal @param {string | null | undefined} permission */
     async authorizePrincipal(principal, permission) {
       return Boolean(principal && (!permission || hasPermission(principal, permission)));
     },
 
+    /** @param {Request} req */
     async revokeRequest(req) {
       const token = tokenFromRequest(req);
       if (!token) return false;
@@ -1190,6 +1377,7 @@ export function createHeadlessAdminService(options) {
       return true;
     },
 
+    /** @param {string | null} deviceId @param {string} [reason] */
     async revokeDeviceSessions(deviceId, reason = 'device_revoked') {
       const state = await loadState();
       const revokedAt = Date.now();
@@ -1204,6 +1392,7 @@ export function createHeadlessAdminService(options) {
       return changed;
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async getBootstrap(principal) {
       const state = await loadState();
       const canReadAdmin = Boolean(principal && hasPermission(principal, 'admin.read'));
@@ -1240,7 +1429,7 @@ export function createHeadlessAdminService(options) {
         library: {
           roots: canReadLibrary
             ? principal && !isOwnerPrincipal(principal) && principal.rootIds !== null
-              ? roots.filter((root) => principal.rootIds.includes(root.id))
+              ? roots.filter((root) => principal.rootIds?.includes(root.id) === true)
               : roots
             : [],
           scan: canReadLibrary ? visibleScan : { state: 'idle' },
@@ -1251,6 +1440,7 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    /** @param {Record<string, unknown>} input */
     async createOwner(input) {
       // Concurrent callers must never receive the first caller's newly issued
       // owner token. Wait, then re-evaluate owner state and this caller's
@@ -1285,6 +1475,7 @@ export function createHeadlessAdminService(options) {
       }
     },
 
+    /** @param {Record<string, unknown>} input */
     async createSession(input) {
       const state = await loadState();
       const identity = typeof input.username === 'string' ? input.username.trim() : '';
@@ -1343,15 +1534,18 @@ export function createHeadlessAdminService(options) {
       return issueToken(state, match.principal, deviceId);
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async getCurrentUser(principal) {
       return principalView(principal);
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async listUsers(principal) {
       ensurePrincipalPermission(principal, 'users.read');
       return (await loadState()).users.filter((user) => principalCanManageUser(principal, user)).map(userView);
     },
 
+    /** @param {Record<string, unknown>} input @param {Principal | null | undefined} [principal] */
     async createUser(input, principal) {
       ensurePrincipalPermission(principal, 'users.manage');
       const state = await loadState();
@@ -1364,7 +1558,7 @@ export function createHeadlessAdminService(options) {
         throw Object.assign(new Error('A user with that name already exists.'), { status: 409 });
       }
       if (state.users.length >= MAX_USERS) throw Object.assign(new Error('The server has reached its user limit.'), { status: 400 });
-      const role = USER_ROLES.includes(input.role) ? input.role : 'viewer';
+      const role = typeof input.role === 'string' && USER_ROLES.includes(input.role) ? input.role : 'viewer';
       if (!isOwnerPrincipal(principal) && role === 'admin') throw permissionDenied('Only the owner can create an administrator.');
       const permissions = permissionsInput(input.permissions, role);
       if (!isOwnerPrincipal(principal) && permissions.some((permission) => !hasPermission(principal, permission))) {
@@ -1377,7 +1571,7 @@ export function createHeadlessAdminService(options) {
       }
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
         if (rootIds === null) throw permissionDenied('You cannot grant access to every library root.');
-        if (rootIds.some((rootId) => !principal.rootIds.includes(rootId))) throw permissionDenied('You cannot grant access outside your own library roots.');
+        if (rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
       }
       if (typeof input.password !== 'string' || input.password.length < 8 || input.password.length > 256) {
         throw Object.assign(new Error('User passwords must be between 8 and 256 characters.'), { status: 400 });
@@ -1402,6 +1596,7 @@ export function createHeadlessAdminService(options) {
       return userView(user);
     },
 
+    /** @param {string | undefined} userId @param {Record<string, unknown>} input @param {Principal | null | undefined} [principal] */
     async updateUser(userId, input, principal) {
       ensurePrincipalPermission(principal, 'users.manage');
       const state = await loadState();
@@ -1419,7 +1614,7 @@ export function createHeadlessAdminService(options) {
         user.name = name;
       }
       const role = input.role === undefined ? user.role : input.role;
-      if (!USER_ROLES.includes(role)) throw Object.assign(new Error('User role is invalid.'), { status: 400 });
+      if (typeof role !== 'string' || !USER_ROLES.includes(role)) throw Object.assign(new Error('User role is invalid.'), { status: 400 });
       if (!isOwnerPrincipal(principal) && role === 'admin') throw permissionDenied('Only the owner can grant administrator access.');
       const roleChanged = role !== user.role;
       const permissions = input.permissions === undefined
@@ -1436,7 +1631,7 @@ export function createHeadlessAdminService(options) {
         throw Object.assign(new Error('One or more library roots are invalid.'), { status: 400 });
       }
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
-        if (rootIds === null || rootIds.some((rootId) => !principal.rootIds.includes(rootId))) throw permissionDenied('You cannot grant access outside your own library roots.');
+        if (rootIds === null || rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
       }
       user.role = role;
       user.permissions = permissions;
@@ -1455,6 +1650,7 @@ export function createHeadlessAdminService(options) {
       return userView(user);
     },
 
+    /** @param {string} userId @param {Principal | null | undefined} [principal] */
     async removeUser(userId, principal) {
       ensurePrincipalPermission(principal, 'users.manage');
       const state = await loadState();
@@ -1468,6 +1664,7 @@ export function createHeadlessAdminService(options) {
       await notifyPlaybackSessionsRevoked(userId, 'principal_removed');
     },
 
+    /** @param {Record<string, unknown>} input @param {Principal | null | undefined} [principal] */
     async changePassword(input, principal) {
       if (!principal) throw Object.assign(new Error('A signed-in account is required.'), { status: 401 });
       const state = await loadState();
@@ -1477,17 +1674,18 @@ export function createHeadlessAdminService(options) {
         : state.users.find((entry) => entry.id === targetId);
       if (!target) throw Object.assign(new Error('Account was not found.'), { status: 404 });
       const changingAnother = targetId !== principal.id;
-      const targetIsOwner = state.owner?.id === targetId;
-      const targetPrincipal = targetIsOwner ? publicOwnerPrincipal(target) : publicUserPrincipal(target);
+      const targetPrincipal = state.owner?.id === target.id
+        ? publicOwnerPrincipal(target)
+        : publicUserPrincipal(state.users.find((entry) => entry.id === target.id));
       const policyAllowed = canResetCredentials(principal, targetPrincipal);
       await appendLog(policyAllowed ? 'info' : 'warn', 'Credential-reset policy evaluated.', {
         actorId: principal.id,
         targetId,
         policyResult: policyAllowed ? 'allowed' : 'denied',
       });
-      if (!policyAllowed) throw permissionDenied('This account cannot reset credentials for the selected account.');
+      if (!policyAllowed || !targetPrincipal) throw permissionDenied('This account cannot reset credentials for the selected account.');
       if (!changingAnother && typeof input.currentPassword !== 'string') throw Object.assign(new Error('The current password is required.'), { status: 400 });
-      if (!changingAnother && !(await verifyPassword(input.currentPassword, target.salt, target.hash))) {
+      if (!changingAnother && typeof input.currentPassword === 'string' && !(await verifyPassword(input.currentPassword, target.salt, target.hash))) {
         throw Object.assign(new Error('The current password is incorrect.'), { status: 401 });
       }
       if (typeof input.newPassword !== 'string' || input.newPassword.length < 8 || input.newPassword.length > 256) {
@@ -1499,23 +1697,25 @@ export function createHeadlessAdminService(options) {
       Object.assign(target, await hashPassword(input.newPassword), { updatedAt: Date.now() });
       state.sessions = state.sessions.filter((session) => session.userId !== targetId);
       await saveState(state);
-      await notifyPlaybackSessionsRevoked(targetId, 'credentials_changed');
+      await notifyPlaybackSessionsRevoked(target.id, 'credentials_changed');
       await appendLog('info', `Password changed for ${target.name}.`, {
         actorId: principal.id,
         targetId,
         policyResult: 'allowed',
       });
-      if (targetId === principal.id) return issueToken(state, target === state.owner ? publicOwnerPrincipal(state.owner) : publicUserPrincipal(target));
+      if (targetId === principal.id) return issueToken(state, targetPrincipal);
       return { changed: true };
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async listLibraryRoots(principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
       const roots = await Promise.all((await loadState()).roots.map(rootView));
       if (!principal || isOwnerPrincipal(principal) || principal.rootIds === null) return roots;
-      return roots.filter((root) => principal.rootIds.includes(root.id));
+      return roots.filter((root) => principal.rootIds?.includes(root.id) === true);
     },
 
+    /** @param {{ path?: unknown }} [input] @param {Principal | null | undefined} [principal] */
     async listLibraryDirectories(input = {}, principal) {
       ensurePrincipalPermission(principal, 'library.manage');
       if (!mediaDir) {
@@ -1523,7 +1723,7 @@ export function createHeadlessAdminService(options) {
       }
 
       const configuredRoot = await fs.realpath(mediaDir).catch((error) => {
-        throw Object.assign(new Error('The configured media mount is not available.'), { status: error?.code === 'EACCES' ? 403 : 409 });
+        throw Object.assign(new Error('The configured media mount is not available.'), { status: errorCode(error) === 'EACCES' ? 403 : 409 });
       });
       const requestedPath = typeof input.path === 'string' && input.path.trim()
         ? path.resolve(input.path.trim())
@@ -1533,7 +1733,7 @@ export function createHeadlessAdminService(options) {
       }
 
       const currentPath = await fs.realpath(requestedPath).catch((error) => {
-        throw Object.assign(new Error('That folder is not available on the server.'), { status: error?.code === 'EACCES' ? 403 : 404 });
+        throw Object.assign(new Error('That folder is not available on the server.'), { status: errorCode(error) === 'EACCES' ? 403 : 404 });
       });
       if (!isPathWithin(configuredRoot, currentPath)) {
         throw Object.assign(new Error('Browse is limited to the configured media mount.'), { status: 403 });
@@ -1541,17 +1741,17 @@ export function createHeadlessAdminService(options) {
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
         const state = await loadState();
         const allowed = state.roots
-          .filter((root) => principal.rootIds.includes(root.id))
+          .filter((root) => principal.rootIds?.includes(root.id) === true)
           .some((root) => isPathWithin(root.path, currentPath));
         if (!allowed) throw permissionDenied('Folder browsing is outside this account’s library roots.');
       }
       const stats = await fs.stat(currentPath).catch((error) => {
-        throw Object.assign(new Error('That folder is not available on the server.'), { status: error?.code === 'EACCES' ? 403 : 404 });
+        throw Object.assign(new Error('That folder is not available on the server.'), { status: errorCode(error) === 'EACCES' ? 403 : 404 });
       });
       if (!stats.isDirectory()) throw Object.assign(new Error('The selected path is not a folder.'), { status: 400 });
 
       const entries = await fs.readdir(currentPath, { withFileTypes: true }).catch((error) => {
-        throw Object.assign(new Error('The server could not read that folder.'), { status: error?.code === 'EACCES' ? 403 : 500 });
+        throw Object.assign(new Error('The server could not read that folder.'), { status: errorCode(error) === 'EACCES' ? 403 : 500 });
       });
       const directories = entries
         .filter((entry) => entry.isDirectory())
@@ -1566,6 +1766,7 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    /** @param {{ query?: unknown }} [input] @param {Principal | null | undefined} [principal] */
     async searchLibraryDirectories(input = {}, principal) {
       ensurePrincipalPermission(principal, 'library.manage');
       if (!mediaDir) {
@@ -1577,7 +1778,7 @@ export function createHeadlessAdminService(options) {
       }
 
       const configuredRoot = await fs.realpath(mediaDir).catch((error) => {
-        throw Object.assign(new Error('The configured media mount is not available.'), { status: error?.code === 'EACCES' ? 403 : 409 });
+        throw Object.assign(new Error('The configured media mount is not available.'), { status: errorCode(error) === 'EACCES' ? 403 : 409 });
       });
       const maxResults = 100;
       const maxVisited = 5_000;
@@ -1598,10 +1799,11 @@ export function createHeadlessAdminService(options) {
       const state = !isOwnerPrincipal(principal) && principal.rootIds !== null ? await loadState() : null;
       const searchRoots = state
         ? state.roots
-          .filter((root) => principal.rootIds.includes(root.id))
+          .filter((root) => principal.rootIds?.includes(root.id) === true)
           .map((root) => path.resolve(root.path))
           .filter((root) => isPathWithin(configuredRoot, root))
         : [configuredRoot];
+      /** @type {{ path: string, depth: number }[]} */
       const queue = [];
       for (const root of searchRoots) {
         const existing = await fs.realpath(root).catch(() => null);
@@ -1612,13 +1814,14 @@ export function createHeadlessAdminService(options) {
       let visited = 0;
       while (queue.length && directories.length < maxResults && visited < maxVisited) {
         const current = queue.shift();
+        if (!current) continue;
         visited += 1;
         const entries = await fs.readdir(current.path, { withFileTypes: true }).catch((error) => {
           // External drives, NAS shares, and cloud-storage placeholders can
           // disappear or time out while the rest of the browse root remains
           // healthy. Skip only that branch so one unavailable folder cannot
           // discard matches found elsewhere.
-          if (unavailableDirectoryErrors.has(error?.code)) return [];
+          if (unavailableDirectoryErrors.has(errorCode(error))) return [];
           throw Object.assign(new Error('The server could not search that folder.'), { status: 500 });
         });
         for (const entry of entries) {
@@ -1642,6 +1845,7 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    /** @param {{ path?: unknown, kind?: unknown }} input @param {Principal | null | undefined} [principal] */
     async addLibraryRoot(input, principal) {
       ensurePrincipalPermission(principal, 'library.manage');
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
@@ -1652,9 +1856,10 @@ export function createHeadlessAdminService(options) {
         throw invalidInput('A library root path is required.');
       }
       const rootPath = path.resolve(input.path);
-      if (state.roots.some((root) => root.path === rootPath)) return rootView(state.roots.find((root) => root.path === rootPath));
+      const existingRoot = state.roots.find((root) => root.path === rootPath);
+      if (existingRoot) return rootView(existingRoot);
       if (state.roots.length >= MAX_ROOTS) throw Object.assign(new Error('The server has reached its library-root limit.'), { status: 400 });
-      const kind = ['movies', 'tvShows', 'anime', 'others'].includes(input.kind) ? input.kind : 'others';
+      const kind = typeof input.kind === 'string' && ['movies', 'tvShows', 'anime', 'others'].includes(input.kind) ? input.kind : 'others';
       const root = { id: rootIdFor(rootPath), path: rootPath, kind, createdAt: Date.now() };
       state.roots.push(root);
       await saveState(state);
@@ -1662,6 +1867,7 @@ export function createHeadlessAdminService(options) {
       return rootView(root);
     },
 
+    /** @param {string} rootId @param {Principal | null | undefined} [principal] */
     async removeLibraryRoot(rootId, principal) {
       ensurePrincipalPermission(principal, 'library.manage');
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
@@ -1675,6 +1881,7 @@ export function createHeadlessAdminService(options) {
       await appendLog('info', `Library root removed: ${rootId}`);
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async getScanStatus(principal) {
       ensurePrincipalPermission(principal, 'library.read');
       const scan = (await loadState()).scan;
@@ -1685,6 +1892,7 @@ export function createHeadlessAdminService(options) {
       return scan;
     },
 
+    /** @param {{ rootId?: string, mode?: string }} input @param {Principal | null | undefined} [principal] */
     async startLibraryScan(input, principal) {
       ensurePrincipalPermission(principal, 'library.manage');
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
@@ -1700,9 +1908,11 @@ export function createHeadlessAdminService(options) {
 
     catalogRevision() { return stateStore?.catalogRevision?.() ?? null; },
 
+    /** @param {Principal | null | undefined} [principal] */
     async listLibraryItems(principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
       const items = await scanner.listItems();
+      /** @type {Map<string, Media[]>} */
       const episodesBySeries = new Map();
       for (const entry of items) {
         if (entry.kind !== 'episode' || !entry.seriesId) continue;
@@ -1710,6 +1920,7 @@ export function createHeadlessAdminService(options) {
         episodes.push(entry);
         episodesBySeries.set(entry.seriesId, episodes);
       }
+      /** @param {string} seriesId */
       const episodeSourcesForSeries = (seriesId) => (episodesBySeries.get(seriesId) || [])
         .flatMap((entry) => stateStore?.listMediaSources?.(entry.id)
           || [{ id: entry.sourceId || `${entry.id}:primary`, rootId: entry.rootId, state: entry.available === false ? 'offline' : 'online' }]);
@@ -1718,7 +1929,7 @@ export function createHeadlessAdminService(options) {
           ? episodesBySeries.get(item.id) || []
           : [];
         if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(item.id)
-          && !linkedEpisodes.some((entry) => principal.invitationMediaIds.includes(entry.id))) return [];
+          && !linkedEpisodes.some((entry) => principal.invitationMediaIds?.includes(entry.id) === true)) return [];
         const ownSources = stateStore?.listMediaSources?.(item.id);
         const canonicalSources = item.kind === 'series'
           ? episodeSourcesForSeries(item.id)
@@ -1732,6 +1943,7 @@ export function createHeadlessAdminService(options) {
       });
     },
 
+    /** @param {string} itemId @param {Principal | null | undefined} [principal] */
     async getLibraryItem(itemId, principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
       if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(itemId)) return null;
@@ -1740,7 +1952,7 @@ export function createHeadlessAdminService(options) {
       const items = item.kind === 'series' ? await scanner.listItems() : [];
       const linkedEpisodes = items.filter((entry) => entry.kind === 'episode' && entry.seriesId === item.id);
       if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(itemId)
-        && !linkedEpisodes.some((entry) => principal.invitationMediaIds.includes(entry.id))) return null;
+        && !linkedEpisodes.some((entry) => principal.invitationMediaIds?.includes(entry.id) === true)) return null;
       const ownSources = stateStore?.listMediaSources?.(item.id);
       const canonicalSources = item.kind === 'series'
         ? linkedEpisodes.flatMap((entry) => stateStore?.listMediaSources?.(entry.id)
@@ -1754,6 +1966,7 @@ export function createHeadlessAdminService(options) {
       return { ...item, sourceIds: visibleSources.map((source) => source.id), available: visibleSources.some((source) => source.state === 'online') };
     },
 
+    /** @param {string} itemId @param {string} sourceId @param {Probe} probe */
     async recordMediaProbe(itemId, sourceId, probe) {
       if (!probe || typeof probe !== 'object' || !Array.isArray(probe.tracks)) return null;
       if (stateStore?.recordMediaProbe) return stateStore.recordMediaProbe(itemId, sourceId, probe) ? probe : null;
@@ -1778,6 +1991,7 @@ export function createHeadlessAdminService(options) {
       return item.localMetadata;
     },
 
+    /** @param {string} itemId @param {Principal | null | undefined} principal @param {string | undefined} [sourceId] */
     async resolveMediaPath(itemId, principal, sourceId = undefined) {
       if (principal && !isOwnerPrincipal(principal)
         && !hasPermission(principal, 'library.read')
@@ -1794,6 +2008,7 @@ export function createHeadlessAdminService(options) {
       const selectedSourceId = sourceId || visibleCanonicalSources[0]?.id;
       const canonicalSource = stateStore?.readMediaSource?.(itemId, selectedSourceId);
       if (sourceId && !canonicalSource) throw Object.assign(new Error('Media source was not found.'), { status: 404, code: 'source_unavailable' });
+      /** @type {Media | import('./server-admin-types.js').MediaSource} */
       const selected = canonicalSource || item;
       if (selected.state && selected.state !== 'online') throw Object.assign(new Error('Media source is unavailable.'), { status: 409, code: 'source_unavailable' });
       if (principal && selected.rootId && !canAccessRoot(principal, selected.rootId)) throw permissionDenied('This account cannot access that library.');
@@ -1822,6 +2037,7 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    /** @param {string} itemId @param {Principal | null | undefined} [principal] */
     async deleteLibraryItem(itemId, principal) {
       ensurePrincipalPermission(principal, 'media.delete');
       const state = await loadState();
@@ -1835,7 +2051,7 @@ export function createHeadlessAdminService(options) {
       // unlink never follows a final-component symlink, so a link substituted
       // after verification removes the link itself and cannot reach outside.
       await fs.unlink(verified.realPath).catch((error) => {
-        throw Object.assign(new Error('The media file could not be deleted.'), { status: error?.code === 'EACCES' ? 403 : 500 });
+        throw Object.assign(new Error('The media file could not be deleted.'), { status: errorCode(error) === 'EACCES' ? 403 : 500 });
       });
       state.catalog = state.catalog.filter((entry) => entry.id !== itemId);
       await saveState(state);
@@ -1847,6 +2063,7 @@ export function createHeadlessAdminService(options) {
       return { id: itemId, deleted: true };
     },
 
+    /** @param {Principal | null | undefined} principal @param {{ summary?: boolean }} [healthOptions] */
     async getHealth(principal, healthOptions = {}) {
       const summaryOnly = healthOptions.summary === true;
       if (principal && !summaryOnly) ensurePrincipalPermission(principal, 'admin.read');
@@ -1875,7 +2092,7 @@ export function createHeadlessAdminService(options) {
         { name: 'Media root', state: mediaState === 'online' ? 'pass' : 'warn', message: runtime.media?.path && !summaryOnly ? `${runtime.media.path} is ${mediaState}.` : `Media root is ${mediaState}.` },
         { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : transcoderState === 'limited' ? 'warn' : 'fail', message: transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
       ];
-      if (!summaryOnly) {
+      if (storage) {
         checks.push({ name: 'Persistent storage', state: storage.writable && (storage.freeBytes === undefined || storage.freeBytes > 64 * 1024 * 1024) ? 'pass' : 'warn', message: storageCheckMessage(storage) });
         checks.push({ name: 'Latest backup', state: latestBackup ? 'pass' : 'warn', message: latestBackup ? `Last verified snapshot ${new Date(latestBackup.createdAt).toISOString()}.` : 'No verified backup has been recorded.' });
       }
@@ -1893,8 +2110,8 @@ export function createHeadlessAdminService(options) {
           ? {
             admission: Object.fromEntries(
               ['active', 'queued', 'globalLimit', 'principalLimit', 'queueLimit', 'principalQueueLimit', 'failed', 'canceled']
-                .filter((field) => Number.isFinite(transcoderHealth.admission[field]))
-                .map((field) => [field, transcoderHealth.admission[field]]),
+                .filter((field) => Number.isFinite(transcoderHealth.admission?.[field]))
+                .map((field) => [field, transcoderHealth.admission?.[field]]),
             ),
           }
           : {}),
@@ -1911,20 +2128,22 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async listSessions(principal) {
       ensurePrincipalPermission(principal, 'sessions.read');
       return getSessions();
     },
 
+    /** @param {number | { limit?: unknown, offset?: unknown, level?: unknown, source?: unknown, search?: unknown, before?: unknown, after?: unknown }} [input] @param {Principal | null | undefined} [principal] */
     async listLogs(input = {}, principal) {
       ensurePrincipalPermission(principal, 'logs.read');
       const options = typeof input === 'number' ? { limit: input } : (input || {});
-      const limit = Number.isSafeInteger(options.limit) ? Math.max(1, Math.min(500, options.limit)) : 100;
-      const offset = Number.isSafeInteger(options.offset) ? Math.max(0, options.offset) : 0;
+      const limit = safeInteger(options.limit) ? Math.max(1, Math.min(500, options.limit)) : 100;
+      const offset = safeInteger(options.offset) ? Math.max(0, options.offset) : 0;
       const state = await loadState();
       const pruned = pruneLogs(state);
       if (pruned) await saveState(state);
-      const level = ['debug', 'info', 'warn', 'error'].includes(options.level) ? options.level : null;
+      const level = typeof options.level === 'string' && ['debug', 'info', 'warn', 'error'].includes(options.level) ? options.level : null;
       const source = typeof options.source === 'string' ? options.source.trim().slice(0, 128).toLocaleLowerCase() : '';
       const search = typeof options.search === 'string' ? options.search.trim().toLocaleLowerCase().slice(0, 200) : '';
       const before = Number.isFinite(options.before) ? Number(options.before) : null;
@@ -1941,6 +2160,7 @@ export function createHeadlessAdminService(options) {
       return { logs, page: { limit, offset, total: filtered.length, nextOffset, hasMore: nextOffset !== null } };
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async getBackupStatus(principal) {
       ensurePrincipalPermission(principal, 'backup.read');
       return (await loadState()).backup;
@@ -1950,11 +2170,13 @@ export function createHeadlessAdminService(options) {
       return path.join(dataDir, 'backups');
     },
 
+    /** @param {unknown} candidate */
     isBackupPathAllowed(candidate) {
       if (typeof candidate !== 'string' || !candidate.trim()) return false;
       return isPathWithin(path.join(dataDir, 'backups'), path.resolve(candidate));
     },
 
+    /** @param {Principal | null | undefined} [principal] */
     async getDiagnostics(principal) {
       ensurePrincipalPermission(principal, 'admin.read');
       const health = await this.getHealth(principal);
@@ -1971,6 +2193,7 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    /** @param {{ destination?: string }} [input] @param {Principal | null | undefined} [principal] */
     async startBackup(input = {}, principal) {
       ensurePrincipalPermission(principal, 'backup.create');
       if (backupPromise) return backupPromise;
@@ -2004,6 +2227,7 @@ export function createHeadlessAdminService(options) {
       }
     },
 
+    /** @param {{ path?: unknown }} [input] @param {Principal | null | undefined} [principal] */
     async restoreBackup(input = {}, principal) {
       const current = await loadState();
       if (!isOwnerPrincipal(principal) || !principal?.id || principal.id !== current.owner?.id) {
@@ -2016,7 +2240,7 @@ export function createHeadlessAdminService(options) {
       const sourcePath = path.resolve(source);
       if (sourcePath === statePath) throw backupError('The live admin state cannot be restored as a backup.');
       const stats = await fs.stat(sourcePath).catch((error) => {
-        throw Object.assign(new Error('The selected backup file is unavailable.'), { status: error?.code === 'EACCES' ? 403 : 404, code: error?.code === 'EACCES' ? 'permission_denied' : 'backup_not_found' });
+        throw Object.assign(new Error('The selected backup file is unavailable.'), { status: errorCode(error) === 'EACCES' ? 403 : 404, code: errorCode(error) === 'EACCES' ? 'permission_denied' : 'backup_not_found' });
       });
       if (!stats.isFile()) throw backupError('The selected backup path is not a file.');
       if (stats.size > MAX_BACKUP_BYTES) throw backupError('The selected backup is larger than the supported limit.');
@@ -2060,18 +2284,18 @@ export function createHeadlessAdminService(options) {
         }
       } catch (error) {
         let rollbackError;
-        if (canonicalRestored) {
+        if (canonicalRestored && stateStore?.restoreCanonicalSnapshot) {
           try { await stateStore.restoreCanonicalSnapshot(rollbackEnvelope.data, Date.now()); } catch (failure) { rollbackError = failure; }
         } else if (!replaceAllState) await saveState(current);
         const invalidSnapshot = ['canonical_backup_incompatible','canonical_backup_invalid','canonical_owner_mismatch','canonical_state_invalid']
-          .includes(error?.code);
+          .includes(errorCode(error));
         throw Object.assign(new Error('The canonical state could not be restored.'), {
           status: invalidSnapshot && !rollbackError ? 422 : 500,
           code: invalidSnapshot && !rollbackError ? 'invalid_backup' : 'canonical_state_restore_failed',
           cause: rollbackError ? new AggregateError([error, rollbackError], 'Canonical restore and rollback both failed.') : error,
         });
       }
-      Object.keys(current).forEach((key) => { delete current[key]; });
+      Object.keys(current).forEach((key) => { Reflect.deleteProperty(current, key); });
       Object.assign(current, replacement);
       if (!canonicalRestored) await notifyAllPlaybackSessionsRevoked('backup_restored');
       await appendLog('warn', 'Headless admin state restored from backup.', { source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, rollbackSizeBytes: rollbackArtifact.sizeBytes });

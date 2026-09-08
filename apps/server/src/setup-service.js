@@ -35,10 +35,22 @@ export const DEFAULT_METADATA_SETTINGS = {
 
 const MAX_NAME_LENGTH = 80;
 
+/**
+ * @typedef {{ provider: string, artworkProvider: string, ratingSource: string, offlineMode: boolean, apiKeys?: Record<string, string>, apiKey?: string, skipped?: boolean }} SetupMetadata
+ * @typedef {{ version: number, step: string, serverName: string, language: string, ownerName: string, metadata: SetupMetadata, startedAt: number, completedAt: number | null, scanStarted: boolean }} SetupRecord
+ */
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) {
+  return value !== null && typeof value === 'object';
+}
+
+/** @param {number} status @param {string} code @param {string} message */
 function setupError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
 }
 
+/** @param {unknown} value */
 function normalizeLanguage(value) {
   const language = String(value || '').trim();
   if (!language) return 'en';
@@ -46,14 +58,18 @@ function normalizeLanguage(value) {
   return match ? match.code : 'en';
 }
 
+/** @param {unknown} value */
 function normalizeStep(value) {
-  return SETUP_STEPS.includes(value) ? value : 'account';
+  return typeof value === 'string' && SETUP_STEPS.includes(value) ? value : 'account';
 }
 
+/** @overload @param {Record<string, unknown>} raw @returns {SetupRecord} */
+/** @overload @param {unknown} raw @returns {SetupRecord | null} */
+/** @param {unknown} raw @returns {SetupRecord | null} */
 function normalizeRecord(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {};
-  const rawApiKeys = metadata.apiKeys && typeof metadata.apiKeys === 'object' ? metadata.apiKeys : {};
+  if (!isRecord(raw)) return null;
+  const metadata = isRecord(raw.metadata) ? raw.metadata : {};
+  const rawApiKeys = isRecord(metadata.apiKeys) ? metadata.apiKeys : {};
   const apiKeys = Object.fromEntries(
     ['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].flatMap((provider) => {
       const value = provider === 'tmdb' && !rawApiKeys[provider] ? metadata.apiKey : rawApiKeys[provider];
@@ -73,8 +89,8 @@ function normalizeRecord(raw) {
       ...(metadata.offlineMode === true ? { offlineMode: true } : {}),
       skipped: metadata.skipped === true,
     },
-    startedAt: Number.isFinite(raw.startedAt) ? raw.startedAt : Date.now(),
-    completedAt: Number.isFinite(raw.completedAt) ? raw.completedAt : null,
+    startedAt: typeof raw.startedAt === 'number' && Number.isFinite(raw.startedAt) ? raw.startedAt : Date.now(),
+    completedAt: typeof raw.completedAt === 'number' && Number.isFinite(raw.completedAt) ? raw.completedAt : null,
     scanStarted: raw.scanStarted === true,
   };
 }
@@ -83,6 +99,7 @@ function freshRecord() {
   return normalizeRecord({ step: 'account', startedAt: Date.now(), metadata: {} });
 }
 
+/** @param {{ store: { readMeta: (key: string) => string | null | undefined, writeMeta: (key: string, value: string) => unknown }, isOwnerConfigured: () => boolean | Promise<boolean> }} options */
 export function createSetupService({ store, isOwnerConfigured }) {
   if (!store) throw new Error('createSetupService requires the canonical state store.');
   if (typeof isOwnerConfigured !== 'function') throw new Error('createSetupService requires an owner-state reader.');
@@ -90,7 +107,8 @@ export function createSetupService({ store, isOwnerConfigured }) {
   function readRecord() {
     try {
       const raw = store.readMeta(SETUP_META_KEY);
-      return raw ? normalizeRecord(JSON.parse(raw)) : null;
+      const parsed = /** @type {unknown} */ (raw ? JSON.parse(raw) : null);
+      return normalizeRecord(parsed);
     } catch {
       // A corrupt progress record must never block an install. Setup restarts
       // from the first step; nothing else in the database depends on it.
@@ -98,6 +116,7 @@ export function createSetupService({ store, isOwnerConfigured }) {
     }
   }
 
+  /** @param {SetupRecord} record */
   function writeRecord(record) {
     store.writeMeta(SETUP_META_KEY, JSON.stringify(record));
     return record;
@@ -152,12 +171,15 @@ export function createSetupService({ store, isOwnerConfigured }) {
 
     metadataSettings() {
       const record = readRecord();
+      /** @type {SetupMetadata} */
       const metadata = record?.metadata || { ...DEFAULT_METADATA_SETTINGS };
-      const { apiKey: _legacyApiKey, apiKeys = {}, ...rest } = metadata;
+      const { apiKeys = {}, ...rest } = metadata;
+      delete rest.apiKey;
       const configuredProviders = Object.keys(apiKeys).filter((provider) => Boolean(apiKeys[provider]));
       return { ...rest, configured: configuredProviders.length > 0, configuredProviders };
     },
 
+    /** @param {{ ownerName?: string, serverName?: string, language?: string }} input */
     begin({ ownerName, serverName, language }) {
       const record = readRecord() || freshRecord();
       return writeRecord({
@@ -169,6 +191,7 @@ export function createSetupService({ store, isOwnerConfigured }) {
       });
     },
 
+    /** @param {string} step */
     setStep(step) {
       const next = normalizeStep(step);
       if (!SETUP_STEPS.includes(step)) throw setupError(400, 'invalid_request', 'Unknown setup step.');
@@ -177,6 +200,7 @@ export function createSetupService({ store, isOwnerConfigured }) {
       return writeRecord({ ...record, step: next });
     },
 
+    /** @param {{ provider?: string, apiKey?: string, keys?: Record<string, unknown>, skipped?: boolean }} input */
     saveMetadata({ provider, apiKey, keys, skipped }) {
       const record = readRecord() || freshRecord();
       const nextKeys = keys && typeof keys === 'object'
@@ -195,6 +219,7 @@ export function createSetupService({ store, isOwnerConfigured }) {
       return writeRecord({ ...record, metadata, step: 'ready' });
     },
 
+    /** @param {{ scanStarted?: boolean }} input */
     complete({ scanStarted }) {
       const record = readRecord() || freshRecord();
       return writeRecord({

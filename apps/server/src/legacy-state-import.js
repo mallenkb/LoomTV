@@ -20,25 +20,41 @@ export const CANONICAL_MIGRATION_REPORT_FIELDS = Object.freeze([
   'targetCounts', 'reconciliation', 'decisions', 'conflicts', 'warnings', 'backup', 'rollback', 'redactions',
 ]);
 
+/** @param {string} target */
 const exists = (target) => fs.access(target).then(() => true, () => false);
+
+/** @param {{path?: string; locator?: string}} root @returns {string} */
+function requiredRootLocator(root) {
+  const locator = root.path ?? root.locator;
+  if (typeof locator !== 'string') throw new TypeError('A library root locator is required.');
+  return locator;
+}
+
+/** @template {{mediaId: string | null}} T @param {T} item @returns {item is T & {mediaId: string}} */
+function hasResolvedMediaId(item) { return Boolean(item.mediaId); }
+/** @param {unknown} value */
 const hashText = (value) => createHash('sha256').update(String(value)).digest('hex');
 
+/** @param {unknown} value @returns {string | undefined} */
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(/** @type {Record<string, unknown>} */ (value)[key])}`).join(',')}}`;
   return JSON.stringify(value);
 }
 
+/** @param {string} code @param {string} category @param {number} [count] @param {Record<string, unknown>} [details] @returns {import('./server-state-types.js').MigrationIssue} */
 function issue(code, category, count = 1, details = {}) {
   return { code, category, count, ...details };
 }
 
+/** @param {string} fileName */
 function sourceSummary(fileName) {
   if (fileName === ADMIN_FILE) return 'admin-json';
   if (fileName === CLIENT_SQLITE_FILE) return 'client-sqlite';
   return 'client-json';
 }
 
+/** @param {string} target @param {string} kind @param {import('node:crypto').Hash} hash */
 async function fingerprintFile(target, kind, hash) {
   const handle = await fs.open(target, 'r');
   let sizeBytes = 0;
@@ -57,6 +73,7 @@ async function fingerprintFile(target, kind, hash) {
   return sizeBytes;
 }
 
+/** @param {string} dataDir @param {string[]} names */
 async function fingerprintSources(dataDir, names) {
   const hash = createHash('sha256');
   const parts = [];
@@ -74,10 +91,12 @@ async function fingerprintSources(dataDir, names) {
   return { fingerprint: hash.digest('hex'), parts };
 }
 
+/** @param {DatabaseSync} database @param {string} tableName */
 function tableExists(database, tableName) {
   return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(tableName));
 }
 
+/** @param {string} databasePath */
 function readLegacyClientDatabase(databasePath) {
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
@@ -90,23 +109,26 @@ function readLegacyClientDatabase(databasePath) {
       ? database.prepare('SELECT * FROM profileAssignments').all().map((row) => ({
         profileId: row.profileId, accountId: row.accountId, access: row.access, createdAt: Number(row.createdAt),
       })) : [];
+    /** @type {import('./server-state-types.js').LegacyClientSnapshot['progress']} */
     const progress = {};
     if (tableExists(database, 'progress')) for (const row of database.prepare('SELECT * FROM progress').all()) {
-      progress[row.profileId] ||= {};
-      progress[row.profileId][row.mediaId] = {
+      progress[String(row.profileId)] ||= {};
+      progress[String(row.profileId)][String(row.mediaId)] = {
         position: Number(row.position), duration: Number(row.duration), watched: row.watched === 1, updatedAt: Number(row.updatedAt),
       };
     }
+    /** @type {Record<string, string>} */
     const selections = {};
-    if (tableExists(database, 'selections')) for (const row of database.prepare('SELECT * FROM selections').all()) selections[row.ownerId] = row.profileId;
+    if (tableExists(database, 'selections')) for (const row of database.prepare('SELECT * FROM selections').all()) selections[String(row.ownerId)] = String(row.profileId);
     return { profiles, assignments, progress, selections };
   } finally { database.close(); }
 }
 
+/** @param {{allowedFolders: unknown; libraryRoots: Array<{id: string; path?: string; locator?: string}>}} input */
 export function mapLegacyAllowedFolders({ allowedFolders, libraryRoots }) {
   if (!Array.isArray(allowedFolders)) return undefined;
   if (allowedFolders.length === 0) return null;
-  const roots = (libraryRoots || []).map((root) => ({ id: root.id, locator: path.resolve(root.path ?? root.locator) }));
+  const roots = (libraryRoots || []).map((root) => ({ id: root.id, locator: path.resolve(requiredRootLocator(root)) }));
   const ids = [];
   for (const folder of allowedFolders) {
     const resolved = path.resolve(String(folder));
@@ -123,8 +145,9 @@ export function mapLegacyAllowedFolders({ allowedFolders, libraryRoots }) {
   return [...new Set(ids)];
 }
 
+/** @param {import('./server-state-types.js').DesktopProjection | null} desktopState @param {import('./server-state-types.js').AdminState} adminState @returns {import('./server-state-types.js').MigrationCarriers} */
 function desktopCarriers(desktopState, adminState) {
-  if (!desktopState || typeof desktopState !== 'object') return {};
+  if (!desktopState || typeof desktopState !== 'object') desktopState = {};
   const restrictions = (desktopState.profileRestrictions || []).map((entry) => {
     const { allowedFolders, ...canonical } = entry;
     return {
@@ -159,16 +182,19 @@ function desktopCarriers(desktopState, adminState) {
   };
 }
 
+/** @param {import('./server-state-types.js').AdminState} base @param {import('./server-state-types.js').MigrationCarriers} carriers */
 function mergeDesktopAdminProjection(base, carriers) {
   if (!carriers.adminState && !carriers.libraryRoots.length && !carriers.accounts.length && !carriers.sessions.length) {
     return { adminState: base, conflicts: [], mergedCounts: {} };
   }
   const projected = normalizeHeadlessAdminState(carriers.adminState || {});
+  /** @type {import('./server-state-types.js').MigrationIssue[]} */
   const conflicts = [];
   const validAccountProjections = carriers.accounts.filter((item) => item?.account?.id && item?.credential?.accountId === item.account.id);
   if (validAccountProjections.length !== carriers.accounts.length) conflicts.push(issue(
     'desktop_account_credential_invalid', 'accounts', carriers.accounts.length - validAccountProjections.length,
   ));
+  /** @type {import('./server-state-types.js').StoredAccount[]} */
   const projectedAccounts = validAccountProjections.map((item) => ({
     ...item.account,
     salt: item.credential.passwordSalt,
@@ -180,10 +206,11 @@ function mergeDesktopAdminProjection(base, carriers) {
   const userProjection = projectedAccounts.filter((item) => item.role !== 'owner').concat(projected.users);
   if (base.owner && ownerProjection && base.owner.id !== ownerProjection.id) conflicts.push(issue('owner_identity_conflict', 'accounts'));
   const projectedRoots = carriers.libraryRoots.map((root) => ({
-    id: root.id, path: root.locator || root.path,
+    id: root.id, path: requiredRootLocator({ path: root.locator || root.path }),
     kind: root.kind === 'tv' ? 'tvShows' : root.kind,
     createdAt: root.createdAt, lastScanAt: root.lastScanAt,
   }));
+  /** @type {import('./server-state-types.js').StoredRoot[]} */
   const roots = [];
   let mergedRoots = 0;
   for (const root of base.roots.concat(projected.roots, projectedRoots)) {
@@ -223,12 +250,15 @@ function mergeDesktopAdminProjection(base, carriers) {
   };
 }
 
+/** @param {number} source @param {number} imported @param {string} [reason] @param {number} [merged] @returns {import("./legacy-state-import.js").MigrationReconciliation} */
 function reconciliationRow(source, imported, reason = 'invalid_or_unrepresentable', merged = 0) {
   const rejected = Math.max(0, source - imported - merged);
   return { source, imported, merged, legacyOnly: 0, rejected: rejected ? [{ reason, count: rejected }] : [] };
 }
 
+/** @template T @param {T[]} items @param {(item: T) => string} keyFor @param {string} category @param {import('./server-state-types.js').MigrationIssue[]} conflicts @returns {T[]} */
 function deduplicate(items, keyFor, category, conflicts) {
+  /** @type {Map<string, T>} */
   const byKey = new Map();
   let rejected = 0;
   for (const item of items) {
@@ -240,7 +270,9 @@ function deduplicate(items, keyFor, category, conflicts) {
   return [...byKey.values()];
 }
 
+/** @param {import('./server-state-types.js').AdminState} adminState */
 function validateAdminReferences(adminState) {
+  /** @type {import('./server-state-types.js').MigrationIssue[]} */
   const conflicts = [];
   const accountIds = new Set(adminState.owner ? [adminState.owner.id] : []);
   const users = deduplicate(adminState.users, (item) => item.id, 'accounts', conflicts)
@@ -254,17 +286,19 @@ function validateAdminReferences(adminState) {
   const catalog = catalogByPath.filter((item) => rootIds.has(item.rootId));
   if (catalog.length !== catalogByPath.length) conflicts.push(issue('catalog_root_unresolved', 'catalogItems', catalogByPath.length - catalog.length));
   const sessionsByToken = deduplicate(adminState.sessions, (item) => item.tokenHash, 'sessions', conflicts);
-  const sessions = sessionsByToken.filter((item) => accountIds.has(item.userId));
+  const sessions = sessionsByToken.filter((item) => accountIds.has(item.userId ?? ''));
   if (sessions.length !== sessionsByToken.length) conflicts.push(issue('session_account_unresolved', 'sessions', sessionsByToken.length - sessions.length));
   const loginAttempts = deduplicate(adminState.loginAttempts, (item) => item.key, 'loginAttempts', conflicts);
   return { adminState: { ...adminState, users, roots, catalog, sessions, loginAttempts }, conflicts };
 }
 
+/** @param {import('./server-state-types.js').ClientState} clientState @param {import('./server-state-types.js').AdminState} adminState @param {import('@loom-media-server/video-contracts/server').MediaIdentityAlias[]} mediaAliases @param {import('@loom-media-server/video-contracts').CatalogItem[]} [projectedCatalogItems] @returns {{clientState: import('./server-state-types.js').ClientState; conflicts: import('./server-state-types.js').MigrationIssue[]}} */
 function validateClientReferences(clientState, adminState, mediaAliases, projectedCatalogItems = []) {
   const validAccounts = new Set([
     ...(adminState.owner ? [adminState.owner.id] : []),
     ...adminState.users.filter((account) => account.disabled !== true).map((account) => account.id),
   ]);
+  /** @type {import('./server-state-types.js').MigrationIssue[]} */
   const conflicts = [];
   const uniqueProfiles = deduplicate(clientState.profiles, (item) => item.id, 'profiles', conflicts);
   const uniqueAssignments = deduplicate(clientState.assignments, (item) => `${item.profileId}\u0000${item.accountId}`, 'profileAssignments', conflicts);
@@ -295,11 +329,12 @@ function validateClientReferences(clientState, adminState, mediaAliases, project
   ));
   const catalogIds = new Set([...adminState.catalog.map((item) => item.id), ...projectedCatalogItems.map((item) => item.id)]);
   const aliasMap = new Map(mediaAliases.map((item) => [`${item.namespace}\u0000${item.alias}`, item.mediaId]));
+  /** @param {string} mediaId */
   const resolveMediaId = (mediaId) => catalogIds.has(mediaId) ? mediaId
     : aliasMap.get(`legacy-media-id\u0000${mediaId}`) || aliasMap.get(`headless-path-hash\u0000${mediaId}`) || null;
   const uniqueProgress = deduplicate(clientState.progress, (item) => `${item.profileId}\u0000${item.mediaId}`, 'progress', conflicts);
   const progress = uniqueProgress.map((item) => ({ ...item, mediaId: resolveMediaId(item.mediaId) }))
-    .filter((item) => profileIds.has(item.profileId) && item.mediaId);
+    .filter(hasResolvedMediaId).filter((item) => profileIds.has(item.profileId));
   if (progress.length !== uniqueProgress.length) conflicts.push(issue(
     'watch_progress_or_media_orphaned', 'progress', uniqueProgress.length - progress.length,
   ));
@@ -310,10 +345,11 @@ function validateClientReferences(clientState, adminState, mediaAliases, project
   ));
   const uniqueHistory = deduplicate(validHistory, (item) => item.id, 'history', conflicts);
   const history = uniqueHistory.map((item) => ({ ...item, mediaId: resolveMediaId(item.mediaId) }))
-    .filter((item) => profileIds.has(item.profileId) && item.mediaId);
+    .filter(hasResolvedMediaId).filter((item) => profileIds.has(item.profileId));
   if (history.length !== uniqueHistory.length) conflicts.push(issue(
     'watch_history_orphaned', 'history', uniqueHistory.length - history.length,
   ));
+  /** @template {{profileId: string}} T @param {T[]} items @param {string} category @param {(item: T) => string} keyFor @returns {T[]} */
   const filterProfileCarrier = (items, category, keyFor) => {
     const unique = deduplicate(items, keyFor, category, conflicts);
     const retained = unique.filter((item) => profileIds.has(item.profileId));
@@ -332,7 +368,7 @@ function validateClientReferences(clientState, adminState, mediaAliases, project
     'profile_list_kind_invalid', 'profileListEntries', clientState.profileListEntries.length - validListEntries.length,
   ));
   const sourceListEntries = filterProfileCarrier(validListEntries, 'profileListEntries', (item) => `${item.profileId}\u0000${item.mediaId}\u0000${item.kind}`);
-  const listEntries = sourceListEntries.map((item) => ({ ...item, mediaId: resolveMediaId(item.mediaId) })).filter((item) => item.mediaId);
+  const listEntries = sourceListEntries.map((item) => ({ ...item, mediaId: resolveMediaId(item.mediaId) })).filter(hasResolvedMediaId);
   if (listEntries.length !== sourceListEntries.length) conflicts.push(issue(
     'profile_list_media_unresolved', 'profileListEntries', sourceListEntries.length - listEntries.length,
   ));
@@ -349,6 +385,7 @@ function validateClientReferences(clientState, adminState, mediaAliases, project
   };
 }
 
+/** @param {Record<string, unknown>} rawClient @param {import('./server-state-types.js').MigrationCarriers} carrierInput */
 function rawClientCounts(rawClient, carrierInput) {
   const profiles = (Array.isArray(rawClient?.profiles) ? rawClient.profiles.length : 0)
     + (Array.isArray(carrierInput?.profiles) ? carrierInput.profiles.length : 0);
@@ -362,6 +399,7 @@ function rawClientCounts(rawClient, carrierInput) {
   const progress = Array.isArray(rawClient?.progress) ? rawClient.progress.length
     : rawClient?.progress && typeof rawClient.progress === 'object'
       ? Object.values(rawClient.progress).reduce((sum, entries) => sum + (entries && typeof entries === 'object' ? Object.keys(entries).length : 0), 0) : 0;
+  /** @param {keyof import('./server-state-types.js').MigrationCarriers} key */
   const carrierCount = (key) => (Array.isArray(rawClient?.[key]) ? rawClient[key].length : 0)
     + (Array.isArray(carrierInput?.[key]) ? carrierInput[key].length : 0);
   return {
@@ -389,7 +427,9 @@ function rawClientCounts(rawClient, carrierInput) {
   };
 }
 
+/** @param {import('./server-state-types.js').MigrationCarriers} carriers @param {import('./server-state-types.js').AdminState} adminState */
 function validateProjectedMedia(carriers, adminState) {
+  /** @type {import('./server-state-types.js').MigrationIssue[]} */
   const conflicts = [];
   const validItems = (carriers.catalogItems || []).filter((item) => item && typeof item.id === 'string'
     && typeof item.title === 'string' && ['movie', 'series', 'episode', 'video'].includes(item.kind));
@@ -421,7 +461,7 @@ function validateProjectedMedia(carriers, adminState) {
     }
     const protectedFields = new Set(['id', 'rootId', 'path', 'relativePath', 'sourceId', 'sourceIds', 'available']);
     for (const [key, value] of Object.entries(item)) {
-      if (!protectedFields.has(key) && value !== undefined) headless[key] = value;
+      if (!protectedFields.has(key) && value !== undefined) Object.assign(headless, { [key]: value });
     }
     mergedCatalogItems += 1;
     mergedSourceIds.add(projectedSource.id);
@@ -464,7 +504,9 @@ function validateProjectedMedia(carriers, adminState) {
   };
 }
 
+/** @param {import('./server-state-types.js').MigrationCarriers} carriers @param {import('./server-state-types.js').AdminState} adminState @param {import('@loom-media-server/video-contracts/server').MediaIdentityAlias[]} generatedAliases @param {import('@loom-media-server/video-contracts').CatalogItem[]} [projectedCatalogItems] */
 function validateDeviceAndIdentityCarriers(carriers, adminState, generatedAliases, projectedCatalogItems = []) {
+  /** @type {import('./server-state-types.js').MigrationIssue[]} */
   const conflicts = [];
   const accountIds = new Set([...(adminState.owner ? [adminState.owner.id] : []), ...adminState.users.map((item) => item.id)]);
   const validDeviceRows = (carriers.devices || []).filter((item) => typeof item.id === 'string' && item.id && typeof item.name === 'string');
@@ -492,6 +534,7 @@ function validateDeviceAndIdentityCarriers(carriers, adminState, generatedAliase
   return { devices, deviceCredentials, aliases: uniqueGeneratedAliases.concat(aliases), generatedAliasCount: uniqueGeneratedAliases.length, conflicts };
 }
 
+/** @param {Partial<import('./server-state-types.js').AdminState>} rawAdmin @param {Record<string, number>} rawCounts @param {import('./server-state-types.js').ImportState} state @param {Record<string, number>} legacyOnly @param {number} carrierAliasCount @param {Record<string, number | undefined>} [mergedCounts] */
 function migrationAccounting(rawAdmin, rawCounts, state, legacyOnly, carrierAliasCount, mergedCounts = {}) {
   const client = state.clientState;
   const accounts = (rawAdmin?.owner ? 1 : 0) + (Array.isArray(rawAdmin?.users) ? rawAdmin.users.length : 0) + rawCounts.projectedAccounts;
@@ -544,6 +587,7 @@ function migrationAccounting(rawAdmin, rawCounts, state, legacyOnly, carrierAlia
   return { sourceCounts, reconciliation };
 }
 
+/** @param {{sourceCounts: Record<string, number>; reconciliation: Record<string, import('./legacy-state-import.js').MigrationReconciliation>}} accounting @param {import('./server-state-types.js').MigrationIssue[]} conflicts */
 function applyRejectionReasons(accounting, conflicts) {
   for (const [category, row] of Object.entries(accounting.reconciliation)) {
     const rejectedTotal = Math.max(0, Number(row.source) - Number(row.imported) - Number(row.merged || 0) - Number(row.legacyOnly));
@@ -562,6 +606,7 @@ function applyRejectionReasons(accounting, conflicts) {
   return accounting;
 }
 
+/** @param {{dataDir: string; desktopState?: import('./server-state-types.js').DesktopProjection | null}} options @returns {Promise<import('./server-state-types.js').ImportPlan>} */
 export async function createLegacyCanonicalImportPlan({ dataDir, desktopState = null }) {
   const resolvedDir = path.resolve(dataDir);
   const sourceNames = [ADMIN_FILE, CLIENT_SQLITE_FILE, CLIENT_JSON_FILE];
@@ -574,6 +619,7 @@ export async function createLegacyCanonicalImportPlan({ dataDir, desktopState = 
   const mergedAdmin = mergeDesktopAdminProjection(baseAdminState, carriers);
   const validatedAdmin = validateAdminReferences(mergedAdmin.adminState);
   const adminState = validatedAdmin.adminState;
+  /** @type {Record<string, unknown>} */
   let rawClient = {};
   const sqlitePath = path.join(resolvedDir, CLIENT_SQLITE_FILE);
   const jsonPath = path.join(resolvedDir, CLIENT_JSON_FILE);
@@ -598,17 +644,30 @@ export async function createLegacyCanonicalImportPlan({ dataDir, desktopState = 
     legacyClient.assignments = legacyClient.assignments.filter((item) => !explicitProfiles.has(item.profileId) || validExplicitProfiles.has(item.profileId));
   }
   const desktopClient = normalizeHeadlessClientState({ ...carriers, assignments: validDesktopAssignments });
-  const sourceClient = Object.fromEntries(Object.keys(legacyClient).map((key) => [key, legacyClient[key].concat(desktopClient[key] || [])]));
+  /** @type {import('./server-state-types.js').ClientState} */
+  const sourceClient = {
+    profiles: legacyClient.profiles.concat(desktopClient.profiles),
+    profileCredentials: legacyClient.profileCredentials.concat(desktopClient.profileCredentials),
+    assignments: legacyClient.assignments.concat(desktopClient.assignments),
+    selections: legacyClient.selections.concat(desktopClient.selections),
+    progress: legacyClient.progress.concat(desktopClient.progress),
+    history: legacyClient.history.concat(desktopClient.history),
+    profilePreferences: legacyClient.profilePreferences.concat(desktopClient.profilePreferences),
+    profileRestrictions: legacyClient.profileRestrictions.concat(desktopClient.profileRestrictions),
+    profileListEntries: legacyClient.profileListEntries.concat(desktopClient.profileListEntries),
+    trackPreferences: legacyClient.trackPreferences.concat(desktopClient.trackPreferences),
+  };
   const projectedMedia = validateProjectedMedia(carriers, adminState);
+  /** @type {import('@loom-media-server/video-contracts/server').MediaIdentityAlias[]} */
   const generatedAliases = adminState.catalog.map((item) => ({
-    namespace: 'headless-path-hash', alias: item.id, mediaId: item.id, createdAt: Number(item.indexedAt) || Date.now(),
+    namespace: /** @type {import('@loom-media-server/video-contracts/server').MediaIdentityAlias['namespace']} */ ('headless-path-hash'), alias: item.id, mediaId: item.id, createdAt: Number(item.indexedAt) || Date.now(),
   })).concat(projectedMedia.catalogItems.flatMap((item) => (item.legacyIds || []).map((alias) => ({
-    namespace: 'legacy-media-id', alias, mediaId: item.id, createdAt: item.createdAt,
+    namespace: /** @type {const} */ ('legacy-media-id'), alias, mediaId: item.id, createdAt: item.createdAt,
   }))));
   const validatedCarriers = validateDeviceAndIdentityCarriers(carriers, adminState, generatedAliases, projectedMedia.catalogItems);
   const mediaIdentityAliases = [...new Map(validatedCarriers.aliases.map((item) => [`${item.namespace}\u0000${item.alias}`, item])).values()];
   const evidenceCandidates = adminState.catalog.map((item) => ({
-    sourceId: item.sourceId || `${item.id}:primary`, kind: 'legacy-path-hash', value: item.id,
+    sourceId: item.sourceId || `${item.id}:primary`, kind: /** @type {import('@loom-media-server/video-contracts').IdentityEvidenceKind} */ ('legacy-path-hash'), value: item.id,
     observedAt: Number(item.indexedAt) || Date.now(),
   }));
   const mediaIdentityEvidence = [...new Map(evidenceCandidates.concat(projectedMedia.mediaIdentityEvidence)
@@ -660,6 +719,7 @@ export async function createLegacyCanonicalImportPlan({ dataDir, desktopState = 
   };
 }
 
+/** @param {string} target */
 async function fileDigest(target) {
   const hash = createHash('sha256');
   const handle = await fs.open(target, 'r');
@@ -676,6 +736,7 @@ async function fileDigest(target) {
   return { sha256: hash.digest('hex'), sizeBytes };
 }
 
+/** @param {string} manifestPath @param {string} migrationId */
 async function verifyLegacyBackupManifest(manifestPath, migrationId) {
   const stats = await fs.stat(manifestPath);
   if (!stats.isFile() || stats.size > 1024 * 1024) throw Object.assign(new Error('Legacy backup manifest is invalid.'), { code: 'legacy_backup_invalid' });
@@ -701,6 +762,7 @@ async function verifyLegacyBackupManifest(manifestPath, migrationId) {
   return manifest;
 }
 
+/** @param {{dataDir: string; migrationId: string; destinationDir: string; additionalArtifacts?: Array<{path: string; kind: string}>}} options @returns {Promise<import("./legacy-state-import.js").VerifiedLegacyBackup>} */
 export async function createVerifiedLegacyBackup({ dataDir, migrationId, destinationDir, additionalArtifacts = [] }) {
   const resolvedDir = path.resolve(dataDir);
   const destinationRoot = path.resolve(destinationDir);
@@ -709,10 +771,12 @@ export async function createVerifiedLegacyBackup({ dataDir, migrationId, destina
   await fs.mkdir(destinationRoot, { recursive: true, mode: 0o700 });
   await fs.mkdir(partialDir, { mode: 0o700 });
 
+  /** @param {string} target */
   const syncFile = async (target) => {
     const handle = await fs.open(target, 'r');
     try { await handle.sync(); } finally { await handle.close(); }
   };
+  /** @param {string} source @param {string} target */
   const copyAndSync = async (source, target) => {
     await fs.copyFile(source, target);
     await fs.chmod(target, 0o600);
@@ -795,6 +859,7 @@ export async function createVerifiedLegacyBackup({ dataDir, migrationId, destina
   }
 }
 
+/** @param {{dataDir: string; plan: import('./server-state-types.js').ImportPlan; backupPath: string; reportPath: string}} options */
 export async function commitLegacyCanonicalImport({ dataDir, plan, backupPath, reportPath }) {
   const rejected = Object.values(plan.reconciliation || {}).reduce((sum, row) => sum
     + (Array.isArray(row.rejected) ? row.rejected.reduce((total, item) => total + Number(item.count || 0), 0) : 0), 0);
@@ -812,6 +877,7 @@ export async function commitLegacyCanonicalImport({ dataDir, plan, backupPath, r
   return finalizeCanonicalImport({ dataDir, migrationId: plan.migrationId, stagedPath: stage.stagedPath });
 }
 
+/** @param {import('./server-state-types.js').ImportPlan} plan @param {{dryRun?: boolean; targetCounts?: Record<string, number>; backup?: import('./legacy-state-import.js').VerifiedLegacyBackup | null}} [options] */
 export function createMigrationReport(plan, { dryRun = true, targetCounts = plan.targetCounts, backup = null } = {}) {
   return {
     format: CANONICAL_MIGRATION_REPORT_FORMAT, migrationId: plan.migrationId,

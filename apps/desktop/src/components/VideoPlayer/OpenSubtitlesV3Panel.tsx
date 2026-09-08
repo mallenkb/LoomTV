@@ -8,7 +8,7 @@ import {
 export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelect }: {
   resolveVideo: () => Promise<SubtitleVideo>;
   selectedId?: string;
-  onSelect: (subtitle: OnlineSubtitle, text: string) => Promise<void>;
+  onSelect: (subtitle: OnlineSubtitle, text: string, signal: AbortSignal) => Promise<void>;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<OnlineSubtitle[] | null>(null);
@@ -16,7 +16,11 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => () => {
+    const controller = request.current;
+    request.current = null;
+    controller?.abort();
+  }, []);
   const groups = useMemo(() => {
     const map = new Map<string, OnlineSubtitle[]>();
     for (const result of results || []) {
@@ -43,7 +47,10 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not search OpenSubtitles v3.');
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      if (request.current === controller) {
+        request.current = null;
+        setLoading(false);
+      }
     }
   };
   const select = async (subtitle: OnlineSubtitle) => {
@@ -55,21 +62,40 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     setError('');
     try {
       const text = await downloadOnlineSubtitle(subtitle, controller.signal);
-      if (!controller.signal.aborted) await onSelect(subtitle, text);
+      if (!controller.signal.aborted) await onSelect(subtitle, text, controller.signal);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load this subtitle.');
     } finally {
-      if (!controller.signal.aborted) setDownloading(null);
+      if (request.current === controller) {
+        request.current = null;
+        setDownloading(null);
+      }
     }
+  };
+  const cancel = () => {
+    const controller = request.current;
+    if (!controller) return;
+    controller.abort();
+    setLoading(false);
+    setDownloading(null);
+    setError('');
   };
   return (
     <section className="space-y-2" aria-label="OpenSubtitles v3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold text-white">OpenSubtitles v3</h3>
-        <button type="button" onClick={() => void search()} disabled={loading || downloading !== null}
-          className="rounded-md bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20 disabled:opacity-50">
-          {loading ? 'Searching...' : results ? 'Refresh results' : 'Find online subtitles'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void search()} disabled={loading || downloading !== null}
+            className="rounded-md bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20 disabled:opacity-50">
+            {loading ? 'Searching...' : results ? 'Refresh results' : 'Find online subtitles'}
+          </button>
+          {(loading || downloading !== null) && (
+            <button type="button" onClick={cancel} aria-label={loading ? 'Cancel subtitle search' : 'Cancel subtitle download'}
+              className="rounded-md border border-white/20 px-3 py-2 text-xs text-white/80 hover:bg-white/10">
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
       <label className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 transition-colors focus-within:bg-white/10">
         <Search className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />

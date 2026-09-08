@@ -2,10 +2,15 @@ name: Tauri port checks
 
 on:
   push:
-    branches: [codex/tauri-react-port]
+    branches: [main, codex/tauri-react-port]
     paths:
       - 'apps/desktop-tauri/**'
       - 'apps/desktop/src/**'
+      - 'apps/desktop/src/main/**'
+      - 'apps/desktop/src/shared/**'
+      - 'apps/desktop/src/preload.ts'
+      - 'apps/desktop/native/**'
+      - 'apps/desktop/resources/**'
       - 'crates/**'
       - 'packages/**'
       - 'scripts/tauri/**'
@@ -20,6 +25,11 @@ on:
     paths:
       - 'apps/desktop-tauri/**'
       - 'apps/desktop/src/**'
+      - 'apps/desktop/src/main/**'
+      - 'apps/desktop/src/shared/**'
+      - 'apps/desktop/src/preload.ts'
+      - 'apps/desktop/native/**'
+      - 'apps/desktop/resources/**'
       - 'crates/**'
       - 'packages/**'
       - 'scripts/tauri/**'

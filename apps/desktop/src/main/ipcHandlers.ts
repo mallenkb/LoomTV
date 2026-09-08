@@ -53,64 +53,22 @@ import {
   setLibVlcPlaybackViewport,
   syncLibVlcPlaybackSurface,
 } from './libvlcPlayback.ts';
-import type { LibVlcStartOptions } from './libvlcPlayback.ts';
-import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 import { z } from 'zod';
 import { lanProviderRatingsSchema } from '@loom-media-server/lan-protocol';
+import { playbackStartOptionsSchema, playbackCommandSchema, playbackTimeSchema, externalBrowserUrl, authorizeFolderReveal, boundedIpcRecord } from './ipcPlaybackValidation.ts';
 import { parseIpcArguments } from './ipcValidation.ts';
 import { metadataProviderRequestSchema } from './metadataProviderGateway.ts';
 import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
 
 const finiteNumber = z.number().finite();
-const nonEmptyString = z.string().trim().min(1);
-const subtitleStyleSchema = z.object({
-  fontSize: finiteNumber,
-  color: z.string(),
-  borderColor: z.string(),
-  borderWidth: finiteNumber,
-  backgroundColor: z.string(),
-  position: finiteNumber,
-});
-const playbackStartOptionsSchema = z.object({
-  startSeconds: finiteNumber.nonnegative().optional(),
-  volume: finiteNumber.optional(),
-  muted: z.boolean().optional(),
-  speed: finiteNumber.positive().optional(),
-  audioTrackId: finiteNumber.optional(),
-  audioLanguage: z.string().trim().min(1).max(32).optional(),
-  audioDelay: finiteNumber.optional(),
-  subtitleDelay: finiteNumber.optional(),
-  subtitleStyle: subtitleStyleSchema.optional(),
-  subtitleFiles: z.array(z.object({
-    path: nonEmptyString,
-    source: z.enum(['sidecar', 'opensubtitles']),
-  })).optional(),
-  nativeSubtitles: z.boolean().optional(),
-});
-const playbackCommandSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('set-paused'), paused: z.boolean() }),
-  z.object({ type: z.literal('seek'), position: finiteNumber.nonnegative() }),
-  z.object({ type: z.literal('set-volume'), volume: finiteNumber }),
-  z.object({ type: z.literal('set-muted'), muted: z.boolean() }),
-  z.object({ type: z.literal('set-speed'), speed: finiteNumber.positive() }),
-  z.object({ type: z.literal('set-video-track'), trackId: finiteNumber.nullable() }),
-  z.object({ type: z.literal('set-audio-track'), trackId: finiteNumber.nullable() }),
-  z.object({ type: z.literal('set-subtitle-track'), trackId: finiteNumber.nullable() }),
-  z.object({ type: z.literal('set-secondary-subtitle-track'), trackId: finiteNumber.nullable() }),
-  z.object({ type: z.literal('set-subtitle-delay'), seconds: finiteNumber }),
-  z.object({ type: z.literal('set-audio-delay'), seconds: finiteNumber }),
-  z.object({ type: z.literal('set-subtitle-style'), ...subtitleStyleSchema.shape }),
-  z.object({ type: z.literal('set-video-aspect'), aspect: z.string().nullable() }),
-  z.object({ type: z.literal('set-video-crop'), crop: z.string().nullable() }),
-  z.object({ type: z.literal('set-video-rotation'), degrees: finiteNumber }),
-]);
+const nonEmptyString = z.string().max(8192).trim().min(1).max(8192);
 const mediaSessionSnapshotSchema = z.object({
   sessionId: z.string().max(200),
   state: z.enum(['playing', 'paused', 'stopped']),
-  positionSeconds: finiteNumber.nonnegative(),
-  durationSeconds: finiteNumber.nonnegative(),
-  rate: finiteNumber.positive(),
+  positionSeconds: playbackTimeSchema,
+  durationSeconds: playbackTimeSchema,
+  rate: finiteNumber.min(0.25).max(3),
   supportedCommands: z.array(z.enum([
     'play',
     'pause',
@@ -135,8 +93,8 @@ const mediaSessionSnapshotSchema = z.object({
   artworkUrl: z.string().max(2048).optional(),
 });
 const playbackViewportSchema = z.object({
-  x: finiteNumber,
-  y: finiteNumber,
+  x: finiteNumber.min(-10_000).max(100_000),
+  y: finiteNumber.min(-10_000).max(100_000),
   width: finiteNumber.positive().max(100_000),
   height: finiteNumber.positive().max(100_000),
 });
@@ -146,16 +104,16 @@ const libraryScanOptionsSchema = z.object({
   mode: z.enum(['quick', 'metadata', 'full']).optional(),
 });
 const libraryFolderKindSchema = z.enum(['movies', 'tvShows', 'anime', 'others']);
-const metadataKeysSchema = z.record(z.string(), z.string());
+const metadataKeysSchema = boundedIpcRecord(z.string().max(8192), 64, 65_536);
 const remoteLibraryRequestSchema = z.object({
   method: z.enum(['GET', 'POST', 'PATCH', 'PUT', 'DELETE']).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  body: z.string().optional(),
+  headers: boundedIpcRecord(z.string().max(8192), 128, 65_536).optional(),
+  body: z.string().max(2_000_000).optional(),
 });
 const profileCreateSchema = z.object({
-  name: z.string(),
-  avatarKey: z.string().optional(),
-  colorKey: z.string().optional(),
+  name: z.string().max(8192),
+  avatarKey: z.string().max(8192).optional(),
+  colorKey: z.string().max(8192).optional(),
   type: z.enum(['standard', 'kid']).optional(),
 });
 const profileUpdateSchema = profileCreateSchema.partial();
@@ -167,7 +125,7 @@ const profilePreferencesSchema = z.object({
   appHomeStyle: z.enum(['default', 'modern']).optional(),
   appModernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
   showProviderRatingBadges: z.boolean().optional(),
-  sidebarNavOrder: z.array(z.string()).optional(),
+  sidebarNavOrder: z.array(z.string().max(8192)).max(1024).optional(),
   autoplayNextEnabled: z.boolean().optional(),
   playbackSkipBackSeconds: finiteNumber.optional(),
   playbackSkipForwardSeconds: finiteNumber.optional(),
@@ -176,7 +134,7 @@ const profileRestrictionsInputSchema = z.object({
   country: z.enum(['US', 'GB', 'CA', 'AU']),
   maximumAge: finiteNumber.nullable(),
   allowUnrated: z.boolean(),
-  allowedFolders: z.array(z.string()),
+  allowedFolders: z.array(z.string().max(8192)).max(1024),
 });
 const profileListKindSchema = z.enum(['watchlist', 'favorite', 'watched']);
 const progressImportValueSchema = z.union([
@@ -190,9 +148,9 @@ const progressImportValueSchema = z.union([
 const trackPreferenceSchema = z.object({
   enabled: z.boolean(),
   index: finiteNumber.optional(),
-  language: z.string().optional(),
-  title: z.string().optional(),
-  codec: z.string().optional(),
+  language: z.string().max(8192).optional(),
+  title: z.string().max(8192).optional(),
+  codec: z.string().max(8192).optional(),
   forced: z.boolean().optional(),
 });
 const playbackTrackPreferencesSchema = z.object({
@@ -239,27 +197,27 @@ const transcodeOptionsSchema = z.object({
   videoBitrateKbps: finiteNumber.positive().optional(),
   audioBitrateKbps: finiteNumber.positive().optional(),
   toneMap: z.boolean().optional(),
-  startSeconds: finiteNumber.nonnegative().optional(),
+  startSeconds: playbackTimeSchema.optional(),
   videoTrackIndex: finiteNumber.nonnegative().optional(),
   audioTrackIndex: finiteNumber.nonnegative().optional(),
   subtitleTrackIndex: finiteNumber.nonnegative().optional(),
   subtitleStreamOrdinal: finiteNumber.nonnegative().optional(),
-  subtitleCodec: z.string().optional(),
-  subtitleFilePath: z.string().optional(),
+  subtitleCodec: z.string().max(8192).optional(),
+  subtitleFilePath: z.string().max(8192).optional(),
   secondarySubtitleTrackIndex: finiteNumber.nonnegative().optional(),
   secondarySubtitleStreamOrdinal: finiteNumber.nonnegative().optional(),
-  secondarySubtitleCodec: z.string().optional(),
-  secondarySubtitleFilePath: z.string().optional(),
+  secondarySubtitleCodec: z.string().max(8192).optional(),
+  secondarySubtitleFilePath: z.string().max(8192).optional(),
   subtitleStyle: z.object({
-    delaySeconds: finiteNumber.optional(),
-    position: finiteNumber.optional(),
-    scale: finiteNumber.optional(),
-    fontSize: finiteNumber.optional(),
-    fontColor: z.string().optional(),
-    borderColor: z.string().optional(),
-    borderWidth: finiteNumber.optional(),
+    delaySeconds: finiteNumber.min(-60).max(60).optional(),
+    position: finiteNumber.min(0).max(100).optional(),
+    scale: finiteNumber.min(0.5).max(2).optional(),
+    fontSize: finiteNumber.min(24).max(96).optional(),
+    fontColor: z.string().max(8192).optional(),
+    borderColor: z.string().max(8192).optional(),
+    borderWidth: finiteNumber.min(0).max(10).optional(),
     borderEnabled: z.boolean().optional(),
-    backgroundColor: z.string().optional(),
+    backgroundColor: z.string().max(8192).optional(),
     backgroundEnabled: z.boolean().optional(),
   }).optional(),
   forceTranscode: z.boolean().optional(),
@@ -307,16 +265,16 @@ const iptvChannelRequestSchema = z.object({
 });
 
 const stremioExtraSchema = z.record(
-  z.string(),
-  z.union([z.string(), finiteNumber, z.boolean()]),
-);
+  z.string().max(128),
+  z.union([z.string().max(8192), finiteNumber, z.boolean()]),
+).refine((values) => Object.keys(values).length <= 64);
 const stremioCatalogRequestSchema = z.object({
   type: nonEmptyString,
   catalogId: nonEmptyString,
   filters: z.object({
-    query: z.string().optional(),
-    genre: z.string().optional(),
-    year: z.string().optional(),
+    query: z.string().max(8192).optional(),
+    genre: z.string().max(8192).optional(),
+    year: z.string().max(8192).optional(),
   }).optional(),
   extra: stremioExtraSchema.optional(),
 });
@@ -620,17 +578,6 @@ export function registerIpcHandlers<
     });
   };
 
-  const handleExperimental = (
-    channel: string,
-    listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>,
-    argsSchema: z.ZodType<unknown[]>,
-  ) => {
-    ipcMain.handle(channel, (event, ...args) => {
-      if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
-      return listener(event, ...parseIpcArguments(channel, args, argsSchema));
-    });
-  };
-
   type StremioPluginChannel = Extract<IpcInvokeChannel, `plugins:stremio:${string}`>;
   type StremioPluginData<C extends StremioPluginChannel> = IpcContract[C]['result'] extends StremioPluginIpcResult<infer T> ? T : never;
   const handleStremio = <C extends StremioPluginChannel>(
@@ -790,7 +737,7 @@ export function registerIpcHandlers<
       ...(currentPath?.trim() ? { defaultPath: currentPath.trim() } : {}),
     });
     return result.canceled ? null : result.filePaths[0] || null;
-  }, z.tuple([z.string().optional()]));
+  }, z.tuple([z.string().max(8192).optional()]));
 
   handle('library:update-folder', async (_event, folderPath: string, nextFolderPath: string, kind: string) => {
     deps.authorizeSettingsWrite();
@@ -963,10 +910,11 @@ export function registerIpcHandlers<
 
   handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
     deps.authorizeMediaPath(filePath);
+    deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (time) params.set('t', time);
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/api/thumbnail?${params.toString()}` };
-  }, z.tuple([nonEmptyString, z.string().optional()]));
+  }, z.tuple([nonEmptyString, z.string().max(8192).optional()]));
 
   handle('media:get-file-info', (_event, filePath: string) => {
     try {
@@ -986,7 +934,7 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:available', () => deps.listAvailableStremioPlugins(), z.tuple([]));
   handleStremio('plugins:stremio:official', () => deps.listOfficialStremioAddons(), z.tuple([]));
   handleStremio('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId), z.tuple([z.enum(['cinemeta', 'opensubtitles-v3'])]));
-  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().url()]));
+  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().max(8192).url()]));
   handleStremio('plugins:stremio:review-installed', (_event, addonId) => deps.reviewInstalledStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')), z.tuple([nonEmptyString, nonEmptyString]));
   handleStremio('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
@@ -1002,7 +950,7 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request), z.tuple([stremioMetaRequestSchema]));
   handleStremio('plugins:stremio:streams', (_event, addonId, request) => deps.fetchStremioStreams(String(addonId || ''), request), z.tuple([nonEmptyString, stremioStreamRequestSchema]));
   handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')), z.tuple([nonEmptyString]));
-  handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values), z.tuple([nonEmptyString, z.record(z.string(), z.unknown())]));
+  handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values), z.tuple([nonEmptyString, boundedIpcRecord(z.unknown(), 128, 262_144)]));
   handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit), z.tuple([nonEmptyString, finiteNumber.int().positive().max(1_000).optional()]));
 
   handle('settings:save', (_event, settings) => {
@@ -1019,8 +967,8 @@ export function registerIpcHandlers<
   handleNoArgs('server:unified-state', () => deps.getUnifiedDesktopServerState());
   handle('server:configure-owner', (_event, input) => deps.configureUnifiedDesktopOwner(input), z.tuple([
     z.object({
-      name: z.string().trim().min(1).max(80),
-      password: z.string().min(8).max(256),
+      name: z.string().max(8192).trim().min(1).max(80),
+      password: z.string().max(8192).min(8).max(256),
     }),
   ]));
   handleNoArgs('server:open-admin', () => deps.openUnifiedDesktopAdmin());
@@ -1059,6 +1007,7 @@ export function registerIpcHandlers<
     for (const subtitleFile of options?.subtitleFiles || []) {
       deps.authorizeMediaPath(subtitleFile.path);
       deps.assertLocalMediaPath(subtitleFile.path);
+      deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitleFile.path);
     }
     return startLibMpvPlayback(event.sender, mediaPath, options);
   }, z.tuple([nonEmptyString, mpvStartOptionsSchema.optional()]));
@@ -1071,11 +1020,11 @@ export function registerIpcHandlers<
 
   handle('mpv:stop', (_event, sessionId) => stopLibMpvPlayback(sessionId), z.tuple([nonEmptyString]));
 
-  handleExperimental('libvlc:availability', () => libVlcAvailability(), z.tuple([]));
+  handle('libvlc:availability', () => libVlcAvailability(), z.tuple([]));
 
-  handleExperimental('libvlc:refresh-availability', () => refreshLibVlcAvailability(), z.tuple([]));
+  handle('libvlc:refresh-availability', () => refreshLibVlcAvailability(), z.tuple([]));
 
-  handleExperimental('libvlc:start', (event, filePath, rawOptions) => {
+  handle('libvlc:start', (event, filePath, rawOptions) => {
     const requestedPath = String(filePath || '');
     const iptvReference = parseIptvPlaybackReference(requestedPath);
     const externalReference = parseExternalPlaybackReference(requestedPath);
@@ -1097,7 +1046,7 @@ export function registerIpcHandlers<
       deps.authorizeMediaPath(mediaPath);
       deps.assertLocalMediaPath(mediaPath);
     }
-    const options: LibVlcStartOptions = playbackStartOptionsSchema.parse(rawOptions ?? {});
+    const options = rawOptions ?? {};
     for (const subtitleFile of options.subtitleFiles || []) {
       const subtitlePath = String(subtitleFile?.path || '');
       deps.authorizeMediaPath(subtitlePath);
@@ -1109,17 +1058,17 @@ export function registerIpcHandlers<
     });
   }, z.tuple([nonEmptyString, playbackStartOptionsSchema.optional()]));
 
-  handleExperimental('libvlc:command', (_event, sessionId, command) =>
-    commandLibVlcPlayback(String(sessionId || ''), playbackCommandSchema.parse(command)),
+  handle('libvlc:command', (_event, sessionId, command) =>
+    commandLibVlcPlayback(sessionId, command),
   z.tuple([nonEmptyString, playbackCommandSchema]));
 
-  handleExperimental('libvlc:stop', (_event, sessionId) =>
-    stopLibVlcPlayback(sessionId ? String(sessionId) : undefined), z.tuple([z.string().optional()]));
+  handle('libvlc:stop', (_event, sessionId) =>
+    stopLibVlcPlayback(sessionId), z.tuple([nonEmptyString]));
 
-  handleExperimental('libvlc:sync-surface', (event) =>
+  handle('libvlc:sync-surface', (event) =>
     syncLibVlcPlaybackSurface(event.sender) || syncLibMpvPlaybackSurface(event.sender), z.tuple([]));
 
-  handleExperimental('libvlc:set-fullscreen-transition', (event, transitioning, waitForFinalViewport) =>
+  handle('libvlc:set-fullscreen-transition', (event, transitioning, waitForFinalViewport) =>
     setLibVlcPlaybackFullscreenTransition(
       event.sender,
       Boolean(transitioning),
@@ -1127,10 +1076,7 @@ export function registerIpcHandlers<
     ) || setLibMpvPlaybackFullscreenTransition(event.sender, Boolean(transitioning)),
   z.tuple([z.boolean(), z.boolean().optional()]));
 
-  handleExperimental('libvlc:set-viewport', (event, rawViewport) => {
-    const result = playbackViewportSchema.safeParse(rawViewport);
-    if (!result.success || result.data.x < -10_000 || result.data.y < -10_000) return false;
-    const viewport: PlaybackViewport = result.data;
+  handle('libvlc:set-viewport', (event, viewport) => {
     return setLibVlcPlaybackViewport(event.sender, viewport)
       || setLibMpvPlaybackViewport(event.sender, viewport);
   }, z.tuple([playbackViewportSchema]));
@@ -1139,7 +1085,7 @@ export function registerIpcHandlers<
   // float over whatever is beneath them — in the player that is the video.
   // Tie them to the player's own chrome so they fade out with the controls
   // instead of sitting permanently on top of the picture.
-  handleExperimental('window:set-chrome-visible', (event, visible) => {
+  handle('window:set-chrome-visible', (event, visible) => {
     const ownerWindow = BrowserWindow.fromWebContents(event.sender);
     if (!ownerWindow || ownerWindow.isDestroyed()) return false;
     if (process.platform !== 'darwin') return false;
@@ -1147,7 +1093,7 @@ export function registerIpcHandlers<
     return true;
   }, z.tuple([z.boolean()]));
 
-  handleExperimental('window:set-fullscreen', async (event, enabled) => {
+  handle('window:set-fullscreen', async (event, enabled) => {
     const ownerWindow = BrowserWindow.fromWebContents(event.sender);
     if (!ownerWindow || ownerWindow.isDestroyed()) return false;
     const nextFullscreen = Boolean(enabled);
@@ -1249,7 +1195,7 @@ export function registerIpcHandlers<
     return deps.connectRemoteLibrary(String(baseUrl || ''), String(code || ''), {
       name: settings.localNetworkDeviceName || os.hostname(),
     }, String(certFingerprint || ''));
-  }, z.tuple([nonEmptyString, z.string(), z.string().optional()]));
+  }, z.tuple([nonEmptyString, z.string().max(8192), z.string().max(8192).optional()]));
 
   handle('network:remote-request', (_event, pathname, request) =>
     deps.requestRemoteLibrary(String(pathname || ''), request),
@@ -1290,33 +1236,33 @@ export function registerIpcHandlers<
   handle('profiles:delete', (_event, profileId: string) => deps.deleteProfile(profileId), z.tuple([nonEmptyString]));
   handle('profiles:export', (_event, profileId: string) => deps.exportProfile(profileId), z.tuple([nonEmptyString]));
   handleNoArgs('profiles:import', () => deps.importProfile());
-  handle('profiles:select', (_event, profileId: string, pin?: string) => deps.selectProfile(profileId, pin), z.tuple([nonEmptyString, z.string().optional()]));
+  handle('profiles:select', (_event, profileId: string, pin?: string) => deps.selectProfile(profileId, pin), z.tuple([nonEmptyString, z.string().max(8192).optional()]));
   handleNoArgs('profiles:select-guest', () => deps.selectGuestProfile());
-  handle('profiles:reorder', (_event, profileIds) => deps.reorderProfiles(profileIds), z.tuple([z.array(nonEmptyString)]));
-  handle('profiles:pin', (_event, profileId, pin) => deps.changeProfilePin(profileId, pin), z.tuple([nonEmptyString, z.string().nullable()]));
-  handle('profiles:reset-owner', (_event, confirmation) => deps.resetOwnerProfile(confirmation), z.tuple([z.string()]));
+  handle('profiles:reorder', (_event, profileIds) => deps.reorderProfiles(profileIds), z.tuple([z.array(nonEmptyString).max(1024)]));
+  handle('profiles:pin', (_event, profileId, pin) => deps.changeProfilePin(profileId, pin), z.tuple([nonEmptyString, z.string().max(8192).nullable()]));
+  handle('profiles:reset-owner', (_event, confirmation) => deps.resetOwnerProfile(confirmation), z.tuple([z.string().max(8192)]));
   handle('profiles:set-auto-sign-in', (_event, enabled) => deps.setAutomaticSignIn(enabled), z.tuple([z.boolean()]));
   handleNoArgs('profile-preferences:get', () => deps.getProfilePreferences());
-  handle('profile-preferences:save', (_event, patch, expectedProfileId) => deps.saveProfilePreferences(patch || {}, expectedProfileId), z.tuple([profilePreferencesSchema, z.string().optional()]));
+  handle('profile-preferences:save', (_event, patch, expectedProfileId) => deps.saveProfilePreferences(patch || {}, expectedProfileId), z.tuple([profilePreferencesSchema, z.string().max(8192).optional()]));
   handle('profile-restrictions:get', (_event, profileId) => deps.getProfileRestrictions(String(profileId || '')), z.tuple([nonEmptyString]));
   handle('profile-restrictions:save', (_event, profileId, input) => deps.saveProfileRestrictions(String(profileId || ''), input), z.tuple([nonEmptyString, profileRestrictionsInputSchema]));
   handle('profile-lists:get', (_event, kind) => deps.getProfileLists(kind), z.tuple([profileListKindSchema.optional()]));
-  handle('profile-lists:set', (_event, mediaId, kind, present, expectedProfileId) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present), expectedProfileId), z.tuple([nonEmptyString, profileListKindSchema, z.boolean(), z.string().optional()]));
-  handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress(), z.tuple([z.string().optional()]));
+  handle('profile-lists:set', (_event, mediaId, kind, present, expectedProfileId) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present), expectedProfileId), z.tuple([nonEmptyString, profileListKindSchema, z.boolean(), z.string().max(8192).optional()]));
+  handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress(), z.tuple([z.string().max(8192).optional()]));
   handle('progress:save', (_event, filePath: string, position: number, duration: number, expectedProfileId?: string) =>
     deps.saveProgress(filePath, position, duration, expectedProfileId), z.tuple([
     nonEmptyString,
     finiteNumber.nonnegative(),
     finiteNumber.nonnegative(),
-    z.string().optional(),
+    z.string().max(8192).optional(),
   ]));
   handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string) => {
     deps.importProgress(progress || {}, expectedProfileId);
     return true;
-  }, z.tuple([z.record(z.string(), progressImportValueSchema), z.string().optional()]));
-  handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope), z.tuple([z.string().optional()]));
+  }, z.tuple([boundedIpcRecord(progressImportValueSchema, 100_000, 16_000_000), z.string().max(8192).optional()]));
+  handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope), z.tuple([z.string().max(8192).optional()]));
   handle('playback-track-preferences:save', (_event, scope: string, preferences, expectedProfileId) =>
-    deps.savePlaybackTrackPreferences(scope, preferences || {}, expectedProfileId), z.tuple([nonEmptyString, playbackTrackPreferencesSchema, z.string().optional()]));
+    deps.savePlaybackTrackPreferences(scope, preferences || {}, expectedProfileId), z.tuple([nonEmptyString, playbackTrackPreferencesSchema, z.string().max(8192).optional()]));
   handle('playback:segments:get', (_event, request: MediaSegmentRequest) =>
     deps.getMediaSegments(request || { mediaId: '' }), z.tuple([mediaSegmentRequestSchema]));
   handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) => {
@@ -1326,11 +1272,11 @@ export function registerIpcHandlers<
   handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => {
     deps.authorizeSettingsWrite();
     return deps.deleteManualMediaSegment(input);
-  }, z.tuple([mediaSegmentRequestSchema.extend({ candidateId: z.string().optional(), type: mediaSegmentTypeSchema })]));
+  }, z.tuple([mediaSegmentRequestSchema.extend({ candidateId: z.string().max(8192).optional(), type: mediaSegmentTypeSchema })]));
   handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => {
     deps.authorizeSettingsWrite();
     return deps.undoManualMediaSegment(input);
-  }, z.tuple([mediaSegmentRequestSchema.extend({ candidateId: z.string().optional(), type: mediaSegmentTypeSchema })]));
+  }, z.tuple([mediaSegmentRequestSchema.extend({ candidateId: z.string().max(8192).optional(), type: mediaSegmentTypeSchema })]));
   handle('playback:segments:manage-list', (_event, request) => {
     deps.authorizeSettingsWrite();
     return deps.getManagedMediaSegments(request ? {
@@ -1362,7 +1308,7 @@ export function registerIpcHandlers<
   handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
     deps.setPlaybackActivityLease(key, Boolean(active), label);
     return true;
-  }, z.tuple([nonEmptyString, z.boolean(), z.string().optional()]));
+  }, z.tuple([nonEmptyString, z.boolean(), z.string().max(8192).optional()]));
 
   handle('media-control:publish', (event, snapshot) =>
     publishMediaSessionSnapshot(event.sender, snapshot), z.tuple([mediaSessionSnapshotSchema]));
@@ -1450,17 +1396,14 @@ export function registerIpcHandlers<
     return deps.libraryIndexForRenderer();
   });
   handle('shell:open-external', (_event, url: string): OpenExternalResult => {
-    const parsed = new URL(String(url || ''));
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error('Only http and https links can be opened externally.');
-    }
-    return shell.openExternal(parsed.toString());
+    return shell.openExternal(externalBrowserUrl(url));
   }, z.tuple([nonEmptyString]));
   const openFolderPath = async (filePath: string) => {
     const target = String(filePath || '').trim();
     if (!target) throw new Error('A local path is required.');
     if (/^[a-z]+:\/\//i.test(target)) throw new Error('Only local paths can be opened in the file manager.');
     const resolvedTarget = path.resolve(target);
+    authorizeFolderReveal(resolvedTarget, deps.authorizeMediaPath, deps.authorizeSettingsWrite);
     let existingTarget = resolvedTarget;
     const root = path.parse(resolvedTarget).root;
     while (!fs.existsSync(existingTarget)) {
@@ -1468,6 +1411,7 @@ export function registerIpcHandlers<
       if (parent === existingTarget || parent === root) {
         throw new Error('That file or folder is no longer available.');
       }
+      authorizeFolderReveal(parent, deps.authorizeMediaPath, deps.authorizeSettingsWrite);
       existingTarget = parent;
     }
 

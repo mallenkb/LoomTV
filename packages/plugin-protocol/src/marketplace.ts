@@ -111,7 +111,7 @@ export interface WireMarketplaceIndex {
   signature: string;
 }
 
-export interface VerifiedMarketplaceAddon extends PluginMarketplaceAddon {}
+export type VerifiedMarketplaceAddon = PluginMarketplaceAddon;
 
 export interface VerifiedMarketplaceIndex {
   wireVersion: 1;

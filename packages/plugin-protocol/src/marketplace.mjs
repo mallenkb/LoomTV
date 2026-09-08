@@ -266,7 +266,8 @@ export function parseWireMarketplaceIndex(input) {
 }
 
 function unsignedPayload(value) {
-  const { signature: _signature, ...payload } = value;
+  const payload = { ...value };
+  delete payload.signature;
   return payload;
 }
 
@@ -275,7 +276,11 @@ function signedCatalogPayload(value) {
     ...unsignedPayload(value),
     payload: {
       ...value.payload,
-      items: value.payload.items.map(({ itemKey: _itemKey, ...item }) => item),
+      items: value.payload.items.map((value) => {
+        const item = { ...value };
+        delete item.itemKey;
+        return item;
+      }),
     },
   };
 }

@@ -1,9 +1,13 @@
 import { createTauriBridge } from './bridge/tauriBridge';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import './desktop.css';
+import './webkit.css';
 
 declare const __TAURI_PLATFORM__: string;
 document.documentElement.dataset.loomRuntime = 'tauri';
+if (__TAURI_PLATFORM__ === 'darwin') {
+  document.documentElement.dataset.loomRenderer = 'webkit';
+}
 document.body.classList.add(`platform-${__TAURI_PLATFORM__}`);
 
 // WebKit does not implement Electron's app-region CSS. Keep the shared drag targets.

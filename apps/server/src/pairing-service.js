@@ -19,24 +19,29 @@ const REMOTE_DEVICE_PERMISSIONS = Object.freeze([
 ]);
 const DEFAULT_DEVICE_PERMISSIONS = Object.freeze(['library.read', 'stream', 'transcode', 'downloads']);
 
+/** @param {number} status @param {string} code @param {string} message @param {{ retryAfter?: number }} details */
 function pairingError(status, code, message, details = {}) {
   return Object.assign(new Error(message), { status, code, ...details });
 }
 
+/** @param {unknown} secret */
 function hashSecret(secret) {
   return createHash('sha256').update(String(secret)).digest('hex');
 }
 
+/** @param {unknown} left @param {unknown} right */
 function safeEqual(left, right) {
   const actual = Buffer.from(String(left || ''), 'utf8');
   const expected = Buffer.from(String(right || ''), 'utf8');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+/** @param {string} requestSecret */
 function envelopeKey(requestSecret) {
   return createHash('sha256').update('loomtv-pairing-envelope-v1\0').update(requestSecret).digest();
 }
 
+/** @param {string} requestSecret @param {string} credentialSecret */
 function encryptCredentialSecret(requestSecret, credentialSecret) {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', envelopeKey(requestSecret), iv);
@@ -44,7 +49,11 @@ function encryptCredentialSecret(requestSecret, credentialSecret) {
   return { ciphertext: ciphertext.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') };
 }
 
+/** @param {string} requestSecret @param {{ ciphertext: string | null, iv: string | null, tag: string | null }} encrypted */
 function decryptCredentialSecret(requestSecret, encrypted) {
+  if (typeof encrypted.iv !== 'string' || typeof encrypted.tag !== 'string' || typeof encrypted.ciphertext !== 'string') {
+    throw pairingError(409, 'pairing_credential_unavailable', 'The approved device credential could not be recovered. Pair again.');
+  }
   const decipher = createDecipheriv('aes-256-gcm', envelopeKey(requestSecret), Buffer.from(encrypted.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(encrypted.tag, 'base64'));
   return Buffer.concat([
@@ -53,6 +62,7 @@ function decryptCredentialSecret(requestSecret, encrypted) {
   ]).toString('utf8');
 }
 
+/** @param {unknown} value */
 function normalizeFingerprint(value) {
   if (value === undefined || value === null || value === '') return undefined;
   const normalized = String(value).replaceAll(':', '').trim().toLowerCase();
@@ -60,6 +70,7 @@ function normalizeFingerprint(value) {
   return normalized;
 }
 
+/** @param {unknown} value @param {readonly string[]} fallback */
 function normalizePermissions(value, fallback = DEFAULT_DEVICE_PERMISSIONS) {
   const source = Array.isArray(value) ? value : fallback;
   const permissions = [...new Set(source.filter((entry) => typeof entry === 'string' && REMOTE_DEVICE_PERMISSIONS.includes(entry)))];
@@ -69,6 +80,7 @@ function normalizePermissions(value, fallback = DEFAULT_DEVICE_PERMISSIONS) {
   return permissions;
 }
 
+/** @param {import('./server-admin-types.js').Device} device */
 function publicDevice(device) {
   return {
     id: device.id,
@@ -85,15 +97,18 @@ function publicDevice(device) {
   };
 }
 
+/** @param {import('./server-admin-types.js').PairingOptions} options */
 export function createPairingService({ store, getAccount, getCertificateFingerprint = () => undefined, clock = Date.now }) {
   if (!store) throw new Error('Pairing service requires canonical state.');
   const requestBuckets = new Map();
   const statusFailureBuckets = new Map();
 
+  /** @param {unknown} address */
   function addressKey(address) {
     return hashSecret(`pairing-address\0${String(address || 'unknown')}`);
   }
 
+  /** @param {Map<string, { count: number, resetAt: number }>} bucketMap @param {unknown} address @param {number} limit */
   function consumeRate(bucketMap, address, limit) {
     const now = clock();
     const key = addressKey(address);
@@ -106,6 +121,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
     });
   }
 
+  /** @param {unknown} value */
   function certificateForRequest(value) {
     const supplied = normalizeFingerprint(value);
     const advertised = normalizeFingerprint(getCertificateFingerprint?.());
@@ -116,6 +132,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
   }
 
   return {
+    /** @param {Record<string, unknown>} input */
     async request(input = {}) {
       consumeRate(requestBuckets, input.address, MAX_REQUESTS_PER_ADDRESS);
       const now = clock();
@@ -139,6 +156,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       return { requestId: request.id, requestSecret, status: 'pending', expiresAt: request.expiresAt };
     },
 
+    /** @param {string} requestId @param {string} requestSecret */
     async status(requestId, requestSecret, address = '') {
       if (!requestId || !requestSecret) throw pairingError(404, 'not_found', 'Pairing request was not found.');
       const record = store.readPairingRequest(String(requestId));
@@ -183,6 +201,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       };
     },
 
+    /** @param {string} requestId @param {{ accountId?: unknown, permissions?: unknown, approved?: unknown }} input @param {import('./server-admin-types.js').PolicyPrincipal | null} approver */
     async approve(requestId, input, approver) {
       const record = store.readPairingRequest(String(requestId || ''));
       if (!record) throw pairingError(404, 'not_found', 'Pairing request was not found.');
@@ -212,11 +231,13 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       }) };
     },
 
+    /** @param {unknown} requestId */
     async deny(requestId) {
       store.denyPairingRequest(String(requestId || ''), clock());
       return { requestId: String(requestId || ''), status: 'denied' };
     },
 
+    /** @param {unknown} authorization */
     async authenticate(authorization) {
       const match = /^LoomDevice\s+([A-Za-z0-9._-]{1,128})\.([A-Za-z0-9_-]{32,256})$/.exec(String(authorization || '').trim());
       if (!match) return null;
@@ -227,11 +248,13 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       return credential;
     },
 
+    /** @param {string} accountId @param {string} deviceId */
     async resolveBoundDevice(accountId, deviceId) {
       if (!accountId || !deviceId) return null;
       return store.resolveBoundDevice(accountId, deviceId);
     },
 
+    /** @param {string} accountId @param {string} deviceId */
     async resolveSessionDevice(accountId, deviceId) {
       if (!accountId || !deviceId) return null;
       const credential = store.readDeviceCredentialForDevice(deviceId);
@@ -243,6 +266,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       };
     },
 
+    /** @param {import('./server-admin-types.js').StreamCapabilityInput} input */
     issueLegacyStreamCapability({
       deviceId, mediaId, profileId, selectionRevision, sourceId, fileVersion,
       authenticationSessionId = '', ttlMs = 15 * 60 * 1000,
@@ -262,6 +286,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
         ...(authenticationSessionId ? { authenticationSessionId } : {}), expiresAt, signature };
     },
 
+    /** @param {Record<string, unknown>} input */
     authorizeLegacyStreamCapability(input) {
       const expiresAt = Number(input?.expiresAt);
       const selectionRevision = Number(input?.selectionRevision);
@@ -276,28 +301,32 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       return safeEqual(expected, input.signature) ? credential : null;
     },
 
+    /** @param {import('./server-admin-types.js').PolicyPrincipal | null} principal */
     async list(principal) {
       if (!hasPermission(principal, 'devices.manage')) throw pairingError(403, 'permission_denied', 'Device management permission is required.');
       return store.listDevices().map(publicDevice);
     },
 
+    /** @param {string} deviceId @param {import('./server-admin-types.js').PolicyPrincipal | null} principal */
     async revoke(deviceId, principal, reason = 'device_revoked') {
       if (!hasPermission(principal, 'devices.manage')) throw pairingError(403, 'permission_denied', 'Device management permission is required.');
       const device = store.listDevices().find((entry) => entry.id === deviceId);
       if (!device) throw pairingError(404, 'not_found', 'Device was not found.');
       const revoked = store.revokeDevice(deviceId, reason, clock());
-      return { ...revoked, device: publicDevice(store.listDevices().find((entry) => entry.id === deviceId)) };
+      return { ...revoked, device: publicDevice(store.listDevices().find((entry) => entry.id === deviceId) || device) };
     },
 
+    /** @param {string} deviceId @param {import('./server-admin-types.js').PolicyPrincipal | null} principal */
     async revokeSelf(deviceId, principal, reason = 'device_revoked') {
       const device = store.listDevices().find((entry) => entry.id === deviceId);
       if (!device || device.accountId !== principal?.id || principal?.deviceId !== deviceId) {
         throw pairingError(403, 'permission_denied', 'The authenticated device cannot revoke that credential.');
       }
       const revoked = store.revokeDevice(deviceId, reason, clock());
-      return { ...revoked, device: publicDevice(store.listDevices().find((entry) => entry.id === deviceId)) };
+      return { ...revoked, device: publicDevice(store.listDevices().find((entry) => entry.id === deviceId) || device) };
     },
 
+    /** @param {{ id?: string, secret?: string }} credential */
     credentialHeader(credential) {
       if (!credential?.id || !credential?.secret) throw pairingError(400, 'invalid_request', 'Device credential is incomplete.');
       return `LoomDevice ${credential.id}.${credential.secret}`;

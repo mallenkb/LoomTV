@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod desktop_os;
 mod desktop_menu;
+mod desktop_os;
+mod libmpv_host;
 mod media_control;
 mod media_protocol;
-mod libmpv_host;
 mod playback_activity;
 mod profile_transfer;
 mod window_host;
@@ -33,6 +33,7 @@ struct Runtime {
     media: loomtv_core::streaming::MediaServer,
     remote: Arc<loomtv_core::remote::RemoteClient>,
     native_scope: Mutex<Option<PlaybackScope>>,
+    renderer_session: Mutex<Option<String>>,
     drained: AtomicBool,
     media_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     player: PlaybackService,
@@ -51,6 +52,32 @@ fn failed(error: impl std::fmt::Display) -> Error {
 }
 fn media_error(error: String) -> Error {
     Error::new("playback_error", error)
+}
+
+async fn renderer_handoff(
+    owner: &Mutex<Option<String>>,
+    id: String,
+    attaching: bool,
+    cleanup: impl std::future::Future<Output = Result<()>>,
+) -> Result<Value> {
+    let mut current = owner.lock().await;
+    if (current.as_deref() == Some(id.as_str())) == attaching {
+        return Ok(json!(attaching));
+    }
+    cleanup.await?;
+    *current = attaching.then_some(id);
+    Ok(json!(true))
+}
+
+async fn require_renderer(owner: &Mutex<Option<String>>, id: Option<&str>) -> Result<()> {
+    let current = owner.lock().await;
+    if id.is_none() || current.as_deref() != id {
+        return Err(Error::new(
+            "stale_renderer",
+            "This renderer no longer owns playback.",
+        ));
+    }
+    Ok(())
 }
 
 fn runtime_root(app: &tauri::AppHandle) -> Result<PathBuf> {
@@ -73,6 +100,7 @@ async fn desktop_invoke(
     state: tauri::State<'_, Runtime>,
     channel: String,
     args: Vec<Value>,
+    renderer_id: Option<String>,
 ) -> Result<Value> {
     let url = window.url().map_err(failed)?;
     let trusted = trusted_ui_url(&url);
@@ -95,6 +123,38 @@ async fn desktop_invoke(
     }
     state.store.lock().await.sync_desktop_selection()?;
     match channel.as_str() {
+        "renderer:attach" | "renderer:detach" => {
+            let id = string(&args, 0)?.to_owned();
+            if uuid::Uuid::parse_str(&id).is_err() {
+                return Err(Error::new(
+                    "invalid_renderer",
+                    "The renderer session is invalid.",
+                ));
+            }
+            let _gate = state.playback_gate.lock().await;
+            renderer_handoff(
+                &state.renderer_session,
+                id,
+                channel == "renderer:attach",
+                async {
+                    let player_stop = state.player.stop(None).await.map_err(media_error);
+                    let mpv_stop = state.libmpv.stop(None).await;
+                    let activity_release = state.playback_activity.release_all().await;
+                    let control_release = state.media_control.release_all().await;
+                    let hide = window_host::hide(&window).await;
+                    let backdrop = window_host::external_backdrop(&window, false).await;
+                    *state.native_scope.lock().await = None;
+                    player_stop?;
+                    mpv_stop?;
+                    activity_release?;
+                    control_release?;
+                    hide?;
+                    backdrop?;
+                    Ok(())
+                },
+            )
+            .await
+        }
         "profiles:choose-avatar" | "shell:open-folder-path" | "shell:show-item" => {
             desktop_os::handle(&window, &state, &channel, &args).await
         }
@@ -472,12 +532,15 @@ async fn desktop_invoke(
         )),
         "libvlc:availability" | "libvlc:refresh-availability" => {
             if !cfg!(target_os = "macos") {
-                return Ok(json!({"available":false,"enabled":true,"surface":"unavailable","warning":"The native video host is unavailable on this platform."}));
+                return Ok(
+                    json!({"available":false,"enabled":true,"surface":"unavailable","warning":"The native video host is unavailable on this platform."}),
+                );
             }
             state.player.availability().await.map_err(media_error)
         }
         "libvlc:start" | "mpv:start" => {
             let _gate = state.playback_gate.lock().await;
+            require_renderer(&state.renderer_session, renderer_id.as_deref()).await?;
             let input = string(&args, 0)?;
             let (source, scope) = if input.starts_with("iptv:") {
                 let url = state.media.grant(input).await?;
@@ -540,6 +603,7 @@ async fn desktop_invoke(
         }
         "libvlc:command" | "mpv:command" => {
             let _gate = state.playback_gate.lock().await;
+            require_renderer(&state.renderer_session, renderer_id.as_deref()).await?;
             match state.native_scope.lock().await.as_ref() {
                 Some(PlaybackScope::Remote(epoch)) if *epoch == state.remote.epoch() => {}
                 Some(PlaybackScope::Local { profile, revision }) => {
@@ -574,6 +638,7 @@ async fn desktop_invoke(
 
         "libvlc:stop" | "mpv:stop" => {
             let _gate = state.playback_gate.lock().await;
+            require_renderer(&state.renderer_session, renderer_id.as_deref()).await?;
             let session = Some(string(&args, 0)?.to_owned());
             let result = if channel == "mpv:stop" {
                 state.libmpv.stop(session).await?
@@ -621,12 +686,8 @@ async fn desktop_invoke(
                 .map_err(failed)?;
             Ok(Value::Null)
         }
-        "mpv:availability" | "mpv:refresh-availability" => {
-            Ok(state.libmpv.availability().await)
-        }
-        "mpv:choose-executable" | "mpv:reset-executable" => {
-            Ok(state.libmpv.availability().await)
-        }
+        "mpv:availability" | "mpv:refresh-availability" => Ok(state.libmpv.availability().await),
+        "mpv:choose-executable" | "mpv:reset-executable" => Ok(state.libmpv.availability().await),
         "updates:get-state" => Ok(
             json!({"status":"disabled","currentVersion":env!("CARGO_PKG_VERSION"),"platform":if cfg!(target_os="macos"){"darwin"}else if cfg!(windows){"win32"}else{"linux"},"arch":std::env::consts::ARCH,"supported":false,"message":"The Tauri update feed has not been configured."}),
         ),
@@ -700,82 +761,87 @@ fn main() {
             // Tauri panics if setup returns an error from the native launch callback.
             // Handle recoverable startup failures before crossing that boundary.
             let initialized = (|| -> std::result::Result<(), Box<dyn std::error::Error>> {
-            desktop_menu::install(app.handle())?;
-            // Match Electron's USER_DATA_DIR, including its shared override.
-            let data_dir = std::env::var("LOOMTV_DATA_DIR").ok()
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| PathBuf::from(value.trim()))
-                .unwrap_or(app.path().config_dir()?.join("LoomTV"));
-            let store = Arc::new(Mutex::new(Store::open_shared(&data_dir)?));
-            let root = runtime_root(app.handle())?;
-            let libvlc_disabled = std::env::var("LOOMTV_DISABLE_LIBVLC")
-                .ok()
-                .is_some_and(|value| ["1", "true", "yes"].contains(&value.to_ascii_lowercase().as_str()));
-            let vlc_path = if libvlc_disabled {
-                None
-            } else {
-                runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"])
-            };
-            let ffmpeg = runtime_file(&root, &["ffmpeg/ffmpeg", "ffmpeg/ffmpeg.exe"]);
-            let ffprobe = runtime_file(&root, &["ffmpeg/ffprobe", "ffmpeg/ffprobe.exe"]);
-            let handle = app.handle().clone();
-            let player = PlaybackService::new(
-                vlc_path,
-                Some(root.join("libvlc/plugins")),
-                Arc::new(move |value| {
-                    let _ = handle.emit_to("main", "loomtv:libvlc:state", [value]);
-                }),
-            )?;
-            let handle = app.handle().clone();
-            let libmpv = libmpv_host::LibMpvService::new(
-                runtime_file(&root, &["mpv/lib/libloomtv_mpv_bridge.dylib"]).as_deref(),
-                runtime_file(
-                    &root,
-                    &["mpv/lib/libmpv.dylib", "mpv/mpv.dll", "mpv/lib/libmpv.so"],
-                )
-                .as_deref(),
-                Arc::new(move |value| {
-                    let _ = handle.emit_to("main", "loomtv:mpv:state", [value]);
-                }),
-            );
-            let remote = Arc::new(loomtv_core::remote::RemoteClient::default());
-            let (media, stop) =
-                tauri::async_runtime::block_on(loomtv_core::streaming::MediaServer::start(
-                    store.clone(),
-                    remote.clone(),
-                    ffmpeg.clone(),
-                    ffprobe,
-                ))?;
-            app.manage(Runtime {
-                iptv: loomtv_core::iptv::IptvService::new(store.clone()),
-                store,
-                media,
-                remote,
-                native_scope: Mutex::new(None),
-                drained: AtomicBool::new(false),
-                media_stop: Mutex::new(Some(stop)),
-                player,
-                libmpv,
-                playback_activity: playback_activity::PlaybackActivity::new()?,
-                media_control: media_control::MediaControl::new(app.handle().clone()),
-                metadata: loomtv_core::metadata::MetadataProviderGateway::new()?,
-                playback_gate: Mutex::new(()),
-                scan_gate: Arc::new(tokio::sync::Semaphore::new(1)),
-                ffmpeg,
-                closing: Arc::new(AtomicBool::new(false)),
-            });
-            let config = app
-                .config()
-                .app
-                .windows
-                .first()
-                .ok_or("The main window configuration is missing.")?;
-            tauri::WebviewWindowBuilder::from_config(app, config)?
-                .on_navigation(trusted_ui_url)
-                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
-                .build()?;
-            start_playback_scope_monitor(app.handle());
-            Ok(())
+                desktop_menu::install(app.handle())?;
+                // Match Electron's USER_DATA_DIR, including its shared override.
+                let data_dir = std::env::var("LOOMTV_DATA_DIR")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| PathBuf::from(value.trim()))
+                    .unwrap_or(app.path().config_dir()?.join("LoomTV"));
+                let store = Arc::new(Mutex::new(Store::open_shared(&data_dir)?));
+                let root = runtime_root(app.handle())?;
+                let libvlc_disabled =
+                    std::env::var("LOOMTV_DISABLE_LIBVLC")
+                        .ok()
+                        .is_some_and(|value| {
+                            ["1", "true", "yes"].contains(&value.to_ascii_lowercase().as_str())
+                        });
+                let vlc_path = if libvlc_disabled {
+                    None
+                } else {
+                    runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"])
+                };
+                let ffmpeg = runtime_file(&root, &["ffmpeg/ffmpeg", "ffmpeg/ffmpeg.exe"]);
+                let ffprobe = runtime_file(&root, &["ffmpeg/ffprobe", "ffmpeg/ffprobe.exe"]);
+                let handle = app.handle().clone();
+                let player = PlaybackService::new(
+                    vlc_path,
+                    Some(root.join("libvlc/plugins")),
+                    Arc::new(move |value| {
+                        let _ = handle.emit_to("main", "loomtv:libvlc:state", [value]);
+                    }),
+                )?;
+                let handle = app.handle().clone();
+                let libmpv = libmpv_host::LibMpvService::new(
+                    runtime_file(&root, &["mpv/lib/libloomtv_mpv_bridge.dylib"]).as_deref(),
+                    runtime_file(
+                        &root,
+                        &["mpv/lib/libmpv.dylib", "mpv/mpv.dll", "mpv/lib/libmpv.so"],
+                    )
+                    .as_deref(),
+                    Arc::new(move |value| {
+                        let _ = handle.emit_to("main", "loomtv:mpv:state", [value]);
+                    }),
+                );
+                let remote = Arc::new(loomtv_core::remote::RemoteClient::default());
+                let (media, stop) =
+                    tauri::async_runtime::block_on(loomtv_core::streaming::MediaServer::start(
+                        store.clone(),
+                        remote.clone(),
+                        ffmpeg.clone(),
+                        ffprobe,
+                    ))?;
+                app.manage(Runtime {
+                    iptv: loomtv_core::iptv::IptvService::new(store.clone()),
+                    store,
+                    media,
+                    remote,
+                    native_scope: Mutex::new(None),
+                    renderer_session: Mutex::new(None),
+                    drained: AtomicBool::new(false),
+                    media_stop: Mutex::new(Some(stop)),
+                    player,
+                    libmpv,
+                    playback_activity: playback_activity::PlaybackActivity::new()?,
+                    media_control: media_control::MediaControl::new(app.handle().clone()),
+                    metadata: loomtv_core::metadata::MetadataProviderGateway::new()?,
+                    playback_gate: Mutex::new(()),
+                    scan_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+                    ffmpeg,
+                    closing: Arc::new(AtomicBool::new(false)),
+                });
+                let config = app
+                    .config()
+                    .app
+                    .windows
+                    .first()
+                    .ok_or("The main window configuration is missing.")?;
+                tauri::WebviewWindowBuilder::from_config(app, config)?
+                    .on_navigation(trusted_ui_url)
+                    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                    .build()?;
+                start_playback_scope_monitor(app.handle());
+                Ok(())
             })();
             if let Err(error) = initialized {
                 eprintln!("LoomTV Tauri could not start: {error}");
@@ -797,7 +863,10 @@ fn main() {
     match app {
         Ok(app) => app.run(|handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                if handle.try_state::<Runtime>().is_some_and(|state| !state.drained.load(Ordering::SeqCst)) {
+                if handle
+                    .try_state::<Runtime>()
+                    .is_some_and(|state| !state.drained.load(Ordering::SeqCst))
+                {
                     api.prevent_exit();
                     begin_shutdown(handle);
                 }
@@ -964,4 +1033,91 @@ fn start_playback_scope_monitor(handle: &tauri::AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod renderer_tests {
+    use super::*;
+
+    #[test]
+    fn reload_handoff_serializes_cleanup_and_ignores_stale_detach() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let owner = Arc::new(Mutex::new(Some("old".to_owned())));
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let attaching = {
+                let owner = owner.clone();
+                tokio::spawn(async move {
+                    renderer_handoff(&owner, "new".into(), true, async {
+                        entered_tx.send(()).unwrap();
+                        release_rx.await.unwrap();
+                        Ok(())
+                    })
+                    .await
+                })
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(1), entered_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(owner.try_lock().is_err());
+            let detaching = {
+                let owner = owner.clone();
+                tokio::spawn(async move {
+                    renderer_handoff(&owner, "old".into(), false, async {
+                        panic!("stale detach must not stop the new renderer");
+                    })
+                    .await
+                })
+            };
+            release_tx.send(()).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                assert_eq!(attaching.await.unwrap().unwrap(), true);
+                assert_eq!(detaching.await.unwrap().unwrap(), false);
+            })
+            .await
+            .unwrap();
+            assert_eq!(owner.lock().await.as_deref(), Some("new"));
+            assert!(require_renderer(&owner, Some("old")).await.is_err());
+            assert!(require_renderer(&owner, None).await.is_err());
+            assert!(require_renderer(&owner, Some("new")).await.is_ok());
+            assert_eq!(
+                renderer_handoff(&owner, "new".into(), true, async {
+                    panic!("duplicate attach must not stop playback");
+                })
+                .await
+                .unwrap(),
+                true
+            );
+            assert_eq!(
+                renderer_handoff(&owner, "new".into(), false, async { Ok(()) })
+                    .await
+                    .unwrap(),
+                true
+            );
+            assert!(owner.lock().await.is_none());
+            assert!(require_renderer(&owner, Some("new")).await.is_err());
+            assert!(require_renderer(&owner, None).await.is_err());
+        });
+    }
+
+    #[test]
+    fn failed_handoff_releases_owner_lock_and_can_be_retried() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let owner = Mutex::new(Some("old".to_owned()));
+            assert!(renderer_handoff(&owner, "new".into(), true, async {
+                Err(failed("cleanup failed"))
+            })
+            .await
+            .is_err());
+            assert_eq!(owner.try_lock().unwrap().as_deref(), Some("old"));
+            assert_eq!(
+                renderer_handoff(&owner, "new".into(), true, async { Ok(()) })
+                    .await
+                    .unwrap(),
+                true
+            );
+            assert_eq!(owner.lock().await.as_deref(), Some("new"));
+        });
+    }
 }

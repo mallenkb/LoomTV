@@ -9,6 +9,7 @@ import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 import type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 import { z } from 'zod';
 import { normalizeSidebarNavOrder } from '../lib/sidebarNavOrder';
+import { assertValidSettingsSecrets, loadOrInitializeSettings, parseSettingsJson, SecureSettingsCorruptError } from './secureSettings.ts';
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
@@ -175,7 +176,8 @@ function normalizeSkipAnalysis(raw: SettingsInput): SkipAnalysisSettings {
 
 function normalizeSettings(input: unknown): AppSettings {
   const result = settingsInputSchema.safeParse(input);
-  const raw: SettingsInput = result.success ? result.data : {};
+  if (!result.success) throw new SecureSettingsCorruptError('Saved settings have an invalid structure.');
+  const raw: SettingsInput = result.data;
   const metadataApiKeys: Record<string, string> = {};
   const rawKeys = raw.metadataApiKeys && typeof raw.metadataApiKeys === 'object' && !Array.isArray(raw.metadataApiKeys)
     ? raw.metadataApiKeys
@@ -203,7 +205,7 @@ function normalizeSettings(input: unknown): AppSettings {
       ? raw.openSubtitlesUsername.trim().slice(0, 120)
       : '',
     openSubtitlesPassword: typeof raw.openSubtitlesPassword === 'string'
-      ? raw.openSubtitlesPassword.trim()
+      ? raw.openSubtitlesPassword
       : '',
     openSubtitlesLanguages: typeof raw.openSubtitlesLanguages === 'string' && raw.openSubtitlesLanguages.trim()
       ? raw.openSubtitlesLanguages.trim().toLowerCase()
@@ -263,34 +265,22 @@ export function getMetadataApiKey(settings: AppSettings, providerId: string): st
 }
 
 export function loadSettings(): AppSettings {
-  const databaseSettings = loadSettingsFromDatabase();
-  if (databaseSettings) {
-    const normalized = normalizeSettings(databaseSettings);
-    if (Number(databaseSettings.localNetworkSecurityEpoch) !== 2) {
-      saveSettingsToDatabase({ ...normalized });
-    }
-    return normalized;
-  }
-
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const settings = normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')));
-      saveSettingsToDatabase({ ...settings });
+  return loadOrInitializeSettings({
+    loadDatabase: loadSettingsFromDatabase,
+    readLegacy: () => {
       try {
-        fs.rmSync(SETTINGS_FILE);
+        return parseSettingsJson(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
       } catch (error) {
-        console.warn('[settings] Legacy settings were migrated but could not be removed:', error);
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+        throw error;
       }
-      return settings;
-    }
-  } catch (error) {
-    console.error('[settings] Failed to migrate legacy settings:', error);
-  }
-  const initialSettings = normalizeSettings({});
-  saveSettingsToDatabase({ ...initialSettings });
-  return initialSettings;
+    },
+    normalize: normalizeSettings,
+    save: (settings) => saveSettingsToDatabase({ ...settings }),
+  });
 }
 
 export function saveSettings(settings: AppSettings): void {
+  assertValidSettingsSecrets({ ...settings });
   saveSettingsToDatabase({ ...normalizeSettings(settings) });
 }

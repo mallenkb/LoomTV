@@ -408,7 +408,7 @@ function verifyEvidence(values) {
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   } catch (error) {
-    throw new Error(`Release manifest JSON is invalid: ${String(error)}`);
+    throw new Error(`Release manifest JSON is invalid: ${String(error)}`, { cause: error });
   }
   if (manifest.manifestVersion !== 2) throw new Error('Unsupported release manifest version.');
   if (manifest.release?.tag !== tag
@@ -459,7 +459,7 @@ function verifyEvidence(values) {
   const checksumLines = fs.readFileSync(checksumsPath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
   const checksums = new Map();
   for (const line of checksumLines) {
-    const match = line.match(/^([a-f0-9]{64})  (.+)$/i);
+    const match = line.match(/^([a-f0-9]{64}) {2}(.+)$/i);
     if (!match || checksums.has(match[2])) throw new Error(`Invalid or duplicate checksum line: ${line}`);
     checksums.set(match[2], match[1].toLowerCase());
   }

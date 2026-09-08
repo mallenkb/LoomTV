@@ -87,7 +87,7 @@ try {
     }
   }
   if (closing) process.exit(process.exitCode);
-  const stage = run(process.execPath, ['scripts/stage-runtimes.mjs']);
+  const stage = run(process.execPath, ['scripts/stage-runtimes.mjs', '--incremental']);
   await new Promise((resolve, reject) => {
     stage.once('error', reject);
     stage.once('exit', code => code === 0 ? resolve() : reject(new Error(`Runtime staging failed with code ${code}.`)));

@@ -10,36 +10,55 @@ export const DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS = 5 * 1000;
 // client receives the rotated token.
 export const DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS = 90 * 1000;
 
+/**
+ * @typedef {{ idleTimeoutMs?: number, absoluteTimeoutMs?: number, activeIdleTimeoutMs?: number, absoluteExpiresAt?: number }} SessionTimeouts
+ * @typedef {{ profileId?: string, deviceId?: string, selectionRevision?: number, sourceId?: string, authenticationSessionId?: string | null, invitationSessionId?: string | null, fileVersion?: string, [key: string]: unknown }} PlaybackProfile
+ * @typedef {SessionTimeouts & { principalId?: string, userId?: string, itemId?: string, action?: string, id?: string, token?: string, principalType?: string, profile?: PlaybackProfile | null, createdAt?: number, lastActivityAt?: number, tokenOverlapMs?: number }} SessionInput
+ * @typedef {{ principalId?: string, userId?: string, itemId?: string, profileId?: string, deviceId?: string, selectionRevision?: number, sourceId?: string, action?: string | string[] }} SessionExpectation
+ * @typedef {{ id: string, token: string, principalId: string, principalType?: string, itemId: string, action: string, profile: PlaybackProfile | null, createdAt: number, lastActivityAt: number, idleExpiresAt: number, absoluteExpiresAt: number, idleTimeoutMs: number, activeIdleTimeoutMs: number, absoluteTimeoutMs: number, tokenOverlapMs: number, tokenAliases: Map<string, number>, renewedAt?: number, revokedAt?: number, revokeReason?: string }} SessionEntry
+ * @typedef {Omit<SessionEntry, 'token' | 'idleTimeoutMs' | 'activeIdleTimeoutMs' | 'absoluteTimeoutMs' | 'tokenOverlapMs' | 'tokenAliases'> & { token?: string, expiresAt: number }} SessionSnapshot
+ */
+
+/** @param {number | undefined} value @param {number} fallback */
 function positiveInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
-  if (!Number.isFinite(value)) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(maximum, Math.trunc(value)));
 }
 
+/** @param {number | undefined} value @param {number} fallback */
 function nonNegativeInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
-  if (!Number.isFinite(value)) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(maximum, Math.trunc(value)));
 }
 
+/** @param {number} status @param {string} code @param {string} message */
 function sessionError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
 }
 
+/** @param {unknown} value */
 function actionValue(value) {
   const action = String(value || '').trim().toLowerCase();
   return PLAYBACK_SESSION_ACTIONS.includes(action) ? action : null;
 }
 
+/** @param {SessionInput} input */
 function principalValue(input) {
   const value = input?.principalId ?? input?.userId;
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 128) : null;
 }
 
+/** @param {SessionInput} input */
 function itemValue(input) {
   return typeof input?.itemId === 'string' && input.itemId.trim()
     ? input.itemId.trim().slice(0, 128)
     : null;
 }
 
+/** @overload @param {SessionEntry} entry @param {true} includeToken @returns {SessionSnapshot & { token: string }} */
+/** @overload @param {SessionEntry} entry @param {boolean} [includeToken] @returns {SessionSnapshot} */
+/** @overload @param {SessionEntry | null | undefined} entry @param {boolean} [includeToken] @returns {SessionSnapshot | null} */
+/** @param {SessionEntry | null | undefined} entry */
 function snapshot(entry, includeToken = false) {
   if (!entry) return null;
   return {
@@ -67,6 +86,7 @@ function snapshot(entry, includeToken = false) {
  * The clock is injected instead of captured at module load time. Callers can
  * use `sweep()` deterministically in tests, while the production interval is
  * only a prompt for the same clock-driven expiry logic.
+ * @param {{ now?: () => number, setInterval?: (callback: () => void, ms: number) => NodeJS.Timeout, clearInterval?: (timer: NodeJS.Timeout) => void, idleTimeoutMs?: number, absoluteTimeoutMs?: number, maxSessions?: number, sweepIntervalMs?: number, tokenOverlapMs?: number, maxTokenAliases?: number, onRevoke?: (entry: SessionSnapshot, reason: string) => void | Promise<unknown> }} options
  */
 export function createPlaybackSessionRegistry(options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
@@ -75,22 +95,26 @@ export function createPlaybackSessionRegistry(options = {}) {
   const idleTimeoutMs = positiveInteger(options.idleTimeoutMs, DEFAULT_PLAYBACK_IDLE_TIMEOUT_MS);
   const absoluteTimeoutMs = positiveInteger(options.absoluteTimeoutMs, DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS);
   const maxSessions = positiveInteger(options.maxSessions, DEFAULT_MAX_PLAYBACK_SESSIONS, 65_536);
-  const sweepIntervalMs = Number.isFinite(options.sweepIntervalMs)
+  const sweepIntervalMs = typeof options.sweepIntervalMs === 'number' && Number.isFinite(options.sweepIntervalMs)
     ? Math.max(0, Math.trunc(options.sweepIntervalMs))
     : DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS;
   const tokenOverlapMs = nonNegativeInteger(options.tokenOverlapMs, DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS, 120 * 1000);
   const maxTokenAliases = positiveInteger(options.maxTokenAliases, 4, 32);
   const onRevoke = typeof options.onRevoke === 'function' ? options.onRevoke : null;
+  /** @type {Map<string, SessionEntry>} */
   const sessions = new Map();
+  /** @type {Map<string, string>} */
   const tokenToId = new Map();
+  /** @type {NodeJS.Timeout | null} */
   let sweepTimer = null;
   let closed = false;
 
+  /** @param {number} createdAt @param {number} lastActivityAt @param {SessionTimeouts} entryOptions */
   function expiryFor(createdAt, lastActivityAt, entryOptions = {}) {
     const entryIdle = positiveInteger(entryOptions.idleTimeoutMs, idleTimeoutMs);
     const entryAbsolute = positiveInteger(entryOptions.absoluteTimeoutMs, absoluteTimeoutMs);
     const activeIdle = positiveInteger(entryOptions.activeIdleTimeoutMs, entryIdle);
-    const absoluteExpiresAt = Number.isFinite(entryOptions.absoluteExpiresAt)
+    const absoluteExpiresAt = typeof entryOptions.absoluteExpiresAt === 'number' && Number.isFinite(entryOptions.absoluteExpiresAt)
       ? Math.max(createdAt, Math.trunc(entryOptions.absoluteExpiresAt))
       : createdAt + entryAbsolute;
     const idleExpiresAt = Math.min(lastActivityAt + entryIdle, absoluteExpiresAt);
@@ -108,6 +132,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     }
   }
 
+  /** @param {string | null | undefined} identifier */
   function resolve(identifier, currentTime = now()) {
     if (!identifier) return null;
     const id = sessions.has(identifier) ? identifier : tokenToId.get(identifier);
@@ -122,6 +147,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return entry;
   }
 
+  /** @param {SessionEntry | null} entry @param {SessionExpectation} expected */
   function matches(entry, expected = {}) {
     if (!entry) return false;
     const expectedPrincipal = expected.principalId ?? expected.userId;
@@ -138,10 +164,12 @@ export function createPlaybackSessionRegistry(options = {}) {
     return true;
   }
 
+  /** @param {SessionEntry} entry @param {number} currentTime */
   function expire(entry, currentTime) {
     return currentTime >= Math.min(entry.idleExpiresAt, entry.absoluteExpiresAt);
   }
 
+  /** @param {SessionEntry} entry @param {string} reason */
   function notifyRevoked(entry, reason) {
     if (!onRevoke) return;
     try {
@@ -152,6 +180,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     }
   }
 
+  /** @param {SessionEntry | null} entry */
   function revokeEntry(entry, reason = 'revoked', currentTime = now()) {
     if (!entry || !sessions.has(entry.id)) return false;
     sessions.delete(entry.id);
@@ -166,7 +195,9 @@ export function createPlaybackSessionRegistry(options = {}) {
     return true;
   }
 
+  /** @param {string | null} excludeId */
   function oldestEntry(excludeId = null) {
+    /** @type {SessionEntry | null} */
     let oldest = null;
     for (const entry of sessions.values()) {
       if (entry.id === excludeId) continue;
@@ -196,6 +227,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     if (closed) throw sessionError(503, 'playback_registry_closed', 'Playback sessions are draining.');
   }
 
+  /** @param {SessionInput} input */
   function create(input = {}) {
     ensureOpen();
     const principalId = principalValue(input);
@@ -204,14 +236,15 @@ export function createPlaybackSessionRegistry(options = {}) {
     if (!principalId || !itemId || !action) {
       throw sessionError(400, 'playback_session_invalid', 'A playback session requires a principal, media item, and action.');
     }
-    const createdAt = Number.isFinite(input.createdAt) ? Math.trunc(input.createdAt) : now();
-    const lastActivityAt = Number.isFinite(input.lastActivityAt) ? Math.trunc(input.lastActivityAt) : createdAt;
+    const createdAt = typeof input.createdAt === 'number' && Number.isFinite(input.createdAt) ? Math.trunc(input.createdAt) : now();
+    const lastActivityAt = typeof input.lastActivityAt === 'number' && Number.isFinite(input.lastActivityAt) ? Math.trunc(input.lastActivityAt) : createdAt;
     const expiry = expiryFor(createdAt, lastActivityAt, input);
     sweep(createdAt);
     let token = typeof input.token === 'string' && input.token ? input.token : randomBytes(24).toString('base64url');
     while (tokenToId.has(token)) token = randomBytes(24).toString('base64url');
     let id = typeof input.id === 'string' && input.id ? input.id : randomUUID();
     while (sessions.has(id)) id = randomUUID();
+    /** @type {SessionEntry} */
     const entry = {
       id,
       token,
@@ -239,6 +272,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return snapshot(entry, true);
   }
 
+  /** @param {string | null | undefined} identifier @param {SessionExpectation} expected */
   function authorize(identifier, expected = {}, currentTime = now()) {
     const entry = resolve(identifier, currentTime);
     if (!entry || !matches(entry, expected)) return null;
@@ -249,6 +283,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return { ...snapshot(entry), token: entry.token };
   }
 
+  /** @param {string | null | undefined} identifier @param {number} currentTime @param {{ activate?: boolean, idleTimeoutMs?: number }} touchOptions */
   function touch(identifier, currentTime = now(), touchOptions = {}) {
     const entry = resolve(identifier, currentTime);
     if (!entry || expire(entry, currentTime)) {
@@ -264,6 +299,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return snapshot(entry);
   }
 
+  /** @param {string | null | undefined} identifier @param {SessionExpectation} expected */
   function renew(identifier, expected = {}, currentTime = now()) {
     ensureOpen();
     const entry = resolve(identifier, currentTime);
@@ -283,7 +319,9 @@ export function createPlaybackSessionRegistry(options = {}) {
     if (overlap > 0) {
       entry.tokenAliases.set(previousToken, currentTime + overlap);
       while (entry.tokenAliases.size > maxTokenAliases) {
-        const oldestToken = entry.tokenAliases.keys().next().value;
+        const oldest = entry.tokenAliases.keys().next();
+        if (oldest.done) break;
+        const oldestToken = oldest.value;
         entry.tokenAliases.delete(oldestToken);
         if (tokenToId.get(oldestToken) === entry.id) tokenToId.delete(oldestToken);
       }
@@ -299,10 +337,12 @@ export function createPlaybackSessionRegistry(options = {}) {
     return snapshot(entry, true);
   }
 
+  /** @param {string | null | undefined} identifier */
   function revoke(identifier, reason = 'revoked', currentTime = now()) {
     return revokeEntry(resolve(identifier, currentTime), reason, currentTime);
   }
 
+  /** @param {string | null | undefined} identifier */
   function remove(identifier) {
     const entry = resolve(identifier);
     if (!entry) return false;
@@ -315,6 +355,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return true;
   }
 
+  /** @param {string} principalId */
   function revokeByPrincipal(principalId, reason = 'principal_revoked', currentTime = now()) {
     let count = 0;
     for (const entry of [...sessions.values()]) {
@@ -323,6 +364,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return count;
   }
 
+  /** @param {string} deviceId */
   function revokeByDevice(deviceId, reason = 'device_revoked', currentTime = now()) {
     let count = 0;
     for (const entry of [...sessions.values()]) {
@@ -331,6 +373,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return count;
   }
 
+  /** @param {string} authenticationSessionId */
   function revokeByAuthenticationSession(authenticationSessionId, reason = 'auth_session_revoked', currentTime = now()) {
     let count = 0;
     for (const entry of [...sessions.values()]) {
@@ -341,6 +384,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     return count;
   }
 
+  /** @param {string} itemId */
   function revokeByItem(itemId, reason = 'item_revoked', currentTime = now()) {
     let count = 0;
     for (const entry of [...sessions.values()]) {
@@ -355,10 +399,12 @@ export function createPlaybackSessionRegistry(options = {}) {
     return count;
   }
 
+  /** @param {string | null | undefined} identifier */
   function get(identifier) {
     return snapshot(resolve(identifier));
   }
 
+  /** @param {unknown} identifier */
   function isSessionIdentifier(identifier) {
     return typeof identifier === 'string' && sessions.has(identifier);
   }

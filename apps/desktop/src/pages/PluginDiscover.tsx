@@ -1885,11 +1885,6 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
           </div>
         </header>
 
-        {!loading && !error && contentType === 'anime' && items.some((item) => item.source === 'tmdb') && (
-          <p role="status" className="mb-4 text-sm text-[var(--loom-muted)]">
-            AniList is unavailable. Showing anime from TMDB; genres and rankings may differ.
-          </p>
-        )}
         {error && errorKind !== 'offline' && (
           <div role="alert" className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             <p className="flex items-start gap-2">

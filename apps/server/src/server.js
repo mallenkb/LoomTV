@@ -18,7 +18,7 @@ import { createSetupService } from './setup-service.js';
 import { createHeadlessTranscoder } from './transcoder.js';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import { assertTransportConfiguration } from './transport-security.js';
-import { canonicalPublicError } from './public-error.js';
+import { canonicalPublicError, errorDetails } from './public-error.js';
 import { createWebAppPage } from './web-app.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
@@ -26,6 +26,7 @@ const CONTRACT_VERSION = VIDEO_CONTRACT_VERSION;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 const DEFAULT_TERM_GRACE_MS = 2_000;
 
+/** @param {import('./server.d.ts').CanonicalRuntimeOptions['tls']} tls */
 function verifyDirectTls(tls) {
   if (!tls) return false;
   if (!tls.cert || !tls.key) {
@@ -45,13 +46,14 @@ function verifyDirectTls(tls) {
     }
     return certificate.fingerprint256.replaceAll(':', '').toLowerCase();
   } catch (error) {
-    throw Object.assign(new Error(`Direct TLS configuration is invalid: ${error.message}`), {
+    throw Object.assign(new Error(`Direct TLS configuration is invalid: ${errorDetails(error).message || String(error)}`), {
       code: 'TLS_CONFIGURATION_INVALID',
       cause: error,
     });
   }
 }
 
+/** @param {unknown} value */
 function configuredCertificateFingerprint(value) {
   if (value === undefined || value === null || value === '') return undefined;
   const normalized = String(value).replaceAll(':', '').trim().toLowerCase();
@@ -63,6 +65,7 @@ function configuredCertificateFingerprint(value) {
   return normalized;
 }
 
+/** @param {http.ServerResponse} res @param {number} status @param {unknown} payload */
 function jsonResponse(res, status, payload, method = 'GET') {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -77,6 +80,7 @@ function jsonResponse(res, status, payload, method = 'GET') {
   res.end(body);
 }
 
+/** @param {http.ServerResponse} res */
 function applySecurityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -84,6 +88,7 @@ function applySecurityHeaders(res) {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 }
 
+/** @param {http.Server} server @param {string} fallbackHost */
 function formatAddress(server, fallbackHost) {
   const address = server.address();
   if (!address || typeof address === 'string') return { host: fallbackHost, port: 0 };
@@ -91,6 +96,7 @@ function formatAddress(server, fallbackHost) {
   return { host, port: address.port };
 }
 
+/** @param {string | null | undefined} mediaDir */
 async function inspectMediaPath(mediaDir) {
   if (!mediaDir) return { configured: false, state: 'unconfigured', path: null };
   try {
@@ -104,14 +110,14 @@ async function inspectMediaPath(mediaDir) {
   } catch (error) {
     return {
       configured: true,
-      state: error?.code === 'EACCES' ? 'permission-denied' : 'offline',
+      state: errorDetails(error).code === 'EACCES' ? 'permission-denied' : 'offline',
       path: mediaDir,
       readable: false,
     };
   }
 }
 
-/** @param {{ host: string, port: number, paths: import('@loom-media-server/runtime-paths').RuntimePaths, version: string, trustedProxies?: string | string[] }} options */
+/** @param {import('./server.d.ts').CanonicalRuntimeOptions} options */
 export function createCanonicalVideoServer(options) {
   // Parse before constructing services so malformed trust configuration fails
   // startup without opening a listener or silently falling back to broad trust.
@@ -131,12 +137,17 @@ export function createCanonicalVideoServer(options) {
   const transport = directTls ? 'https' : 'http';
   const deploymentMode = options.deploymentMode === 'desktop-hosted' ? 'desktop-hosted' : 'standalone';
   const requireBootstrapSecret = options.requireBootstrapSecret !== false;
+  /** @type {http.Server} */
   let server;
+  /** @type {Promise<void> | undefined} */
   let stopPromise;
   let draining = false;
   const transcoder = options.transcoder
     || createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath, ffprobePath: options.ffprobePath });
+  /** @type {ReturnType<typeof createHeadlessMediaService>} */
   let mediaService;
+  const mediaClock = typeof options.clock === 'function' ? { now: options.clock } : options.clock;
+  const stateClock = typeof options.clock === 'function' ? options.clock : options.clock?.now;
   const bootstrapSecurity = options.bootstrapSecurity || createBootstrapSecurity({
     dataDir: options.paths.dataDir,
     required: requireBootstrapSecret,
@@ -203,20 +214,20 @@ export function createCanonicalVideoServer(options) {
 
   const persistence = createCanonicalPersistence({
     dataDir: options.paths.dataDir,
-    mediaDir: options.paths.mediaDir,
+    mediaDir: options.paths.mediaDir || undefined,
     version: options.version,
     baseUrl: options.host === '0.0.0.0' ? undefined : `${transport}://${options.host}:${options.port}`,
     getRuntimeHealth: healthPayload,
     getSessions: () => mediaService?.listSessions() || [],
-    onPlaybackSessionsRevoked: (principalId, reason) => mediaService?.revokePrincipal?.(principalId, reason),
-    onPlaybackSessionsRevokedForItem: (itemId, reason) => mediaService?.revokeItem?.(itemId, reason),
-    onAuthenticationSessionRevoked: (sessionId, reason) => mediaService?.revokeAuthenticationSession?.(sessionId, reason),
-    onAllPlaybackSessionsRevoked: (reason) => mediaService?.revokeAllPlaybackSessions?.(reason),
+    onPlaybackSessionsRevoked: /** @param {string} principalId @param {string} reason */ (principalId, reason) => mediaService?.revokePrincipal?.(principalId, reason),
+    onPlaybackSessionsRevokedForItem: /** @param {string} itemId @param {string} reason */ (itemId, reason) => mediaService?.revokeItem?.(itemId, reason),
+    onAuthenticationSessionRevoked: /** @param {string} sessionId @param {string} reason */ (sessionId, reason) => mediaService?.revokeAuthenticationSession?.(sessionId, reason),
+    onAllPlaybackSessionsRevoked: /** @param {string} reason */ (reason) => mediaService?.revokeAllPlaybackSessions?.(reason),
     getCertificateFingerprint: () => certificateFingerprint || undefined,
-    clientAddress: (req) => proxyPolicy.clientAddress(req),
+    clientAddress: /** @param {http.IncomingMessage} req */ (req) => proxyPolicy.clientAddress(req),
     proxyPolicy,
-    clock: options.clock,
-    probeMedia: async (filePath, probeOptions) => {
+    clock: stateClock,
+    probeMedia: /** @param {string} filePath @param {{ sourceId?: string, signal?: AbortSignal }} probeOptions */ async (filePath, probeOptions) => {
       if (!transcoder.getHealth().available) return null;
       return transcoder.probeMedia(filePath, probeOptions);
     },
@@ -233,9 +244,8 @@ export function createCanonicalVideoServer(options) {
     transcoder,
     cacheDir: options.paths.cacheDir,
     authorize: adminService.authorizeRequest,
-    clientAddress: (req) => proxyPolicy.clientAddress(req),
     remotePolicy,
-    clock: options.clock,
+    clock: mediaClock,
     playbackSessionRegistry: options.playbackSessionRegistry,
     playbackSessionOptions: options.playbackSessionOptions,
     transcodeAdmission: options.transcodeAdmission,
@@ -251,7 +261,7 @@ export function createCanonicalVideoServer(options) {
   });
   const desktopSetupChannel = createDesktopSetupChannel({
     token: options.desktopSetupToken,
-    clientAddress: (req) => proxyPolicy.clientAddress(req),
+    clientAddress: /** @param {http.IncomingMessage} req */ (req) => proxyPolicy.clientAddress(req),
   });
   // Every surface reads the same status, so `/app`, `/admin`, and `/setup`
   // agree on whether this installation still needs setup.
@@ -292,18 +302,21 @@ export function createCanonicalVideoServer(options) {
   const legacyV2 = createLegacyV2CompatibilityHandler({
     authorizeLegacyPairing: options.authorizeLegacyPairing,
     getCertificateFingerprint: () => certificateFingerprint,
-    clientAddress: (req) => proxyPolicy.clientAddress(req),
+    clientAddress: /** @param {http.IncomingMessage} req */ (req) => proxyPolicy.clientAddress(req),
   });
 
+  /** @type {Set<import('node:net').Socket>} */
   const sockets = new Set();
-  const shutdownTimeoutMs = Number.isFinite(options.shutdownTimeoutMs)
+  const shutdownTimeoutMs = typeof options.shutdownTimeoutMs === 'number' && Number.isFinite(options.shutdownTimeoutMs)
     ? Math.max(100, Math.min(60_000, Math.trunc(options.shutdownTimeoutMs)))
     : DEFAULT_SHUTDOWN_TIMEOUT_MS;
-  const termGraceMs = Number.isFinite(options.termGraceMs)
+  const termGraceMs = typeof options.termGraceMs === 'number' && Number.isFinite(options.termGraceMs)
     ? Math.max(0, Math.min(30_000, Math.trunc(options.termGraceMs)))
     : DEFAULT_TERM_GRACE_MS;
+  /** @type {Promise<void> | undefined} */
   let closeListenerPromise;
 
+  /** @param {number} milliseconds */
   function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, milliseconds)));
   }
@@ -317,17 +330,18 @@ export function createCanonicalVideoServer(options) {
     closeListenerPromise = new Promise((resolve) => {
       try {
         server.close((error) => {
-          if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') console.error('[loomtv-server] listener close failed:', error);
+          if (error && errorDetails(error).code !== 'ERR_SERVER_NOT_RUNNING') console.error('[loomtv-server] listener close failed:', error);
           resolve();
         });
       } catch (error) {
-        if (error?.code !== 'ERR_SERVER_NOT_RUNNING') console.error('[loomtv-server] listener close failed:', error);
+        if (errorDetails(error).code !== 'ERR_SERVER_NOT_RUNNING') console.error('[loomtv-server] listener close failed:', error);
         resolve();
       }
     });
     return closeListenerPromise;
   }
 
+  /** @param {import('./public-api.js').ApiRequest} req @param {http.ServerResponse} res */
   const handleRequest = async (req, res) => {
     try {
       applySecurityHeaders(res);
@@ -463,14 +477,14 @@ export function createCanonicalVideoServer(options) {
         const isCanonical = String(req.url || '').startsWith('/api/v1');
         jsonResponse(res, normalized.status, isCanonical
           ? { ok: false, error: { code: normalized.code, message: normalized.status >= 500
-            ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.' } }
+            ? 'The hosted API request could not be completed.' : errorDetails(error).message || 'The request was rejected.' } }
           : { ok: false, error: normalized.code, message: normalized.status >= 500
-            ? 'The server request could not be completed.' : error?.message || 'The request was rejected.' }, req.method);
+            ? 'The server request could not be completed.' : errorDetails(error).message || 'The request was rejected.' }, req.method);
       }
       else res.destroy();
     }
   };
-  server = directTls
+  server = directTls && options.tls
     ? https.createServer({ cert: options.tls.cert, key: options.tls.key, minVersion: 'TLSv1.2' }, handleRequest)
     : http.createServer(handleRequest);
   server.on('connection', (socket) => {
@@ -496,7 +510,8 @@ export function createCanonicalVideoServer(options) {
       try {
         await persistence.start();
         await bootstrapSecurity.initialize({ ownerConfigured: await adminService.isOwnerConfigured() });
-        await new Promise((resolve, reject) => {
+        await new Promise(/** @param {(value?: void) => void} resolve */ (resolve, reject) => {
+          /** @param {Error} error */
           const onError = (error) => {
             server.off('listening', onListening);
             reject(error);
@@ -520,7 +535,7 @@ export function createCanonicalVideoServer(options) {
         for (const socket of sockets) socket.destroy();
         const cleanupErrors = cleanup.filter((result) => result.status === 'rejected').map((result) => result.reason);
         if (cleanupErrors.length) {
-          throw new AggregateError([error, ...cleanupErrors], 'Canonical server startup failed and cleanup was incomplete.');
+          throw new AggregateError([error, ...cleanupErrors], 'Canonical server startup failed and cleanup was incomplete.', { cause: error });
         }
         throw error;
       }
@@ -558,7 +573,7 @@ export function createCanonicalVideoServer(options) {
             code: 'server_shutdown_timeout',
           }));
         } else {
-          for (const result of completed.results) {
+          for (const result of completed.results || []) {
             if (result.status === 'rejected') shutdownErrors.push(result.reason);
           }
         }
@@ -572,6 +587,7 @@ export function createCanonicalVideoServer(options) {
 /** Compatibility name for integrations that have not adopted the canonical runtime name. */
 export const createHeadlessServer = createCanonicalVideoServer;
 
+/** @param {string} packageRoot */
 export async function readServerVersion(packageRoot) {
   try {
     const packageJson = JSON.parse(await fs.readFile(`${packageRoot}/package.json`, 'utf8'));

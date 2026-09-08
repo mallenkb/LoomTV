@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/stage-runtimes.mjs && tauri build",
+    "build:local": "node scripts/stage-runtimes.mjs --incremental && tauri build --debug --no-bundle",
     "frontend:dev": "vp dev --config vite.config.ts",
     "frontend:build": "vp build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",

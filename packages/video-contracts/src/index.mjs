@@ -44,17 +44,18 @@ export const ACCOUNT_PERMISSIONS = Object.freeze([
   'media.delete',
 ]);
 
+/** @param {unknown} value */
 export function canonicalProfileKind(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (PROFILE_KINDS.includes(normalized)) return normalized;
   throw Object.assign(new TypeError('Unknown canonical profile kind.'), { code: 'unknown_profile_kind' });
 }
 
+/** @param {unknown} kind */
 export function identityEvidenceStrength(kind) {
   const normalized = String(kind || '').trim().toLowerCase();
-  const strength = IDENTITY_EVIDENCE_STRENGTH[normalized];
-  if (!strength) throw Object.assign(new TypeError('Unknown media identity evidence kind.'), { code: 'unknown_identity_evidence_kind' });
-  return strength;
+  if (!Object.hasOwn(IDENTITY_EVIDENCE_STRENGTH, normalized)) throw Object.assign(new TypeError('Unknown media identity evidence kind.'), { code: 'unknown_identity_evidence_kind' });
+  return IDENTITY_EVIDENCE_STRENGTH[/** @type {keyof typeof IDENTITY_EVIDENCE_STRENGTH} */ (normalized)];
 }
 
 export const API_ERROR_CODES = Object.freeze([
@@ -92,6 +93,7 @@ export const API_ERROR_CODES = Object.freeze([
   'owner_exists',
 ]);
 
+/** @template {object} T @param {readonly T[]} records */
 function freezeRecords(records) {
   return Object.freeze(records.map((record) => Object.freeze(record)));
 }
@@ -224,6 +226,7 @@ export const LEGACY_MODEL_DESTINATIONS = freezeRecords([
   { source: 'headless-admin.json', destination: 'canonical account, root, catalog, session, and operational stores', decision: 'retire-after-verified-migration' },
 ]);
 
+/** @param {string} routeId */
 export function canonicalRoute(routeId) {
   return CANONICAL_ROUTES.find((route) => route.id === routeId) || null;
 }

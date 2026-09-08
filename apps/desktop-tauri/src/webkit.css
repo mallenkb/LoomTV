@@ -1,0 +1,23 @@
+/* macOS Tauri only. Do not infer WebKit from the host OS in the shared UI:
+   Electron on macOS still uses Chromium. Keep native video transparency. */
+:root[data-loom-renderer="webkit"] .loom-page,
+:root[data-loom-renderer="webkit"] .loom-modern-home,
+:root[data-loom-renderer="webkit"] .loom-modern-search-overlay {
+  /* Scroll restoration must settle immediately when a route mounts. */
+  scroll-behavior: auto;
+}
+
+/* Retain the existing tinted, masked ground without repeatedly sampling and
+   blurring the large animated artwork underneath it. */
+:root[data-loom-renderer="webkit"] .loom-modern-hero::after,
+:root[data-loom-renderer="webkit"] .loom-detail-page-modern .loom-detail-hero-content-wrap::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Animate the indicator's position, not its layout dimensions. */
+:root[data-loom-renderer="webkit"] .loom-shared-highlight-group::before,
+:root[data-loom-renderer="webkit"] .loom-shared-highlight-preserve-active::after {
+  transition: transform 180ms ease-out, opacity 90ms ease-out;
+  will-change: auto;
+}

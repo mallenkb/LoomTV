@@ -2,10 +2,17 @@ import { randomUUID } from 'node:crypto';
 
 const TRANSPORTS = new Set(['airplay', 'chromecast', 'dlna']);
 
+/**
+ * @typedef {{ transport: string, receiverName?: string, principalId: string, profileId: string, deviceId: string, mediaId: string, sourceId: string, fileVersion: string, playbackSessionId: string, invitationSessionId?: string | null, authenticationSessionId?: string | null, selectionRevision?: number, positionSeconds?: number }} CastInput
+ * @typedef {CastInput & { id: string, receiverName: string, state: string, positionSeconds: number, createdAt: number, updatedAt: number, expiresAt: number }} CastRecord
+ */
+
+/** @param {number} status @param {string} code @param {string} message */
 function castError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
 }
 
+/** @param {CastRecord} entry */
 function publicSession(entry) {
   return {
     id: entry.id,
@@ -21,18 +28,25 @@ function publicSession(entry) {
 }
 
 export function createCastSessionRegistry({ clock = Date.now, maxSessions = 1_024, ttlMs = 15 * 60 * 1000 } = {}) {
+  /** @type {Map<string, CastRecord>} */
   const sessions = new Map();
 
   function sweep(now = clock()) {
     for (const [id, entry] of sessions) if (entry.expiresAt <= now) sessions.delete(id);
-    while (sessions.size > maxSessions) sessions.delete(sessions.keys().next().value);
+    while (sessions.size > maxSessions) {
+      const oldest = sessions.keys().next();
+      if (oldest.done) break;
+      sessions.delete(oldest.value);
+    }
   }
 
   return {
+    /** @param {CastInput} input */
     create(input) {
       sweep();
       if (!TRANSPORTS.has(input.transport)) throw castError(400, 'invalid_request', 'The cast transport is invalid.');
-      for (const field of ['principalId','profileId','deviceId','mediaId','sourceId','fileVersion','playbackSessionId']) {
+      const requiredFields = /** @type {const} */ (['principalId','profileId','deviceId','mediaId','sourceId','fileVersion','playbackSessionId']);
+      for (const field of requiredFields) {
         if (typeof input[field] !== 'string' || !input[field]) throw castError(400, 'invalid_request', `Cast session ${field} is required.`);
       }
       const now = clock();
@@ -52,11 +66,13 @@ export function createCastSessionRegistry({ clock = Date.now, maxSessions = 1_02
       sweep(now);
       return { record: { ...entry }, session: publicSession(entry) };
     },
+    /** @param {string} id */
     read(id) {
       sweep();
       const entry = sessions.get(id);
       return entry ? { ...entry } : null;
     },
+    /** @param {string} id @param {{ state?: string, positionSeconds?: number }} input */
     update(id, input = {}) {
       sweep();
       const entry = sessions.get(id);
@@ -73,6 +89,7 @@ export function createCastSessionRegistry({ clock = Date.now, maxSessions = 1_02
       entry.expiresAt = entry.updatedAt + ttlMs;
       return { record: { ...entry }, session: publicSession(entry) };
     },
+    /** @param {string} id */
     remove(id) {
       const entry = sessions.get(id);
       if (!entry) return null;

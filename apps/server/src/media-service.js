@@ -3,7 +3,6 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { normalizePlaybackProfile, playbackPlanForMedia } from '@loom-media-server/media-core';
-import { backendEncoder } from '@loom-media-server/transcode-capabilities';
 import { openContainedFile, resolveContainedPath, statContainedFile } from './media-path-guard.js';
 import {
   createPlaybackSessionRegistry,
@@ -13,6 +12,7 @@ import { createTranscodeAdmission } from './transcode-admission.js';
 import { createTranscodeCacheQuota } from './transcode-cache-quota.js';
 import { canonicalPublicError } from './public-error.js';
 
+/** @type {Record<string, string>} */
 const MIME_TYPES = {
   '.mp4': 'video/mp4',
   '.m4v': 'video/mp4',
@@ -34,13 +34,16 @@ const HLS_ABSOLUTE_TIMEOUT_MS = Math.max(DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS, S
 const HLS_NO_CLIENT_GRACE_MS = 30 * 1000;
 const PROCESS_TERM_GRACE_MS = 2_000;
 
+/** @param {import('./server-media-types.js').MediaResponse} res @param {number} status @param {import('./server-media-types.js').JsonPayload} payload */
 function json(res, status, payload) {
-  const retryAfterSeconds = Number.isFinite(payload?.retryAfter)
+  const retryAfterSeconds = typeof payload?.retryAfter === 'number' && Number.isFinite(payload.retryAfter)
     ? Math.max(1, Math.ceil(payload.retryAfter))
     : undefined;
   let publicPayload = payload;
   if (res.__loomtvPublicApi && payload?.ok === false && typeof payload.error === 'string') {
-    const { retryAfter: _legacyRetryAfter, message: _legacyMessage, ...safePayload } = payload;
+    const safePayload = { ...payload };
+    delete safePayload.retryAfter;
+    delete safePayload.message;
     publicPayload = { ...safePayload, error: {
       code: canonicalPublicError({ status, code: payload.error }).code,
       message: status >= 500
@@ -71,40 +74,46 @@ function json(res, status, payload) {
  * route did not, so any account with library.read — a viewer, by default —
  * could read absolute server paths for the whole library.
  */
+/** @param {unknown} item */
 function redactedLibraryItem(item) {
   if (!item || typeof item !== 'object') return item;
+  const record = /** @type {Record<string, unknown>} */ (item);
+  /** @type {Record<string, unknown>} */
   const safeItem = {};
   for (const field of ['id', 'rootId', 'type', 'title', 'kind', 'extension']) {
-    if (typeof item[field] === 'string' && item[field].length <= 4_096 && !item[field].includes('\u0000')) safeItem[field] = item[field];
+    if (typeof record[field] === 'string' && record[field].length <= 4_096 && !record[field].includes('\u0000')) safeItem[field] = record[field];
   }
   for (const field of ['year', 'sizeBytes', 'modifiedAtMs', 'indexedAt']) {
-    if (Number.isFinite(item[field])) safeItem[field] = Number(item[field]);
+    if (Number.isFinite(record[field])) safeItem[field] = Number(record[field]);
   }
-  if (typeof item.available === 'boolean') safeItem.available = item.available;
-  if (typeof item.relativePath === 'string' && item.relativePath.length <= 4_096
-    && !path.isAbsolute(item.relativePath) && !path.win32.isAbsolute(item.relativePath)
-    && !item.relativePath.includes('\u0000')) safeItem.relativePath = item.relativePath;
-  if (item.animeLikely === true) safeItem.animeLikely = true;
-  if (item.series && typeof item.series === 'object' && typeof item.series.title === 'string') {
+  if (typeof record.available === 'boolean') safeItem.available = record.available;
+  if (typeof record.relativePath === 'string' && record.relativePath.length <= 4_096
+    && !path.isAbsolute(record.relativePath) && !path.win32.isAbsolute(record.relativePath)
+    && !record.relativePath.includes('\u0000')) safeItem.relativePath = record.relativePath;
+  if (record.animeLikely === true) safeItem.animeLikely = true;
+  if (record.series && typeof record.series === 'object' && 'title' in record.series && typeof record.series.title === 'string') {
     safeItem.series = {
-      title: item.series.title.slice(0, 500),
-      ...(Number.isSafeInteger(item.series.season) ? { season: item.series.season } : {}),
-      ...(Number.isSafeInteger(item.series.episode) ? { episode: item.series.episode } : {}),
+      title: record.series.title.slice(0, 500),
+      ...('season' in record.series && Number.isSafeInteger(record.series.season) ? { season: record.series.season } : {}),
+      ...('episode' in record.series && Number.isSafeInteger(record.series.episode) ? { episode: record.series.episode } : {}),
     };
   }
   return safeItem;
 }
 
+/** @param {string} filePath */
 function mimeFor(filePath) {
   return MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
 }
 
+/** @param {string} filePath */
 function downloadDisposition(filePath) {
-  const name = path.basename(filePath).replace(/[\u0000-\u001f\u007f]/g, '_') || 'loomtv-media';
+  const name = path.basename(filePath).replace(/[^\x20-\x7e\u0080-\uffff]/g, '_') || 'loomtv-media';
   const asciiName = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `attachment; filename="${asciiName}"`;
 }
 
+/** @param {import('./server-media-types.js').MediaSource} source */
 function directCapabilityFileVersion(source) {
   const dev = Number(source?.fileId?.dev);
   const ino = Number(source?.fileId?.ino);
@@ -120,6 +129,7 @@ function directCapabilityFileVersion(source) {
     .digest('base64url');
 }
 
+/** @param {string | undefined} header @param {number} size */
 function parseRange(header, size) {
   if (!header || !header.startsWith('bytes=') || header.includes(',')) return null;
   const [startText, endText] = header.slice(6).split('-', 2);
@@ -136,27 +146,56 @@ function parseRange(header, size) {
   return { start, end };
 }
 
+/** @param {import('./server-media-types.js').AuthRequest} req @param {URL} url */
 function tokenFromRequest(req, url) {
   const header = req.headers.authorization || '';
   if (header.startsWith('Bearer ')) return header.slice(7).trim();
-  return req.headers['x-loom-admin-token'] || url.searchParams.get('token') || '';
+  const adminToken = req.headers['x-loom-admin-token'];
+  return (typeof adminToken === 'string' ? adminToken : '') || url.searchParams.get('token') || '';
+}
+
+/** @param {import('./server-media-types.js').MediaRequest} req @param {string} token @returns {import('./server-media-types.js').MediaRequest} */
+function requestWithBearerToken(req, token) {
+  const authenticatedRequest = /** @type {import('./server-media-types.js').MediaRequest} */ (Object.create(req));
+  authenticatedRequest.headers = { ...req.headers, authorization: `Bearer ${token}` };
+  return authenticatedRequest;
+}
+
+/** @param {unknown} error */
+function errorFields(error) {
+  const value = error && typeof error === 'object' ? error : {};
+  return {
+    code: 'code' in value && typeof value.code === 'string' ? value.code : '',
+    status: 'status' in value && typeof value.status === 'number' ? value.status : undefined,
+    retryAfter: 'retryAfter' in value && typeof value.retryAfter === 'number' ? value.retryAfter : undefined,
+  };
 }
 
 function cancelledError() {
   return Object.assign(new Error('The media operation was cancelled.'), { code: 'operation_cancelled', status: 503 });
 }
 
+/** @param {unknown} value @returns {value is import('./server-media-types.js').FileIdentity} */
+function isFileIdentity(value) {
+  return value !== null && typeof value === 'object'
+    && 'dev' in value && typeof value.dev === 'number' && Number.isSafeInteger(value.dev)
+    && 'ino' in value && typeof value.ino === 'number' && Number.isSafeInteger(value.ino);
+}
+
+/** @param {string} code @param {string} message @param {number} [status] @param {{ sourceState?: string; retryAfter?: number }} [details] */
 function playbackError(code, message, status = 503, details = {}) {
   return Object.assign(new Error(message), { code, status, retryable: status >= 500, ...details });
 }
 
+/** @param {unknown} error */
 function publicPlaybackErrorCode(error) {
-  if (['transcode_principal_limit', 'transcode_global_limit', 'transcode_cache_unavailable', 'transcode_cache_free_space_unknown', 'transcode_cache_quota', 'transcode_cache_free_space', 'playback_capacity_exceeded'].includes(error?.code)) return 'playback_capacity_exceeded';
-  if (error?.code === 'media_probe_unavailable') return 'transcoder_unavailable';
-  if (['profile_required', 'profile_locked', 'stale_profile_selection', 'source_unavailable', 'playback_not_supported', 'transcoder_unavailable', 'transcode_failed', 'playback_session_invalid', 'permission_denied', 'invalid_request'].includes(error?.code)) return error.code;
+  if (['transcode_principal_limit', 'transcode_global_limit', 'transcode_cache_unavailable', 'transcode_cache_free_space_unknown', 'transcode_cache_quota', 'transcode_cache_free_space', 'playback_capacity_exceeded'].includes(errorFields(error).code)) return 'playback_capacity_exceeded';
+  if (errorFields(error).code === 'media_probe_unavailable') return 'transcoder_unavailable';
+  if (['profile_required', 'profile_locked', 'stale_profile_selection', 'source_unavailable', 'playback_not_supported', 'transcoder_unavailable', 'transcode_failed', 'playback_session_invalid', 'permission_denied', 'invalid_request'].includes(errorFields(error).code)) return errorFields(error).code || 'transcode_failed';
   return 'transcode_failed';
 }
 
+/** @param {unknown} value @param {string} field */
 function optionalStreamIndex(value, field) {
   if (value === undefined || value === null || value === '') return undefined;
   const index = Number(value);
@@ -166,9 +205,10 @@ function optionalStreamIndex(value, field) {
   return index;
 }
 
+/** @param {import('@loom-media-server/media-core').PlaybackPlan} plan @param {import('@loom-media-server/media-core').MediaProbe} probe */
 function subtitleKindForProbe(plan, probe) {
   const codec = probe?.tracks?.find((track) => track.id === plan.selectedSubtitleTrackId)?.codec;
-  return ['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text'].includes(codec) ? 'text' : 'bitmap';
+  return ['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text'].includes(codec || '') ? 'text' : 'bitmap';
 }
 
 /**
@@ -177,14 +217,73 @@ function subtitleKindForProbe(plan, probe) {
  * Returning it lets playback preparation skip the ffprobe round trip; anything
  * missing or stale returns null so the caller re-probes and re-records.
  */
-function cachedScanProbe(source, sourceId) {
-  const cached = source?.localMetadata;
-  if (!cached || cached.sourceId !== sourceId || !Array.isArray(cached.tracks)) return null;
-  if (source.recordedSizeBytes !== source.sizeBytes) return null;
-  if (!(Math.abs(Number(source.recordedModifiedAtMs) - Number(source.modifiedAtMs)) < 1)) return null;
-  return { ...cached, sourceId };
+/** @param {unknown} value @returns {import('@loom-media-server/media-core').MediaTrackProbe | null} */
+function cachedMediaTrack(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const track = /** @type {Record<string, unknown>} */ (value);
+  if (typeof track.id !== 'string' || typeof track.codec !== 'string' || !Number.isSafeInteger(track.index)
+    || !['video', 'audio', 'subtitle', 'data', 'unknown'].includes(String(track.kind))
+    || typeof track.default !== 'boolean' || typeof track.forced !== 'boolean') return null;
+  return {
+    id: track.id,
+    index: Number(track.index),
+    kind: /** @type {import('@loom-media-server/media-core').MediaTrackProbe['kind']} */ (track.kind),
+    default: track.default,
+    forced: track.forced,
+    codec: track.codec,
+    ...(typeof track.language === 'string' ? { language: track.language } : {}),
+    ...(typeof track.title === 'string' ? { title: track.title } : {}),
+    ...(typeof track.profile === 'string' ? { profile: track.profile } : {}),
+    ...(typeof track.pixelFormat === 'string' ? { pixelFormat: track.pixelFormat } : {}),
+    ...(typeof track.colorTransfer === 'string' ? { colorTransfer: track.colorTransfer } : {}),
+    ...(typeof track.colorPrimaries === 'string' ? { colorPrimaries: track.colorPrimaries } : {}),
+    ...(typeof track.colorSpace === 'string' ? { colorSpace: track.colorSpace } : {}),
+    ...(Number.isFinite(track.channels) ? { channels: Number(track.channels) } : {}),
+    ...(Number.isFinite(track.width) ? { width: Number(track.width) } : {}),
+    ...(Number.isFinite(track.height) ? { height: Number(track.height) } : {}),
+    ...(Number.isFinite(track.frameRate) ? { frameRate: Number(track.frameRate) } : {}),
+    ...(track.external === true ? { external: true } : {}),
+  };
 }
 
+/** @param {import('./server-media-types.js').MediaSource} source @param {string} sourceId @returns {import('@loom-media-server/media-core').MediaProbe | null} */
+function cachedScanProbe(source, sourceId) {
+  if (!source?.localMetadata || typeof source.localMetadata !== 'object' || Array.isArray(source.localMetadata)) return null;
+  const cached = /** @type {Record<string, unknown>} */ (source.localMetadata);
+  if (cached.sourceId !== sourceId || typeof cached.container !== 'string' || !Array.isArray(cached.tracks)
+    || !Number.isFinite(cached.probedAt)) return null;
+  if (source.recordedSizeBytes !== source.sizeBytes) return null;
+  if (!(Math.abs(Number(source.recordedModifiedAtMs) - Number(source.modifiedAtMs)) < 1)) return null;
+  const tracks = cached.tracks.map(cachedMediaTrack);
+  if (tracks.some((track) => track === null)) return null;
+  const chapters = (Array.isArray(cached.chapters) ? cached.chapters : []).flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const chapter = /** @type {Record<string, unknown>} */ (value);
+    return Number.isFinite(chapter.startMs) && Number.isFinite(chapter.endMs) && typeof chapter.title === 'string'
+      ? [{ startMs: Number(chapter.startMs), endMs: Number(chapter.endMs), title: chapter.title }]
+      : [];
+  });
+  return {
+    sourceId,
+    container: cached.container,
+    hdr: cached.hdr === true,
+    tracks: /** @type {import('@loom-media-server/media-core').MediaTrackProbe[]} */ (tracks),
+    chapters,
+    probedAt: Number(cached.probedAt),
+    adapterGaps: Array.isArray(cached.adapterGaps) && cached.adapterGaps.includes('external_sidecar_subtitles')
+      ? ['external_sidecar_subtitles'] : [],
+    ...(Number.isFinite(cached.durationSeconds) ? { durationSeconds: Number(cached.durationSeconds) } : {}),
+    ...(Number.isFinite(cached.bitrateKbps) ? { bitrateKbps: Number(cached.bitrateKbps) } : {}),
+    ...(Number.isFinite(cached.width) ? { width: Number(cached.width) } : {}),
+    ...(Number.isFinite(cached.height) ? { height: Number(cached.height) } : {}),
+    ...(typeof cached.videoCodec === 'string' ? { videoCodec: cached.videoCodec } : {}),
+    ...(typeof cached.audioCodec === 'string' ? { audioCodec: cached.audioCodec } : {}),
+    ...(['hdr10', 'hdr10-plus', 'hlg', 'dolby-vision'].includes(String(cached.hdrFormat))
+      ? { hdrFormat: /** @type {import('@loom-media-server/media-core').MediaProbe['hdrFormat']} */ (cached.hdrFormat) } : {}),
+  };
+}
+
+/** @param {import('./server-media-types.js').MediaSource} source @returns {import('@loom-media-server/media-core').MediaTrackProbe[]} */
 function externalSubtitleTracks(source) {
   return (Array.isArray(source?.subtitleSidecars) ? source.subtitleSidecars : []).slice(0, 64).map((sidecar, ordinal) => ({
     id: sidecar.id,
@@ -199,6 +298,7 @@ function externalSubtitleTracks(source) {
   }));
 }
 
+/** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res */
 function requestAbortSignal(req, res) {
   const controller = new AbortController();
   const abort = () => {
@@ -216,6 +316,7 @@ function requestAbortSignal(req, res) {
   };
 }
 
+/** @param {string} rootPath @param {string} filePath @param {number} timeoutMs @param {import('./server-media-types.js').MediaClock & {signal?: AbortSignal}} [options] */
 async function waitForFile(rootPath, filePath, timeoutMs, options = {}) {
   const now = options.now || (() => Date.now());
   const setTimeoutFn = options.setTimeout || setTimeout;
@@ -230,7 +331,8 @@ async function waitForFile(rootPath, filePath, timeoutMs, options = {}) {
     } catch {
       // FFmpeg is still starting.
     }
-    await new Promise((resolve, reject) => {
+    await new Promise(/** @param {(value?: void) => void} resolve */ (resolve, reject) => {
+      /** @type {NodeJS.Timeout | undefined} */
       let timer;
       const onAbort = () => {
         clearTimeoutFn(timer);
@@ -248,10 +350,12 @@ async function waitForFile(rootPath, filePath, timeoutMs, options = {}) {
   return false;
 }
 
+/** @param {import("node:child_process").ChildProcess | null | undefined} child @returns {Promise<void>} */
 export function terminateChild(child, graceMs = PROCESS_TERM_GRACE_MS) {
   if (!child || child.exitCode != null || child.signalCode) return Promise.resolve();
   return new Promise((resolve) => {
     let settled = false;
+    /** @type {NodeJS.Timeout | undefined} */
     let killTimer;
     const finish = () => {
       if (settled) return;
@@ -276,9 +380,10 @@ export function terminateChild(child, graceMs = PROCESS_TERM_GRACE_MS) {
   });
 }
 
+/** @param {import('./server-media-types.js').TranscodeRequest} input @param {import('./server-media-types.js').MediaTranscoderHealth} health */
 function normalizeProfile(input = {}, health) {
   const requestedPlayback = normalizePlaybackProfile(input);
-  const mode = ['remux', 'transcode'].includes(input.mode) ? input.mode : 'transcode';
+  const mode = input.mode === 'remux' || input.mode === 'transcode' ? input.mode : 'transcode';
   const copyVideo = mode === 'remux' || input.copyVideo === true || input.copyVideo === '1';
   const copyAudio = input.copyAudio === true || input.copyAudio === '1';
   const burnSubtitles = input.burnSubtitles === true || input.burnSubtitles === '1';
@@ -334,6 +439,7 @@ function normalizeProfile(input = {}, health) {
   };
 }
 
+/** @param {import('./server-media-types.js').NormalizedTranscodeProfile} profile */
 function scaleFilter(profile) {
   if (!profile.maxWidth && !profile.maxHeight) return null;
   return `scale=${profile.maxWidth || -2}:${profile.maxHeight || -2}:force_original_aspect_ratio=decrease`;
@@ -343,17 +449,20 @@ function toneMapFilter() {
   return 'zscale=transfer=linear:npl=100,format=gbrpf32le,tonemap=mobius,zscale=transfer=bt709:primaries=bt709:matrix=bt709,format=yuv420p';
 }
 
+/** @param {import('./server-media-types.js').MediaTranscoderHealth} health @param {import('@loom-media-server/media-core').TranscodeCodec} codec */
 function softwareEncoder(health, codec) {
   return health.softwareEncoders?.[codec] || 'libx264';
 }
 
+/** @param {string} filePath */
 function ffmpegFilterPath(filePath) {
   return String(filePath).replaceAll('\\', '\\\\').replaceAll(':', '\\:').replaceAll("'", "\\'");
 }
 
+/** @param {import('./server-media-types.js').MediaTranscoderHealth} health @param {string} backend @param {import('@loom-media-server/media-core').TranscodeCodec} codec @param {import('./server-media-types.js').NormalizedTranscodeProfile} profile */
 function hardwareArgs(health, backend, codec, profile) {
   const entry = health.backends?.find((candidate) => candidate.id === backend);
-  const encoder = backendEncoder(health, backend, codec);
+  const encoder = entry?.codecs?.[codec]?.encoder || null;
   if (!entry || !encoder) return null;
   const beforeInput = [];
   if (backend === 'vaapi' && entry.device) beforeInput.push('-vaapi_device', entry.device);
@@ -392,6 +501,7 @@ function hardwareArgs(health, backend, codec, profile) {
   };
 }
 
+/** @param {string} filePath @param {string} outputDir @param {import('./server-media-types.js').MediaTranscoderHealth} health @param {import('./server-media-types.js').NormalizedTranscodeProfile} profile */
 function transcodeArgs(filePath, outputDir, health, profile) {
   const hardware = profile.hardware ? hardwareArgs(health, profile.backend, profile.codec, profile) : null;
   const seek = profile.startSeconds > 0 ? ['-ss', String(profile.startSeconds)] : [];
@@ -444,6 +554,7 @@ function transcodeArgs(filePath, outputDir, health, profile) {
   return args;
 }
 
+/** @param {import('./server-media-types.js').MediaServiceOptions} options */
 export function createHeadlessMediaService({
   adminService,
   clientState,
@@ -459,13 +570,15 @@ export function createHeadlessMediaService({
   transcodeQuotaOptions = {},
   cacheFileSystem,
   spawnProcess = spawn,
-  clientAddress,
   remotePolicy,
-} = {}) {
+}) {
+  /** @type {Map<string, import('./server-media-types.js').TranscodeSession>} */
   const sessions = new Map();
+  /** @type {Map<string, import('./server-media-types.js').StoredTranscodePlan>} */
   const transcodePlans = new Map();
   const configuredCacheDir = path.resolve(cacheDir);
 
+  /** @param {string} principalId @param {import('./server-media-types.js').ProfileBinding | null | undefined} profile */
   async function resolveBoundPrincipal(principalId, profile) {
     if (profile?.invitationSessionId && remotePolicy?.resolveInvitationPrincipal) {
       return remotePolicy.resolveInvitationPrincipal(profile.invitationSessionId);
@@ -473,10 +586,14 @@ export function createHeadlessMediaService({
     return adminService.getPrincipalById?.(principalId);
   }
 
+  /** @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null | undefined} profileContext @param {import('./server-media-types.js').MediaSource} media @returns {Promise<import('./server-media-types.js').ProfileContext>} */
   async function requireBoundProfile(principal, profileContext, media) {
     if (principal?.authentication === 'invitation-session' && remotePolicy?.invitationProfileContext) {
-      return remotePolicy.invitationProfileContext(principal, media);
+      const context = await remotePolicy.invitationProfileContext(principal, media);
+      if (!context) throw playbackError('profile_required', 'An active profile is required for playback.', 409);
+      return context;
     }
+    if (!clientState) throw playbackError('profile_required', 'An active profile is required for playback.', 409);
     return clientState.requireActivePlaybackProfile(principal.id, profileContext?.deviceId, media);
   }
   const root = path.join(configuredCacheDir, 'headless-transcodes');
@@ -487,10 +604,14 @@ export function createHeadlessMediaService({
   const clearIntervalFn = typeof clock.clearInterval === 'function' ? clock.clearInterval : clearInterval;
   const ownsPlaybackRegistry = !playbackSessionRegistry;
   const ownsAdmission = !transcodeAdmission;
+  /** @type {Set<Promise<unknown>>} */
   const cleanupTasks = new Set();
   let stopping = false;
+  /** @type {Promise<void> | undefined} */
   let stopPromise;
+  /** @type {Promise<number> | null} */
   let reconciliationPromise = null;
+  /** @type {Promise<Awaited<ReturnType<import('./server-media-types.js').Quota['status']>> | null> | null} */
   let quotaSweepPromise = null;
   const cacheQuota = createTranscodeCacheQuota({
     ...transcodeQuotaOptions,
@@ -499,8 +620,10 @@ export function createHeadlessMediaService({
     now,
     ...(cacheFileSystem ? { fileSystem: cacheFileSystem } : {}),
   });
+  /** @type {NodeJS.Timeout | null} */
   let quotaSweepTimer = null;
 
+  /** @template T @param {Promise<T>} task @returns {Promise<T>} */
   function trackCleanup(task) {
     if (!task || typeof task.then !== 'function') return task;
     cleanupTasks.add(task);
@@ -508,7 +631,9 @@ export function createHeadlessMediaService({
     return task;
   }
 
+  /** @type {import('./server-media-types.js').PlaybackRegistry} */
   let playbackRegistry;
+  /** @type {Parameters<typeof createPlaybackSessionRegistry>[0]} */
   const registryOptions = {
     ...playbackSessionOptions,
     now,
@@ -589,6 +714,7 @@ export function createHeadlessMediaService({
     return quotaSweepPromise;
   }
 
+  /** @param {import('./server-media-types.js').TranscodeSession} session */
   async function enforceSessionQuota(session) {
     try {
       const current = await cacheQuota.sessionBytes(session.id);
@@ -611,6 +737,7 @@ export function createHeadlessMediaService({
     quotaSweepTimer?.unref?.();
   }
 
+  /** @param {import('./server-media-types.js').TranscodeSession} session @param {{activate?: boolean}} [touchOptions] */
   function touchTranscodeSession(session, touchOptions = {}) {
     const touched = playbackRegistry.touch(session.registryId || session.id, now(), touchOptions);
     if (touched) session.lastActivityAt = touched.lastActivityAt;
@@ -622,6 +749,7 @@ export function createHeadlessMediaService({
   // cached value and never triggers an unbounded filesystem scan itself.
   void enforceCacheQuota();
 
+  /** @param {string} itemId @param {string} userId @param {string} action @param {import('./server-media-types.js').ProfileBinding | null} [profileContext] */
   function issuePlaybackToken(itemId, userId, action, profileContext = null) {
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
     if (action === 'download') throw playbackError('download_not_allowed', 'Offline downloads require a persistent download lease.', 410);
@@ -653,6 +781,7 @@ export function createHeadlessMediaService({
     };
   }
 
+  /** @param {string} token @param {URL} url @param {string} permission @param {import('./server-media-types.js').MediaRequest} req @returns {Promise<{ok: true, principal: import('./server-media-types.js').Principal, playbackSession: import('./server-media-types.js').RegistrySession} | null>} */
   async function authorizePlaybackToken(token, url, permission, req) {
     const expectedAction = permission === 'downloads' ? 'download' : 'direct';
     const itemId = url.searchParams.get('itemId');
@@ -673,10 +802,11 @@ export function createHeadlessMediaService({
     }
     const permitted = typeof adminService.authorizePrincipal === 'function'
       ? await adminService.authorizePrincipal(principal, permission)
-      : await authorize({ headers: { authorization: `Bearer ${token}` } }, permission);
+      : await authorize(requestWithBearerToken(req, token), permission);
     return permitted ? { ok: true, principal, playbackSession: entry } : null;
   }
 
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {URL} url @param {string} permission @returns {Promise<import('./server-media-types.js').Authorization>} */
   async function authorizedFor(req, url, permission, capabilityOnly = false) {
     const headerToken = req.headers.authorization || req.headers['x-loom-admin-token'] || '';
     const queryToken = url.searchParams.get('token') || '';
@@ -691,10 +821,7 @@ export function createHeadlessMediaService({
     }
     const token = tokenFromRequest(req, url);
     if (!token) return { ok: false, status: 401 };
-    const authenticatedRequest = {
-      ...req,
-      headers: { ...req.headers, authorization: `Bearer ${token}` },
-    };
+    const authenticatedRequest = requestWithBearerToken(req, token);
     const principal = await adminService.authenticateRequest(authenticatedRequest);
     if (!principal) return { ok: false, status: 401 };
     const permitted = typeof adminService.authorizePrincipal === 'function'
@@ -703,6 +830,7 @@ export function createHeadlessMediaService({
     return permitted ? { ok: true, principal } : { ok: false, status: 403, principal };
   }
 
+  /** @param {import('./server-media-types.js').TranscodeSession | undefined} session @param {{revokeRegistry?: boolean; reason?: string; termGraceMs?: number}} [options] @returns {Promise<void>} */
   async function cleanupSession(session, { revokeRegistry = true, reason = 'revoked', termGraceMs = PROCESS_TERM_GRACE_MS } = {}) {
     if (!session) return;
     if (session.cleanupPromise) return session.cleanupPromise;
@@ -734,6 +862,7 @@ export function createHeadlessMediaService({
     return session.cleanupPromise;
   }
 
+  /** @param {import('./server-media-types.js').TranscodeSession} session @param {import('./server-media-types.js').NormalizedTranscodeProfile} profile */
   async function startProcess(session, profile) {
     // FFmpeg opens both paths by name. Recheck the authorized input identity
     // and anchor the output to the configured cache at the last async boundary
@@ -746,7 +875,7 @@ export function createHeadlessMediaService({
     session.profile = profile;
     session.stderr = '';
     if (session.cleaned || stopping) throw cancelledError();
-    const child = spawnProcess(transcoder.path, transcodeArgs(session.filePath, session.outputDir, transcoder.getHealth(), profile), { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawnProcess(transcoder.path || '', transcodeArgs(session.filePath, session.outputDir, transcoder.getHealth(), profile), { stdio: ['ignore', 'ignore', 'pipe'] });
     session.process = child;
     child.stderr?.on('data', (chunk) => {
       session.stderr = `${session.stderr}${chunk.toString()}`.slice(-4000);
@@ -787,7 +916,7 @@ export function createHeadlessMediaService({
           .then(() => startProcess(session, { ...profile, backend: 'software', hardware: false }))
           .catch((error) => {
             session.error = error instanceof Error ? error.message : String(error);
-            if (['operation_cancelled', 'server_draining'].includes(error?.code)) admission.recordCancelled?.();
+            if (['operation_cancelled', 'server_draining'].includes(errorFields(error).code)) admission.recordCancelled?.();
             else admission.recordFailure?.();
             trackCleanup(cleanupSession(session, { reason: 'transcode_failed' }));
           });
@@ -803,6 +932,7 @@ export function createHeadlessMediaService({
     return child;
   }
 
+  /** @param {string} itemId @param {import('./server-media-types.js').TranscodeRequest} requestedProfile @param {import('./server-media-types.js').Principal} principal @param {AbortSignal | null} [requestSignal] */
   async function startTranscode(itemId, requestedProfile = {}, principal, requestSignal = null) {
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
     if (requestedProfile.planToken) {
@@ -860,10 +990,12 @@ export function createHeadlessMediaService({
     const health = transcoder.getHealth();
     const profile = normalizeProfile(requestedProfile, health);
     await cacheQuota.checkAdmission();
-    const permit = await admission.acquire(principal, { signal: requestSignal });
+    const permit = await admission.acquire(principal, { signal: requestSignal || undefined });
+    /** @type {import('./server-media-types.js').TranscodeSession | undefined} */
     let session;
     let createdOutputDir = null;
     let quotaReservationId = null;
+    /** @type {(() => void) | null} */
     let detachRequestAbort = null;
     try {
       if (stopping || requestSignal?.aborted) throw cancelledError();
@@ -927,7 +1059,8 @@ export function createHeadlessMediaService({
       };
       if (requestSignal) {
         if (requestSignal.aborted) throw cancelledError();
-        const onAbort = () => session.abortController.abort();
+        const sessionAbortController = session.abortController;
+        const onAbort = () => sessionAbortController.abort();
         requestSignal.addEventListener('abort', onAbort, { once: true });
         detachRequestAbort = () => requestSignal.removeEventListener('abort', onAbort);
       }
@@ -978,10 +1111,10 @@ export function createHeadlessMediaService({
       if (session) await cleanupSession(session, { reason: 'transcode_failed' });
       else {
         permit.release();
-        cacheQuota.release(quotaReservationId);
+        if (quotaReservationId) cacheQuota.release(quotaReservationId);
         if (createdOutputDir) await fsPromises.rm(createdOutputDir, { recursive: true, force: true }).catch(() => undefined);
       }
-      if (['operation_cancelled', 'transcode_request_cancelled', 'transcode_admission_closed', 'server_draining'].includes(error?.code)) admission.recordCancelled?.();
+      if (['operation_cancelled', 'transcode_request_cancelled', 'transcode_admission_closed', 'server_draining'].includes(errorFields(error).code)) admission.recordCancelled?.();
       else admission.recordFailure?.();
       throw error;
     } finally {
@@ -989,6 +1122,7 @@ export function createHeadlessMediaService({
     }
   }
 
+  /** @param {string} itemId @param {import('./server-media-types.js').PlanningRequest} request @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null} [profileContext] */
   async function planPlayback(itemId, request = {}, principal, profileContext = null) {
     const catalogItem = await adminService.getLibraryItem?.(itemId, principal);
     if (!catalogItem) throw playbackError('media_not_found', 'Media item was not found.', 404);
@@ -996,11 +1130,11 @@ export function createHeadlessMediaService({
     try {
       source = await adminService.resolveMediaPath(itemId, principal, request.sourceId);
     } catch (error) {
-      if (error?.code === 'permission_denied') throw error;
+      if (errorFields(error).code === 'permission_denied') throw error;
       throw playbackError(
-        error?.code === 'EACCES' ? 'media_source_unreadable' : 'source_unavailable',
+        errorFields(error).code === 'EACCES' ? 'media_source_unreadable' : 'source_unavailable',
         'The selected media source is not currently readable.', 409,
-        { sourceState: error?.code === 'EACCES' ? 'unreadable' : 'offline' },
+        { sourceState: errorFields(error).code === 'EACCES' ? 'unreadable' : 'offline' },
       );
     }
     if (clientState?.requireActivePlaybackProfile) {
@@ -1055,6 +1189,7 @@ export function createHeadlessMediaService({
     return { item: catalogItem, probe, plan, sourceIdentity: { fileId: source.fileId }, externalSubtitle };
   }
 
+  /** @param {string} itemId @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null} profileContext @param {string} [sourceId] */
   async function describeDirectCapability(itemId, principal, profileContext, sourceId = undefined) {
     const source = await adminService.resolveMediaPath(itemId, principal, sourceId);
     if (clientState?.requireActivePlaybackProfile) {
@@ -1070,6 +1205,7 @@ export function createHeadlessMediaService({
     };
   }
 
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res @param {{itemId: string; principal: import('./server-media-types.js').Principal; profileContext: import('./server-media-types.js').ProfileBinding | null; sourceId: string; fileVersion: string}} options */
   async function serveDirectCapability(req, res, {
     itemId, principal, profileContext, sourceId, fileVersion,
   }) {
@@ -1090,6 +1226,7 @@ export function createHeadlessMediaService({
     return serveFile(req, res, source.rootPath, source.path, mimeFor(source.path), true, {}, source.fileId);
   }
 
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res @param {{itemId: string; trackId: string; token: string}} options */
   async function serveExternalSubtitleCapability(req, res, { itemId, trackId, token }) {
     const authorizationUrl = new URL(`http://loomtv.local/subtitle?itemId=${encodeURIComponent(itemId)}`);
     const authorization = await authorizePlaybackToken(token, authorizationUrl, 'stream', req);
@@ -1097,7 +1234,7 @@ export function createHeadlessMediaService({
       return json(res, 401, { ok: false, error: 'playback_session_invalid' });
     }
     const binding = authorization.playbackSession.profile;
-    if (!binding?.externalSubtitleTrackId || binding.externalSubtitleTrackId !== trackId || !binding.externalSubtitleFileId) {
+    if (!binding?.externalSubtitleTrackId || binding.externalSubtitleTrackId !== trackId || !isFileIdentity(binding.externalSubtitleFileId)) {
       return json(res, 401, { ok: false, error: 'playback_session_invalid' });
     }
     const source = await adminService.resolveMediaPath(itemId, authorization.principal, binding.sourceId);
@@ -1109,6 +1246,7 @@ export function createHeadlessMediaService({
       () => playbackRegistry.touch(authorization.playbackSession.id, now()));
   }
 
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res @param {{lease: import('./server-media-types.js').StoredDownloadLease; source: import('./server-media-types.js').MediaSource} | null | undefined} authorization */
   async function serveOfflineDownload(req, res, authorization) {
     const { lease, source } = authorization || {};
     if (!lease || !source) return json(res, 401, { ok: false, error: 'session_expired' });
@@ -1116,11 +1254,16 @@ export function createHeadlessMediaService({
       { 'Content-Disposition': downloadDisposition(source.path) }, source.fileId);
   }
 
+  /** @param {string} itemId @param {string} principalId @param {import('./server-media-types.js').ExecutionPlan} plan @param {import('@loom-media-server/media-core').MediaProbe} probe @param {import('./server-media-types.js').PlanningRequest} request @param {import('./server-media-types.js').ProfileBinding | null} profileContext @param {{fileId: import('./server-media-types.js').FileIdentity} | null} [sourceIdentity] */
   function issueTranscodePlan(itemId, principalId, plan, probe, request, profileContext, sourceIdentity = null) {
     const token = randomUUID();
     const cutoff = now() - MEDIA_TOKEN_TTL_MS;
     for (const [id, entry] of transcodePlans) if (entry.createdAt < cutoff) transcodePlans.delete(id);
-    while (transcodePlans.size >= 4_096) transcodePlans.delete(transcodePlans.keys().next().value);
+    while (transcodePlans.size >= 4_096) {
+      const oldest = transcodePlans.keys().next();
+      if (oldest.done) break;
+      transcodePlans.delete(oldest.value);
+    }
     transcodePlans.set(token, {
       itemId, principalId, createdAt: now(), expiresAt: now() + MEDIA_TOKEN_TTL_MS,
       profileContext,
@@ -1153,6 +1296,7 @@ export function createHeadlessMediaService({
    * not from a second open by name, so the size in the headers and the bytes on
    * the wire are the same file — even if the path is replaced mid-response.
    */
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res @param {string} rootPath @param {string} filePath @param {string} contentType @param {boolean} [allowRange] @param {import('node:http').OutgoingHttpHeaders} [extraHeaders] @param {import('./server-media-types.js').FileIdentity | null} [expectedFileId] @param {(() => unknown) | null} [onSuccess] */
   async function serveFile(req, res, rootPath, filePath, contentType, allowRange = false, extraHeaders = {}, expectedFileId = null, onSuccess = null) {
     let opened;
     try {
@@ -1161,12 +1305,13 @@ export function createHeadlessMediaService({
       // A containment failure is reported as such; everything else stays the
       // indistinguishable 404 this route has always returned for a file that
       // is simply not there.
-      if (error?.code === 'media_path_escape') return json(res, 403, { ok: false, error: 'media_path_escape' });
-      if (error?.code === 'media_path_substituted') return json(res, 409, { ok: false, error: 'media_path_substituted' });
+      if (errorFields(error).code === 'media_path_escape') return json(res, 403, { ok: false, error: 'media_path_escape' });
+      if (errorFields(error).code === 'media_path_substituted') return json(res, 409, { ok: false, error: 'media_path_substituted' });
       return json(res, 404, { ok: false, error: 'not_found' });
     }
     const { handle, stats } = opened;
     const closeHandle = () => { void handle.close().catch(() => undefined); };
+    /** @param {{start?: number; end?: number}} streamOptions */
     const pipeFrom = (streamOptions) => {
       const stream = handle.createReadStream({ autoClose: false, ...streamOptions });
       stream.once('error', () => { if (!res.destroyed) res.destroy(); });
@@ -1203,6 +1348,7 @@ export function createHeadlessMediaService({
     return pipeFrom({ start, end });
   }
 
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res @param {import('./server-media-types.js').TranscodeSession} session */
   async function servePlaylist(req, res, session) {
     const filePath = path.join(session.outputDir, 'index.m3u8');
     const source = await openContainedFile(configuredCacheDir, filePath)
@@ -1226,6 +1372,7 @@ export function createHeadlessMediaService({
     return res.end(playlist);
   }
 
+  /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res @param {URL} url */
   async function handle(req, res, url) {
     const pathname = url.pathname;
     if (pathname === '/api/media/items' && req.method === 'GET') {
@@ -1269,11 +1416,11 @@ export function createHeadlessMediaService({
       try {
         return json(res, 202, { ok: true, data: await startTranscode(itemId, requestedProfile, principal, requestLifecycle.signal) });
       } catch (error) {
-        return json(res, error?.status || 500, {
+        return json(res, errorFields(error).status || 500, {
           ok: false,
           error: publicPlaybackErrorCode(error),
           message: error instanceof Error ? error.message : 'The transcode could not be started.',
-          ...(error?.retryAfter ? { retryAfter: error.retryAfter } : {}),
+          ...(errorFields(error).retryAfter ? { retryAfter: errorFields(error).retryAfter } : {}),
         });
       } finally {
         requestLifecycle.cleanup();
@@ -1298,7 +1445,7 @@ export function createHeadlessMediaService({
       const token = tokenFromRequest(req, url);
       const playback = playbackRegistry.authorize(token, { action: 'hls' });
       const session = playback && playback.id === transcodeMatch[1] ? sessions.get(playback.id) : null;
-      if (!session || session.cleaned) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
+      if (!playback || !session || session.cleaned) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
       session.token = playback.token;
       let principal = null;
       if (typeof adminService.getPrincipalById === 'function') {
@@ -1347,7 +1494,7 @@ export function createHeadlessMediaService({
       try {
         return json(res, 200, { ok: true, data: await adminService.deleteLibraryItem(itemMatch[1], authorization.principal) });
       } catch (error) {
-        return json(res, error?.status || 500, { ok: false, error: error instanceof Error ? error.message : 'media_delete_failed' });
+        return json(res, errorFields(error).status || 500, { ok: false, error: error instanceof Error ? error.message : 'media_delete_failed' });
       }
     }
     if (itemMatch && itemMatch[2] === 'download' && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -1364,13 +1511,14 @@ export function createHeadlessMediaService({
           decodeURIComponent(directMatch[1]), principal, authorization.playbackSession?.profile?.sourceId,
         );
         const expectedFileId = authorization.playbackSession?.profile?.fileId;
-        if (expectedFileId && (item.fileId?.dev !== expectedFileId.dev || item.fileId?.ino !== expectedFileId.ino)) {
+        if (expectedFileId && (!isFileIdentity(expectedFileId) || item.fileId?.dev !== expectedFileId.dev || item.fileId?.ino !== expectedFileId.ino)) {
           return json(res, 409, { ok: false, error: 'source_unavailable', message: 'The media source changed.' });
         }
         if (!DIRECT_EXTENSIONS.has(path.extname(item.path).toLowerCase())) return json(res, 415, { ok: false, error: 'direct_stream_not_supported', message: 'Start an HLS transcode for this media type.' });
         if (authorization.playbackSession && authorization.playbackSession.itemId !== decodeURIComponent(directMatch[1])) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
-        return serveFile(req, res, item.rootPath, item.path, mimeFor(item.path), true, {}, item.fileId, authorization.playbackSession ? () => playbackRegistry.touch(authorization.playbackSession.id, now()) : null);
-      } catch (error) { return json(res, error?.status || 404, { ok: false, error: error instanceof Error ? error.message : 'media_not_found' }); }
+        const playbackSession = authorization.playbackSession;
+        return serveFile(req, res, item.rootPath, item.path, mimeFor(item.path), true, {}, item.fileId, playbackSession ? () => playbackRegistry.touch(playbackSession.id, now()) : null);
+      } catch (error) { return json(res, errorFields(error).status || 404, { ok: false, error: error instanceof Error ? error.message : 'media_not_found' }); }
     }
     return false;
   }
@@ -1384,9 +1532,11 @@ export function createHeadlessMediaService({
     serveOfflineDownload,
     issuePlaybackToken,
     issueTranscodePlan,
+    /** @param {string} itemId @param {string} planToken @param {import('./server-media-types.js').Principal} principal @param {AbortSignal | null} [requestSignal] */
     startTranscodePlan(itemId, planToken, principal, requestSignal = null) {
       return startTranscode(itemId, { planToken, canonicalPlanRequired: true }, principal, requestSignal);
     },
+    /** @param {string} identifier @param {import('./server-media-types.js').Principal | null | undefined} principal @param {string | null | undefined} itemId @param {string} [action] @param {import('./server-media-types.js').AuthRequest} [req] */
     async renewPlaybackSession(identifier, principal, itemId, action = undefined, req = undefined) {
       const current = playbackRegistry.authorize(identifier, {
         ...(itemId ? { itemId } : {}),
@@ -1432,6 +1582,7 @@ export function createHeadlessMediaService({
       if (session) session.token = renewed.token;
       return renewed;
     },
+    /** @param {string} identifier @param {import('./server-media-types.js').Principal | null | undefined} principal @param {string | null | undefined} itemId */
     async stopPlaybackSession(identifier, principal, itemId) {
       const current = playbackRegistry.authorize(identifier, {
         ...(itemId ? { itemId } : {}),
@@ -1449,25 +1600,30 @@ export function createHeadlessMediaService({
       else playbackRegistry.revoke(identifier, 'user_stopped', now());
       return { id: current.id, action: current.action, stopped: true };
     },
+    /** @param {string} identifier */
     revokePlaybackSession(identifier, reason = 'user_revoked') {
       return playbackRegistry.revoke(identifier, reason, now());
     },
+    /** @param {string} principalId */
     revokePrincipal(principalId, reason = 'principal_revoked') {
       for (const [id, entry] of transcodePlans) if (entry.principalId === principalId) transcodePlans.delete(id);
       return playbackRegistry.revokeByPrincipal(principalId, reason, now());
     },
+    /** @param {string} deviceId */
     revokeDevice(deviceId, reason = 'device_revoked') {
       for (const [id, entry] of transcodePlans) {
         if (entry.profileContext?.deviceId === deviceId) transcodePlans.delete(id);
       }
       return playbackRegistry.revokeByDevice(deviceId, reason, now());
     },
+    /** @param {string} authenticationSessionId */
     revokeAuthenticationSession(authenticationSessionId, reason = 'auth_session_revoked') {
       for (const [id, entry] of transcodePlans) {
         if (entry.profileContext?.authenticationSessionId === authenticationSessionId) transcodePlans.delete(id);
       }
       return playbackRegistry.revokeByAuthenticationSession(authenticationSessionId, reason, now());
     },
+    /** @param {string} itemId */
     revokeItem(itemId, reason = 'item_revoked') {
       for (const [id, entry] of transcodePlans) if (entry.itemId === itemId) transcodePlans.delete(id);
       return playbackRegistry.revokeByItem(itemId, reason, now());
@@ -1502,11 +1658,12 @@ export function createHeadlessMediaService({
         };
       });
     },
+    /** @param {{termGraceMs?: number}} [options] */
     async stop(options = {}) {
       if (stopPromise) return stopPromise;
       stopping = true;
       transcodePlans.clear();
-      const termGraceMs = Number.isFinite(options.termGraceMs)
+      const termGraceMs = typeof options.termGraceMs === 'number' && Number.isFinite(options.termGraceMs)
         ? Math.max(0, Math.min(30_000, Math.trunc(options.termGraceMs)))
         : PROCESS_TERM_GRACE_MS;
       stopPromise = (async () => {

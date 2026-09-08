@@ -4,6 +4,7 @@ import { hasPermission, isLocalNetworkAddress } from './auth-policy.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
+/** @param {import('node:http').ServerResponse} res @param {number} status @param {unknown} value @param {Record<string, string>} [headers] */
 function response(res, status, value, headers = {}) {
   const body = JSON.stringify(value);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body),
@@ -12,6 +13,7 @@ function response(res, status, value, headers = {}) {
   return true;
 }
 
+/** @param {import('node:http').IncomingMessage} req */
 function requestOrigin(req) {
   const host = String(req.headers.host || '').trim();
   if (!host || host.includes('@') || /[/?#\\]/.test(host)) {
@@ -21,6 +23,7 @@ function requestOrigin(req) {
   return parsed.origin;
 }
 
+/** @param {import('node:http').IncomingMessage} req */
 async function body(req) {
   const chunks = [];
   let size = 0;
@@ -34,6 +37,7 @@ async function body(req) {
   catch { throw Object.assign(new Error('Request body is invalid.'), { status: 400, code: 'invalid_json' }); }
 }
 
+/** @param {readonly string[]} [permissions] */
 function legacyScopes(permissions = []) {
   return [
     ...(permissions.includes('library.read') ? ['catalog:read'] : []),
@@ -43,6 +47,7 @@ function legacyScopes(permissions = []) {
   ];
 }
 
+/** @param {import('./server-state-types.js').StoredCatalogItem} item */
 function legacyMediaItem(item) {
   const type = item.animeLikely ? 'anime' : item.kind === 'episode' || item.type === 'tv' ? 'tv' : 'movie';
   return {
@@ -54,11 +59,13 @@ function legacyMediaItem(item) {
   };
 }
 
+/** @param {import('./server-state-types.js').StoredCatalogItem} item */
 function legacyCard(item) {
   const projected = legacyMediaItem(item);
   return { ...projected, playbackReferences: [{ progressKey: item.id }] };
 }
 
+/** @param {import('./server-state-types.js').Profile} profile */
 function legacyProfile(profile, sortOrder = 0) {
   const type = profile.type === 'kid' || profile.kind === 'child' ? 'kid'
     : profile.type === 'guest' || profile.kind === 'guest' ? 'guest' : 'standard';
@@ -68,11 +75,13 @@ function legacyProfile(profile, sortOrder = 0) {
     ...(profile.lastUsedAt === undefined ? {} : { lastUsedAt: profile.lastUsedAt }) };
 }
 
+/** @param {import('@loom-media-server/video-contracts').ActiveProfileSelection} active */
 function legacyActive(active) {
   return { profileId: active.profileId || null, selectionRequired: !active.profileId,
     selectionRevision: Number(active.selectionRevision) || 0, automaticSignIn: active.automaticSignIn === true };
 }
 
+/** @param {import('./server-state-types.js').StoredCatalogItem[]} items @param {(item: import('./server-state-types.js').StoredCatalogItem) => ReturnType<typeof legacyMediaItem>} [projection] */
 function collection(items, projection = legacyMediaItem) {
   return {
     movies: items.filter((item) => !item.animeLikely && item.kind !== 'episode').map(projection),
@@ -82,10 +91,12 @@ function collection(items, projection = legacyMediaItem) {
   };
 }
 
+/** @param {import('./server-state-types.js').StoredCatalogItem[]} items */
 function revisionFor(items) {
   return items.reduce((latest, item) => Math.max(latest, Number(item.updatedAt || item.indexedAt) || 0), 0);
 }
 
+/** @param {import('@loom-media-server/video-contracts').ProfilePreferences} preferences */
 function legacyPreferences(preferences) {
   return {
     ...(preferences.themeMode ? { appThemeMode: preferences.themeMode } : {}),
@@ -96,6 +107,7 @@ function legacyPreferences(preferences) {
   };
 }
 
+/** @param {Record<string, unknown>} input */
 function canonicalPreferences(input) {
   return {
     ...(input.appThemeMode !== undefined ? { themeMode: input.appThemeMode } : {}),
@@ -116,19 +128,23 @@ const UNAVAILABLE_LIBRARY_ITEM_ERRORS = new Set([
   'media_path_substituted',
 ]);
 
+/** @param {string} message */
 function legacyOptionUnsupported(message) {
   return Object.assign(new Error(message), { status: 422, code: 'legacy_option_unsupported' });
 }
 
+/** @param {unknown} value @param {string} field */
 function legacyTrackId(value, field) {
   if (value === undefined || value === null) return undefined;
-  if (!Number.isSafeInteger(value) || value < -1 || value > 65_535) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < -1 || value > 65_535) {
     throw Object.assign(new Error(`${field} must be -1 or a non-negative stream index.`), { status: 400, code: 'invalid_request' });
   }
   return value === -1 ? null : `stream:${value}`;
 }
 
+/** @param {import('./server-state-types.js').LegacyV2Options} [options] */
 export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, getCertificateFingerprint, clientAddress } = {}) {
+  /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {import('./server-state-types.js').LegacyV2Context} context */
   return async function legacyV2(req, res, context) {
     const url = new URL(req.url || '/', `https://${req.headers.host || 'loomtv.local'}`);
     if (!url.pathname.startsWith('/api/v2/') && url.pathname !== '/stream' && !url.pathname.startsWith('/hls/')) return false;
@@ -149,6 +165,7 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
           expiresAt: url.searchParams.get('expiresAt'), signature: url.searchParams.get('signature'),
         });
         if (!credential) return response(res, 401, { error: 'stream_token_invalid' });
+        if (!credential.accountId) return response(res, 401, { error: 'stream_token_invalid' });
         const account = await adminService.getPrincipalById(credential.accountId);
         const streamPrincipal = account ? { ...account, authentication: 'legacy-stream-capability',
           deviceId: credential.deviceId, devicePermissions: [...credential.permissions] } : null;
@@ -163,6 +180,9 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
           return response(res, 401, { error: 'stream_token_invalid' });
         }
         const mediaId = url.searchParams.get('mediaId');
+        const sourceId = url.searchParams.get('sourceId');
+        const fileVersion = url.searchParams.get('fileVersion');
+        if (mediaId === null || sourceId === null || fileVersion === null) return response(res, 401, { error: 'stream_token_invalid' });
         const item = await adminService.getLibraryItem(mediaId, streamPrincipal);
         if (!item) return response(res, 404, { error: 'media_not_found' });
         const contextForStream = await clientState.requireActivePlaybackProfile(streamPrincipal.id, credential.deviceId, item);
@@ -172,7 +192,7 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
         }
         await mediaService.serveDirectCapability(req, res, {
           itemId: mediaId, principal: streamPrincipal, profileContext: contextForStream,
-          sourceId: url.searchParams.get('sourceId'), fileVersion: url.searchParams.get('fileVersion'),
+          sourceId, fileVersion,
         });
         return true;
       }
@@ -191,6 +211,7 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
           certificateFingerprint: input.certificateFingerprint, address,
         });
         if (input.approvalRequested === true) return response(res, 202, requested);
+        if (typeof authorizeLegacyPairing !== 'function') return response(res, 410, { error: 'pin_pairing_retired' });
         const authorized = await authorizeLegacyPairing({
           code: String(input.code || ''), deviceName: String(input.deviceName || ''),
           address: address || '', requestId: requested.requestId,
@@ -206,8 +227,10 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
           approved: true, accountId: approval.accountId || owner.id, permissions: approval.permissions,
         }, owner);
         const result = await pairingService.status(requested.requestId, requested.requestSecret, address);
+        if (!('credential' in result)) return response(res, 409, { error: 'pairing_approval_unavailable' });
         const credentialToken = `${result.credential.id}.${result.credential.secret}`;
         const credential = await pairingService.authenticate(`LoomDevice ${credentialToken}`);
+        if (!credential) throw Object.assign(new Error('The approved device credential is unavailable.'), { status: 401, code: 'device_revoked' });
         const session = await adminService.issueDeviceSession(credential);
         const emptyLibrary = { movies: [], tvShows: [], animeShows: [], others: [] };
         return response(res, 200, { ok: true, deviceId: result.deviceId, accessToken: session.adminToken,
@@ -220,10 +243,11 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
         const input = await body(req);
         const address = typeof clientAddress === 'function' ? clientAddress(req) : req.socket?.remoteAddress;
         const result = await pairingService.status(input.requestId, input.requestSecret, address);
+        if (!('status' in result)) return response(res, 409, { error: 'pairing_approval_unavailable' });
         if (result.status === 'pending') return response(res, 202, result);
         if (result.status === 'denied') return response(res, 403, { ...result, error: 'The host denied this connection.' });
         if (result.status === 'expired') return response(res, 410, { ...result, error: 'Pairing approval expired.' });
-        if (result.status !== 'approved') return response(res, 409, { status: result.status, error: 'Pairing approval is unavailable.' });
+        if (!('credential' in result) || result.status !== 'approved') return response(res, 409, { status: result.status, error: 'Pairing approval is unavailable.' });
         const credentialToken = `${result.credential.id}.${result.credential.secret}`;
         const credential = await pairingService.authenticate(`LoomDevice ${credentialToken}`);
         if (!credential) throw Object.assign(new Error('The approved device credential is unavailable.'), { status: 401, code: 'device_revoked' });
@@ -285,16 +309,17 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
             const query = new URLSearchParams(Object.fromEntries(Object.entries(capability).map(([key, value]) => [key, String(value)])));
             query.set('resourceId', item.id);
             visible.push({ ...item, legacyStreamUrl: `${origin}/stream?${query}` });
-          } catch (error) {
-            if (HIDDEN_LIBRARY_ITEM_ERRORS.has(error?.code)) continue;
-            if (UNAVAILABLE_LIBRARY_ITEM_ERRORS.has(error?.code)) {
+          } catch (caught) {
+            const error = caught !== null && (typeof caught === 'object' || typeof caught === 'function') ? /** @type {Record<string, unknown>} */ (caught) : {}; 
+            if (typeof error.code === 'string' && HIDDEN_LIBRARY_ITEM_ERRORS.has(error.code)) continue;
+            if (typeof error.code === 'string' && UNAVAILABLE_LIBRARY_ITEM_ERRORS.has(error.code)) {
               // The v2 media schema has no availability field. Keep the record
               // decoder-valid with an empty, non-playable filePath so an
               // offline source does not look like a catalog deletion.
               visible.push({ ...item, legacyStreamUrl: '' });
               continue;
             }
-            throw error;
+            throw caught;
           }
         }
         return visible;
@@ -479,8 +504,9 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
         return response(res, 410, { error: 'legacy_route_retired', replacement: 'No canonical provider-metadata or segment contract is available.' });
       }
       return response(res, 404, { error: 'not_found' });
-    } catch (error) {
-      return response(res, Number.isInteger(error?.status) ? error.status : 500, {
+    } catch (caught) {
+      const error = caught !== null && (typeof caught === 'object' || typeof caught === 'function') ? /** @type {Record<string, unknown>} */ (caught) : {};
+      return response(res, typeof error.status === 'number' && Number.isInteger(error.status) ? error.status : 500, {
         error: error?.code || 'request_failed',
         message: Number(error?.status) >= 500 ? 'The compatibility request could not be completed.' : error?.message,
         ...(error?.retryAfter ? { retryAfter: error.retryAfter } : {}),

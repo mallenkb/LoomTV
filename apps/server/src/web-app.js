@@ -15,10 +15,12 @@ const DEFAULT_HLS_PATH = (() => {
 
 const FALLBACK_WEB_APP = '<!doctype html><html lang="en"><meta charset="utf-8"><title>LoomTV</title><body><p>LoomTV web client is unavailable.</p></body></html>';
 
+/** @param {import('./setup-page.js').SetupPageOptions & { getHls?: () => Promise<string | Buffer> }} options */
 export function createWebAppPage(options = {}) {
   const htmlProvider = options.getHtml || (() => fs.readFile(options.htmlPath || DEFAULT_WEB_APP_HTML_PATH, 'utf8').catch(() => FALLBACK_WEB_APP));
   const hlsProvider = options.getHls || (() => DEFAULT_HLS_PATH ? fs.readFile(DEFAULT_HLS_PATH) : Promise.reject(Object.assign(new Error('HLS runtime is not installed.'), { code: 'ENOENT' })));
   const setupGuard = createSetupRedirectGuard(options.getSetupStatus, 'app');
+  /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res */
   return async function handleWebApp(req, res) {
     const pathname = new URL(req.url || '/', 'http://loomtv.local').pathname;
     const isHtml = pathname === '/app' || pathname === WEB_APP_PATH;

@@ -3,32 +3,39 @@ import { hasPermission, isLocalNetworkAddress } from './auth-policy.js';
 
 const INVITATION_PERMISSIONS = Object.freeze(['library.read', 'stream', 'downloads']);
 const RATE_WINDOW_MS = 10 * 60 * 1000;
+/** @type {Readonly<Record<string, number>>} */
 const RATE_LIMITS = Object.freeze({ credential: 30, pairing: 12, media: 600, download: 600, admin: 120, compatibility: 300, public: 180 });
 const INVITATION_SESSION_IDLE_MS = 30 * 60 * 1000;
 const MAX_SCOPE_IDS = 512;
 
+/** @param {number} status @param {string} code @param {string} message @param {{retryAfter?: number}} [details] */
 function remoteError(status, code, message, details = {}) {
   return Object.assign(new Error(message), { status, code, ...details });
 }
 
+/** @param {unknown} value */
 function digest(value) {
   return createHash('sha256').update(String(value)).digest('hex');
 }
 
+/** @param {unknown} left @param {unknown} right */
 function safeEqual(left, right) {
   const actual = Buffer.from(String(left || ''), 'utf8');
   const expected = Buffer.from(String(right || ''), 'utf8');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+/** @param {unknown} value @param {number} fallback @param {number} minimum @param {number} maximum */
 function boundedInteger(value, fallback, minimum, maximum) {
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(Number(value))) throw remoteError(400, 'invalid_request', 'A remote policy limit is invalid.');
   return Math.max(minimum, Math.min(maximum, Number(value)));
 }
 
+/** @param {unknown} value */
 function scalarDetails(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  /** @type {Record<string, string | number | boolean | null>} */
   const result = {};
   for (const [key, item] of Object.entries(value).slice(0, 32)) {
     if (/secret|token|credential|authorization|cookie|path|locator|url|header|address|fingerprint/i.test(key)) continue;
@@ -39,6 +46,9 @@ function scalarDetails(value) {
   return result;
 }
 
+/** @overload @param {unknown} value @param {'rootIds'} field @returns {string[]} */
+/** @overload @param {unknown} value @param {'mediaIds'} field @returns {string[] | null} */
+/** @param {unknown} value @param {'rootIds' | 'mediaIds'} field */
 function uniqueIds(value, field) {
   if (value === null && field === 'mediaIds') return null;
   if (!Array.isArray(value)) throw remoteError(400, 'invalid_request', `${field} must be an array.`);
@@ -47,6 +57,7 @@ function uniqueIds(value, field) {
   return ids;
 }
 
+/** @param {import('./server-media-types.js').MediaSource} source */
 function fileVersion(source) {
   return createHash('sha256').update([
     source.sourceId, source.fileId?.dev, source.fileId?.ino,
@@ -54,22 +65,30 @@ function fileVersion(source) {
   ].join('\0')).digest('base64url');
 }
 
+/** @param {import('./server-media-types.js').StoredDownloadLease} lease */
 function publicDownloadLease(lease) {
-  const { secretHash: _secretHash, quotaOwner: _quotaOwner, fileVersion: _fileVersion, ...safe } = lease;
+  const safe = { ...lease };
+  delete safe.secretHash;
+  delete safe.quotaOwner;
+  delete safe.fileVersion;
   return safe;
 }
 
+/** @param {import('./server-media-types.js').RemoteServiceOptions} options */
 export function createRemotePolicyService({ store, proxyPolicy, getAccount, getAdminService, getClientState, clock = Date.now }) {
   if (!store || !proxyPolicy) throw new Error('Remote policy requires canonical state and a trusted-proxy policy.');
+  /** @type {Map<string, {count: number; resetAt: number; reported?: boolean}>} */
   const rateBuckets = new Map();
   const addressAuditKey = randomBytes(32);
 
+  /** @param {import('./server-media-types.js').AuthRequest | undefined} req @returns {import('./server-media-types.js').RemoteContext} */
   function context(req) {
     const address = proxyPolicy.clientAddress(req);
     const requestClass = isLocalNetworkAddress(address) ? 'local' : 'remote';
     return { address, requestClass, secure: proxyPolicy.isSecureRequest(req) };
   }
 
+  /** @param {string} action @param {import('@loom-media-server/video-contracts').AuditEvent['outcome']} outcome @param {import('./server-media-types.js').RemoteContext | null | undefined} requestContext @param {(import('./server-admin-types.js').PolicyPrincipal & { authentication?: string, invitationSessionId?: string }) | null} [actor] @param {unknown} [details] */
   function audit(action, outcome, requestContext, actor = null, details = {}) {
     const actorType = actor?.authentication === 'invitation-session'
       ? 'invitation' : actor?.authentication === 'device-credential' || actor?.authentication === 'device-session'
@@ -84,16 +103,22 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     });
   }
 
+  /** @param {import('./server-media-types.js').RemoteContext} requestContext @param {string} routeClass */
   function consumeRate(requestContext, routeClass) {
     if (requestContext.requestClass !== 'remote') return;
     const limit = RATE_LIMITS[routeClass] || RATE_LIMITS.public;
     const currentTime = clock();
     const key = digest(`${requestContext.address}\0${routeClass}`);
     const prior = rateBuckets.get(key);
+    /** @type {{count: number; resetAt: number; reported?: boolean}} */
     const bucket = !prior || prior.resetAt <= currentTime ? { count: 0, resetAt: currentTime + RATE_WINDOW_MS } : prior;
     bucket.count += 1;
     rateBuckets.set(key, bucket);
-    while (rateBuckets.size > 4096) rateBuckets.delete(rateBuckets.keys().next().value);
+    while (rateBuckets.size > 4096) {
+      const oldest = rateBuckets.keys().next();
+      if (oldest.done) break;
+      rateBuckets.delete(oldest.value);
+    }
     if (bucket.count > limit) {
       const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - currentTime) / 1000));
       if (!bucket.reported) {
@@ -104,6 +129,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     }
   }
 
+  /** @param {import('./server-media-types.js').AuthRequest | undefined} req */
   function preflight(req, routeClass = 'public') {
     if (req?.__loomRemoteContext) return req.__loomRemoteContext;
     const requestContext = context(req);
@@ -125,6 +151,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return requestContext;
   }
 
+  /** @param {import('@loom-media-server/video-contracts').InvitationScope} scope @param {import('./server-media-types.js').Principal} issuer */
   function liveInvitationScope(scope, issuer) {
     const rootIds = issuer.rootIds === null
       ? [...scope.rootIds]
@@ -135,6 +162,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return { ...scope, rootIds, permissions };
   }
 
+  /** @param {import('@loom-media-server/video-contracts').InvitationScope} scope @param {import('./server-media-types.js').Principal} issuer */
   async function authorizedInvitationScope(scope, issuer) {
     const liveScope = liveInvitationScope(scope, issuer);
     if (!liveScope) return null;
@@ -146,6 +174,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return rootIds.length ? { ...liveScope, rootIds } : null;
   }
 
+  /** @param {import('./server-media-types.js').AuthRequest | undefined} req @param {import('./server-media-types.js').Principal | null | undefined} principal */
   function assertPrincipal(req, principal, routeClass = 'public') {
     const requestContext = preflight(req, routeClass);
     if (requestContext.requestClass === 'remote'
@@ -161,6 +190,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return store.readRemotePolicy();
   }
 
+  /** @param {{enabled?: unknown; downloadQuotaBytes?: unknown; downloadLeaseTtlMs?: unknown; invitationTtlMs?: unknown}} input @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
   function updatePolicy(input, principal, req) {
     const requestContext = context(req);
     if (!hasPermission(principal, 'remote.manage')) throw remoteError(403, 'permission_denied', 'Remote policy management permission is required.');
@@ -178,6 +208,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return updated;
   }
 
+  /** @param {import('./server-media-types.js').InvitationInput} input @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
   async function createInvitation(input, principal, req) {
     const requestContext = assertPrincipal(req, principal, 'admin');
     if (!hasPermission(principal, 'sharing.manage')) throw remoteError(403, 'permission_denied', 'Sharing management permission is required.');
@@ -185,7 +216,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     const rootIds = uniqueIds(input.rootIds, 'rootIds');
     const mediaIds = uniqueIds(input.mediaIds ?? null, 'mediaIds');
     const permissions = [...new Set((Array.isArray(input.permissions) ? input.permissions : ['library.read', 'stream'])
-      .filter((entry) => INVITATION_PERMISSIONS.includes(entry)))];
+      .filter(/** @returns {entry is import('@loom-media-server/video-contracts').InvitationPermission} */ (entry) => typeof entry === 'string' && INVITATION_PERMISSIONS.includes(entry)))];
     if (!profileId || !rootIds.length || !permissions.includes('library.read')
       || (Array.isArray(input.permissions) && permissions.length !== input.permissions.length)) {
       throw remoteError(400, 'invalid_request', 'Invitation scope is invalid.');
@@ -208,8 +239,9 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       const item = await admin.getLibraryItem(mediaId, principal);
       if (!item) throw remoteError(404, 'media_not_found', 'An invited media item is unavailable.');
       const sources = store.listMediaSources(mediaId);
-      if (!sources.some((source) => rootIds.includes(source.rootId))) throw remoteError(403, 'permission_denied', 'An invited media item is outside the invitation roots.');
-      await clientState.requireScopedProfile(principal.id, profileId, { ...item, rootId: sources.find((source) => rootIds.includes(source.rootId))?.rootId });
+      const scopedSource = sources.find((source) => typeof source.rootId === 'string' && rootIds.includes(source.rootId));
+      if (!scopedSource?.rootId) throw remoteError(403, 'permission_denied', 'An invited media item is outside the invitation roots.');
+      await clientState.requireScopedProfile(principal.id, profileId, { ...item, rootId: scopedSource.rootId });
     }
     const currentPolicy = policy();
     const ttlMs = boundedInteger(input.ttlMs, currentPolicy.invitationTtlMs, 60_000, currentPolicy.invitationTtlMs);
@@ -224,6 +256,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return { ...invitation, secret, scheme: 'LoomInvite' };
   }
 
+  /** @param {string} invitationId @param {string} invitationSecret @param {unknown} deviceId @param {import('./server-media-types.js').AuthRequest} req */
   async function acceptInvitation(invitationId, invitationSecret, deviceId, req) {
     const requestContext = preflight(req, 'credential');
     const invitation = store.readInvitation(invitationId, true);
@@ -241,10 +274,13 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       sessionId: randomUUID(), sessionSecretHash: digest(sessionSecret), deviceId: normalizedDeviceId, createdAt,
       idleExpiresAt: Math.min(invitation.expiresAt, createdAt + INVITATION_SESSION_IDLE_MS), absoluteExpiresAt: invitation.expiresAt });
     audit('invitation.accept', 'created', requestContext, null, { invitationId, sessionId: session.id });
-    const { secretHash: _secretHash, issuerAccountId: _issuerAccountId, ...safeSession } = session;
+    const safeSession = { ...session };
+    delete safeSession.secretHash;
+    delete safeSession.issuerAccountId;
     return { ...safeSession, credential: { id: session.id, secret: sessionSecret, scheme: 'LoomInvitation' } };
   }
 
+  /** @param {import('./server-media-types.js').AuthRequest} req */
   async function authenticateInvitation(req) {
     const match = /^LoomInvitation\s+([A-Za-z0-9-]{36})\.([A-Za-z0-9_-]{32,256})$/.exec(String(req?.headers?.authorization || '').trim());
     if (!match) return null;
@@ -253,7 +289,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     const currentTime = clock();
     if (!session || session.revokedAt || session.idleExpiresAt <= currentTime || session.absoluteExpiresAt <= currentTime
       || !safeEqual(session.secretHash, digest(match[2]))) throw remoteError(401, 'session_expired', 'Invitation session is unavailable.');
-    const issuer = await getAccount(session.issuerAccountId);
+    const issuer = await getAccount(session.issuerAccountId || '');
     if (!issuer || !hasPermission(issuer, 'sharing.manage')) {
       store.revokeInvitationSession(session.id, 'issuer_revoked', currentTime);
       throw remoteError(403, 'permission_denied', 'Invitation session is no longer authorized.');
@@ -271,11 +307,12 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     };
   }
 
+  /** @param {string} sessionId */
   async function resolveInvitationPrincipal(sessionId) {
     const session = store.readInvitationSession(sessionId, true);
     const currentTime = clock();
     if (!session || session.revokedAt || session.idleExpiresAt <= currentTime || session.absoluteExpiresAt <= currentTime) return null;
-    const issuer = await getAccount(session.issuerAccountId);
+    const issuer = await getAccount(session.issuerAccountId || '');
     if (!issuer || !hasPermission(issuer, 'sharing.manage')) return null;
     const liveScope = await authorizedInvitationScope(session.scope, issuer);
     if (!liveScope) return null;
@@ -286,16 +323,20 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       invitationScope: liveScope, sessionId: session.id };
   }
 
+  /** @param {import('./server-media-types.js').Principal | null | undefined} principal @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource} [media] */
   async function invitationProfileContext(principal, media) {
     if (principal?.authentication !== 'invitation-session') return null;
+    if (!principal.invitationProfileId) throw remoteError(403, 'permission_denied', 'Invitation profile is unavailable.');
+    const deviceId = principal.deviceId ?? undefined;
     if (!media) return getClientState().requireScopedProfile(
-      principal.id, principal.invitationProfileId, undefined, principal.deviceId,
+      principal.id, principal.invitationProfileId, undefined, deviceId,
     );
     if (principal.invitationMediaIds && !principal.invitationMediaIds.includes(media.id)) throw remoteError(403, 'permission_denied', 'Media is outside the invitation scope.');
-    if (!principal.rootIds?.includes(media.rootId)) throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
-    return getClientState().requireScopedProfile(principal.id, principal.invitationProfileId, media, principal.deviceId);
+    if (!principal.rootIds?.includes(media.rootId || '')) throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+    return getClientState().requireScopedProfile(principal.id, principal.invitationProfileId, media, deviceId);
   }
 
+  /** @param {import('./server-media-types.js').DownloadInput} input @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
   async function createDownload(input, principal, req) {
     const requestContext = assertPrincipal(req, principal, 'download');
     if (!hasPermission(principal, 'downloads')) throw remoteError(403, 'download_not_allowed', 'Offline downloads are not allowed.');
@@ -306,10 +347,11 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     }
     const profileContext = principal.authentication === 'invitation-session'
       ? await invitationProfileContext(principal, source)
-      : await getClientState().requireActivePlaybackProfile(principal.id, principal.deviceId, source);
+      : await getClientState().requireActivePlaybackProfile(principal.id, principal.deviceId ?? undefined, source);
+    if (!profileContext) throw remoteError(403, 'permission_denied', 'Download profile is unavailable.');
     const currentPolicy = policy();
     const ownerQuota = principal.authentication === 'invitation-session'
-      ? Math.min(currentPolicy.downloadQuotaBytes, principal.invitationScope.downloadQuotaBytes)
+      ? Math.min(currentPolicy.downloadQuotaBytes, principal.invitationScope?.downloadQuotaBytes ?? 0)
       : currentPolicy.downloadQuotaBytes;
     const ttlMs = boundedInteger(input.ttlMs, currentPolicy.downloadLeaseTtlMs, 60_000, currentPolicy.downloadLeaseTtlMs);
     const secret = randomBytes(32).toString('base64url');
@@ -327,6 +369,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       credential: { id: lease.id, secret, scheme: 'LoomDownload' } };
   }
 
+  /** @param {import('./server-media-types.js').AuthRequest} req @param {string} downloadId */
   async function authorizeDownload(req, downloadId) {
     const requestContext = preflight(req, 'download');
     const match = /^LoomDownload\s+([A-Za-z0-9-]{36})\.([A-Za-z0-9_-]{32,256})$/.exec(String(req?.headers?.authorization || '').trim());
@@ -336,13 +379,14 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     if (!lease || lease.revokedAt || lease.expiresAt <= currentTime || !safeEqual(lease.secretHash, digest(match[2]))) {
       throw remoteError(401, 'session_expired', 'Download lease is unavailable.');
     }
+    /** @type {import('./server-media-types.js').Principal | null} */
     let principal;
     let invitationSession = null;
     if (lease.invitationSessionId) {
       invitationSession = store.readInvitationSession(lease.invitationSessionId, true);
       if (!invitationSession || invitationSession.revokedAt || invitationSession.idleExpiresAt <= currentTime
         || invitationSession.absoluteExpiresAt <= currentTime) throw remoteError(401, 'session_expired', 'Download lease is unavailable.');
-      const issuer = await getAccount(invitationSession.issuerAccountId);
+      const issuer = await getAccount(invitationSession.issuerAccountId || '');
       if (!issuer || !hasPermission(issuer, 'sharing.manage') || !invitationSession.scope.permissions.includes('downloads')) {
         throw remoteError(403, 'download_not_allowed', 'Download authority was revoked.');
       }
@@ -355,7 +399,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
         invitationMediaIds: liveScope.mediaIds, invitationProfileId: liveScope.profileId,
         invitationScope: liveScope };
     } else {
-      principal = await getAccount(lease.accountId);
+      principal = await getAccount(lease.accountId || '');
       if (!principal || !hasPermission(principal, 'downloads')) throw remoteError(403, 'download_not_allowed', 'Download authority was revoked.');
     }
     assertPrincipal(req, principal, 'download');
@@ -363,7 +407,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     const profileContext = principal.authentication === 'invitation-session'
       ? await invitationProfileContext(principal, source)
       : await getClientState().requireActivePlaybackProfile(principal.id, lease.deviceId, source);
-    if (profileContext.profileId !== lease.profileId || profileContext.selectionRevision !== lease.selectionRevision
+    if (!profileContext || profileContext.profileId !== lease.profileId || profileContext.selectionRevision !== lease.selectionRevision
       || source.rootId !== lease.rootId || source.sourceId !== lease.sourceId || source.sizeBytes !== lease.sizeBytes
       || fileVersion(source) !== lease.fileVersion) throw remoteError(409, 'source_unavailable', 'Download lease binding changed.');
     if (req.headers.range && !lease.allowRanges) throw remoteError(416, 'download_not_allowed', 'This download lease does not permit byte ranges.');
@@ -373,12 +417,14 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return { lease, principal, source, requestContext };
   }
 
+  /** @param {import('./server-media-types.js').Principal} principal */
   function listDownloads(principal) {
     return store.listDownloadLeases(principal.authentication === 'invitation-session'
       ? { invitationSessionId: principal.invitationSessionId } : { accountId: principal.id })
       .map(publicDownloadLease);
   }
 
+  /** @param {string} id @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
   function revokeDownload(id, principal, req) {
     const requestContext = assertPrincipal(req, principal, 'download');
     const changed = store.revokeDownloadLease(id, principal.authentication === 'invitation-session'
@@ -391,7 +437,8 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
   return {
     context, preflight, assertPrincipal, policy, updatePolicy, audit,
     createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext,
-    listInvitations: (principal) => store.listInvitations(principal.id),
+    listInvitations: (/** @type {import('./server-media-types.js').Principal} */ principal) => store.listInvitations(principal.id),
+    /** @param {string} id @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
     revokeInvitation(id, principal, req) {
       const requestContext = assertPrincipal(req, principal, 'admin');
       if (!hasPermission(principal, 'sharing.manage')) throw remoteError(403, 'permission_denied', 'Sharing management permission is required.');
@@ -399,15 +446,16 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       audit('invitation.revoke', 'revoked', requestContext, principal, { invitationId: id });
       return true;
     },
+    /** @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
     revokeInvitationSession(principal, req) {
-      if (principal.authentication !== 'invitation-session') throw remoteError(400, 'invalid_request', 'An invitation session is required.');
+      if (principal.authentication !== 'invitation-session' || !principal.invitationSessionId) throw remoteError(400, 'invalid_request', 'An invitation session is required.');
       const requestContext = assertPrincipal(req, principal, 'credential');
       store.revokeInvitationSession(principal.invitationSessionId, 'user_revoked', clock());
       audit('invitation.session.revoke', 'revoked', requestContext, principal, { sessionId: principal.invitationSessionId });
       return true;
     },
     createDownload, authorizeDownload, listDownloads, revokeDownload,
-    listAuditEvents: (input) => store.listAuditEvents(input),
+    listAuditEvents: (/** @type {Parameters<import('./server-media-types.js').RemoteStore['listAuditEvents']>[0]} */ input) => store.listAuditEvents(input),
     supportedInvitationPermissions: [...INVITATION_PERMISSIONS],
   };
 }

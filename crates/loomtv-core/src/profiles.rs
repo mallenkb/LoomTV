@@ -11,13 +11,22 @@ impl Store {
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional()?;
         match saved {
-            Some((id, revision, automatic, has_pin)) if revision != self.revision || self.active.as_deref() != Some(&id) => {
+            Some((id, revision, automatic, has_pin))
+                if revision != self.revision || self.active.as_deref() != Some(&id) =>
+            {
                 self.revision = revision;
-                self.active = if automatic && !has_pin { Some(id) } else { None };
+                self.active = if automatic && !has_pin {
+                    Some(id)
+                } else {
+                    None
+                };
                 self.unlocked_until = 0;
             }
-            None => { self.active = None; self.unlocked_until = 0; }
-            _ => {},
+            None => {
+                self.active = None;
+                self.unlocked_until = 0;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -42,7 +51,10 @@ impl Store {
             params![id, self.revision], |row| row.get(0),
         )?;
         if !selected {
-            return Err(Error::new("stale_profile_selection", "The active profile changed."));
+            return Err(Error::new(
+                "stale_profile_selection",
+                "The active profile changed.",
+            ));
         }
         let (_kind, has_pin): (String, bool) = self.db.query_row(
             "SELECT profile_type,pin_hash IS NOT NULL FROM profiles WHERE id=?",

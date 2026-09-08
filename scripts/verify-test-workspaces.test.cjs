@@ -28,6 +28,10 @@ function policyFixture(t) {
       scripts: { test: 'node --test' },
     });
   }
+  writeJson(path.join(root, 'packages/lan-protocol/package.json'), {
+    name: '@loom-media-server/lan-protocol',
+    scripts: { typecheck: 'tsc --noEmit' },
+  });
   return root;
 }
 
@@ -69,5 +73,40 @@ test('rejects an expected package removed from the workspace patterns', (t) => {
 
   assert.deepEqual(validateTestWorkspacePolicy(root), [
     'packages/runtime-paths is not included by pnpm-workspace.yaml',
+  ]);
+});
+
+test('requires classification for new workspace packages', (t) => {
+  const root = policyFixture(t);
+  writeJson(path.join(root, 'apps/new-client/package.json'), { name: 'new-client' });
+  assert.deepEqual(validateTestWorkspacePolicy(root), [
+    'apps/new-client must be classified as a test workspace or an explicit exclusion',
+  ]);
+});
+
+test('ignores directories without manifests and excluded packages regardless of pattern order', (t) => {
+  const root = policyFixture(t);
+  fs.mkdirSync(path.join(root, 'apps/assets'));
+  writeJson(path.join(root, 'apps/excluded/package.json'), { name: 'excluded' });
+  fs.writeFileSync(path.join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "!apps/excluded"\n  - apps/*\n  - packages/*\n  - .\n');
+  assert.deepEqual(validateTestWorkspacePolicy(root), []);
+});
+
+test('discovers literal and nested workspace patterns', (t) => {
+  const root = policyFixture(t);
+  writeJson(path.join(root, 'tools/checker/package.json'), { name: 'checker' });
+  writeJson(path.join(root, 'extensions/group/addon/package.json'), { name: 'addon' });
+  fs.appendFileSync(path.join(root, 'pnpm-workspace.yaml'), '  - tools/checker\n  - extensions/**\n');
+  assert.deepEqual(validateTestWorkspacePolicy(root).sort(), [
+    'extensions/group/addon must be classified as a test workspace or an explicit exclusion',
+    'tools/checker must be classified as a test workspace or an explicit exclusion',
+  ]);
+});
+
+test('requires reclassification when an excluded package gains tests', (t) => {
+  const root = policyFixture(t);
+  writeJson(path.join(root, 'packages/lan-protocol/package.json'), { scripts: { test: 'node --test' } });
+  assert.deepEqual(validateTestWorkspacePolicy(root), [
+    'packages/lan-protocol is excluded from test workspaces but has a test script',
   ]);
 });

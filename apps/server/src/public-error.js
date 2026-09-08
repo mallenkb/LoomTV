@@ -1,10 +1,26 @@
 import { API_ERROR_CODES } from '@loom-media-server/video-contracts';
 
+/** @type {Set<string>} */
 const PUBLIC_ERROR_CODES = new Set(API_ERROR_CODES);
 
+/** @param {unknown} error */
+export function errorDetails(error) {
+  const source = error && typeof error === 'object' ? error : {};
+  return {
+    code: 'code' in source && typeof source.code === 'string' ? source.code : undefined,
+    name: 'name' in source && typeof source.name === 'string' ? source.name : undefined,
+    message: 'message' in source && typeof source.message === 'string' ? source.message : undefined,
+    retryAfter: 'retryAfter' in source && typeof source.retryAfter === 'number' ? source.retryAfter : undefined,
+    retryable: 'retryable' in source && typeof source.retryable === 'boolean' ? source.retryable : undefined,
+    provider: 'provider' in source && typeof source.provider === 'string' ? source.provider : undefined,
+  };
+}
+
+/** @param {unknown} error */
 export function canonicalPublicError(error) {
-  const internalCode = typeof error?.code === 'string' ? error.code : '';
-  let status = Number.isInteger(error?.status) ? error.status : 500;
+  const details = error && typeof error === 'object' ? error : {};
+  const internalCode = 'code' in details && typeof details.code === 'string' ? details.code : '';
+  let status = 'status' in details && typeof details.status === 'number' && Number.isInteger(details.status) ? details.status : 500;
   let code = internalCode;
 
   if (['media_source_unavailable', 'media_source_unreadable', 'source_unavailable', 'media_path_substituted', 'stream_source_revoked'].includes(internalCode)) code = 'source_unavailable';

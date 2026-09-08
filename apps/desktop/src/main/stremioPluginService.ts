@@ -91,6 +91,15 @@ export class StremioPluginServiceError extends Error {
   }
 }
 
+function providerRequestCancelled(cause?: unknown): StremioPluginServiceError {
+  return new StremioPluginServiceError(
+    'STREMIO_PLUGIN_REQUEST_CANCELLED',
+    'The provider request was cancelled.',
+    true,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
 export type StremioHostProfile = {
   id: string;
   type: 'owner' | 'standard' | 'kid' | 'guest';
@@ -387,6 +396,7 @@ export class StremioPluginService {
     return this.mutateRegistry(
       (registry) => registry.disable(addonId),
       (_disabled, actor) => ({ addonId, eventType: 'addon_disabled', actor }),
+      () => this.abortProviderRequestsForAddon(addonId),
     );
   }
 
@@ -394,6 +404,7 @@ export class StremioPluginService {
     return this.mutateRegistry(
       (registry) => registry.remove(addonId),
       (removed, actor) => removed ? { addonId, eventType: 'addon_removed', actor } : undefined,
+      () => this.abortProviderRequestsForAddon(addonId),
     );
   }
 
@@ -564,6 +575,7 @@ export class StremioPluginService {
   private mutateRegistry<T>(
     operation: (registry: StremioAddonRegistry) => T | Promise<T>,
     auditForResult?: (result: T, actor: string) => Parameters<StremioPluginServiceDependencies['saveState']>[1],
+    onCommitted?: () => void,
   ): Promise<T> {
     return this.enqueueMutation(async () => {
       const actorProfile = this.deps.authorizeManagement();
@@ -582,6 +594,7 @@ export class StremioPluginService {
         this.restoreRegistry(previous);
         throw storageUnavailable(error);
       }
+      onCommitted?.();
       return result;
     });
   }
@@ -620,7 +633,9 @@ export class StremioPluginService {
       try {
         providerStarted = true;
         const result = await operation(this.getRegistry(), requestSignal);
+        if (requestSignal.aborted) throw providerRequestCancelled();
         this.deps.validateProfileAuthorization?.(profileId, profileAuthorization);
+        if (requestSignal.aborted) throw providerRequestCancelled();
         const after = this.requireProfileAccess(profileId, addonId);
         if (before.reviewToken !== after.reviewToken || before.approvedAt !== after.approvedAt) {
           throw new StremioPluginServiceError(
@@ -630,18 +645,31 @@ export class StremioPluginService {
           );
         }
         await this.persistProviderHealth(addonId, true);
+        if (requestSignal.aborted) throw providerRequestCancelled();
         return result;
       } catch (error) {
-        const expectedCancellation = (error instanceof StremioPluginServiceError && (error.code === 'STREMIO_PLUGIN_REQUEST_CANCELLED' || error.code === 'STREMIO_PLUGIN_RESULT_STALE'))
-          || (error instanceof StremioAdapterError && error.code === 'REQUEST_CANCELLED');
-        if (providerStarted && !expectedCancellation) await this.persistProviderHealth(addonId, false, error);
-        throw error;
+        const normalizedError = requestSignal.aborted
+          ? error instanceof StremioPluginServiceError && error.code === 'STREMIO_PLUGIN_REQUEST_CANCELLED'
+            ? error
+            : providerRequestCancelled(error)
+          : error;
+        const expectedCancellation = (normalizedError instanceof StremioPluginServiceError && (normalizedError.code === 'STREMIO_PLUGIN_REQUEST_CANCELLED' || normalizedError.code === 'STREMIO_PLUGIN_RESULT_STALE'))
+          || (normalizedError instanceof StremioAdapterError && normalizedError.code === 'REQUEST_CANCELLED');
+        if (providerStarted && !expectedCancellation) await this.persistProviderHealth(addonId, false, normalizedError);
+        throw normalizedError;
       }
     }, globalSignal), controller.signal);
     return request.finally(() => {
       signal?.removeEventListener('abort', abortExternal);
       if (this.latestProviderRequests.get(requestKey) === controller) this.latestProviderRequests.delete(requestKey);
     });
+  }
+
+  private abortProviderRequestsForAddon(addonId: string): void {
+    const suffix = `\u0000${addonId}`;
+    for (const [requestKey, controller] of this.latestProviderRequests) {
+      if (requestKey.endsWith(suffix)) controller.abort();
+    }
   }
 
   private isConfigured(record: StremioInstallRecord): boolean {

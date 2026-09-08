@@ -77,3 +77,41 @@ test('passes cancellation to the provider request', async () => {
     throw new DOMException('Aborted', 'AbortError');
   }), { name: 'AbortError' });
 });
+
+test('rejects a late search response even when the transport ignores cancellation', async () => {
+  const controller = new AbortController();
+  let respond!: (response: Response) => void;
+  const pending = findOnlineSubtitles(video, controller.signal, () => new Promise(resolve => { respond = resolve; }));
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  controller.abort();
+  respond(Response.json({ subtitles: [] }));
+  await rejected;
+});
+
+test('rejects a subtitle body completed after cancellation', async () => {
+  const controller = new AbortController();
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  let started!: () => void;
+  const reading = new Promise<void>(resolve => { started = resolve; });
+  const subtitle = { id: downloadUrl, url: downloadUrl, language: 'eng', name: 'Movie.srt', source: 'OpenSubtitles v3' as const };
+  const pending = downloadOnlineSubtitle(subtitle, controller.signal, async () => new Response(new ReadableStream({
+    start(stream) { body = stream; },
+    pull() { started(); },
+  })));
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  await reading;
+  controller.abort();
+  body.enqueue(new TextEncoder().encode('1\n00:00:01,000 --> 00:00:02,000\nHello\n'));
+  body.close();
+  await rejected;
+});
+
+test('reports provider timeout separately from user cancellation', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = findOnlineSubtitles(video, undefined, async (_url, init) => new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+  }));
+  const rejected = assert.rejects(pending, /request timed out/);
+  t.mock.timers.tick(20_000);
+  await rejected;
+});
