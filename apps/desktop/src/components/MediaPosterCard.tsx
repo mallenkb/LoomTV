@@ -11,7 +11,6 @@ import { posterSources, routeArtworkState, uniqueArtworkSources } from '@/lib/ar
 import { artworkVariant } from '@/lib/artworkVariants';
 import { desktopApi } from '@/lib/desktopApi';
 import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.helpers';
-import { mediaFormatLabel } from '@/shared/mediaFormat';
 import { resetProgress, useProgressSnapshot } from '@/lib/progress';
 import { matchesLibraryFilter } from '@/lib/libraryFilters';
 import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
@@ -107,11 +106,6 @@ const MediaPosterCard = memo(function MediaPosterCard({
   const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item), variant === 'others');
   const isImage = variant === 'others' && item.format?.toLowerCase() === 'image';
   const displayTitle = variant === 'others' ? fileNameForItem(item) : item.title;
-  const formatLabel = isImage
-    ? 'Image'
-    : variant === 'others' && item.type === 'movie'
-      ? 'Video'
-    : mediaFormatLabel(item.format, item.type);
   const { watchedKeys, setWatchedEntries } = useProfiles();
   const progress = useProgressSnapshot();
   const watchedByProgress = matchesLibraryFilter(item, 'watched', progress);
@@ -168,10 +162,12 @@ const MediaPosterCard = memo(function MediaPosterCard({
         <h4 className={variant === 'others'
           ? 'line-clamp-2 min-h-[2rem] w-full break-all text-center text-xs font-normal leading-snug text-[var(--loom-text)]'
           : 'line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]'}>{displayTitle}</h4>
-        {variant !== 'others' && (metaLine || item.format) && (
+        {variant !== 'others' && (metaLine || item.contentRating) && (
           <div className="loom-poster-meta mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
             {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
-            <ContentRatingBadge rating={formatLabel} className="shrink-0 bg-[var(--loom-surface-3)]" />
+            {item.contentRating && (
+              <ContentRatingBadge rating={item.contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
+            )}
           </div>
         )}
       </div>

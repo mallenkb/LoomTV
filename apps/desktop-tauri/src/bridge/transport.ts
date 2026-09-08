@@ -16,6 +16,7 @@ export function createTauriTransport(
   },
 ): { transport: DesktopTransport; dispose: Stop } {
   const channels = new Map<string, Map<Listener, Subscription>>();
+  const pendingSubscriptions = new Set<Promise<void>>();
   let closed = false;
   const closedError = () => Object.assign(new Error('The desktop connection has closed.'), { code: 'bridge_closed' });
   function stop(subscription: Subscription, channel: string) {
@@ -28,6 +29,9 @@ export function createTauriTransport(
     async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
       if (closed) throw closedError();
       try {
+        // Register event receivers before a command can emit its first update.
+        if (pendingSubscriptions.size) await Promise.all(pendingSubscriptions);
+        if (closed) throw closedError();
         const result = await native.invoke<T>('desktop_invoke', { channel, args });
         if (closed) throw closedError();
         return result;
@@ -51,13 +55,14 @@ export function createTauriTransport(
       if (previous) stop(previous, channel);
       const subscription: Subscription = { cancelled: false };
       listeners.set(listener, subscription);
-      void Promise.resolve().then(() => native.listen(`loomtv:${channel}`, event => {
+      const ready = Promise.resolve().then(() => native.listen(`loomtv:${channel}`, event => {
         if (subscription.cancelled || closed) return;
         if (!Array.isArray(event.payload)) {
           reportError(channel, new Error('The desktop event payload must be an argument array.'));
           return;
         }
-        listener(undefined, ...event.payload);
+        try { listener(undefined, ...event.payload); }
+        catch (error) { reportError(channel, error); }
       })).then(unlisten => {
         if (subscription.cancelled || closed) unlisten();
         else subscription.stop = unlisten;
@@ -67,7 +72,10 @@ export function createTauriTransport(
           if (listeners.size === 0) channels.delete(channel);
         }
         if (!subscription.cancelled && !closed) reportError(channel, error);
+      }).finally(() => {
+        pendingSubscriptions.delete(ready);
       });
+      pendingSubscriptions.add(ready);
     },
     removeListener(channel, listener) {
       const listeners = channels.get(channel);

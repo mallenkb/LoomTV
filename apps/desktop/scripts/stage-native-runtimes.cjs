@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const DESKTOP_ROOT = path.resolve(__dirname, '..');
 const RESOURCES_ROOT = path.join(DESKTOP_ROOT, 'resources');
 const RUNTIME_PROVENANCE_PATH = path.join(RESOURCES_ROOT, 'ffmpeg', 'runtime-provenance.json');
-const ENGINES = ['libvlc', 'mpv'];
+const ENGINES = ['libvlc'];
 const MARKER_NAME = '.loomtv-native-runtime-staging.json';
 const SUPPORTED_PLATFORMS = new Set(['darwin', 'win32', 'linux']);
 const SUPPORTED_ARCHITECTURES = new Set(['arm64', 'x64', 'ia32', 'arm']);
@@ -16,14 +16,13 @@ const USAGE = `
 Native runtime staging is explicit and offline.
 
 Required source-root layout:
-  <source-root>/<platform>-<arch>/mpv/
   <source-root>/<platform>-<arch>/libvlc/   # darwin and win32 support local LibVLC
 
 Set LOOMTV_NATIVE_RUNTIME_SOURCE_ROOT to an absolute source-root and select
 targets with LOOMTV_NATIVE_RUNTIME_TARGETS (comma-separated), or use the
 single-target overrides LOOMTV_LIBVLC_SOURCE_DIR and
-LOOMTV_MPV_SOURCE_DIR. The override required depends on the selected target:
-LibVLC is required for darwin and win32, while MPV is required for darwin.
+The LibVLC override is required for darwin and win32. libmpv is staged as an
+in-process library by stage-libmpv.cjs; external player payloads are unsupported.
 These overrides must be absolute and must be used with exactly one target.
 
 The output layout is resources/<engine>/<platform>/<arch>, which matches the
@@ -254,19 +253,15 @@ function bundledTargetsByEngine() {
 
 function directSources(targets) {
   const libvlc = valueFromEnvironment('LOOMTV_LIBVLC_SOURCE_DIR');
-  const mpv = valueFromEnvironment('LOOMTV_MPV_SOURCE_DIR');
-  if (!libvlc && !mpv) return undefined;
+  if (!libvlc) return undefined;
   const requiredEngines = new Set(targets.flatMap(enginesForTarget));
   if (requiredEngines.has('libvlc') && !libvlc) {
     throw new Error('LOOMTV_LIBVLC_SOURCE_DIR is required for a darwin or win32 target when using per-engine source overrides.');
   }
-  if (requiredEngines.has('mpv') && !mpv) {
-    throw new Error('LOOMTV_MPV_SOURCE_DIR is required for a darwin target when using per-engine source overrides.');
-  }
   if (targets.length !== 1) {
     throw new Error('The per-engine source overrides support exactly one native runtime target.');
   }
-  return { libvlc, mpv };
+  return { libvlc };
 }
 
 function existingGeneratedDestination(destination, engine, target) {

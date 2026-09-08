@@ -200,7 +200,6 @@ export default function Settings() {
   const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
-  const [metadataOfflineMode, setMetadataOfflineMode] = useState(false);
   const [openSubtitlesUsername, setOpenSubtitlesUsername] = useState('');
   const [openSubtitlesPassword, setOpenSubtitlesPassword] = useState('');
   const [openSubtitlesLanguages, setOpenSubtitlesLanguages] = useState('en');
@@ -394,27 +393,35 @@ export default function Settings() {
       return;
     }
     try {
+      setMpvAvailability(null);
       setMpvAvailability(await desktopApi.mpv.refreshAvailability());
     } catch (error) {
-      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check mpv availability.');
+      setMpvAvailability({ available: false, surface: 'unavailable', reason: 'libmpv availability could not be read.' });
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check libmpv availability.');
     }
   }, [isRemoteLibraryMode]);
 
-  const chooseMpvExecutable = useCallback(async () => {
-    try {
-      setMpvAvailability(await desktopApi.mpv.chooseExecutable());
-      setSettingsPersistenceError('');
-    } catch (error) {
-      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not select an mpv executable.');
+  const refreshLibvlcAvailability = useCallback(async () => {
+    if (isRemoteLibraryMode) {
+      setLibvlcAvailability(null);
+      return;
     }
-  }, []);
-
-  const resetMpvExecutable = useCallback(async () => {
     try {
-      setMpvAvailability(await desktopApi.mpv.resetExecutable());
-      setSettingsPersistenceError('');
+      setLibvlcAvailability(null);
+      setLibvlcAvailability(await desktopApi.libvlc.refreshAvailability());
     } catch (error) {
-      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not reset the mpv executable.');
+      setLibvlcAvailability({ available: false, enabled: false, surface: 'unavailable', reason: 'LibVLC availability could not be read.' });
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check LibVLC availability.');
+    }
+  }, [isRemoteLibraryMode]);
+
+  const refreshFfmpegAvailability = useCallback(async () => {
+    try {
+      setFfmpegStatus(null);
+      setFfmpegStatus(await desktopApi.checkFFmpeg());
+    } catch (error) {
+      setFfmpegStatus({ available: false, path: null });
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check FFmpeg availability.');
     }
   }, []);
 
@@ -438,7 +445,10 @@ export default function Settings() {
         tvdb: s.metadataApiKeys?.tvdb || '',
       };
       setMetadataKeys(loadedKeys);
-      setMetadataOfflineMode(Boolean(s.metadataOfflineMode));
+      // Retire the hidden offline toggle without leaving existing owners offline.
+      if (s.metadataOfflineMode && activeProfile?.type === 'owner' && !isRemoteLibraryMode) {
+        void persistSettings({ metadataOfflineMode: false });
+      }
       setOpenSubtitlesUsername(s.openSubtitlesUsername || '');
       setOpenSubtitlesPassword(s.openSubtitlesPassword || '');
       setOpenSubtitlesLanguages(s.openSubtitlesLanguages || 'en');
@@ -487,7 +497,7 @@ export default function Settings() {
     if (savedSharedLibrary?.library && (savedSharedLibrary.deviceToken || desktopApi.isRemoteLibraryMode())) {
       setSharedLibrarySnapshot(savedSharedLibrary);
     }
-  }, [activeProfile?.id, activeProfile?.type]);
+  }, [activeProfile?.id, activeProfile?.type, isRemoteLibraryMode, persistSettings]);
 
   const analysisIsActive = localAnalysisStatus?.state === 'running' || localAnalysisStatus?.state === 'queued';
   useEffect(() => {
@@ -505,10 +515,17 @@ export default function Settings() {
   useEffect(() => {
     if (activeSection !== 'playback') return undefined;
     let cancelled = false;
-    void desktopApi.libvlc.availability().then((availability) => {
-      if (!cancelled) setLibvlcAvailability(availability);
-    }).catch(() => {
-      if (!cancelled) setLibvlcAvailability({ available: false, enabled: false, surface: 'unavailable', reason: 'LibVLC availability could not be read.' });
+    void Promise.allSettled([
+      desktopApi.libvlc.availability(),
+      desktopApi.mpv.refreshAvailability(),
+    ]).then(([libvlcResult, libmpvResult]) => {
+      if (cancelled) return;
+      setLibvlcAvailability(libvlcResult.status === 'fulfilled'
+        ? libvlcResult.value
+        : { available: false, enabled: false, surface: 'unavailable', reason: 'LibVLC availability could not be read.' });
+      setMpvAvailability(libmpvResult.status === 'fulfilled'
+        ? libmpvResult.value
+        : { available: false, surface: 'unavailable', reason: 'libmpv availability could not be read.' });
     });
     return () => { cancelled = true; };
   }, [activeSection]);
@@ -614,7 +631,6 @@ export default function Settings() {
     })) return false;
 
     setMetadataKeys(cleanedKeys);
-    setMetadataOfflineMode(false);
     setEditingKeys(
       Object.fromEntries(Object.keys(cleanedKeys).map((provider) => [provider, false])),
     );
@@ -670,13 +686,6 @@ export default function Settings() {
     setOpenSubtitlesAutoDownload(enabled);
     void persistSettings({ openSubtitlesAutoDownload: enabled }).then((saved) => {
       if (!saved) setOpenSubtitlesAutoDownload(!enabled);
-    });
-  }, [persistSettings]);
-
-  const handleMetadataOfflineModeChange = useCallback((enabled: boolean) => {
-    setMetadataOfflineMode(enabled);
-    void persistSettings({ metadataOfflineMode: enabled }).then((saved) => {
-      if (!saved) setMetadataOfflineMode(!enabled);
     });
   }, [persistSettings]);
 
@@ -1210,12 +1219,12 @@ export default function Settings() {
                     ? { available: false, enabled: false, surface: 'unavailable', reason: 'Native LibVLC playback is available only for local files on this laptop.' }
                     : libvlcAvailability}
                   mpvAvailability={isRemoteLibraryMode
-                    ? { available: false, reason: 'Native mpv playback is available only for local files on this laptop.' }
+                    ? { available: false, reason: 'Native libmpv playback is available only for local files on this laptop.' }
                     : mpvAvailability}
                   ffmpegStatus={ffmpegStatus}
-                  onMpvChoose={isRemoteLibraryMode ? undefined : chooseMpvExecutable}
-                  onMpvReset={isRemoteLibraryMode ? undefined : resetMpvExecutable}
+                  onLibvlcRefresh={isRemoteLibraryMode ? undefined : refreshLibvlcAvailability}
                   onMpvRefresh={isRemoteLibraryMode ? undefined : refreshMpvAvailability}
+                  onFfmpegRefresh={refreshFfmpegAvailability}
                 />
               )}
 
@@ -1292,7 +1301,6 @@ export default function Settings() {
           <MetadataSettingsSection
             providers={METADATA_PROVIDERS}
             metadataKeys={metadataKeys}
-            metadataOfflineMode={metadataOfflineMode}
             editingKeys={editingKeys}
             visibleKeys={visibleKeys}
             customProviders={customProviders}
@@ -1307,7 +1315,6 @@ export default function Settings() {
             metadataKeyTestResults={metadataKeyTestResults}
             hasMetadataKeysToTest={Object.keys(cleanedMetadataKeys()).length > 0}
             setMetadataKey={setMetadataKey}
-            setMetadataOfflineMode={handleMetadataOfflineModeChange}
             setProviderEditing={setProviderEditing}
             toggleProviderVisibility={toggleProviderVisibility}
             deleteMetadataKey={handleDeleteMetadataKey}

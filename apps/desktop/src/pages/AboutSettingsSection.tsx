@@ -188,7 +188,7 @@ export default function AboutSettingsSection({
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white">Bundled Media Tools</CardTitle>
           <CardDescription className="text-[var(--loom-faint)] text-xs leading-5">
-            Release payloads include FFmpeg/FFprobe and may include LibVLC and mpv for supported
+            Release payloads include FFmpeg/FFprobe and may include LibVLC and libmpv for supported
             targets. Each tool remains governed by its own license, dependency notices, and source
             requirements; LoomTV&apos;s MIT license does not replace those terms.
           </CardDescription>
@@ -202,8 +202,8 @@ export default function AboutSettingsSection({
               { label: 'FFmpeg source code', sub: 'Official FFmpeg source repository', url: 'https://git.ffmpeg.org/ffmpeg.git' },
               { label: 'LibVLC legal notices', sub: 'VideoLAN licensing and trademark guidance', url: 'https://www.videolan.org/legal.html' },
               { label: 'LibVLC source code', sub: 'Official VLC source repository', url: 'https://code.videolan.org/videolan/vlc' },
-              { label: 'mpv bundled release', sub: 'Official mpv 0.41.0 macOS ARM release', url: 'https://github.com/mpv-player/mpv/releases/tag/v0.41.0' },
-              { label: 'mpv source code', sub: 'Official mpv source repository and license notices', url: 'https://github.com/mpv-player/mpv' },
+              { label: 'libmpv bundled library', sub: 'libmpv from the official mpv 0.41.0 macOS ARM release', url: 'https://github.com/mpv-player/mpv/releases/tag/v0.41.0' },
+              { label: 'libmpv source code', sub: 'Official mpv source repository and license notices', url: 'https://github.com/mpv-player/mpv' },
             ].map((link) => (
               <button
                 key={link.label}
@@ -276,7 +276,7 @@ export default function AboutSettingsSection({
             plugins and bundled dependencies can carry different terms. The exact bundled
             payload provenance and applicable notices are recorded in
             <span className="text-[var(--loom-muted)]"> apps/desktop/resources/libvlc/NOTICE.md</span>.
-            Stock mpv builds are ordinarily GPL-2.0-or-later and may include dependencies
+            Stock libmpv builds are ordinarily GPL-2.0-or-later and may include dependencies
             with additional obligations; the selected payload is documented in
             <span className="text-[var(--loom-muted)]"> apps/desktop/resources/mpv/NOTICE.md</span>.
             <button

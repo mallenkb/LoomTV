@@ -36,19 +36,20 @@ type KoffiTypeSpec = string | KoffiType;
  * plain object matching its descriptor.
  */
 type NativeValue = string | number | bigint | boolean | null | undefined
+  | Buffer
   | Record<string, unknown>
   | readonly (string | null)[];
 type DynamicFunction = (...args: NativeValue[]) => NativeValue;
 
-type KoffiLibrary = {
+export type KoffiLibrary = {
   func: (name: string, returnType: KoffiTypeSpec, argumentTypes: readonly KoffiTypeSpec[]) => DynamicFunction;
 };
-type KoffiRuntime = {
+export type KoffiRuntime = {
   load: (libraryPath: string) => KoffiLibrary;
   struct: (fields: Record<string, KoffiTypeSpec>) => KoffiType;
   decode: (value: NativeValue, type: KoffiTypeSpec) => Record<string, NativeValue>;
 };
-type NativeDrawable = bigint | number;
+export type NativeDrawable = bigint | number;
 /** A native pointer result: an address, or null when the call returned NULL. */
 type NativeHandle = NativeDrawable | null;
 
@@ -162,10 +163,8 @@ function libVlcConfiguredEnabled(): boolean {
 }
 
 function libVlcKillSwitchEnabled(): boolean {
-  // Keep LibVLC enabled by default in this branch.
-  // Runtime kill switches are intentionally ignored so playback remains in native
-  // path unless the runtime is missing or unsupported.
-  return false;
+  return explicitBoolean(process.env.LOOMTV_DISABLE_EXPERIMENTAL_LIBVLC) === true
+    || explicitBoolean(process.env.LOOMTV_DISABLE_LIBVLC) === true;
 }
 
 // A raw BrowserWindow native drawable is not composited with WebContents, so
@@ -182,12 +181,12 @@ function disabledReason(): string {
     return 'Native LibVLC playback is disabled by the LoomTV kill switch. LoomTV is using compatible fallback playback.';
   }
   if (!libVlcConfiguredEnabled()) {
-    return 'Native LibVLC playback was disabled by configuration. LoomTV is using MPV or Chromium/HLS fallback playback.';
+    return 'Native LibVLC playback was disabled by configuration. LoomTV is using libmpv or Chromium/HLS fallback playback.';
   }
   if (!libVlcCompositionGateEnabled()) {
-    return 'Native LibVLC playback has no in-window composition host on this platform. LoomTV is using MPV or Chromium/HLS fallback playback.';
+    return 'Native LibVLC playback has no in-window composition host on this platform. LoomTV is using libmpv or Chromium/HLS fallback playback.';
   }
-  return 'Native LibVLC playback is unavailable. LoomTV is using MPV or Chromium/HLS fallback playback.';
+  return 'Native LibVLC playback is unavailable. LoomTV is using libmpv or Chromium/HLS fallback playback.';
 }
 
 function runtimeCacheKey(): string {
@@ -315,7 +314,7 @@ function configuredLibraryCandidate(): { path: string; source: 'environment' | '
   return undefined;
 }
 
-function loadKoffi(): KoffiRuntime {
+export function loadKoffi(): KoffiRuntime {
   return require('koffi') as KoffiRuntime;
 }
 
@@ -495,7 +494,7 @@ export function libVlcAvailability(): LibVlcAvailability {
   const cached = cachedRuntime();
   return cached.runtime
     ? { available: true, enabled: true, surface: 'composited-window', libraryPath: cached.runtime.libraryPath, version: cached.runtime.version, runtimeSource: cached.runtime.source, warning: cached.warning }
-    : { available: false, enabled: true, surface: 'unavailable', warning: cached.warning, reason: 'The bundled or installed LibVLC runtime is unavailable. LoomTV will use MPV or Chromium/HLS fallback playback.' };
+    : { available: false, enabled: true, surface: 'unavailable', warning: cached.warning, reason: 'The bundled or installed LibVLC runtime is unavailable. LoomTV will use libmpv or Chromium/HLS fallback playback.' };
 }
 
 export function refreshLibVlcAvailability(): LibVlcAvailability {
@@ -532,7 +531,7 @@ function nativeHandleForWindow(window: BrowserWindow): NativeDrawable {
   return pointer;
 }
 
-type NativeViewHost = {
+export type NativeViewHost = {
   drawable: NativeDrawable;
   setVisible: (visible: boolean) => void;
   /**
@@ -1008,7 +1007,7 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
   }
 }
 
-function createNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
+export function createNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
   const platformBinding = libVlcPlatformBinding(process.platform);
   if (platformBinding?.host === 'macos-child') return createMacOsNativeViewHost(koffi, ownerWindow);
   if (platformBinding?.host === 'windows-child') return createWindowsNativeViewHost(koffi, ownerWindow);

@@ -7,9 +7,6 @@ interface SubtitleOverlayProps {
   controlsVisible: boolean;
   cues: SubtitleCue[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
-  transcodeStartSecondsRef: React.RefObject<number>;
-  streamIsSeekableRef: React.RefObject<boolean>;
-  streamIsTranscoded: boolean;
   currentTimeRef?: React.RefObject<number>;
   style: SubtitleStyleSettings;
   visible: boolean;
@@ -37,9 +34,6 @@ function SubtitleOverlay({
   controlsVisible,
   cues,
   videoRef,
-  transcodeStartSecondsRef,
-  streamIsSeekableRef,
-  streamIsTranscoded,
   currentTimeRef,
   style,
   visible,
@@ -52,6 +46,13 @@ function SubtitleOverlay({
     () => cues.slice().sort((a, b) => a.start - b.start || a.end - b.end),
     [cues],
   );
+  const prefixEndTimes = useMemo(() => {
+    let latestEnd = -Infinity;
+    return sortedCues.map(cue => {
+      latestEnd = Math.max(latestEnd, cue.end);
+      return latestEnd;
+    });
+  }, [sortedCues]);
 
   useEffect(() => {
     if (!visible || sortedCues.length === 0) {
@@ -65,14 +66,9 @@ function SubtitleOverlay({
       const video = videoRef.current;
       const nativeTime = currentTimeRef?.current;
       if (video || (typeof nativeTime === 'number' && Number.isFinite(nativeTime))) {
-        const offset = video && streamIsTranscoded && !streamIsSeekableRef.current
-          ? transcodeStartSecondsRef.current || 0
-          : 0;
-        // Keep cue timing on the same clock as playback. Resume offsets are
-        // applied only for a non-seekable transcoded window; subtitle delay is
-        // intentionally not added here.
-        const time = (video?.currentTime ?? nativeTime ?? 0) + offset;
-        const next = activeSubtitleText(sortedCues, time);
+        // Keep cue timing on the same clock as playback.
+        const time = typeof nativeTime === 'number' && Number.isFinite(nativeTime) ? nativeTime : video?.currentTime ?? 0;
+        const next = activeSubtitleText(sortedCues, time, prefixEndTimes);
         if (next !== textRef.current) {
           textRef.current = next;
           setText(next);
@@ -83,7 +79,7 @@ function SubtitleOverlay({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [sortedCues, videoRef, transcodeStartSecondsRef, streamIsSeekableRef, streamIsTranscoded, currentTimeRef, visible]);
+  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, visible]);
 
   const textShadow = useMemo(() => {
     const outlineWidth = style.borderEnabled

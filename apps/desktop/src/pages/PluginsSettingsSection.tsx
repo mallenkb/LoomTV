@@ -14,6 +14,8 @@ import {
 } from '@/lib/desktopApi';
 import { saveCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
 
+const BUILT_IN_SUBTITLE_ADDON_ID = 'org.stremio.opensubtitlesv3';
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The add-on request failed.';
 }
@@ -51,16 +53,22 @@ export default function PluginsSettingsSection() {
       desktopApi.listOfficialStremioAddons(),
       desktopApi.listProfiles(),
     ]);
+    // Retire the old plugin record now that captions use the built-in provider.
+    if (nextInstalled.some(plugin => plugin.addonId === BUILT_IN_SUBTITLE_ADDON_ID)) {
+      await desktopApi.removeStremioAddon(BUILT_IN_SUBTITLE_ADDON_ID);
+      window.dispatchEvent(new Event('loomtv:plugins-changed'));
+    }
+    const remainingInstalled = nextInstalled.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID);
     const grantableProfiles = nextProfiles.filter((profile) => profile.type === 'standard' && !profile.isGuest);
     const accessEntries = await Promise.all(grantableProfiles.map(async (profile) => (
       [profile.id, await desktopApi.listStremioProfileAccess(profile.id)] as const
     )));
-    const auditEntries = await Promise.all(nextInstalled.map(async (plugin) => {
+    const auditEntries = await Promise.all(remainingInstalled.map(async (plugin) => {
       try { return [plugin.addonId, await desktopApi.listStremioPluginAudit(plugin.addonId, 8)] as const; } catch { return [plugin.addonId, []] as const; }
     }));
-    setInstalled(nextInstalled);
-    saveCachedSidebarPlugins(nextInstalled);
-    setOfficial(nextOfficial);
+    setInstalled(remainingInstalled);
+    saveCachedSidebarPlugins(remainingInstalled);
+    setOfficial(nextOfficial.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID));
     setProfiles(grantableProfiles);
     setProfileAccess(Object.fromEntries(accessEntries));
     setAuditByAddon(Object.fromEntries(auditEntries));
@@ -75,7 +83,7 @@ export default function PluginsSettingsSection() {
   }, [refresh]);
 
   const installedById = useMemo(
-    () => new Map(installed.map((plugin) => [plugin.addonId, plugin])),
+    () => new Map(installed.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID).map((plugin) => [plugin.addonId, plugin])),
     [installed],
   );
 
@@ -84,6 +92,10 @@ export default function PluginsSettingsSection() {
     setError(null);
     try {
       const nextReview = await operation();
+      if (nextReview.addonId === BUILT_IN_SUBTITLE_ADDON_ID) {
+        await refresh();
+        throw new Error('OpenSubtitles v3 is built into Captions and does not need a plugin.');
+      }
       setReview(nextReview);
       setReviewConfirmed(false);
       await refresh();
@@ -371,7 +383,7 @@ export default function PluginsSettingsSection() {
         </CardHeader>
         <CardContent className="space-y-3">
           {busyKey === 'load' && <p className="text-sm text-[var(--loom-muted)]">Loading add-ons…</p>}
-          {official.map((addon) => {
+          {official.filter(addon => addon.addonId !== BUILT_IN_SUBTITLE_ADDON_ID).map((addon) => {
             const installedPlugin = installedById.get(addon.addonId);
             return (
               <div key={addon.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
@@ -406,10 +418,10 @@ export default function PluginsSettingsSection() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {busyKey !== 'load' && installed.length === 0 && (
+          {busyKey !== 'load' && installed.every(plugin => plugin.addonId === BUILT_IN_SUBTITLE_ADDON_ID) && (
             <p className="text-sm text-[var(--loom-muted)]">No add-ons installed yet.</p>
           )}
-          {installed.map((plugin) => (
+          {installed.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID).map((plugin) => (
             <div key={plugin.addonId} className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">

@@ -435,7 +435,7 @@ export function parseVttCues(content: string): SubtitleCue[] {
   return cues.sort((a, b) => a.start - b.start);
 }
 
-export function activeSubtitleText(cues: SubtitleCue[], time: number): string {
+export function activeSubtitleText(cues: SubtitleCue[], time: number, prefixEndTimes?: readonly number[]): string {
   if (!Number.isFinite(time) || cues.length === 0) return '';
   let low = 0;
   let high = cues.length - 1;
@@ -451,8 +451,20 @@ export function activeSubtitleText(cues: SubtitleCue[], time: number): string {
   }
 
   if (lastStartedIndex < 0) return '';
+  // Prefix maxima preserve overlapping cues while skipping expired history.
+  let firstCandidate = 0;
+  if (prefixEndTimes?.length === cues.length) {
+    low = 0;
+    high = lastStartedIndex + 1;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (prefixEndTimes[middle] <= time) low = middle + 1;
+      else high = middle;
+    }
+    firstCandidate = low;
+  }
   const activeLines = new Set<string>();
-  for (let index = 0; index <= lastStartedIndex; index += 1) {
+  for (let index = firstCandidate; index <= lastStartedIndex; index += 1) {
     const cue = cues[index];
     if (time >= cue.start && time < cue.end && cue.text) activeLines.add(cue.text);
   }

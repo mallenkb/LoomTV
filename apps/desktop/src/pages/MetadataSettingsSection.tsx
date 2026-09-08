@@ -1,4 +1,4 @@
-import { CheckCircle, Download, Eye, EyeOff, Key, Pencil, Plus, RefreshCw, Save, Trash2, WifiOff } from 'lucide-react';
+import { CheckCircle, Download, Eye, EyeOff, Key, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { MetadataKeyTestResult } from '@/lib/desktopApi';
@@ -9,7 +9,6 @@ import type { MetadataProvider } from './Settings.types';
 type MetadataSettingsSectionProps = {
   providers: MetadataProvider[];
   metadataKeys: Record<string, string>;
-  metadataOfflineMode: boolean;
   editingKeys: Record<string, boolean>;
   visibleKeys: Record<string, boolean>;
   customProviders: string[];
@@ -24,7 +23,6 @@ type MetadataSettingsSectionProps = {
   metadataKeyTestResults: MetadataKeyTestResult[];
   hasMetadataKeysToTest: boolean;
   setMetadataKey: (providerId: string, value: string) => void;
-  setMetadataOfflineMode: (enabled: boolean) => void;
   setProviderEditing: (providerId: string, isEditing: boolean) => void;
   toggleProviderVisibility: (providerId: string) => void;
   deleteMetadataKey: (providerId: string) => void;
@@ -42,7 +40,6 @@ type MetadataSettingsSectionProps = {
 export default function MetadataSettingsSection({
   providers,
   metadataKeys,
-  metadataOfflineMode,
   editingKeys,
   visibleKeys,
   customProviders,
@@ -57,7 +54,6 @@ export default function MetadataSettingsSection({
   metadataKeyTestResults,
   hasMetadataKeysToTest,
   setMetadataKey,
-  setMetadataOfflineMode,
   setProviderEditing,
   toggleProviderVisibility,
   deleteMetadataKey,
@@ -316,34 +312,6 @@ export default function MetadataSettingsSection({
               className="w-full bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)]"
             />
             <span className="block text-xs text-[var(--loom-muted)]">Use comma-separated language codes. Example: en, es, fr.</span>
-          </label>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <WifiOff className="h-4 w-4 text-[var(--loom-accent)]" />
-            Local metadata mode
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Use saved metadata and artwork without contacting providers.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <label className="flex items-start gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <input
-              type="checkbox"
-              checked={metadataOfflineMode}
-              onChange={(event) => setMetadataOfflineMode(event.target.checked)}
-              className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
-            />
-            <span>
-              <span className="block text-sm font-semibold text-white">Stay offline for metadata</span>
-              <span className="mt-1 block text-xs text-[var(--loom-muted)]">
-                New matches and artwork stay off until you disable this.
-              </span>
-            </span>
           </label>
         </CardContent>
       </Card>

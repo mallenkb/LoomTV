@@ -3,7 +3,7 @@ mod desktop_os;
 mod desktop_menu;
 mod media_control;
 mod media_protocol;
-mod mpv_host;
+mod libmpv_host;
 mod playback_activity;
 mod profile_transfer;
 mod window_host;
@@ -33,13 +33,10 @@ struct Runtime {
     media: loomtv_core::streaming::MediaServer,
     remote: Arc<loomtv_core::remote::RemoteClient>,
     native_scope: Mutex<Option<PlaybackScope>>,
-    external_session: Mutex<Option<String>>,
     drained: AtomicBool,
     media_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     player: PlaybackService,
-    mpv: loomtv_playback::mpv::MpvService,
-    mpv_resolver: loomtv_playback::mpv::RuntimeResolver,
-    mpv_candidates: Vec<PathBuf>,
+    libmpv: libmpv_host::LibMpvService,
     playback_activity: playback_activity::PlaybackActivity,
     media_control: media_control::MediaControl,
     metadata: loomtv_core::metadata::MetadataProviderGateway,
@@ -225,11 +222,10 @@ async fn desktop_invoke(
                 )
                 .await?;
             state.player.stop(None).await.map_err(media_error)?;
-            state.mpv.stop(None).await.map_err(media_error)?;
+            state.libmpv.stop(None).await?;
             state.playback_activity.release_all().await?;
             state.media_control.release_all().await?;
             *state.native_scope.lock().await = None;
-            *state.external_session.lock().await = None;
             state.media.revoke_all().await;
             window_host::hide(&window).await?;
             window_host::external_backdrop(&window, false).await?;
@@ -242,11 +238,10 @@ async fn desktop_invoke(
                 .disconnect(args.first().and_then(Value::as_bool).unwrap_or(false))
                 .await?;
             state.player.stop(None).await.map_err(media_error)?;
-            state.mpv.stop(None).await.map_err(media_error)?;
+            state.libmpv.stop(None).await?;
             state.playback_activity.release_all().await?;
             state.media_control.release_all().await?;
             *state.native_scope.lock().await = None;
-            *state.external_session.lock().await = None;
             state.media.revoke_all().await;
             window_host::hide(&window).await?;
             window_host::external_backdrop(&window, false).await?;
@@ -269,11 +264,10 @@ async fn desktop_invoke(
             let session_changed = state.remote.epoch() != epoch;
             if session_changed {
                 state.player.stop(None).await.map_err(media_error)?;
-                state.mpv.stop(None).await.map_err(media_error)?;
+                state.libmpv.stop(None).await?;
                 state.playback_activity.release_all().await?;
                 state.media_control.release_all().await?;
                 *state.native_scope.lock().await = None;
-                *state.external_session.lock().await = None;
                 state.media.revoke_all().await;
                 window_host::hide(&window).await?;
                 window_host::external_backdrop(&window, false).await?;
@@ -528,35 +522,11 @@ async fn desktop_invoke(
                 }
             }
             state.player.stop(None).await.map_err(media_error)?;
-            state.mpv.stop(None).await.map_err(media_error)?;
+            state.libmpv.stop(None).await?;
             *state.native_scope.lock().await = None;
-            *state.external_session.lock().await = None;
             let result = if channel == "mpv:start" {
-                window_host::hide(&window).await?;
-                window_host::external_backdrop(&window, false).await?;
-                let executable = mpv_host::executable(&state).await?;
-                let result = state
-                    .mpv
-                    .start(
-                        executable,
-                        source,
-                        options,
-                        mpv_host::window_state(&window)?,
-                    )
-                    .await
-                    .map_err(media_error);
-                if result.is_err() {
-                    state.mpv_resolver.invalidate().await;
-                }
-                let result = result?;
-                *state.external_session.lock().await =
-                    result["sessionId"].as_str().map(str::to_owned);
-                if let Err(error) = window_host::external_backdrop(&window, true).await {
-                    let _ = state.mpv.stop(None).await;
-                    *state.external_session.lock().await = None;
-                    return Err(error);
-                }
-                result
+                let drawable = window_host::ensure(&window).await?;
+                state.libmpv.start(source, options, drawable).await?
             } else {
                 let drawable = window_host::ensure(&window).await?;
                 state
@@ -592,11 +562,7 @@ async fn desktop_invoke(
                 .cloned()
                 .ok_or_else(|| Error::new("invalid_command", "The playback command is missing."))?;
             if channel == "mpv:command" {
-                state
-                    .mpv
-                    .command(session, command)
-                    .await
-                    .map_err(media_error)
+                state.libmpv.command(session, command).await
             } else {
                 state
                     .player
@@ -610,7 +576,7 @@ async fn desktop_invoke(
             let _gate = state.playback_gate.lock().await;
             let session = Some(string(&args, 0)?.to_owned());
             let result = if channel == "mpv:stop" {
-                state.mpv.stop(session).await.map_err(media_error)?
+                state.libmpv.stop(session).await?
             } else {
                 state.player.stop(session).await.map_err(media_error)?
             };
@@ -618,7 +584,6 @@ async fn desktop_invoke(
                 state.playback_activity.release_all().await?;
                 state.media_control.release_all().await?;
                 *state.native_scope.lock().await = None;
-                *state.external_session.lock().await = None;
                 window_host::hide(&window).await?;
                 window_host::external_backdrop(&window, false).await?;
             }
@@ -656,10 +621,12 @@ async fn desktop_invoke(
                 .map_err(failed)?;
             Ok(Value::Null)
         }
-        "mpv:availability"
-        | "mpv:refresh-availability"
-        | "mpv:choose-executable"
-        | "mpv:reset-executable" => mpv_host::handle(&window, &state, &channel).await,
+        "mpv:availability" | "mpv:refresh-availability" => {
+            Ok(state.libmpv.availability().await)
+        }
+        "mpv:choose-executable" | "mpv:reset-executable" => {
+            Ok(state.libmpv.availability().await)
+        }
         "updates:get-state" => Ok(
             json!({"status":"disabled","currentVersion":env!("CARGO_PKG_VERSION"),"platform":if cfg!(target_os="macos"){"darwin"}else if cfg!(windows){"win32"}else{"linux"},"arch":std::env::consts::ARCH,"supported":false,"message":"The Tauri update feed has not been configured."}),
         ),
@@ -688,11 +655,10 @@ async fn desktop_invoke(
                     .map_err(failed)??;
             if profile_change {
                 state.player.stop(None).await.map_err(media_error)?;
-                state.mpv.stop(None).await.map_err(media_error)?;
+                state.libmpv.stop(None).await?;
                 state.playback_activity.release_all().await?;
                 state.media_control.release_all().await?;
                 *state.native_scope.lock().await = None;
-                *state.external_session.lock().await = None;
                 state.media.revoke_all().await;
                 window_host::hide(&window).await?;
                 window_host::external_backdrop(&window, false).await?;
@@ -731,6 +697,9 @@ fn main() {
         .register_asynchronous_uri_scheme_protocol("plexserver", media_protocol::handle)
         .invoke_handler(tauri::generate_handler![desktop_invoke])
         .setup(|app| {
+            // Tauri panics if setup returns an error from the native launch callback.
+            // Handle recoverable startup failures before crossing that boundary.
+            let initialized = (|| -> std::result::Result<(), Box<dyn std::error::Error>> {
             desktop_menu::install(app.handle())?;
             // Match Electron's USER_DATA_DIR, including its shared override.
             let data_dir = std::env::var("LOOMTV_DATA_DIR").ok()
@@ -739,7 +708,14 @@ fn main() {
                 .unwrap_or(app.path().config_dir()?.join("LoomTV"));
             let store = Arc::new(Mutex::new(Store::open_shared(&data_dir)?));
             let root = runtime_root(app.handle())?;
-            let vlc_path = runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"]);
+            let libvlc_disabled = std::env::var("LOOMTV_DISABLE_LIBVLC")
+                .ok()
+                .is_some_and(|value| ["1", "true", "yes"].contains(&value.to_ascii_lowercase().as_str()));
+            let vlc_path = if libvlc_disabled {
+                None
+            } else {
+                runtime_file(&root, &["libvlc/lib/libvlc.dylib", "libvlc/libvlc.dll"])
+            };
             let ffmpeg = runtime_file(&root, &["ffmpeg/ffmpeg", "ffmpeg/ffmpeg.exe"]);
             let ffprobe = runtime_file(&root, &["ffmpeg/ffprobe", "ffmpeg/ffprobe.exe"]);
             let handle = app.handle().clone();
@@ -751,30 +727,17 @@ fn main() {
                 }),
             )?;
             let handle = app.handle().clone();
-            let mpv = tauri::async_runtime::block_on(async {
-                loomtv_playback::mpv::MpvService::new(Arc::new(move |value| {
-                    let _ = handle.emit_to("main", "loomtv:mpv:state", [value.clone()]);
-                    if matches!(value["status"].as_str(), Some("closed" | "error")) {
-                        let app = handle.clone();
-                        let id = value["sessionId"].as_str().unwrap_or("").to_owned();
-                        tauri::async_runtime::spawn(async move {
-                            let Some(state) = app.try_state::<Runtime>() else {
-                                return;
-                            };
-                            let _gate = state.playback_gate.lock().await;
-                            if state.external_session.lock().await.as_deref() == Some(id.as_str()) {
-                                *state.external_session.lock().await = None;
-                                *state.native_scope.lock().await = None;
-                                let _ = state.playback_activity.release_all().await;
-                                let _ = state.media_control.release_all().await;
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window_host::external_backdrop(&window, false).await;
-                                }
-                            }
-                        });
-                    }
-                }))
-            });
+            let libmpv = libmpv_host::LibMpvService::new(
+                runtime_file(&root, &["mpv/lib/libloomtv_mpv_bridge.dylib"]).as_deref(),
+                runtime_file(
+                    &root,
+                    &["mpv/lib/libmpv.dylib", "mpv/mpv.dll", "mpv/lib/libmpv.so"],
+                )
+                .as_deref(),
+                Arc::new(move |value| {
+                    let _ = handle.emit_to("main", "loomtv:mpv:state", [value]);
+                }),
+            );
             let remote = Arc::new(loomtv_core::remote::RemoteClient::default());
             let (media, stop) =
                 tauri::async_runtime::block_on(loomtv_core::streaming::MediaServer::start(
@@ -789,13 +752,10 @@ fn main() {
                 media,
                 remote,
                 native_scope: Mutex::new(None),
-                external_session: Mutex::new(None),
                 drained: AtomicBool::new(false),
                 media_stop: Mutex::new(Some(stop)),
                 player,
-                mpv,
-                mpv_resolver: Default::default(),
-                mpv_candidates: mpv_host::packaged_candidates(&root),
+                libmpv,
                 playback_activity: playback_activity::PlaybackActivity::new()?,
                 media_control: media_control::MediaControl::new(app.handle().clone()),
                 metadata: loomtv_core::metadata::MetadataProviderGateway::new()?,
@@ -816,11 +776,18 @@ fn main() {
                 .build()?;
             start_playback_scope_monitor(app.handle());
             Ok(())
+            })();
+            if let Err(error) = initialized {
+                eprintln!("LoomTV Tauri could not start: {error}");
+                app.dialog()
+                    .message(error.to_string())
+                    .title("LoomTV could not start")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                    .show(|_| std::process::exit(1));
+            }
+            Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == "main" {
-                mpv_host::sync(window.app_handle());
-            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 begin_shutdown(window.app_handle());
@@ -830,7 +797,7 @@ fn main() {
     match app {
         Ok(app) => app.run(|handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                if !handle.state::<Runtime>().drained.load(Ordering::SeqCst) {
+                if handle.try_state::<Runtime>().is_some_and(|state| !state.drained.load(Ordering::SeqCst)) {
                     api.prevent_exit();
                     begin_shutdown(handle);
                 }
@@ -844,11 +811,11 @@ fn main() {
 }
 
 fn begin_shutdown(handle: &tauri::AppHandle) {
-    if handle
-        .state::<Runtime>()
-        .closing
-        .swap(true, Ordering::SeqCst)
-    {
+    let Some(state) = handle.try_state::<Runtime>() else {
+        handle.exit(1);
+        return;
+    };
+    if state.closing.swap(true, Ordering::SeqCst) {
         return;
     }
     let app = handle.clone();
@@ -857,7 +824,7 @@ fn begin_shutdown(handle: &tauri::AppHandle) {
         let cleanup = async {
             let _gate = state.playback_gate.lock().await;
             let _ = state.player.shutdown().await;
-            let _ = state.mpv.shutdown().await;
+            let _ = state.libmpv.shutdown().await;
             let _ = state.playback_activity.shutdown().await;
             let _ = state.media_control.shutdown().await;
             state.media.shutdown().await;
@@ -985,11 +952,10 @@ fn start_playback_scope_monitor(handle: &tauri::AppHandle) {
             };
             if !valid {
                 let _ = state.player.stop(None).await;
-                let _ = state.mpv.stop(None).await;
+                let _ = state.libmpv.stop(None).await;
                 let _ = state.playback_activity.release_all().await;
                 let _ = state.media_control.release_all().await;
                 *state.native_scope.lock().await = None;
-                *state.external_session.lock().await = None;
                 state.media.revoke_all().await;
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window_host::hide(&window).await;

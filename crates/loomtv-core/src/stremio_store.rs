@@ -1116,13 +1116,6 @@ fn official_addons() -> Value {
             "name":"Cinemeta",
             "description":"Stremio’s official movie and series catalogs and metadata.",
             "capability":"catalog"
-        },
-        {
-            "id":"opensubtitles-v3",
-            "addonId":"org.stremio.opensubtitlesv3",
-            "name":"OpenSubtitles v3",
-            "description":"Stremio’s official OpenSubtitles provider. Playback integration is planned.",
-            "capability":"subtitles"
         }
     ])
 }

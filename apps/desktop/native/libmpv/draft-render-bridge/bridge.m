@@ -28,6 +28,7 @@
  X(mpv_handle *, mpv_create, (void)) \
  X(int, mpv_initialize, (mpv_handle *)) \
  X(int, mpv_set_option_string, (mpv_handle *, const char *, const char *)) \
+ X(int, mpv_set_property_string, (mpv_handle *, const char *, const char *)) \
  X(int, mpv_command_async, (mpv_handle *, uint64_t, const char **)) \
  X(int, mpv_observe_property, (mpv_handle *, uint64_t, const char *, mpv_format)) \
  X(mpv_event *, mpv_wait_event, (mpv_handle *, double)) \
@@ -281,7 +282,14 @@ LM_EXPORT int loom_mpv_command(void *opaque, uint64_t request, const char *json,
         const char **argv = calloc(strings.count + 1, sizeof(char *));
         if (!argv) { copyError(error, capacity, @"Could not allocate the playback command."); return -1; }
         for (NSUInteger i = 0; i < strings.count; ++i) argv[i] = strings[i].UTF8String;
-        int code = engine->api.mpv_command_async(engine->player, request, argv);
+        int code;
+        if ([args[0] isEqual:@"set_property"]) {
+            code = strings.count == 3
+                ? engine->api.mpv_set_property_string(engine->player, argv[1], argv[2])
+                : MPV_ERROR_INVALID_PARAMETER;
+        } else {
+            code = engine->api.mpv_command_async(engine->player, request, argv);
+        }
         free(argv);
         if (code < 0) copyError(error, capacity, @(engine->api.mpv_error_string(code)));
         return code;
@@ -357,6 +365,20 @@ LM_EXPORT char *loom_mpv_poll(void *opaque) {
     }
 }
 LM_EXPORT void loom_mpv_free(void *pointer) { free(pointer); }
+LM_EXPORT int loom_mpv_poll_into(void *opaque, char *output, size_t capacity) {
+    if (!output || capacity < 2) return -1;
+    output[0] = '\0';
+    char *events = loom_mpv_poll(opaque);
+    if (!events) return 0;
+    size_t length = strnlen(events, 2097153);
+    if (length > 2097152 || length + 1 > capacity) {
+        free(events);
+        return -1;
+    }
+    memcpy(output, events, length + 1);
+    free(events);
+    return (int)length;
+}
 
 // Call on a worker. AppKit detaches and frees the render context before the
 // blocking core shutdown. A queued render callback owns only a weak view.

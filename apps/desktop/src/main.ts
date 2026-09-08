@@ -82,7 +82,7 @@ import {
   getTrayIconPath,
   getWindowIconPath,
 } from './main/windowManager';
-import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
+import { libMpvRuntimeSummary as mpvRuntimeSummary, stopAllLibMpvPlayback as stopAllMpvPlayback } from './main/libmpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import {
@@ -417,7 +417,7 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 14;
+const SCAN_CACHE_VERSION = 15;
 let libraryMutationVersion = 0;
 let cachedLibrary: LibraryData | null = null;
 

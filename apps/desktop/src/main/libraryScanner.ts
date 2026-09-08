@@ -3,7 +3,7 @@ import path from 'node:path';
 import { isImageFileName, isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
 import { detectLibraryFolderKind } from './libraryFolders.ts';
 import { createMediaItemId } from './libraryItemHelpers.ts';
-import { isSeasonDirectoryName } from './libraryScanFiles.ts';
+import { isExcludedLibraryAuxiliaryDirectory, isSeasonDirectoryName } from './libraryScanFiles.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import {
   getBoundedLibraryProbe,
@@ -346,7 +346,9 @@ async function scanFolder(
       await addItems(await buildImageItems(folderPath, rootImageFiles));
     }
 
-    const rootDirectories = rootEntries.filter((entry) => entry.isDirectory());
+    const rootDirectories = rootEntries.filter((entry) => (
+      entry.isDirectory() && !isExcludedLibraryAuxiliaryDirectory(entry.name)
+    ));
     await processWithConcurrencyInOrder(
         rootDirectories,
         LIBRARY_ITEM_CONCURRENCY,

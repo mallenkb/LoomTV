@@ -2500,6 +2500,7 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "image",
+ "libloading 0.8.9",
  "loomtv-core",
  "loomtv-playback",
  "objc2",
@@ -2513,6 +2514,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

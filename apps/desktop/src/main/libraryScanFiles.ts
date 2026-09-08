@@ -25,6 +25,14 @@ const SKIPPED_EPISODE_DIRECTORIES = new Set([
   'behind the scenes', 'featurettes', 'interviews', 'scenes', 'shorts',
   'trailers', 'featurette', 'sample', 'samples', 'subs', 'subtitles',
 ]);
+
+export function isExcludedLibraryAuxiliaryDirectory(name: string): boolean {
+  return SKIPPED_EPISODE_DIRECTORIES.has(name.trim().toLowerCase());
+}
+
+export function isExcludedLibraryAuxiliaryPath(filePath: string): boolean {
+  return path.resolve(filePath).split(path.sep).some(isExcludedLibraryAuxiliaryDirectory);
+}
 const SPECIALS_DIRECTORY_PATTERN = /^specials?(?=$|[\s.:()[\]{}–—])/i;
 const SEASON_DIRECTORY_PATTERN = /^(?:season|series|s)[\s.:]*0*(\d{1,2})(?=$|[\s.:()[\]{}–—])/i;
 
@@ -185,7 +193,7 @@ export function scanEpisodeFiles(folderPath: string, probe: MediaFileProbe = EMP
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         const fullPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
-          if (!SKIPPED_EPISODE_DIRECTORIES.has(entry.name.toLowerCase())) scanDirectory(fullPath);
+          if (!isExcludedLibraryAuxiliaryDirectory(entry.name)) scanDirectory(fullPath);
           continue;
         }
         if (!isVideoFileName(entry.name)) continue;

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { mergeProviderIds } from './mediaTags';
 import type { LibraryData } from './appContracts.ts';
 import { createMediaItemId } from './libraryItemHelpers.ts';
-import { seasonNumberFromDirectoryName } from './libraryScanFiles.ts';
+import { isExcludedLibraryAuxiliaryPath, seasonNumberFromDirectoryName } from './libraryScanFiles.ts';
 import { cleanMediaTitle, isGenericGroupingFolderTitle } from './metadata/helpers.ts';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types';
 import { normalizeAnimeCast } from '../shared/animeCast';
@@ -502,11 +502,15 @@ function updateScanCacheItemCounts(data: LibraryData, items: MediaItem[]): { sca
  * season cards behind in the database.
  */
 export function repairSeasonFolderItems(data: LibraryData): SeasonFolderRepairResult {
-  const entries: LibraryItemEntry[] = [
+  const storedEntries: LibraryItemEntry[] = [
     ...(data.movies || []).map((item) => ({ collection: 'movies' as const, item })),
     ...(data.tvShows || []).map((item) => ({ collection: 'tvShows' as const, item })),
     ...(data.animeShows || []).map((item) => ({ collection: 'animeShows' as const, item })),
   ];
+  const excludedEntries = storedEntries.filter(({ item }) => (
+    Boolean(item.filePath) && isExcludedLibraryAuxiliaryPath(item.filePath)
+  ));
+  const entries = storedEntries.filter((entry) => !excludedEntries.includes(entry));
   const itemByPathAndType = new Map<string, LibraryItemEntry>();
   const seasonGroups = new Map<string, SeasonFolderCandidate[]>();
 
@@ -522,7 +526,7 @@ export function repairSeasonFolderItems(data: LibraryData): SeasonFolderRepairRe
     else seasonGroups.set(key, [candidate]);
   }
 
-  const removedIds = new Set<string>();
+  const removedIds = new Set(excludedEntries.map(({ item }) => item.id));
   const replacements = new Map<string, LibraryItemEntry>();
   const syntheticEntries: LibraryItemEntry[] = [];
   const mediaIdAliases = new Map<string, string>();

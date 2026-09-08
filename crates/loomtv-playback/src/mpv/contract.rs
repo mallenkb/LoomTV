@@ -35,7 +35,7 @@ fn property(name: &str, value: Value) -> Value {
     json!(["set_property", name, value])
 }
 
-pub(super) fn commands(value: &Value) -> Result<Vec<Value>> {
+pub fn commands(value: &Value) -> Result<Vec<Value>> {
     let (property_name, property_value) = match value["type"].as_str() {
         Some("seek") => {
             return Ok(vec![json!([
@@ -110,7 +110,7 @@ pub(super) fn commands(value: &Value) -> Result<Vec<Value>> {
     Ok(vec![property(property_name, property_value)])
 }
 
-pub(super) fn start_commands(options: &Value) -> Result<Vec<Value>> {
+pub fn start_commands(options: &Value) -> Result<Vec<Value>> {
     if !options.is_object() {
         return Err("Playback options must be an object.".into());
     }
@@ -204,7 +204,7 @@ pub(super) fn tracks(value: &Value, sources: &HashMap<String, String>) -> Value 
     }).collect::<Vec<_>>()).unwrap_or_default())
 }
 
-pub(super) struct State {
+pub struct State {
     pub value: Value,
     pub dirty: bool,
     pub tracks_dirty: bool,

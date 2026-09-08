@@ -2,7 +2,7 @@ import { app, BrowserWindow, type WebContents } from 'electron';
 import path from 'node:path';
 import type { MediaSessionDiagnostics, MediaSessionSnapshot } from '../shared/mediaControlProtocol.ts';
 import { commandLibVlcPlayback } from './libvlcPlayback.ts';
-import { commandMpvPlayback } from './mpvPlayback.ts';
+import { commandLibMpvPlayback as commandMpvPlayback } from './libmpvPlayback.ts';
 import { createArtworkStaging } from './mediaControl/artworkStaging.ts';
 import { mediaSessionAdapterCandidates } from './mediaControl/adapters.ts';
 import { createEngineDispatcher } from './mediaControl/engineDispatch.ts';

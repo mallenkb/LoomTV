@@ -45,7 +45,6 @@ const settingsInputSchema = z.looseObject({
   localSkipAnalysisEnabled: z.unknown().optional(),
   metadataApiKeys: z.unknown().optional(),
   metadataOfflineMode: z.unknown().optional(),
-  mpvExecutablePath: z.unknown().optional(),
   omdbApiKey: z.unknown().optional(),
   openSubtitlesAutoDownload: z.unknown().optional(),
   openSubtitlesLanguages: z.unknown().optional(),
@@ -194,12 +193,8 @@ function normalizeSettings(input: unknown): AppSettings {
   if (typeof raw.tmdbApiKey === 'string' && raw.tmdbApiKey.trim()) metadataApiKeys.tmdb = raw.tmdbApiKey.trim();
 
   const skipAnalysis = normalizeSkipAnalysis(raw);
-  const mpvExecutablePath = typeof raw.mpvExecutablePath === 'string' && raw.mpvExecutablePath.trim()
-    ? path.resolve(raw.mpvExecutablePath.trim())
-    : undefined;
   return {
     ...raw,
-    mpvExecutablePath,
     omdbApiKey: metadataApiKeys.omdb || '',
     tmdbApiKey: metadataApiKeys.tmdb || '',
     metadataApiKeys,

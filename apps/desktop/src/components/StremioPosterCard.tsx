@@ -6,7 +6,6 @@ import ContentRatingBadge from '@/components/ContentRatingBadge';
 import WatchedToggle from '@/components/WatchedToggle';
 import RatingBadge from '@/components/RatingBadge';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
-import { mediaFormatLabel } from '@/shared/mediaFormat';
 import { cacheWatchedDiscoverItem, discoverWatchedKey } from '@/lib/watched';
 
 /* Keep the Discover card pitch aligned with the local-library poster cards so
@@ -117,13 +116,9 @@ const StremioPosterCard = memo(function StremioPosterCard({
       </div>
       <div className="mt-2 shrink-0 overflow-hidden">
         <h4 className="truncate text-sm font-semibold text-[var(--loom-text)]">{item.title}</h4>
-        {(metaLine || item.contentRating || item.format) && (
+        {(metaLine || (showContentRating && item.contentRating)) && (
           <div className="loom-poster-meta mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
             {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
-            <ContentRatingBadge
-              rating={mediaFormatLabel(item.format, item.type)}
-              className="shrink-0 bg-[var(--loom-surface-3)]"
-            />
             {showContentRating && (
               <ContentRatingBadge rating={item.contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
             )}

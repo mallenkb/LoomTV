@@ -62,23 +62,14 @@ export const OFFICIAL_STREMIO_ADDONS: readonly OfficialStremioAddon[] = Object.f
     description: 'Stremio’s official movie and series catalogs and metadata.',
     capability: 'catalog',
   }),
-  Object.freeze({
-    id: 'opensubtitles-v3',
-    addonId: 'org.stremio.opensubtitlesv3',
-    name: 'OpenSubtitles v3',
-    description: 'Stremio’s official OpenSubtitles provider. Playback integration is planned.',
-    capability: 'subtitles',
-  }),
 ]);
 
-const OFFICIAL_STREMIO_MANIFEST_URLS: Record<OfficialStremioAddon['id'], string> = {
+const OFFICIAL_STREMIO_MANIFEST_URLS: Partial<Record<OfficialStremioAddon['id'], string>> = {
   cinemeta: 'https://v3-cinemeta.strem.io/manifest.json',
-  'opensubtitles-v3': 'https://opensubtitles-v3.strem.io/manifest.json',
 };
 
-const OFFICIAL_STREMIO_ADDON_IDS: Record<OfficialStremioAddon['id'], OfficialStremioAddon['addonId']> = {
+const OFFICIAL_STREMIO_ADDON_IDS: Partial<Record<OfficialStremioAddon['id'], OfficialStremioAddon['addonId']>> = {
   cinemeta: 'com.linvo.cinemeta',
-  'opensubtitles-v3': 'org.stremio.opensubtitlesv3',
 };
 
 export function officialStremioManifestUrl(id: OfficialStremioAddon['id']): string {

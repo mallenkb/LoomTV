@@ -1,4 +1,6 @@
+import { useMemo } from 'react';
 import { X } from 'lucide-react';
+import { compareSubtitleLanguages, subtitleLanguageLabel } from '../../lib/openSubtitlesV3';
 import { ScrollArea } from '../ui/scroll-area';
 import { clampSidePanelWidth, trackLabel } from './helpers';
 import type {
@@ -138,6 +140,7 @@ interface PlayerSettingsPanelProps {
   audioDelayAvailable: boolean;
   subtitlesDefaultEnabled: boolean;
   subtitleTracks: MediaTrack[];
+  onlineSubtitles?: React.ReactNode;
   selectedSubtitleTrackIndex: number;
   selectSubtitleTrack: (trackIndex: number) => void;
   secondarySubtitlesAvailable: boolean;
@@ -185,6 +188,7 @@ export default function PlayerSettingsPanel({
   audioDelayAvailable,
   subtitlesDefaultEnabled,
   subtitleTracks,
+  onlineSubtitles,
   selectedSubtitleTrackIndex,
   selectSubtitleTrack,
   secondarySubtitlesAvailable,
@@ -197,23 +201,18 @@ export default function PlayerSettingsPanel({
   applySubtitleStyleToStream,
   onCorrectSkipTiming,
 }: PlayerSettingsPanelProps) {
-  const subtitleGroups = [
-    {
-      key: 'embedded',
-      label: 'Embedded in video',
-      tracks: subtitleTracks.filter((track) => !track.source || track.source === 'embedded'),
-    },
-    {
-      key: 'sidecar',
-      label: 'Added subtitle files',
-      tracks: subtitleTracks.filter((track) => track.source === 'sidecar'),
-    },
-    {
-      key: 'opensubtitles',
-      label: 'OpenSubtitles',
-      tracks: subtitleTracks.filter((track) => track.source === 'opensubtitles'),
-    },
-  ].filter((group) => group.tracks.length > 0);
+  const trackSource = (track: MediaTrack) => track.source === 'opensubtitles' ? 'OpenSubtitles download'
+    : track.source === 'sidecar' ? 'Added subtitle file' : 'Embedded in video';
+  const subtitleGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; tracks: MediaTrack[] }>();
+    subtitleTracks.forEach((track) => {
+      const label = subtitleLanguageLabel(track.language);
+      const group = groups.get(label) || { key: label, label, tracks: [] };
+      group.tracks.push(track);
+      groups.set(label, group);
+    });
+    return [...groups.values()].sort((a, b) => compareSubtitleLanguages(a.label, b.label));
+  }, [subtitleTracks]);
 
   const selectedTrackLabel = (tracks: MediaTrack[], selectedIndex: number, emptyLabel: string) => {
     const selectedTrack = tracks.find((track) => track.index === selectedIndex);
@@ -480,7 +479,7 @@ export default function PlayerSettingsPanel({
                   </div>
                 ) : (
                   <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70">
-                    Delay controls are available with native mpv playback.
+                    Delay controls are available with native libmpv playback.
                   </p>
                 )}
               </div>
@@ -523,7 +522,7 @@ export default function PlayerSettingsPanel({
                             className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                           >
                             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
-                            <span className="truncate">{trackLabel(track, ordinal)}</span>
+                            <span className="min-w-0"><span className="block truncate">{trackLabel(track, ordinal)}</span><span className="mt-0.5 block text-[10px] text-white/50">{trackSource(track)}</span></span>
                           </button>
                         );
                       })}
@@ -532,11 +531,13 @@ export default function PlayerSettingsPanel({
                 </div>
               </div>
 
+              {onlineSubtitles}
+
               {secondarySubtitlesAvailable && subtitleTracks.length > 0 && (
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold text-white">Secondary subtitle</p>
-                    <p className="text-[10px] uppercase tracking-wide text-white/70">mpv</p>
+                    <p className="text-[10px] uppercase tracking-wide text-white/70">libmpv</p>
                   </div>
                   <div className="max-h-48 overflow-y-auto rounded-lg bg-white/10">
                     <button

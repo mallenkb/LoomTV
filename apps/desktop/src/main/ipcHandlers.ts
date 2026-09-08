@@ -35,13 +35,14 @@ import { buildNetworkStatus, ffmpegAvailability } from './ipcHandlerPolicy.ts';
 import { rendererSettingsPatchSchema, sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import { serializeStremioPluginError } from './stremioPluginWire.ts';
 import {
-  commandMpvPlayback,
-  mpvAvailability,
-  refreshMpvAvailability,
-  startMpvPlayback,
-  stopMpvPlayback,
-  validateMpvExecutable,
-} from './mpvPlayback.ts';
+  commandLibMpvPlayback,
+  libMpvAvailability,
+  setLibMpvPlaybackFullscreenTransition,
+  setLibMpvPlaybackViewport,
+  startLibMpvPlayback,
+  stopLibMpvPlayback,
+  syncLibMpvPlaybackSurface,
+} from './libmpvPlayback.ts';
 import {
   commandLibVlcPlayback,
   libVlcAvailability,
@@ -348,7 +349,6 @@ type LanPairedDevice = {
 };
 
 type NetworkSettings = {
-  mpvExecutablePath?: string;
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
   localNetworkPairedDevices?: LanPairedDevice[];
@@ -1035,34 +1035,13 @@ export function registerIpcHandlers<
   }, z.tuple([nonEmptyString]));
   handle('metadata:provider-request', (_event, request) => deps.requestMetadataProvider(request), z.tuple([metadataProviderRequestSchema]));
   handle('metadata:streaming-providers', (_event, mediaId: string) => deps.getStreamingProviders(mediaId), z.tuple([nonEmptyString]));
-  handleNoArgs('mpv:availability', () => mpvAvailability());
+  handleNoArgs('mpv:availability', () => libMpvAvailability());
 
-  handleNoArgs('mpv:refresh-availability', () => refreshMpvAvailability());
+  handleNoArgs('mpv:refresh-availability', () => libMpvAvailability(true));
 
-  handleNoArgs('mpv:choose-executable', async () => {
-    deps.authorizeSettingsWrite();
-    const result = await deps.showOpenFolderDialog({
-      title: 'Choose mpv executable',
-      properties: ['openFile'],
-      filters: process.platform === 'win32'
-        ? [{ name: 'mpv executable', extensions: ['exe'] }]
-        : [{ name: 'mpv executable', extensions: ['*'] }],
-    });
-    const selectedPath = result.filePaths[0];
-    if (result.canceled || !selectedPath) return mpvAvailability();
-    const validated = validateMpvExecutable(selectedPath);
-    deps.saveSettings({ ...deps.loadSettings(), mpvExecutablePath: validated.executablePath });
-    deps.onSettingsSaved?.();
-    return refreshMpvAvailability();
-  });
+  handleNoArgs('mpv:choose-executable', () => libMpvAvailability());
 
-  handleNoArgs('mpv:reset-executable', () => {
-    deps.authorizeSettingsWrite();
-    const settings = deps.loadSettings();
-    deps.saveSettings({ ...settings, mpvExecutablePath: undefined });
-    deps.onSettingsSaved?.();
-    return refreshMpvAvailability();
-  });
+  handleNoArgs('mpv:reset-executable', () => libMpvAvailability());
 
   handle('mpv:start', (event, filePath, options) => {
     const requestedPath = String(filePath || '');
@@ -1081,16 +1060,16 @@ export function registerIpcHandlers<
       deps.authorizeMediaPath(subtitleFile.path);
       deps.assertLocalMediaPath(subtitleFile.path);
     }
-    return startMpvPlayback(event.sender, mediaPath, options);
+    return startLibMpvPlayback(event.sender, mediaPath, options);
   }, z.tuple([nonEmptyString, mpvStartOptionsSchema.optional()]));
 
   handle(
     'mpv:command',
-    (_event, sessionId, command) => commandMpvPlayback(sessionId, command),
+    (_event, sessionId, command) => commandLibMpvPlayback(sessionId, command),
     z.tuple([nonEmptyString, playbackCommandSchema]),
   );
 
-  handle('mpv:stop', (_event, sessionId) => stopMpvPlayback(sessionId), z.tuple([nonEmptyString]));
+  handle('mpv:stop', (_event, sessionId) => stopLibMpvPlayback(sessionId), z.tuple([nonEmptyString]));
 
   handleExperimental('libvlc:availability', () => libVlcAvailability(), z.tuple([]));
 
@@ -1137,20 +1116,23 @@ export function registerIpcHandlers<
   handleExperimental('libvlc:stop', (_event, sessionId) =>
     stopLibVlcPlayback(sessionId ? String(sessionId) : undefined), z.tuple([z.string().optional()]));
 
-  handleExperimental('libvlc:sync-surface', (event) => syncLibVlcPlaybackSurface(event.sender), z.tuple([]));
+  handleExperimental('libvlc:sync-surface', (event) =>
+    syncLibVlcPlaybackSurface(event.sender) || syncLibMpvPlaybackSurface(event.sender), z.tuple([]));
 
   handleExperimental('libvlc:set-fullscreen-transition', (event, transitioning, waitForFinalViewport) =>
     setLibVlcPlaybackFullscreenTransition(
       event.sender,
       Boolean(transitioning),
       waitForFinalViewport === undefined ? true : Boolean(waitForFinalViewport),
-    ), z.tuple([z.boolean(), z.boolean().optional()]));
+    ) || setLibMpvPlaybackFullscreenTransition(event.sender, Boolean(transitioning)),
+  z.tuple([z.boolean(), z.boolean().optional()]));
 
   handleExperimental('libvlc:set-viewport', (event, rawViewport) => {
     const result = playbackViewportSchema.safeParse(rawViewport);
     if (!result.success || result.data.x < -10_000 || result.data.y < -10_000) return false;
     const viewport: PlaybackViewport = result.data;
-    return setLibVlcPlaybackViewport(event.sender, viewport);
+    return setLibVlcPlaybackViewport(event.sender, viewport)
+      || setLibMpvPlaybackViewport(event.sender, viewport);
   }, z.tuple([playbackViewportSchema]));
 
   // The window uses titleBarStyle 'hiddenInset', so the macOS traffic lights

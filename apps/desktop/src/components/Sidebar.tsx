@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from '@/lib/navigation';
 import { Archive as ArchivePhosphorIcon } from '@phosphor-icons/react';
+import { motion } from 'motion/react';
 import { Bookmark, Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { normalizeOtherFolderIcon, otherFolderIconPair, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
@@ -116,14 +117,10 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
         <LoomLogo className="h-8 w-auto" />
       </Link>
       <nav
-        className="loom-modern-category-pill loom-no-drag flex h-12 items-center rounded-full border p-1 backdrop-blur-2xl"
+        className="loom-modern-category-pill loom-no-drag flex h-12 items-center rounded-full border p-1"
         aria-label="Library categories"
       >
-        <SharedListHighlight
-          activeId={activeCategory?.path}
-          followPointer={false}
-          className="loom-shared-highlight-category flex h-full items-center"
-        >
+        <div className="loom-shared-highlight-group loom-shared-highlight-category flex h-full items-center">
           {visibleCategories.map((category) => {
             const isActive = category.path === activeCategory?.path;
             const CategoryIcon = isActive ? (category.activeIcon || category.icon) : category.icon;
@@ -138,17 +135,27 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
                 data-shared-highlight-item
                 data-shared-highlight-id={category.path}
                 className={cn(
-                  'relative z-10 inline-flex h-full items-center justify-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
+                  'relative inline-flex h-full items-center justify-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
                   category.iconOnly && 'w-12 px-3',
                   isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
                 )}
               >
-                {CategoryIcon ? <CategoryIcon className="h-4 w-4" aria-hidden="true" /> : null}
-                {!category.iconOnly && category.label}
+                {isActive ? (
+                  <motion.span
+                    layoutId="loom-modern-category-selection"
+                    className="loom-modern-category-selection absolute inset-0 rounded-full"
+                    transition={{ type: 'spring', stiffness: 520, damping: 42, mass: 0.7 }}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <span className="relative z-10 inline-flex items-center justify-center">
+                  {CategoryIcon ? <CategoryIcon className="h-4 w-4" aria-hidden="true" /> : null}
+                  {!category.iconOnly && category.label}
+                </span>
               </Link>
             );
           })}
-        </SharedListHighlight>
+        </div>
       </nav>
     </header>
   );

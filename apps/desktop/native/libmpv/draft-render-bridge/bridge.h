@@ -17,6 +17,8 @@ int loom_mpv_command(void *engine, uint64_t request, const char *arguments_json,
 /* Returns an allocated JSON array, or NULL when no events are queued. */
 char *loom_mpv_poll(void *engine);
 void loom_mpv_free(void *allocation);
+/* Copies one JSON event batch into output and returns its byte length. */
+int loom_mpv_poll_into(void *engine, char *output, size_t capacity);
 /* Frees the renderer before the core; consumes the engine handle exactly once. */
 void loom_mpv_destroy(void *engine);
 #ifdef __cplusplus

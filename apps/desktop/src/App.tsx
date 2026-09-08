@@ -1,9 +1,9 @@
-import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { useLocation, parseDesktopSearch, stringifyDesktopSearch } from './lib/navigation';
-import { MotionConfig } from 'motion/react';
+import { MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
@@ -167,6 +167,22 @@ export default function App() {
       window.clearTimeout(timer);
     };
   }, [hasDesktopLibVlcBridge, startupReady]);
+
+  useEffect(() => {
+    if (!startupReady || !window.desktopApi) return undefined;
+    const preload = () => {
+      void Promise.allSettled([
+        MyList, Movies, Others, TVShows, MovieDetail, TVDetail, Settings,
+        PluginDiscover, LiveTv, ArchiveOrgAddon,
+      ].map((component) => component.preload?.()));
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(preload, { timeout: 2_000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(preload, 500);
+    return () => window.clearTimeout(id);
+  }, [startupReady]);
 
   return (
     <StartupReadyContext.Provider value={markStartupReady}>
@@ -354,20 +370,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 }
 
 function AppShell() {
-  const pageRef = useRef<HTMLElement>(null);
-  const route = useLocation();
-  useLayoutEffect(() => {
-    const page = pageRef.current;
-    if (!page || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    // One compositor opacity transition per route. Keep the element in place
-    // so fixed controls retain their viewport coordinates.
-    page.style.willChange = 'opacity';
-    const animation = page.animate([{ opacity: 0.75 }, { opacity: 1 }], {
-      duration: 160, easing: 'ease-out',
-    });
-    animation.onfinish = () => { page.style.willChange = ''; };
-    return () => { animation.cancel(); page.style.willChange = ''; };
-  }, [route.pathname]);
+  const shouldReduceMotion = useReducedMotion();
   const { state: libraryState } = useLibrary();
   const { activeProfile, gateOpen, openGate } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
@@ -522,24 +525,31 @@ function AppShell() {
         aria-hidden="true"
       />
       <main
-        ref={pageRef}
         className="flex-1 overflow-hidden"
         // The now-playing bar is 93px tall before its shell padding. Keep a
         // full breathing band below every library grid so its final row can be
         // scrolled clear of the fixed bar.
         style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '11rem' : '0px' } as React.CSSProperties}
       >
-        {/* Keyed on the route so navigating with the sidebar clears a failed
-            page instead of stranding the user on the error panel. */}
-        <ErrorBoundary
+        <motion.div
           key={location.pathname}
-          title="This page ran into a problem"
-          description="The rest of LoomTV is still running. Retry, or pick another section from the sidebar."
+          className="loom-route-transition-frame"
+          initial={shouldReduceMotion ? false : { opacity: 0.82 }}
+          animate={{ opacity: 1 }}
+          transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
         >
-          <PlaybackActionsContext.Provider value={{ handlePlayMedia, handlePlayLiveChannel, handlePlayArchiveMovie }}>
-            <Outlet />
-          </PlaybackActionsContext.Provider>
-        </ErrorBoundary>
+          {/* Keyed on the route so navigating with the sidebar clears a failed
+              page instead of stranding the user on the error panel. */}
+          <ErrorBoundary
+            key={location.pathname}
+            title="This page ran into a problem"
+            description="The rest of LoomTV is still running. Retry, or pick another section from the sidebar."
+          >
+            <PlaybackActionsContext.Provider value={{ handlePlayMedia, handlePlayLiveChannel, handlePlayArchiveMovie }}>
+              <Outlet />
+            </PlaybackActionsContext.Provider>
+          </ErrorBoundary>
+        </motion.div>
       </main>
       </div>
       {nowPlaying && (
@@ -605,6 +615,31 @@ function warmDetails(id: string, preload: boolean, state: unknown) {
   void desktopApi.getLibraryItem(id).catch(() => undefined).finally(() => { preloadingDetails = false; });
 }
 
+function isRouteModuleError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /importing a module script failed|failed to fetch dynamically imported module|loading chunk .+ failed|chunkloaderror/i.test(message);
+}
+
+function RouteErrorFallback({ error, reset }: { error: Error; reset: () => void }) {
+  const moduleError = isRouteModuleError(error);
+  useEffect(() => {
+    if (!moduleError) return;
+    const key = 'loomtv:last-route-module-reload';
+    const previous = Number(window.sessionStorage.getItem(key) || 0);
+    if (Date.now() - previous < 15_000) return;
+    window.sessionStorage.setItem(key, String(Date.now()));
+    window.location.reload();
+  }, [moduleError]);
+  return (
+    <div role="alert" className="p-8">
+      <p>{moduleError ? 'Reloading this page…' : error.message || 'This page could not load.'}</p>
+      <button type="button" onClick={moduleError ? () => window.location.reload() : reset}>
+        {moduleError ? 'Reload now' : 'Retry'}
+      </button>
+    </div>
+  );
+}
+
 const rootRoute = createRootRoute({ component: DesktopBootstrap, validateSearch: (search: Record<string, unknown>) => Object.fromEntries(Object.entries(search).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')),  notFoundComponent: () => <Navigate to="/" replace /> });
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: Home }),
@@ -630,10 +665,7 @@ const router = createRouter({
   scrollToTopSelectors: ['main .loom-page', '.loom-modern-home'],
   defaultPendingMs: 150, defaultPendingMinMs: 0,
   defaultPendingComponent: () => <div role="status" className="p-8 text-[var(--loom-muted)]">Loading page…</div>,
-  defaultErrorComponent: ({ error, reset }) => <div role="alert" className="p-8">
-    <p>{error.message || 'This page could not load.'}</p>
-    <button type="button" onClick={reset}>Retry</button>
-  </div>,
+  defaultErrorComponent: RouteErrorFallback,
 });
 
 router.subscribe('onBeforeNavigate', ({ pathChanged }) => {

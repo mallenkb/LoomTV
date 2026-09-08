@@ -1,5 +1,6 @@
 import { defineConfig, mergeConfig, type Plugin } from 'vite-plus';
 import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 import electronRenderer from '../desktop/vite.renderer.config';
 
 function rejectNativeImports(): Plugin {
@@ -15,7 +16,15 @@ function rejectNativeImports(): Plugin {
 }
 
 export default mergeConfig(electronRenderer, defineConfig({
-  plugins: [rejectNativeImports()],
+  plugins: [rejectNativeImports(), {
+    name: 'loomtv-dev-identity',
+    configureServer(server) {
+      server.middlewares.use('/__loomtv_dev_identity', (_request, response) => {
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ root: realpathSync(fileURLToPath(new URL('.', import.meta.url))) }));
+      });
+    },
+  }],
   define: { __TAURI_PLATFORM__: JSON.stringify(process.platform) },
   css: { postcss: fileURLToPath(new URL('.', import.meta.url)) },
   build: { outDir: 'dist', emptyOutDir: true, target: 'esnext' },

@@ -1,5 +1,5 @@
 //! Owned external-window mpv fallback. Only reviewed playback commands reach IPC.
-mod contract;
+pub mod contract;
 mod runtime;
 #[cfg(test)]
 mod tests;

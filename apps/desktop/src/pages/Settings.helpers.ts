@@ -36,6 +36,7 @@ export const APP_LICENSE = {
 };
 
 export const THIRD_PARTY_DEPENDENCIES = [
+  { name: 'Stremio official add-on registry', owner: 'SmartCode OOD / Stremio', license: 'MIT', url: 'https://github.com/Stremio/stremio-official-addons/blob/master/LICENSE.md' },
   { name: 'DiceBear Glyphs', owner: 'Matt Houser / DiceBear', license: 'CC BY 4.0', url: 'https://www.dicebear.com/styles/glyphs/' },
   { name: 'Electron', owner: 'Electron Community', license: 'MIT', url: 'https://www.electronjs.org/' },
   { name: 'YouTube embedded player', owner: 'Google LLC / YouTube', license: 'YouTube Terms of Service', url: 'https://www.youtube.com/t/terms' },
@@ -51,7 +52,7 @@ export const THIRD_PARTY_DEPENDENCIES = [
   { name: 'better-sqlite3', owner: 'Joshua Wise and contributors', license: 'MIT', url: 'https://github.com/WiseLibs/better-sqlite3' },
   { name: 'bonjour-service', owner: 'bonjour-service contributors', license: 'MIT', url: 'https://github.com/onlxltd/bonjour-service' },
   { name: 'LibVLC / VLC media engine', owner: 'VideoLAN', license: 'LGPL-2.1+ core*', url: 'https://www.videolan.org/legal.html' },
-  { name: 'mpv media player', owner: 'mpv contributors', license: 'GPL-2.0-or-later*', url: 'https://github.com/mpv-player/mpv' },
+  { name: 'libmpv media library', owner: 'mpv contributors', license: 'GPL-2.0-or-later*', url: 'https://github.com/mpv-player/mpv' },
   { name: 'FFmpeg / FFprobe', owner: 'FFmpeg contributors and build providers', license: 'GPL-3.0-or-later*', url: 'https://ffmpeg.org/legal.html' },
   { name: 'fpcalc / Chromaprint', owner: 'AcoustID / Chromaprint contributors', license: 'MIT + upstream notices*', url: 'https://github.com/acoustid/chromaprint' },
   { name: 'Koffi', owner: 'Koromix', license: 'MIT', url: 'https://github.com/Koromix/koffi' },
@@ -68,6 +69,8 @@ export const THIRD_PARTY_DEPENDENCIES = [
 ];
 
 export const METADATA_ATTRIBUTIONS = [
+  { name: 'OpenSubtitles v3 / Stremio', details: 'Online subtitles from OpenSubtitles, delivered by the official Stremio v3 add-on. Discovered through the Stremio official add-on registry.', url: 'https://github.com/Stremio/stremio-official-addons' },
+  { name: 'OpenSubtitles', details: 'Subtitle service and community contributions. Subtitle content is subject to the provider\'s terms, not the registry\'s MIT license.', url: 'https://www.opensubtitles.org/' },
   { name: 'TMDB', details: 'Movie and TV posters, backdrops, cast data, ratings, and metadata.', url: 'https://www.themoviedb.org/' },
   { name: 'TheTVDB', details: 'TV series, season, episode, and artwork metadata.', url: 'https://thetvdb.com/' },
   { name: 'TVmaze', details: 'Ratings for active anime and TV series, plus show and episode metadata.', url: 'https://www.tvmaze.com/' },

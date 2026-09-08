@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { LibVlcAvailability, LocalSegmentAnalysisStatus, MpvAvailability, SkipAnalysisSettings } from '@/lib/desktopApi';
 import SkipTimestampManager from './SkipTimestampManager';
-import { isBundledFFmpegPath } from './Settings.helpers';
 
 type PlaybackSettingsSectionProps = {
   showServerControls?: boolean;
@@ -29,9 +28,9 @@ type PlaybackSettingsSectionProps = {
   libvlcAvailability?: LibVlcAvailability | null;
   mpvAvailability?: MpvAvailability | null;
   ffmpegStatus?: { available: boolean; path: string | null } | null;
-  onMpvChoose?: () => void | Promise<void>;
-  onMpvReset?: () => void | Promise<void>;
+  onLibvlcRefresh?: () => void | Promise<void>;
   onMpvRefresh?: () => void | Promise<void>;
+  onFfmpegRefresh?: () => void | Promise<void>;
 };
 
 const INTRO_TYPES = ['intro', 'recap'] as const;
@@ -67,9 +66,9 @@ export default function PlaybackSettingsSection({
   libvlcAvailability = null,
   mpvAvailability = null,
   ffmpegStatus = null,
-  onMpvChoose,
-  onMpvReset,
+  onLibvlcRefresh,
   onMpvRefresh,
+  onFfmpegRefresh,
 }: PlaybackSettingsSectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -89,6 +88,13 @@ export default function PlaybackSettingsSection({
   const remaining = manualScanActive ? manualRemaining : running;
   const waiting = analysisStatus?.waitingCount || 0;
   const scanActive = remaining > 0;
+  const refreshAction = libvlcAvailability && !libvlcAvailability.available && onLibvlcRefresh
+    ? { label: 'Refresh LibVLC', run: onLibvlcRefresh }
+    : mpvAvailability && !mpvAvailability.available && onMpvRefresh
+      ? { label: 'Refresh libmpv', run: onMpvRefresh }
+      : ffmpegStatus && !ffmpegStatus.available && onFfmpegRefresh
+        ? { label: 'Refresh FFmpeg', run: onFfmpegRefresh }
+        : null;
   useEffect(() => {
     if (!scanActive) {
       setBatchSize(0);
@@ -137,15 +143,15 @@ export default function PlaybackSettingsSection({
     <div className="space-y-6">
       <Card className="settings-panel">
         <CardHeader>
-          <CardTitle className="text-white">Playback</CardTitle>
+          <CardTitle className="text-white">Seek controls</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Adjust seek distances and choose how long LoomTV keeps the display awake during playback.
+            Choose how far to skip backward and forward.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2">
-              <span className="text-sm font-medium text-white">Back skip seconds</span>
+              <span className="text-sm font-medium text-white">Backward skip seconds</span>
               <input type="number" min={1} step={1} value={skipBackSeconds} onChange={(event) => onSkipBackChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none" />
             </label>
             <label className="space-y-2">
@@ -163,7 +169,7 @@ export default function PlaybackSettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Display sleep timer</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Choose how long LoomTV keeps the display awake during active playback. Pausing allows sleep immediately; resuming starts a fresh timer.
+            Keep the display awake during playback. Pausing allows it to sleep.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -194,48 +200,12 @@ export default function PlaybackSettingsSection({
         </CardContent>
       </Card>}
 
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Native playback fallback (mpv)</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            LibVLC plays local files through an in-window native surface on macOS and Windows. Configure an external mpv installation here as the fallback for the classic integrated player experience; packaged releases may also include a verified mpv payload.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="font-medium text-white">
-                {mpvAvailability === null
-                  ? 'Not checked'
-                  : mpvAvailability.available
-                    ? `Available${mpvAvailability.version ? ` · ${mpvAvailability.version}` : ''}`
-                    : 'Not detected'}
-              </span>
-              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
-                {mpvAvailability?.runtimeSource === 'user-selected' ? 'Selected executable' : mpvAvailability?.runtimeSource === 'environment' ? 'Environment' : 'System search'}
-              </span>
-            </div>
-            <p className="mt-2 break-all text-xs text-[var(--loom-muted)]">
-              {mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason || 'MPV is optional. Use Refresh only if you want to configure it as a fallback.'}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => void onMpvChoose?.()} disabled={!onMpvChoose}>Choose mpv executable</Button>
-            <Button type="button" variant="outline" onClick={() => void onMpvReset?.()} disabled={!onMpvReset || mpvAvailability?.runtimeSource !== 'user-selected'}>Use system mpv</Button>
-            <Button type="button" variant="outline" onClick={() => void onMpvRefresh?.()} disabled={!onMpvRefresh}>Refresh</Button>
-          </div>
-          <p className="text-xs text-[var(--loom-faint)]">
-            LoomTV keeps the existing player UI in every case. If LibVLC is unavailable it tries mpv, then falls back to its Chromium/HLS path.
-          </p>
-        </CardContent>
-      </Card>
-
       {showServerControls && <>
       <Card className="settings-panel">
         <CardHeader>
-          <CardTitle className="text-white">Intro &amp; Outro Skipping</CardTitle>
+          <CardTitle className="text-white">Intro and outro skipping</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            LoomTV finds intros and outros automatically — from online databases, embedded chapters, and local audio analysis — and shows a skip button during playback. Media files are never modified.
+            Find intros and outros automatically and show a skip button during playback.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -252,22 +222,20 @@ export default function PlaybackSettingsSection({
                 />
                 <Check className="pointer-events-none absolute h-3.5 w-3.5 text-[var(--loom-accent-foreground)] opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
               </span>
-              Automatically detect and mark intros &amp; outros
+              Detect intros and outros
             </label>
             <div className="flex flex-wrap items-center gap-2">
               {manualScanActive ? (
                 <Button type="button" onClick={stopScan}>Stop scan</Button>
               ) : (
-                <Button type="button" disabled={!skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'quick' })}>Quick scan</Button>
+                <Button type="button" disabled={!skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'quick' })}>Scan library</Button>
               )}
-              <Button type="button" variant="outline" disabled={manualScanActive || !skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'full' })}>Full scan</Button>
               <Button type="button" variant="outline" onClick={onSave}>Save</Button>
             </div>
           </div>
 
           <p className="text-xs text-[var(--loom-muted)]">
-            Quick scan only analyzes items that aren&apos;t up to date yet. Full scan re-analyzes the entire library.
-            Scans save your settings automatically, and stopping keeps everything already completed — only the rest stays remaining.
+            Scanning saves your settings and checks new or changed items.
           </p>
           {scanNotice && !scanActive && <p className="settings-status-available text-xs">{scanNotice}</p>}
 
@@ -297,7 +265,7 @@ export default function PlaybackSettingsSection({
               {analysisStatus?.currentJob && (
                 <p className="mt-2 text-xs text-[var(--loom-muted)]">{analysisStatus.currentJob.detail}</p>
               )}
-              {phase && (
+              {showProgress && phase && (
                 <p className="mt-1 text-xs text-[var(--loom-muted)]">
                   Current phase: {phase.completed} of {phase.total} {phase.phase === 'fingerprinting' ? 'fingerprinted' : 'matched'}
                 </p>
@@ -336,7 +304,6 @@ export default function PlaybackSettingsSection({
                 </p>
               )}
               {analysisStatus?.lastError && <p role="alert" className="settings-status-error mt-1">{analysisStatus.lastError}</p>}
-              {waiting > 0 && <p className="mt-1">{waiting} item{waiting === 1 ? '' : 's'} waiting for enough peer episodes; this does not keep the scanner active.</p>}
               {coordinatorDisabled && manualRemaining > 0 && (
                 <p className="mt-1">{manualRemaining} unfinished manual item{manualRemaining === 1 ? '' : 's'} retained and ready to resume when analysis is enabled.</p>
               )}
@@ -348,15 +315,16 @@ export default function PlaybackSettingsSection({
               type="button"
               onClick={() => setShowAdvanced((value) => !value)}
               aria-expanded={showAdvanced}
+              aria-controls="playback-analysis-advanced"
               className="inline-flex items-center gap-1.5 rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--loom-accent)] transition-colors hover:bg-[var(--loom-active-bg)]"
             >
-              {showAdvanced ? 'Hide advanced options' : 'Show advanced options'}
+              Advanced options
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
             </button>
           </div>
 
           {showAdvanced && (
-            <div className="space-y-5 rounded-lg bg-[var(--loom-surface-2)] p-4">
+            <div id="playback-analysis-advanced" className="space-y-5 rounded-lg bg-[var(--loom-surface-2)] p-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <Toggle label="Auto-scan new or changed media" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => update({ analyzeNewMedia })} />
                 <Toggle label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => update({ analyzeSpecials })} />
@@ -380,9 +348,10 @@ export default function PlaybackSettingsSection({
 
               <div className="rounded-lg bg-[var(--loom-surface-2)] p-4">
                 <p className="text-sm font-medium text-white">Maintenance</p>
-                <p className="mt-1 text-xs text-[var(--loom-muted)]">{analysisStatus?.fingerprintCount || 0} cached fingerprints · {formatBytes(analysisStatus?.fingerprintCacheBytes || 0)}{analysisStatus?.helperPath ? ` · ${analysisStatus.helperPath}` : ''}</p>
+                <p className="mt-1 text-xs text-[var(--loom-muted)]">{analysisStatus?.fingerprintCount || 0} cached fingerprints · {formatBytes(analysisStatus?.fingerprintCacheBytes || 0)}</p>
                 {analysisStatus?.progress && <p className="mt-1 text-xs text-[var(--loom-muted)]">Job history: {analysisStatus.progress.complete}/{analysisStatus.progress.total} complete</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" disabled={manualScanActive || !skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'full' })}>Rescan entire library</Button>
                   <Button type="button" variant="outline" onClick={() => onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
                   <Button type="button" variant="outline" onClick={() => onAnalysisAction('cancel')}>Cancel queued</Button>
                   <Button type="button" variant="outline" onClick={() => onAnalysisAction('cleanup')}>Clear stale cache</Button>
@@ -394,89 +363,61 @@ export default function PlaybackSettingsSection({
                   <Button type="button" variant="outline" disabled={!skipAnalysis.enabled || !scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Save &amp; scan season</Button>
                 </div>
               </div>
+              <div className="space-y-3 border-t border-[var(--loom-panel-border)] pt-4">
+                <Button type="button" variant="outline" aria-expanded={showManual} aria-controls="playback-manual-markers" onClick={() => setShowManual((value) => !value)}>
+                  {showManual ? 'Hide manual markers' : 'Edit manual markers'}
+                </Button>
+                {showManual && (
+                  <div id="playback-manual-markers">
+                    <SkipTimestampManager
+                      settings={skipAnalysis}
+                      onSettingsChange={onSkipAnalysisChange}
+                      onRun={(scope) => onAnalysisAction('run', scope)}
+                      onSaveSettings={onSave}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="settings-panel">
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-white">Manual markers</CardTitle>
-              <CardDescription className="text-[var(--loom-muted)]">
-                Review, correct, or add intro and outro timestamps by hand. Manual markers always override automatic detection.
-              </CardDescription>
-            </div>
-            <Button type="button" variant="outline" onClick={() => setShowManual((value) => !value)}>
-              {showManual ? 'Hide timestamp manager' : 'Open timestamp manager'}
-            </Button>
-          </div>
-        </CardHeader>
-        {showManual && (
-          <CardContent>
-            <SkipTimestampManager
-              settings={skipAnalysis}
-              onSettingsChange={onSkipAnalysisChange}
-              onRun={(scope) => onAnalysisAction('run', scope)}
-              onSaveSettings={onSave}
-            />
-          </CardContent>
-        )}
-      </Card>
       </>}
 
       <Card className="settings-panel">
         <CardHeader>
-          <CardTitle className="text-white">More information</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            How LoomTV chooses a playback path for local, network, and remote media.
-          </CardDescription>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="text-white">Playback availability</CardTitle>
+            {refreshAction && (
+              <Button type="button" variant="ghost" onClick={() => void refreshAction.run()}>
+                {refreshAction.label}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
-              <dt className="text-xs font-semibold text-white/60">Local files</dt>
-              <dd className="mt-1 text-white/85">Classic Loom player UI → LibVLC native surface (macOS/Windows) → mpv fallback → Chromium/HLS</dd>
-            </div>
-            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
-              <dt className="text-xs font-semibold text-white/60">Network &amp; remote media</dt>
-              <dd className="mt-1 text-white/85">Chromium direct stream or HLS, selected by the host playback plan</dd>
-            </div>
-            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
-              <dt className="text-xs font-semibold text-white/60">Hardware decode</dt>
-              <dd className="mt-1 text-white/85">Native engines manage decoding; Chromium reports browser-managed decoding</dd>
-            </div>
-            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
-              <dt className="text-xs font-semibold text-white/60">Encode backend</dt>
-              <dd className="mt-1 text-white/85">The host transcoder is used only when direct playback is not compatible</dd>
-            </div>
-          </dl>
-
           <div className="overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] divide-y divide-[var(--loom-panel-border)]">
-            <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
               <span className="font-medium text-white">LibVLC</span>
-              <span className="text-xs text-[var(--loom-faint)]">Primary local playback on macOS and Windows</span>
-              <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={libvlcAvailability?.libraryPath || libvlcAvailability?.warning || libvlcAvailability?.reason}>
+              <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
                 {libvlcAvailability === null
                   ? 'Checking…'
                   : libvlcAvailability.available
-                    ? `Ready${libvlcAvailability.version ? ` · ${libvlcAvailability.version}` : ''}`
+                    ? 'Ready'
                     : 'Unavailable'}
               </span>
             </div>
-            <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
-              <span className="font-medium text-white">mpv</span>
-              <span className="text-xs text-[var(--loom-faint)]">Optional local playback fallback</span>
-              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason}>
-                {mpvAvailability === null ? 'Not checked' : mpvAvailability.available ? `Ready${mpvAvailability.version ? ` · ${mpvAvailability.version}` : ''}` : 'Unavailable'}
+            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <span className="font-medium text-white">libmpv</span>
+              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
+                {mpvAvailability === null ? 'Checking…' : mpvAvailability.available ? 'Ready' : 'Unavailable'}
               </span>
             </div>
-            <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
               <span className="font-medium text-white">FFmpeg</span>
-              <span className="text-xs text-[var(--loom-faint)]">Media probing and incompatible-stream transcoding</span>
-              <span className={ffmpegStatus?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={ffmpegStatus?.path || undefined}>
-                {ffmpegStatus === null ? 'Checking…' : ffmpegStatus.available ? `Ready · ${isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled' : 'System'}` : 'Unavailable'}
+              <span className={ffmpegStatus?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
+                {ffmpegStatus === null ? 'Checking…' : ffmpegStatus.available ? 'Ready' : 'Unavailable'}
               </span>
             </div>
           </div>

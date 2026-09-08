@@ -94,6 +94,8 @@ import PlayerControlBar from './VideoPlayer/PlayerControlBar';
 import PlayerEpisodePanel from './VideoPlayer/PlayerEpisodePanel';
 import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
 import PlayerSettingsPanel from './VideoPlayer/PlayerSettingsPanel';
+import OpenSubtitlesV3Panel from './VideoPlayer/OpenSubtitlesV3Panel';
+import type { OnlineSubtitle, SubtitleVideo } from '../lib/openSubtitlesV3';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
@@ -437,6 +439,14 @@ export default function VideoPlayer({
   const autoplayNextEnabled = true;
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
+  const onlinePlaybackKey = JSON.stringify([filePath, currentSeason, currentEpisode, playbackRequestId, activeProfile?.id]);
+  const onlinePlaybackKeyRef = useRef(onlinePlaybackKey);
+  onlinePlaybackKeyRef.current = onlinePlaybackKey;
+  const [onlineCaption, setOnlineCaption] = useState<{ key: string; subtitle: OnlineSubtitle; cues: SubtitleCue[] } | null>(null);
+  const [subtitleSelectionRevision, setSubtitleSelectionRevision] = useState(0);
+  const subtitleSelectionRevisionRef = useRef(0);
+  const activeOnlineCaption = onlineCaption?.key === onlinePlaybackKey ? onlineCaption : null;
+  useEffect(() => { setOnlineCaption(null); }, [onlinePlaybackKey]);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [cropMode, setCropMode] = useState<CropMode>('none');
   const [rotation, setRotation] = useState<RotationMode>(0);
@@ -1545,9 +1555,8 @@ export default function VideoPlayer({
         latestEpisodePlaybackRef.current.scheduleNextEpisode();
       }
     } else if (state.status === 'closed') {
-      // MPV uses --keep-open=no, so normal EOF is followed by a closed event.
-      // Its external video window is gone at that point and the Electron player
-      // must become opaque again instead of leaving a transparent ghost window.
+      // Native engines may report closed after EOF. Release the composited
+      // surface and return the React player to its normal opaque state.
       const closedEngine = playbackEngineRef.current;
       playbackEngineRef.current = null;
       void closedEngine?.destroy();
@@ -1584,7 +1593,7 @@ export default function VideoPlayer({
               const loaded = await fallbackEngine.load(filePath, {
                 startSeconds: fallbackPosition,
                 audioDelay: audioDelayRef.current,
-                subtitleDelay: style.delaySeconds,
+                subtitleDelay: 0,
                 subtitleStyle: {
                   fontSize: Math.round(style.fontSize * style.scale),
                   color: style.fontColor,
@@ -1607,7 +1616,7 @@ export default function VideoPlayer({
                 setNativePlaybackActive(true);
                 setNativeEngineKind('mpv');
                 document.documentElement.classList.add('loom-native-active');
-                setStatusMessage('Opening with mpv...');
+                setStatusMessage('Opening with libmpv…');
                 setErrorMessage(null);
                 return;
               }
@@ -1846,7 +1855,7 @@ export default function VideoPlayer({
             loaded = await engine.load(filePath, {
               startSeconds: requestedStartPosition,
               audioDelay: audioDelayRef.current,
-              subtitleDelay: initialSubtitleStyle.delaySeconds,
+              subtitleDelay: 0,
               subtitleStyle: {
                 fontSize: Math.round(initialSubtitleStyle.fontSize * initialSubtitleStyle.scale),
                 color: initialSubtitleStyle.fontColor,
@@ -1870,7 +1879,10 @@ export default function VideoPlayer({
               failedEngine: engine.kind,
               reason: error instanceof Error ? error.name : 'unknown',
             });
-            console.warn(`[player] Native ${engine.kind} startup failed; trying the next fallback.`, error);
+            console.warn(
+              `[player] Native ${engine.kind} startup failed; trying the next fallback.`,
+              error instanceof Error ? `${error.name}: ${error.message}` : error,
+            );
           }
           if (!playerActiveRef.current || loadToken !== loadTokenRef.current) {
             await engine.destroy();
@@ -2718,7 +2730,7 @@ export default function VideoPlayer({
   useEffect(() => {
     if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const style = subtitleStyleRef.current;
-    void playbackEngineRef.current.setSubtitleDelay(style.delaySeconds);
+    void playbackEngineRef.current.setSubtitleDelay(0);
     void playbackEngineRef.current.setAudioDelay(audioDelay);
     if (playbackEngineRef.current.kind !== 'libvlc') {
       void playbackEngineRef.current.setSubtitleStyle({
@@ -2964,7 +2976,7 @@ export default function VideoPlayer({
     }
     if (playbackEngineRef.current) {
       const style = subtitleStyleRef.current;
-      void playbackEngineRef.current.setSubtitleDelay(style.delaySeconds);
+      void playbackEngineRef.current.setSubtitleDelay(0);
       if (playbackEngineRef.current.kind !== 'libvlc') {
         void playbackEngineRef.current.setSubtitleStyle({
           fontSize: Math.round(style.fontSize * style.scale),
@@ -3113,7 +3125,9 @@ export default function VideoPlayer({
     restartForTrackChange();
   }, [restartForTrackChange, trackPreferenceScopeKey]);
 
-  const selectSubtitleTrack = useCallback((trackIndex: number) => {
+  const selectSubtitleTrack = useCallback((trackIndex: number, temporary = false) => {
+    setSubtitleSelectionRevision(++subtitleSelectionRevisionRef.current);
+    setOnlineCaption(null);
     if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
     const previousTrackIndex = selectedSubtitleTrackIndexRef.current;
     subtitleSelectionExplicitRef.current = true;
@@ -3124,13 +3138,14 @@ export default function VideoPlayer({
       selectedSubtitleIsBitmap: Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec)),
       activeSubtitleIsBurnedIn: selectedSubtitleIsBurnedIn(),
     });
-    const preference = saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
+    const preference = temporary ? sharedTrackPreferencesRef.current.subtitle
+      : saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
     const nextPreferences = { ...sharedTrackPreferencesRef.current, subtitle: preference };
     sharedTrackPreferencesRef.current = nextPreferences;
     subtitlesDefaultEnabledRef.current = enabled;
     libVlcSubtitleFallbackRef.current = false;
     setSubtitlesDefaultEnabled(enabled);
-    saveSubtitlesDefaultEnabled(enabled);
+    if (!temporary) saveSubtitlesDefaultEnabled(enabled);
     selectedSubtitleTrackIndexRef.current = trackIndex;
     setSelectedSubtitleTrackIndex(trackIndex);
     const engine = playbackEngineRef.current;
@@ -3631,7 +3646,7 @@ export default function VideoPlayer({
     engine: activePlaybackEngine === 'libvlc'
       ? 'LibVLC'
       : activePlaybackEngine === 'mpv'
-        ? 'mpv'
+        ? 'libmpv'
         : 'Chromium',
     mode: nativePlaybackActive
       ? isLiveStream ? 'Native live stream' : 'Native local playback'
@@ -4010,14 +4025,11 @@ export default function VideoPlayer({
 
           <SubtitleOverlay
             controlsVisible={showControls && playerState !== 'error'}
-            cues={subtitleCues}
+            cues={activeOnlineCaption?.cues ?? subtitleCues}
             videoRef={videoRef}
-            transcodeStartSecondsRef={transcodeStartSecondsRef}
-            streamIsSeekableRef={streamIsSeekableRef}
-            streamIsTranscoded={streamIsTranscoded}
-            currentTimeRef={nativeEngineKind === 'libvlc' ? playbackPositionRef : undefined}
+            currentTimeRef={nativePlaybackActive ? playbackPositionRef : undefined}
             style={subtitleStyle}
-            visible={showSubtitleOverlay}
+            visible={Boolean(activeOnlineCaption) || showSubtitleOverlay}
           />
         </div>
 
@@ -4257,6 +4269,35 @@ export default function VideoPlayer({
             subtitleTracks={subtitleTracks}
             selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
             selectSubtitleTrack={selectSubtitleTrack}
+            onlineSubtitles={isLiveStream ? undefined : (
+              <div className="space-y-2">
+                {activeOnlineCaption && <p className="text-xs text-[var(--loom-accent)]">Selected: {activeOnlineCaption.subtitle.name} - OpenSubtitles v3</p>}
+                <OpenSubtitlesV3Panel
+                  key={onlinePlaybackKey}
+                  selectedId={activeOnlineCaption?.subtitle.id}
+                  resolveVideo={async (): Promise<SubtitleVideo> => {
+                    const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
+                    let item = items.find(candidate => candidate.id === mediaId)
+                      || items.find(candidate => candidate.filePath === filePath || candidate.episodeFiles?.some(episode => episode.filePath === filePath));
+                    if (!item?.providerIds?.imdbId && (mediaId || item?.id)) {
+                      item = (await desktopApi.getLibraryItem(mediaId || item!.id))?.item || item;
+                    }
+                    if (!item?.providerIds?.imdbId) throw new Error('Match this title to an IMDb entry in your library before searching for subtitles.');
+                    return { imdbId: item.providerIds.imdbId, type: item.type === 'movie' ? 'movie' : 'series', season: currentSeason, episode: currentEpisode };
+                  }}
+                  onSelect={async (subtitle, text) => {
+                    const cues = parseVttCues(text);
+                    if (!cues.length) throw new Error('This subtitle has no readable timed captions. Choose another result.');
+                    if (onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
+                    const engine = playbackEngineRef.current;
+                    if (engine) await engine.selectSubtitle(null);
+                    if (onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
+                    selectSubtitleTrack(-1, true);
+                    setOnlineCaption({ key: onlinePlaybackKey, subtitle, cues });
+                  }}
+                />
+              </div>
+            )}
             secondarySubtitlesAvailable={nativePlaybackActive && nativeEngineKind === 'mpv'}
             selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
             selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
