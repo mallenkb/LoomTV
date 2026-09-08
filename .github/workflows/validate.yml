@@ -299,7 +299,8 @@ jobs:
           node apps/desktop/scripts/fetch-fpcalc.cjs
           for attempt in 1 2 3; do
             echo "Building unsigned installers (attempt ${attempt}/3)"
-            if corepack pnpm --filter loom-media-server-desktop run dist; then
+            if corepack pnpm --filter loom-media-server-desktop run dist
+            then
               exit 0
             fi
             if [[ "${attempt}" -lt 3 ]]; then
