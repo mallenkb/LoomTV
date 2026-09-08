@@ -60,6 +60,7 @@ export class NativeSessionLease<Options, State extends NativeState> {
   private receive(state: State): void {
     if (this.disposed) return;
     const sessionId = state.sessionId;
+    if (sessionId === '') return;
     if (
       this.active
       && this.activeGeneration === this.generation
@@ -72,7 +73,7 @@ export class NativeSessionLease<Options, State extends NativeState> {
     }
     if (!this.starting) return;
 
-    if (!sessionId) {
+    if (sessionId === undefined) {
       // A start can emit state before its reply supplies the session ID. Apply
       // anonymous patches to every candidate already seen, and keep a base for
       // candidates that identify themselves later. This preserves event order.
