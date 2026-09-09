@@ -305,7 +305,7 @@ export default function Settings() {
   const persistSettings = useCallback(async (settings: Parameters<typeof desktopApi.saveSettings>[0]): Promise<boolean> => {
     try {
       const saved = await desktopApi.saveSettings(settings);
-      if (!saved) throw new Error('LoomTV did not confirm that the settings were saved.');
+      if (!saved) throw new Error('Loom did not confirm that the settings were saved.');
       setSettingsPersistenceError('');
       return true;
     } catch (error) {
@@ -338,15 +338,8 @@ export default function Settings() {
   }, [addLibraryFolder, runLibraryAction]);
 
   const handleRemoveLibraryFolder = useCallback(async (folder: string) => {
-    const confirmed = await confirm({
-      title: 'Remove this library folder?',
-      description: `LoomTV will stop scanning “${folder}”. Existing media files will not be deleted, but the folder will disappear from the library after the next successful sync.`,
-      confirmLabel: 'Remove folder',
-      destructive: true,
-    });
-    if (!confirmed) return;
-    void runLibraryAction({ operation: 'remove-folder', run: () => removeLibraryFolder(folder) });
-  }, [confirm, removeLibraryFolder, runLibraryAction]);
+    await removeLibraryFolder(folder);
+  }, [removeLibraryFolder]);
 
   const handleScanLibrary = useCallback(() => {
     void runLibraryAction({ operation: 'scan', run: scanLibrary });
@@ -553,7 +546,7 @@ export default function Settings() {
   const deleteCustomLibrary = useCallback(async (groupId: string) => {
     const group = otherFolderGroups[groupId];
     if (!group) return;
-    const confirmed = await confirm({ title: `Delete ${group.name}?`, description: 'The folders will stay in LoomTV as ungrouped Others folders. No files will be deleted.', confirmLabel: 'Delete group', destructive: true });
+    const confirmed = await confirm({ title: `Delete ${group.name}?`, description: 'The folders will stay in Loom as ungrouped Others folders. No files will be deleted.', confirmLabel: 'Delete group', destructive: true });
     if (!confirmed) return;
     const next = { ...otherFolderGroups };
     delete next[groupId];
@@ -745,7 +738,7 @@ export default function Settings() {
   };
 
   const handleSidebarOrderDrop = (targetId: SidebarNavItemId, position: 'before' | 'after') => {
-    if (!draggedSidebarItem || draggedSidebarItem === 'divider' || draggedSidebarItem === targetId) {
+    if (!draggedSidebarItem || draggedSidebarItem === targetId) {
       setDraggedSidebarItem(null);
       return;
     }
@@ -773,7 +766,7 @@ export default function Settings() {
     const currentOrder = sidebarOrderItems.map((item) => item.id);
     const index = currentOrder.indexOf(itemId);
     const nextIndex = index + direction;
-    if (itemId === 'divider' || index < 0 || nextIndex < 0 || nextIndex >= currentOrder.length) return;
+    if (index < 0 || nextIndex < 0 || nextIndex >= currentOrder.length) return;
 
     const nextOrder = [...currentOrder];
     [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
@@ -1123,8 +1116,8 @@ export default function Settings() {
           <div className="loom-settings-mobile-menu">
             <div className="loom-settings-mobile-profile">
               <div className="loom-settings-mobile-logo">LT</div>
-              <h1>LoomTV</h1>
-              <p>Manage your library, playback, network, metadata, theme, and app details.</p>
+              <h1>Loom</h1>
+              <p>Manage your libraries, playback, network, metadata, theme, and app details.</p>
             </div>
             <SharedListHighlight activeId={activeSection} className="loom-settings-mobile-list loom-shared-highlight-list">
               {visibleSettingsSections.map((section) => (
@@ -1193,40 +1186,40 @@ export default function Settings() {
 
         {activeSection === 'library' && (
           <LibrarySettingsSection
-            folderSections={folderSections}
-            folderStatuses={libraryFolderStatuses}
-            addLibraryFolder={handleAddLibraryFolder}
-            removeLibraryFolder={handleRemoveLibraryFolder}
-            customFolderNames={customFolderNames}
-            otherFolderGroups={otherFolderGroups}
-            onCreateOtherFolderGroup={createCustomLibrary}
-            onAddFolderToGroup={addFolderToCustomLibrary}
-            onDeleteOtherFolderGroup={deleteCustomLibrary}
-            onEditFolder={editFolder}
-            otherFolderIcon={otherFolderIcon}
-            onOtherFolderIconChange={changeOtherFolderIcon}
-            sidebarOrderItems={sidebarOrderItems}
-            draggedSidebarItem={draggedSidebarItem}
-            setDraggedSidebarItem={setDraggedSidebarItem}
-            onSidebarOrderDrop={handleSidebarOrderDrop}
-            moveSidebarItem={moveSidebarItem}
-            isScanning={isScanning}
-            scanProgress={scanProgress}
-            movieCount={movies.length}
-            tvShowCount={tvShows.length}
-            animeCount={animeShows.length}
-            scanLibrary={handleScanLibrary}
-            refreshMetadata={handleRefreshMetadata}
-            fullRescanLibrary={handleFullRescanLibrary}
-            autoSyncIntervalHours={autoSyncIntervalHours}
-            setAutoSyncIntervalHours={handleAutoSyncIntervalChange}
-            backupStatus={backupStatus}
-            clearDataStatus={clearDataStatus}
-            isClearingData={isClearingData}
-            libraryActionError={libraryActionError?.error.sanitizedMessage}
-            onRetryLibraryAction={libraryActionError?.error.retryable ? retryLibraryAction : undefined}
-            onBackupDatabase={() => void handleBackupDatabase()}
-            onClearAppData={() => void handleClearAppData()}
+              folderSections={folderSections}
+              folderStatuses={libraryFolderStatuses}
+              addLibraryFolder={handleAddLibraryFolder}
+              removeLibraryFolder={handleRemoveLibraryFolder}
+              customFolderNames={customFolderNames}
+              otherFolderGroups={otherFolderGroups}
+              onCreateOtherFolderGroup={createCustomLibrary}
+              onAddFolderToGroup={addFolderToCustomLibrary}
+              onDeleteOtherFolderGroup={deleteCustomLibrary}
+              onEditFolder={editFolder}
+              otherFolderIcon={otherFolderIcon}
+              onOtherFolderIconChange={changeOtherFolderIcon}
+              sidebarOrderItems={sidebarOrderItems}
+              draggedSidebarItem={draggedSidebarItem}
+              setDraggedSidebarItem={setDraggedSidebarItem}
+              onSidebarOrderDrop={handleSidebarOrderDrop}
+              moveSidebarItem={moveSidebarItem}
+              isScanning={isScanning}
+              scanProgress={scanProgress}
+              movieCount={movies.length}
+              tvShowCount={tvShows.length}
+              animeCount={animeShows.length}
+              scanLibrary={handleScanLibrary}
+              refreshMetadata={handleRefreshMetadata}
+              fullRescanLibrary={handleFullRescanLibrary}
+              autoSyncIntervalHours={autoSyncIntervalHours}
+              setAutoSyncIntervalHours={handleAutoSyncIntervalChange}
+              backupStatus={backupStatus}
+              clearDataStatus={clearDataStatus}
+              isClearingData={isClearingData}
+              libraryActionError={libraryActionError?.error.sanitizedMessage}
+              onRetryLibraryAction={libraryActionError?.error.retryable ? retryLibraryAction : undefined}
+              onBackupDatabase={() => void handleBackupDatabase()}
+              onClearAppData={() => void handleClearAppData()}
           />
         )}
 
