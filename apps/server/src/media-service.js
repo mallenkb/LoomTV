@@ -217,19 +217,18 @@ function subtitleKindForProbe(plan, probe) {
  * Returning it lets playback preparation skip the ffprobe round trip; anything
  * missing or stale returns null so the caller re-probes and re-records.
  */
-/** @param {unknown} value @returns {import('@loom-media-server/media-core').MediaTrackProbe | null} */
-function cachedMediaTrack(value) {
+/** @param {unknown} value @param {number} ordinal @returns {import('@loom-media-server/media-core').MediaTrackProbe | null} */
+function cachedMediaTrack(value, ordinal) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const track = /** @type {Record<string, unknown>} */ (value);
-  if (typeof track.id !== 'string' || typeof track.codec !== 'string' || !Number.isSafeInteger(track.index)
-    || !['video', 'audio', 'subtitle', 'data', 'unknown'].includes(String(track.kind))
-    || typeof track.default !== 'boolean' || typeof track.forced !== 'boolean') return null;
+  if (typeof track.id !== 'string' || typeof track.codec !== 'string'
+    || !['video', 'audio', 'subtitle', 'data', 'unknown'].includes(String(track.kind))) return null;
   return {
     id: track.id,
-    index: Number(track.index),
+    index: Number.isSafeInteger(track.index) ? Number(track.index) : ordinal,
     kind: /** @type {import('@loom-media-server/media-core').MediaTrackProbe['kind']} */ (track.kind),
-    default: track.default,
-    forced: track.forced,
+    default: track.default === true,
+    forced: track.forced === true,
     codec: track.codec,
     ...(typeof track.language === 'string' ? { language: track.language } : {}),
     ...(typeof track.title === 'string' ? { title: track.title } : {}),
@@ -250,8 +249,7 @@ function cachedMediaTrack(value) {
 function cachedScanProbe(source, sourceId) {
   if (!source?.localMetadata || typeof source.localMetadata !== 'object' || Array.isArray(source.localMetadata)) return null;
   const cached = /** @type {Record<string, unknown>} */ (source.localMetadata);
-  if (cached.sourceId !== sourceId || typeof cached.container !== 'string' || !Array.isArray(cached.tracks)
-    || !Number.isFinite(cached.probedAt)) return null;
+  if (cached.sourceId !== sourceId || typeof cached.container !== 'string' || !Array.isArray(cached.tracks)) return null;
   if (source.recordedSizeBytes !== source.sizeBytes) return null;
   if (!(Math.abs(Number(source.recordedModifiedAtMs) - Number(source.modifiedAtMs)) < 1)) return null;
   const tracks = cached.tracks.map(cachedMediaTrack);
@@ -269,7 +267,10 @@ function cachedScanProbe(source, sourceId) {
     hdr: cached.hdr === true,
     tracks: /** @type {import('@loom-media-server/media-core').MediaTrackProbe[]} */ (tracks),
     chapters,
-    probedAt: Number(cached.probedAt),
+    // Older scanner records did not persist a probe timestamp. The source
+    // size and modified-time checks above are the freshness boundary, so keep
+    // those valid records usable and represent the missing timestamp as zero.
+    probedAt: Number.isFinite(cached.probedAt) ? Number(cached.probedAt) : 0,
     adapterGaps: Array.isArray(cached.adapterGaps) && cached.adapterGaps.includes('external_sidecar_subtitles')
       ? ['external_sidecar_subtitles'] : [],
     ...(Number.isFinite(cached.durationSeconds) ? { durationSeconds: Number(cached.durationSeconds) } : {}),
