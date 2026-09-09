@@ -1,8 +1,20 @@
-# Loom Media Server Roadmap
+# Loom roadmap
 
-This roadmap captures the current direction for Loom Media Server. It is intentionally practical: the project should remain a reliable local-first media library and player, not a streaming service or media source.
+Loom is the desktop product. Loom Media Server is the server component used by the desktop app and headless deployments. The project remains a local-first media library and player, not a streaming service or media source.
 
 ## Current Focus
+
+Electron media expansion now follows this order:
+
+1. Photos
+2. Music
+3. Audiobooks
+4. Books
+5. Comics and manga
+
+The first implementation includes photo folders and viewing, plus separate Music, Audiobooks, Books, and Comics sections with local catalogs and basic players or readers. One SQLite file keeps separate tables for each domain. Tauri is outside this work. The [media execution plan](docs/multimedia-execution-plan.md) records format limits, remaining capabilities, and verification gaps.
+
+The platform work below remains the background roadmap for video and server deployment.
 
 The current implementation sequence is deliberately dependency-first: establish an independent server, make mounted storage safe, package it as an appliance, and only then expand client reach.
 

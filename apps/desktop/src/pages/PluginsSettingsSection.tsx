@@ -145,7 +145,7 @@ export default function PluginsSettingsSection() {
   const removePlugin = async (plugin: StremioPluginSummary) => {
     const confirmed = await confirm({
       title: `Remove ${plugin.name}?`,
-      description: 'Its saved approval and profile access will be removed from this LoomTV host.',
+      description: 'Its saved approval and profile access will be removed from this Loom host.',
       confirmLabel: 'Remove add-on',
       destructive: true,
     });
@@ -312,7 +312,7 @@ export default function PluginsSettingsSection() {
                   onChange={(event) => setReviewConfirmed(event.target.checked)}
                   className="mt-0.5 h-4 w-4 accent-[var(--loom-accent)]"
                 />
-                <span>I understand this add-on is a remote third-party service and approve LoomTV contacting the reviewed origin.</span>
+                <span>I understand this add-on is a remote third-party service and approve Loom contacting the reviewed origin.</span>
               </label>
               <div className="flex gap-2 sm:justify-end">
                 <Button variant="ghost" onClick={() => setReview(null)} disabled={busyKey !== null}>Cancel</Button>
@@ -378,7 +378,7 @@ export default function PluginsSettingsSection() {
             Official Stremio add-ons
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Review and approve remote HTTPS providers before LoomTV can contact their catalog, metadata, or subtitle endpoints.
+            Review and approve remote HTTPS providers before Loom can contact their catalog, metadata, or subtitle endpoints.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

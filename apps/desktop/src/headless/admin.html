@@ -321,7 +321,7 @@
   <div class="shell">
     <aside class="sidebar" id="sidebar" aria-label="Server navigation">
       <div class="brand">
-        <svg class="brand-logo" width="86" height="24" viewBox="0 0 86 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LoomTV">
+        <svg class="brand-logo" width="86" height="24" viewBox="0 0 86 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Loom">
           <path d="M27.3787 16.1202C27.0955 15.5557 26.9823 15.6686 26.9823 5H25V15.6686C25 17.3056 25.9628 18.8297 27.8884 18.8297H29.4742V16.9669H28.4548C27.8884 16.9669 27.5486 16.6847 27.3787 16.1202Z" fill="var(--loom-logo-word, var(--loom-text))" />
           <path d="M35.3639 8.8385C32.5888 8.8385 30.1534 10.9835 30.1534 13.9752C30.1534 16.5154 32.1357 18.9991 35.194 18.9991C38.3656 19.0555 40.2913 16.5718 40.2913 13.9752C40.3479 11.3222 38.1391 8.8385 35.3639 8.8385ZM35.3073 17.1928C33.3817 17.1928 32.0224 15.7816 32.0224 13.9188C32.0224 12.2818 33.3817 10.7577 35.194 10.7577C37.1197 10.7013 38.5355 12.1689 38.5355 13.9752C38.4789 15.6687 37.063 17.1928 35.3073 17.1928Z" fill="var(--loom-logo-word, var(--loom-text))" />
           <path d="M46.4636 8.83846C44.1981 8.83846 41.4796 10.6448 41.4796 13.9188C41.4796 16.9105 43.745 18.9426 46.4636 18.9426C49.1821 18.999 51.7873 16.9669 51.7873 13.9752C51.844 10.9835 49.352 8.78202 46.9733 8.83846H46.4636ZM46.5202 17.1927C44.7645 17.1927 43.292 15.838 43.292 13.9188C43.292 12.1689 44.8211 10.7577 46.3503 10.7577H46.5768C48.1626 10.7012 49.9184 11.9995 49.9184 13.9188C49.9184 15.7815 48.4458 17.1927 46.5202 17.1927Z" fill="var(--loom-logo-word, var(--loom-text))" />
@@ -341,7 +341,7 @@
       </nav>
       <div class="side-footer">
         <div class="connection"><span class="dot" id="sideDot"></span><span id="connectionText">Connecting…</span></div>
-        <div id="versionText">LoomTV server</div>
+        <div id="versionText">Loom Media Server</div>
       </div>
     </aside>
     <main class="main" id="mainContent" data-page="overview">
@@ -401,7 +401,7 @@
           <article class="panel pad">
             <div class="callout" style="margin-top:12px" id="certificateAction">
               <h3>Remove the browser warning</h3>
-              <p>Download LoomTV's certificate, then trust it on this device.</p>
+              <p>Download Loom's certificate, then trust it on this device.</p>
               <a class="button" href="/api/admin/certificate" download="loomtv-local.crt">Download certificate</a>
               <details class="trust-help">
                 <summary>How to trust it</summary>
@@ -452,7 +452,7 @@
   <div class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
     <div class="modal">
       <h2 id="authTitle">Unlock server control</h2>
-      <p id="authCopy">Use your LoomTV account password to open server control. Sign out when you are done.</p>
+      <p id="authCopy">Use your Loom account password to open server control. Sign out when you are done.</p>
       <form id="authForm">
         <div class="form-grid">
           <div class="field" id="ownerNameField">
@@ -479,7 +479,7 @@
     </div>
   </div>
   <div class="modal-backdrop" id="rootModal" role="dialog" aria-modal="true" aria-labelledby="rootTitle">
-    <div class="modal"><h2 id="rootTitle">Add a library folder</h2><p id="rootCopy">Add a local folder or a NAS share mounted where the LoomTV server can read it.</p><form id="rootForm"><div class="form-grid"><div class="field full"><label for="rootPath">Server-mounted path</label><div class="path-control"><input id="rootPath" type="text" required placeholder="/media/Movies" aria-describedby="rootPathHint"><button class="button subtle" id="browseRootButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-open"></use></svg>Browse</button></div><p class="field-hint" id="rootPathHint">Use the server path, not the host path. For Docker, map a host folder to <code>/media/Movies</code> first, then choose it here.</p></div><div class="path-picker" id="rootPicker" hidden><div class="path-picker-head"><div><strong>Mounted folders</strong><p id="rootPickerPath">/media</p></div><button class="button subtle" id="closePickerButton" type="button">Close</button></div><div class="path-picker-toolbar"><button class="button subtle" id="rootPickerUpButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-up"></use></svg>Up</button><button class="button primary" id="rootPickerUseButton" type="button">Use this folder</button></div><div class="path-picker-list" id="rootPickerList" role="listbox" aria-label="Mounted folders"></div><p class="field-hint">Finder/Explorer cannot expose a host path to a browser. This list shows folders visible inside LoomTV, including Docker and NAS mounts.</p></div><div class="field full"><label for="rootKind">Library type</label><select id="rootKind"><option value="movies">Movies</option><option value="tvShows">TV shows</option><option value="anime">Anime</option><option value="others">Other video</option></select></div><div class="form-actions"><button class="button subtle" id="closeRootButton" type="button">Cancel</button><button class="button primary" type="submit"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#plus"></use></svg>Add folder</button></div></div></form></div>
+    <div class="modal"><h2 id="rootTitle">Add a library folder</h2><p id="rootCopy">Add a local folder or a NAS share mounted where the Loom Media Server can read it.</p><form id="rootForm"><div class="form-grid"><div class="field full"><label for="rootPath">Server-mounted path</label><div class="path-control"><input id="rootPath" type="text" required placeholder="/media/Movies" aria-describedby="rootPathHint"><button class="button subtle" id="browseRootButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-open"></use></svg>Browse</button></div><p class="field-hint" id="rootPathHint">Use the server path, not the host path. For Docker, map a host folder to <code>/media/Movies</code> first, then choose it here.</p></div><div class="path-picker" id="rootPicker" hidden><div class="path-picker-head"><div><strong>Mounted folders</strong><p id="rootPickerPath">/media</p></div><button class="button subtle" id="closePickerButton" type="button">Close</button></div><div class="path-picker-toolbar"><button class="button subtle" id="rootPickerUpButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-up"></use></svg>Up</button><button class="button primary" id="rootPickerUseButton" type="button">Use this folder</button></div><div class="path-picker-list" id="rootPickerList" role="listbox" aria-label="Mounted folders"></div><p class="field-hint">Finder/Explorer cannot expose a host path to a browser. This list shows folders visible inside Loom Media Server, including Docker and NAS mounts.</p></div><div class="field full"><label for="rootKind">Library type</label><select id="rootKind"><option value="movies">Movies</option><option value="tvShows">TV shows</option><option value="anime">Anime</option><option value="others">Other video</option></select></div><div class="form-actions"><button class="button subtle" id="closeRootButton" type="button">Cancel</button><button class="button primary" type="submit"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#plus"></use></svg>Add folder</button></div></div></form></div>
   </div>
   <div class="modal-backdrop" id="userModal" role="dialog" aria-modal="true" aria-labelledby="userTitle">
     <div class="modal"><h2 id="userTitle">Add user</h2><p id="userCopy">Create a scoped account for someone who uses this server.</p><form id="userForm"><div class="form-grid"><div class="field"><label for="userName">Account name</label><input id="userName" type="text" required maxlength="80" autocomplete="username" placeholder="Alex"></div><div class="field"><label for="userRole">Role</label><select id="userRole"><option value="viewer">Viewer</option><option value="user">User</option><option value="admin">Administrator</option></select></div><div class="field full"><label for="userPassword">Password</label><input id="userPassword" type="password" required minlength="8" maxlength="256" autocomplete="new-password" placeholder="At least 8 characters"></div><div class="field full"><label>Permissions</label><div class="permission-grid" id="userPermissions"></div></div><div class="field full"><label>Library roots</label><div class="user-root-list" id="userRoots"></div><p class="field-hint">Leave every root unchecked to grant access to all current and future roots.</p></div><div class="field"><label for="userDeviceIds">Allowed device IDs (optional)</label><input id="userDeviceIds" type="text" maxlength="2048" placeholder="living-room, tablet"><p class="field-hint">Comma-separated IDs. Leave blank to allow any device.</p></div><div class="field"><label for="userMaxSessions">Concurrent sessions (optional)</label><input id="userMaxSessions" type="number" min="1" max="32" inputmode="numeric" placeholder="Unlimited"><p class="field-hint">Limit simultaneous sign-ins for this account.</p></div><div class="field full"><label class="permission-option"><input id="userDisabled" type="checkbox"><span>Disable this account and revoke its active sessions</span></label></div><div class="form-actions"><button class="button subtle" id="closeUserButton" type="button">Cancel</button><button class="button primary" type="submit" id="userSubmit">Create user</button></div></div></form></div>
@@ -589,7 +589,7 @@
           else $('rootGroups').textContent = 'Sign in with library access to view folders.';
           applyPermissionUi(permissions);
           await loadPageData(state.page);
-        } catch (err) { error(err.message || 'Could not reach the LoomTV server.'); }
+        } catch (err) { error(err.message || 'Could not reach the Loom Media Server.'); }
       }
       function formatUptime(seconds) {
         const total = Math.floor(Number(seconds) || 0);
@@ -627,7 +627,7 @@
         $('healthDot').className = `dot ${status === 'healthy' ? 'online' : status === 'degraded' ? 'warn' : 'offline'}`;
         $('sideDot').className = `dot ${status === 'healthy' ? 'online' : status === 'degraded' ? 'warn' : 'offline'}`;
         text('connectionText', status === 'healthy' ? 'Server online' : status === 'degraded' ? 'Server degraded' : 'Server unavailable');
-        text('versionText', `LoomTV ${payload.app?.version || ''}`.trim());
+        text('versionText', `Loom Media Server ${payload.app?.version || ''}`.trim());
         const roots = payload.library?.roots || [];
         const permissions = payload.user?.permissions || [];
         const canRead = (permission) => permissions.includes('*') || permissions.includes(permission);

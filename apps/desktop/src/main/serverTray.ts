@@ -38,7 +38,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
   if (process.platform === 'darwin' && options.iconIsTemplate) trayIcon.setTemplateImage(true);
 
   serverTray = new Tray(trayIcon);
-  serverTray.setToolTip('LoomTV');
+  serverTray.setToolTip('Loom');
   let previousServerInfo = '';
   const refreshMenu = () => {
     if (!serverTray || serverTray.isDestroyed()) return;
@@ -59,7 +59,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     }] : []),
     { type: 'separator' },
     {
-      label: 'Open LoomTV',
+      label: 'Open Loom',
       click: options.onOpen,
     },
     {
@@ -72,7 +72,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     }] : []),
     { type: 'separator' },
     {
-      label: 'Quit LoomTV',
+      label: 'Quit Loom',
       click: options.onQuit,
     },
     ]));

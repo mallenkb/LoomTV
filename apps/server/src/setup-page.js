@@ -19,9 +19,9 @@ export const DEFAULT_SETUP_HTML_PATH = path.resolve(MODULE_DIR, 'setup.html');
 
 const FALLBACK_SETUP_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LoomTV setup</title><style>:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#fafafa}
+<title>Loom setup</title><style>:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#fafafa}
 body{display:grid;min-height:100vh;place-items:center;margin:0;padding:24px}main{max-width:560px}h1{margin:0 0 10px;color:#FC9C03}p{line-height:1.6;color:#a3a3a3}code{color:#FC9C03}</style></head>
-<body><main><h1>LoomTV setup</h1><p>The setup page asset was not packaged with this server. Copy <code>setup.html</code> next to the server and restart it.</p></main></body></html>`;
+<body><main><h1>Loom setup</h1><p>The setup page asset was not packaged with this server. Copy <code>setup.html</code> next to the server and restart it.</p></main></body></html>`;
 
 /**
  * @typedef {() => Promise<{ required: boolean } | null>} SetupStatusProvider

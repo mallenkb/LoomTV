@@ -311,7 +311,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     return this.requiredCommand({ type: 'set-video-crop', crop }, 'This LibVLC runtime cannot crop video live.');
   }
   setVideoRotation(degrees: number): Promise<void> {
-    return this.requiredCommand({ type: 'set-video-rotation', degrees }, 'LibVLC does not support live video rotation in LoomTV.');
+    return this.requiredCommand({ type: 'set-video-rotation', degrees }, 'LibVLC does not support live video rotation in Loom.');
   }
 
   async destroy(): Promise<void> {

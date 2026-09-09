@@ -1,8 +1,8 @@
 {
   "name": "loom-media-server-desktop",
-  "productName": "LoomTV",
+  "productName": "Loom",
   "version": "1.0.161",
-  "description": "A local media server for your movie and TV show collection",
+  "description": "A local media library for video, photos, music, and reading",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.20.0",
   "private": true,
@@ -111,8 +111,8 @@
     "zod": "catalog:"
   },
   "build": {
-    "appId": "com.mallenkb.loommediaserver",
-    "productName": "LoomTV",
+    "appId": "com.mallenkb.loomtv",
+    "productName": "Loom",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "afterSign": "scripts/after-sign.cjs",
     "afterPack": "scripts/ensure-update-config.cjs",

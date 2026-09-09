@@ -24,13 +24,13 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
 export const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';
 
 export const LOADER_OPTIONS: { id: AppLoaderStyle; label: string; description: string }[] = [
-  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the LoomTV logo.' },
+  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the Loom logo.' },
   { id: 'logo-mark', label: 'Logo Only', description: 'Compact logo-only loader for tighter surfaces.' },
-  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full LoomTV wordmark animation for branded screens.' },
+  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full Loom wordmark animation for branded screens.' },
 ];
 
 export const APP_LICENSE = {
-  name: 'LoomTV',
+  name: 'Loom',
   license: 'MIT',
   copyright: 'Copyright (c) 2026 malllenkb',
 };

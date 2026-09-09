@@ -353,7 +353,7 @@ export default function ModernHome() {
             <div className="max-w-lg text-center">
               <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[var(--loom-border)] bg-[var(--loom-surface)]"><FolderPlus className="h-9 w-9 text-[var(--loom-accent)]" /></div>
               <h1 className="mt-6 text-3xl font-bold">Build your cinematic library</h1>
-              <p className="mt-3 text-sm leading-6 text-[var(--loom-muted)]">Add anime, TV shows, or movies and LoomTV will turn your collection into a Modern home.</p>
+              <p className="mt-3 text-sm leading-6 text-[var(--loom-muted)]">Add anime, TV shows, or movies and Loom will turn your collection into a Modern home.</p>
               {libraryActionError ? <p role="alert" className="mt-4 text-sm text-red-200">{libraryActionError}</p> : null}
               <Button disabled={isScanning} onClick={() => void handleAddFolder()} className="mt-7 gap-2 rounded-full px-6"><FolderPlus className="h-4 w-4" /> Add a folder</Button>
             </div>

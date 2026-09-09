@@ -40,7 +40,7 @@ import {
 
 if (squirrelStartup) app.quit();
 
-app.setName('LoomTV');
+app.setName('Loom');
 const configuredUserDataDir = String(process.env.LOOMTV_DATA_DIR || '').trim();
 const USER_DATA_DIR = configuredUserDataDir
   ? path.resolve(configuredUserDataDir)
@@ -71,7 +71,7 @@ function startupDocument(message: string): string {
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Starting LoomTV</title>
+  <title>Starting Loom</title>
   <style>
     :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
@@ -84,7 +84,7 @@ function startupDocument(message: string): string {
     @keyframes move { from { transform: translateX(-35%); } to { transform: translateX(175%); } }
   </style>
 </head>
-<body><main><h1>Starting LoomTV</h1><p>${escaped}</p><div class="bar"></div></main></body>
+<body><main><h1>Starting Loom</h1><p>${escaped}</p><div class="bar"></div></main></body>
 </html>`;
 }
 
@@ -97,7 +97,7 @@ function showStartupProgress(message: string): void {
       minHeight: 280,
       maxWidth: 480,
       maxHeight: 280,
-      title: 'Starting LoomTV',
+      title: 'Starting Loom',
       backgroundColor: '#090909',
       resizable: false,
       maximizable: false,
@@ -132,18 +132,18 @@ function readProtectedSecret(name: string): string | null {
   const target = protectedSecretPath(name);
   if (!fs.existsSync(target)) return null;
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-protected credential storage is unavailable. LoomTV will not expose or replace the saved startup credential.');
+    throw new Error('OS-protected credential storage is unavailable. Loom will not expose or replace the saved startup credential.');
   }
   const value = JSON.parse(fs.readFileSync(target, 'utf8')) as ProtectedSecret;
   if (value.version !== 1 || typeof value.encrypted !== 'string' || !value.encrypted) {
-    throw new Error('The protected LoomTV startup credential is malformed.');
+    throw new Error('The protected Loom startup credential is malformed.');
   }
   return safeStorage.decryptString(Buffer.from(value.encrypted, 'base64'));
 }
 
 function writeProtectedSecret(name: string, secret: string): string {
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-protected credential storage is required before LoomTV can migrate this installation safely.');
+    throw new Error('OS-protected credential storage is required before Loom can migrate this installation safely.');
   }
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
   const target = protectedSecretPath(name);
@@ -176,7 +176,7 @@ async function showCredential(credential: StartupCredential): Promise<void> {
     type: 'info',
     title: credential.label,
     message: credential.label,
-    detail: `${credential.secret}\n\nCopy this now. LoomTV will not put the secret in logs or the browser address.`,
+    detail: `${credential.secret}\n\nCopy this now. Loom will not put the secret in logs or the browser address.`,
     buttons: ['Copy and continue', 'Quit'],
     defaultId: 0,
     cancelId: 1,
@@ -245,7 +245,7 @@ function getJson<T>(url: string, identity: LanTlsIdentity): Promise<T> {
         const actual = certificate.raw ? createHash('sha256').update(certificate.raw).digest() : Buffer.alloc(0);
         return actual.length === expected.length && actual.equals(expected)
           ? undefined
-          : new Error('The local LoomTV server certificate did not match its pinned identity.');
+          : new Error('The local Loom Media Server certificate did not match its pinned identity.');
       },
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -278,7 +278,7 @@ async function pickLibraryFolder(): Promise<string | null> {
 async function requestLegacyPairingApproval(request: { deviceName: string; address: string }): Promise<boolean> {
   const result = await dialog.showMessageBox({
     type: 'question',
-    title: 'LoomTV device request',
+    title: 'Loom device request',
     message: `${request.deviceName} wants to connect`,
     detail: `Network address: ${request.address}\n\nAllow this prior-generation client to browse and stream your library?`,
     buttons: ['Allow', 'Deny'],
@@ -292,7 +292,7 @@ async function requestLegacyPairingApproval(request: { deviceName: string; addre
 async function startCanonicalDesktop(): Promise<void> {
   showStartupProgress('Checking your library and server data.');
   const migrationCredential = await migrateLegacyDesktopIfNeeded();
-  showStartupProgress('Starting the private LoomTV server.');
+  showStartupProgress('Starting the private Loom Media Server.');
   const identity = loadOrCreateLanTlsIdentity(USER_DATA_DIR, getLocalNetworkAddresses());
   const bootstrap = fs.existsSync(canonicalStatePath(USER_DATA_DIR))
     ? readProtectedSecret('canonical-bootstrap')
@@ -392,11 +392,11 @@ async function startCanonicalDesktop(): Promise<void> {
 app.whenReady().then(startCanonicalDesktop).catch(async (error) => {
   if ((error as { code?: string })?.code === 'startup_cancelled') return;
   closeStartupProgress();
-  console.error('Failed to start LoomTV canonical desktop host:', error);
+  console.error('Failed to start Loom canonical desktop host:', error);
   await dialog.showMessageBox({
     type: 'error',
-    title: 'LoomTV could not start',
-    message: 'The canonical LoomTV server could not start.',
+    title: 'Loom could not start',
+    message: 'The canonical Loom Media Server could not start.',
     detail: error instanceof Error ? error.message : String(error),
   }).catch(() => undefined);
   app.exit(1);

@@ -83,7 +83,7 @@ export default function DesktopOnboarding({
       desktopApi.activateRemoteLibrary(connection);
       onRemoteReady();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not connect to that LoomTV host.');
+      setMessage(error instanceof Error ? error.message : 'Could not connect to that Loom Media Server host.');
     } finally {
       setIsConnecting(false);
     }
@@ -114,16 +114,16 @@ export default function DesktopOnboarding({
           <main className={`mx-auto flex ${contentWidth} flex-1 flex-col py-12 lg:py-16`}>
             <div className="flex flex-col items-center text-center">
               <LoomBrandLockup className="mb-4 h-20 w-[108px]" />
-              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Set up LoomTV</h1>
-              <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">Choose how LoomTV looks, then tell us where your library lives.</p>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Set up Loom</h1>
+              <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">Choose how Loom looks, then tell us where your library lives.</p>
             </div>
 
             <section className="mt-8">
               <h2 className="text-sm font-semibold text-[var(--loom-text)]">Choose your style</h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="LoomTV style">
+              <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Loom style">
                 {([
                   { id: 'modern', label: 'Modern', description: 'A cinematic hero with floating navigation.', Icon: Clapperboard },
-                  { id: 'default', label: 'Classic', description: 'The familiar LoomTV library layout.', Icon: LayoutGrid },
+                  { id: 'default', label: 'Classic', description: 'The familiar Loom library layout.', Icon: LayoutGrid },
                 ] as const).map(({ id, label, description, Icon }) => {
                   const selected = homeStyle === id;
                   return (
@@ -185,7 +185,7 @@ export default function DesktopOnboarding({
             <div className="mb-6 flex flex-col items-center text-center">
               <LoomBrandLockup className="mb-4 h-20 w-[108px]" />
               <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Connect to a host</h1>
-              <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">Pick your LoomTV host below, then enter the 6-digit PIN it shows under Settings → Network.</p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">Pick your Loom Media Server host below, then enter the 6-digit PIN it shows under Settings → Network.</p>
             </div>
 
             <section className="overflow-hidden rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] shadow-2xl shadow-black/20">
@@ -205,7 +205,7 @@ export default function DesktopOnboarding({
               <div className="grid gap-2 px-5 py-4 sm:px-6">
                 {isScanning && peers.length === 0 ? (
                   <div className="flex items-center justify-center gap-3 rounded-xl border border-dashed border-[var(--loom-border)] bg-[var(--loom-bg)] py-9 text-sm text-[var(--loom-muted)]">
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Looking for LoomTV hosts…
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Looking for Loom Media Server hosts…
                   </div>
                 ) : peers.length ? peers.map((peer) => {
                   const peerAddress = `https://${peer.host}:${peer.port}`;

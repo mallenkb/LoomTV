@@ -190,7 +190,7 @@ export default function AboutSettingsSection({
           <CardDescription className="text-[var(--loom-faint)] text-xs leading-5">
             Release payloads include FFmpeg/FFprobe and may include LibVLC and libmpv for supported
             targets. Each tool remains governed by its own license, dependency notices, and source
-            requirements; LoomTV&apos;s MIT license does not replace those terms.
+            requirements; Loom&apos;s MIT license does not replace those terms.
           </CardDescription>
         </CardHeader>
         <CardContent>

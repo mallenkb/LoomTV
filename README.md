@@ -1,14 +1,14 @@
-# LoomTV
+# Loom
 
-LoomTV organizes and plays video files stored on your own computer or server. It gives a household a private place to browse movies, TV shows, anime, and other videos across desktop, web, mobile, and TV.
+Loom is a private media library for video, photos, music, and reading. The Electron app organizes files stored on your computer or an OS-mounted server folder.
 
-LoomTV does not provide media or streaming subscriptions. Use it only with files you own, created, or are allowed to access.
+Loom does not provide media or streaming subscriptions. Use it only with files you own, created, or are allowed to access.
 
 [Release notes](CHANGELOG.md)
 
-![LoomTV home screen with an empty library](docs/screenshots/loomtv-home-empty-library.png)
+![Loom home screen with an empty library](docs/screenshots/loomtv-home-empty-library.png)
 
-## What LoomTV does
+## What Loom does
 
 - Scans local folders and NAS paths into separate Movies, TV Shows, Anime, and custom libraries.
 - Fetches titles, summaries, ratings, cast details, posters, backdrops, and clearlogos from supported metadata providers.
@@ -19,13 +19,13 @@ LoomTV does not provide media or streaming subscriptions. Use it only with files
 - Supports direct streaming, transcoding, subtitles, offline downloads, and browser casting where the client allows it.
 - Runs inside the desktop app or as a headless service on a NAS or always-on computer.
 
-LoomTV is video-only for now. Music, photos, books, and comics are outside the current scope.
+Video is the established library experience. Electron media expansion is starting with Photos, followed by Music, Audiobooks, Books, and Comics and manga. See the [execution plan](docs/multimedia-execution-plan.md) for scope and implementation status. These media types are not yet advertised as released support.
 
 ## Where it runs
 
 | Surface | Purpose |
 | --- | --- |
-| Desktop | Runs the LoomTV server and desktop client together on macOS, Windows, or Linux. |
+| Desktop | Runs Loom Media Server and the Loom desktop client together on macOS, Windows, or Linux. |
 | Headless server | Runs without Electron on a NAS, home server, or Linux host. |
 | Web | Opens the library at `/app/` and server controls at `/admin/`. |
 | Mobile | Connects from iOS or Android, with profile support and offline downloads. |
@@ -33,7 +33,7 @@ LoomTV is video-only for now. Music, photos, books, and comics are outside the c
 
 The desktop and headless versions use the same server, API, accounts, and database model. Before startup, the desktop app can migrate older LoomTV data into that shared database.
 
-Some internal package names still use `loom-media-server`. The installed product, application name, and release identity are LoomTV.
+Some internal package names still use `loom-media-server`. The installed product is Loom. The server component is Loom Media Server. Existing application IDs, data paths, and update identifiers remain unchanged for upgrade safety.
 
 See the [platform capability matrix and verification notes](docs/platform-capabilities.md) for client differences and checks that still need device verification.
 
@@ -51,7 +51,7 @@ Unsigned builds can trigger an operating-system warning. A normal public macOS r
 - Corepack
 - macOS, Windows, or Linux with a desktop environment supported by Electron
 
-Clone the repository, install the workspace, and start LoomTV:
+Clone the repository, install the workspace, and start Loom:
 
 ```sh
 git clone https://github.com/mallenkb/LoomTV.git
@@ -60,7 +60,7 @@ corepack pnpm install
 corepack pnpm start
 ```
 
-The desktop app starts the LoomTV server and opens its client. Add media folders during setup or from Settings, then scan the library.
+The desktop app starts Loom Media Server and opens the Loom client. Add media folders during setup or from Settings, then scan the library.
 
 ## Run the headless server
 
@@ -79,7 +79,7 @@ The default local routes are:
 
 The address and port can be changed with the server configuration. For Docker, systemd, storage layout, permissions, backups, and hardware transcoding, read the [NAS deployment guide](docs/nas-deployment.md).
 
-Mount SMB or NFS shares on the host, then give LoomTV the mounted path. LoomTV does not mount network shares or store NAS credentials. If a share goes offline, its library records stay in the database and can be scanned again after the path returns.
+Mount SMB or NFS shares on the host, then give Loom Media Server the mounted path. Loom does not mount network shares or store NAS credentials. If a share goes offline, its library records stay in the database and can be scanned again after the path returns.
 
 Keep a headless server on your LAN unless you have deliberately configured HTTPS, authentication, a trusted reverse proxy or VPN, and remote-access policy. Do not expose the server port directly to the public internet.
 
@@ -87,13 +87,13 @@ Keep a headless server on your LAN unless you have deliberately configured HTTPS
 
 Local desktop playback uses this order:
 
-1. LibVLC in the LoomTV player on supported macOS and Windows builds.
+1. LibVLC in the Loom player on supported macOS and Windows builds.
 2. A packaged, user-selected, or system mpv runtime.
 3. Chromium direct playback or an FFmpeg-backed HLS stream.
 
-Browser and remote clients use authenticated direct playback when their capabilities match the file. Otherwise, the server remuxes or transcodes the video through HLS. Audio tracks, subtitle tracks, playback progress, and resume position remain part of the LoomTV session.
+Browser and remote clients use authenticated direct playback when their capabilities match the file. Otherwise, the server remuxes or transcodes the video through HLS. Audio tracks, subtitle tracks, playback progress, and resume position remain part of the Loom session.
 
-Packaged releases stage their native playback resources during the build. LoomTV does not download LibVLC or mpv while the application is running.
+Packaged releases stage their native playback resources during the build. Loom does not download LibVLC or mpv while the application is running.
 
 ## Metadata
 
@@ -206,6 +206,8 @@ The release history lives in [`CHANGELOG.md`](CHANGELOG.md).
 ## Documentation
 
 - [Video feature status](docs/loomtv-vs-jellyfin-feature-status.md): what is implemented, what has automated evidence, and what still needs device testing.
+- [Product structure](docs/product-structure.md): how Loom, Loom Media Server, and the media libraries fit together.
+- [Media library expansion](docs/multimedia-execution-plan.md): the Electron-only delivery order and photo milestone.
 - [Hosted API](docs/hosted-api.md): authentication, playback plans, downloads, private sharing, and remote access.
 - [NAS deployment](docs/nas-deployment.md): Docker, systemd, storage, permissions, backups, and hardware access.
 - [Canonical migration](docs/canonical-migration.md): migration and rollback behavior for older installations.

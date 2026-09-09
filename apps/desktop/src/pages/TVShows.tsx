@@ -105,8 +105,8 @@ function EmptyShowsState({
   const Icon = isAnime ? FolderPlus : Tv;
   const title = isAnime ? 'Add an Anime folder' : 'Add a TV Shows folder';
   const description = isAnime
-    ? 'Choose a folder containing anime series. LoomTV will scan episodes and organize them into your anime library.'
-    : 'Choose a folder containing TV series. LoomTV will scan episodes and organize them into your TV library.';
+    ? 'Choose a folder containing anime series. Loom will scan episodes and organize them into your anime library.'
+    : 'Choose a folder containing TV series. Loom will scan episodes and organize them into your TV library.';
   const buttonLabel = isAnime ? 'Add Anime Folder' : 'Add TV Shows Folder';
 
   return (

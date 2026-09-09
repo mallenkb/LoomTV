@@ -158,14 +158,20 @@ function getDb(): BetterSqlite3.Database {
   if (db) return db;
 
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
-  db = new BetterSqlite3(databasePath());
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-  backupBeforeProfilesMigration(db);
-  migrateDatabase(db);
-  scheduleDatabaseMaintenance(db);
-  return db;
+  const connection = new BetterSqlite3(databasePath());
+  try {
+    connection.pragma('journal_mode = WAL');
+    connection.pragma('foreign_keys = ON');
+    connection.pragma('busy_timeout = 5000');
+    backupBeforeProfilesMigration(connection);
+    migrateDatabase(connection);
+    db = connection;
+    scheduleDatabaseMaintenance(connection);
+    return connection;
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
 }
 
 function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
@@ -441,6 +447,16 @@ export function remapLibraryMediaReferences(aliases: ReadonlyMap<string, string>
  * connection rather than a facade wrapper for each statement.
  */
 export function getIptvDatabase(): BetterSqlite3.Database {
+  return getDb();
+}
+
+/** Photos share the Electron database and its whole-database backup. */
+export function getPhotoDatabase(): BetterSqlite3.Database {
+  return getDb();
+}
+
+/** Non-video repositories own separate table groups in the shared database. */
+export function getMediaLibraryDatabase(): BetterSqlite3.Database {
   return getDb();
 }
 
@@ -1337,6 +1353,13 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
 export function clearDatabase(): ProfileRecord {
   const database = getDb();
   database.transaction(() => database.exec(`
+    DELETE FROM music_roots;
+    DELETE FROM audiobooks_roots;
+    DELETE FROM books_roots;
+    DELETE FROM comics_roots;
+    DELETE FROM photo_items;
+    DELETE FROM photo_directories;
+    DELETE FROM photo_roots;
     DELETE FROM segment_manual_history;
     DELETE FROM media_segments;
     DELETE FROM media_segment_candidates;

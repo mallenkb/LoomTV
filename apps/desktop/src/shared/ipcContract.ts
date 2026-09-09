@@ -1,3 +1,4 @@
+import type { PhotoLibraryApi, PhotoBrowseRequest } from './photoLibrary.ts';
 import type { LibVlcAvailability, LibVlcPlaybackState, LibVlcStartResult } from '../lib/desktopApi';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackViewport } from './playbackProtocol';
 import type {
@@ -80,6 +81,22 @@ import type {
 type ImportedProgress = Record<string, number | { position?: number; duration?: number; updatedAt?: number }>;
 
 export interface IpcContract {
+  'media-libraries:roots': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind]; result: import('./mediaLibraries.ts').MediaLibraryRoot[] };
+  'media-libraries:add': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, folderPath?: string]; result: import('./mediaLibraries.ts').MediaLibraryRoot | null };
+  'media-libraries:remove': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, rootId: string]; result: void };
+  'media-libraries:scan': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, rootId: string]; result: void };
+  'media-libraries:cancel': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, rootId: string]; result: void };
+  'media-libraries:browse': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, request: { query?: string; offset?: number; rootId?: string; inProgress?: boolean }]; result: import('./mediaLibraries.ts').MediaLibraryPage };
+  'media-libraries:open': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, id: string]; result: string };
+  'media-libraries:publication': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, id: string]; result: { entries: Array<{ name: string; url: string }> } };
+  'media-libraries:progress': { args: [kind: import('./mediaLibraries.ts').MediaLibraryKind, id: string, position: number, completed: boolean]; result: void };
+  'photos:roots': { args: []; result: Awaited<ReturnType<PhotoLibraryApi['roots']>> };
+  'photos:add': { args: [folderPath?: string]; result: Awaited<ReturnType<PhotoLibraryApi['add']>> };
+  'photos:remove': { args: [rootId: string]; result: void };
+  'photos:scan': { args: [rootId: string]; result: void };
+  'photos:cancel': { args: [rootId: string]; result: void };
+  'photos:browse': { args: [request: PhotoBrowseRequest]; result: Awaited<ReturnType<PhotoLibraryApi['browse']>> };
+  'photos:read': { args: [photoId: string]; result: string };
   'libvlc:availability': { args: []; result: LibVlcAvailability };
   'libvlc:refresh-availability': { args: []; result: LibVlcAvailability };
   'libvlc:start': { args: [filePath: string, options?: PlaybackStartOptions]; result: LibVlcStartResult };

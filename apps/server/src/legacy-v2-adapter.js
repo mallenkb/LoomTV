@@ -203,7 +203,7 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
           message: 'Legacy pairing requires a configured certificate fingerprint.',
         });
         if (input.approvalRequested !== true && typeof authorizeLegacyPairing !== 'function') return response(res, 410, {
-          error: 'pin_pairing_retired', message: 'Request approval from the LoomTV host to pair this device.',
+          error: 'pin_pairing_retired', message: 'Request approval from the Loom Media Server host to pair this device.',
         });
         const address = typeof clientAddress === 'function' ? clientAddress(req) : req.socket?.remoteAddress;
         const requested = await pairingService.request({

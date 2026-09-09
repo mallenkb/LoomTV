@@ -174,6 +174,8 @@ export interface MediaServerDependencies {
   libraryForLocalNetwork: (profileId?: string, deviceId?: string) => LibraryPayload;
   profileRestrictionIdentity: (profileId: string) => string;
   libraryForRenderer: () => LibraryPayload;
+  photoRootsForRenderer?: () => Promise<import('../shared/photoLibrary').PhotoRoot[]>;
+  mediaRootsForRenderer?: (kind: import('../shared/mediaLibraries').MediaLibraryKind) => Promise<import('../shared/mediaLibraries').MediaLibraryRoot[]>;
   loadLibrary: () => LibraryData;
   resourceRegistryEpoch: string;
   loadSettings: () => AppSettings;
@@ -858,6 +860,27 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const revision = getLibraryRevision();
         const etag = catalogEtag('index', revision, getRendererCatalogIdentity());
         writeCatalogRepresentation(etag, () => compactLibraryIndexForRenderer(revision));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/library/roots' && req.method === 'GET') {
+        try {
+          requireOwner();
+        } catch (error) {
+          writeProfileError(error);
+          return;
+        }
+        const kind = reqUrl.searchParams.get('kind');
+        res.setHeader('Cache-Control', 'no-store');
+        if (kind === 'photos' && deps.photoRootsForRenderer) {
+          void deps.photoRootsForRenderer().then((roots) => writeJson(res, 200, roots))
+            .catch(() => writeJson(res, 500, { error: 'Library folders could not be loaded.' }));
+        } else if ((kind === 'music' || kind === 'audiobooks' || kind === 'books' || kind === 'comics') && deps.mediaRootsForRenderer) {
+          void deps.mediaRootsForRenderer(kind).then((roots) => writeJson(res, 200, roots))
+            .catch(() => writeJson(res, 500, { error: 'Library folders could not be loaded.' }));
+        } else {
+          writeJson(res, 400, { error: 'Unsupported library type.' });
+        }
         return;
       }
 

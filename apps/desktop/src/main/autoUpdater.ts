@@ -136,7 +136,7 @@ function showUpdateDialog(message: string, detail: string, type: 'info' | 'warni
   if (!mainWindow || mainWindow.isDestroyed()) return;
   void dialog.showMessageBox(mainWindow, {
     type,
-    title: 'LoomTV Updates',
+    title: 'Loom Updates',
     message,
     detail,
     buttons: ['OK'],
@@ -150,17 +150,17 @@ function updateFailureMessage(error: unknown, stage: UpdateFailureStage): string
   console.error(`[updates] ${stage} failed:`, error);
 
   if (/ENOTEMPTY|directory not empty|loomtv-update-install/i.test(rawMessage)) {
-    return 'LoomTV couldn’t prepare the downloaded update. Please try again.';
+    return 'Loom couldn’t prepare the downloaded update. Please try again.';
   }
   if (/code.?sign|signature|publisher|checksum|sha512/i.test(rawMessage)) {
     return 'The downloaded update could not be verified and was not installed.';
   }
   if (/EACCES|EPERM|permission denied|not permitted/i.test(rawMessage)) {
-    return 'LoomTV does not have permission to install the update. Reinstall it from an administrator account.';
+    return 'Loom does not have permission to install the update. Reinstall it from an administrator account.';
   }
-  if (stage === 'install') return 'LoomTV couldn’t install the update. Please try again.';
-  if (stage === 'download') return 'LoomTV couldn’t download the update. Check your connection and try again.';
-  return 'LoomTV couldn’t check for updates. Check your connection and try again.';
+  if (stage === 'install') return 'Loom couldn’t install the update. Please try again.';
+  if (stage === 'download') return 'Loom couldn’t download the update. Check your connection and try again.';
+  return 'Loom couldn’t check for updates. Check your connection and try again.';
 }
 
 function normalizeReleaseVersion(value?: string): string {
@@ -207,8 +207,8 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
       releaseUrl: release.html_url,
       checkedAt: new Date().toISOString(),
       message: hasUpdate
-        ? `LoomTV ${latestVersion} is available.`
-        : `LoomTV is up to date at ${currentVersion}.`,
+        ? `Loom ${latestVersion} is available.`
+        : `Loom is up to date at ${currentVersion}.`,
     });
   } catch (error) {
     return setUpdateState({
@@ -684,7 +684,7 @@ async function handleManualUpdateCheck() {
   if (checkedState.status === 'checking') {
     showUpdateDialog(
       'Checking for updates',
-      'LoomTV is already checking for an update. You’ll get notified when it completes.',
+      'Loom is already checking for an update. You’ll get notified when it completes.',
     );
     return;
   }
@@ -704,7 +704,7 @@ async function handleManualUpdateCheck() {
   }
 
   if (checkedState.status === 'not-available') {
-    showUpdateDialog('No update found', `You’re already on LoomTV ${checkedState.currentVersion}.`);
+    showUpdateDialog('No update found', `You’re already on Loom ${checkedState.currentVersion}.`);
     return;
   }
 
@@ -723,7 +723,7 @@ export async function installDownloadedUpdate() {
   if (updateState.status !== 'downloaded') return updateState;
   updateInstallStarted = true;
 
-  setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
+  setUpdateState({ status: 'installing', message: 'Installing update and restarting Loom...' });
 
   // Drain playback/server work before quitAndInstall. Active HTTP streams can
   // keep the process alive after every window has closed, which leaves the
@@ -798,7 +798,7 @@ function configureAutoUpdater() {
   if (!app.isPackaged) {
     setUpdateState({
       status: 'disabled',
-      message: 'Automatic updates are enabled after LoomTV is packaged and published.',
+      message: 'Automatic updates are enabled after Loom is packaged and published.',
     });
     return;
   }
@@ -843,7 +843,7 @@ function configureAutoUpdater() {
   autoUpdater.on('update-not-available', () => {
     setUpdateState({
       status: 'not-available',
-      message: 'LoomTV is up to date.',
+      message: 'Loom is up to date.',
       checkedAt: new Date().toISOString(),
     });
   });
@@ -852,7 +852,7 @@ function configureAutoUpdater() {
     downloadedUpdateFilePath = event.downloadedFile;
     setUpdateState({
       status: 'downloaded',
-      message: 'Update downloaded. Restart LoomTV to install it.',
+      message: 'Update downloaded. Restart Loom to install it.',
       checkedAt: new Date().toISOString(),
     });
     // The sidebar announces readiness without interrupting playback.

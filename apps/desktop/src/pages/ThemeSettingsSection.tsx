@@ -103,7 +103,7 @@ export default function ThemeSettingsSection({
             <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Home layout style">
               {([
                 { id: 'modern', label: 'Modern', description: 'A cinematic hero, category pill, and floating controls.' },
-                { id: 'default', label: 'Classic', description: 'The familiar LoomTV library layout.' },
+                { id: 'default', label: 'Classic', description: 'The familiar Loom library layout.' },
               ] as const satisfies readonly { id: AppHomeStyle; label: string; description: string }[]).map((option) => {
                 const isSelected = theme.homeStyle === option.id;
                 return (

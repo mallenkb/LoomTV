@@ -23,6 +23,7 @@ export const IPTV_SOURCES_MIGRATION_VERSION = 12;
 export const IPTV_GEO_BLOCKED_MIGRATION_VERSION = 13;
 /** v14 stores the Phosphor icon selected for each IPTV sidebar tab. */
 export const IPTV_SOURCE_ICONS_MIGRATION_VERSION = 14;
+export const PHOTO_LIBRARY_MIGRATION_VERSION = 15;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -365,13 +366,79 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateIptvSources(database);
   migrateIptvGeoBlocked(database);
   migrateIptvSourceIcons(database);
+  migratePhotoLibrary(database);
+  migrateMediaLibraries(database);
+  migrateMediaLibraryDiscs(database);
+}
+
+function migrateMediaLibraryDiscs(database: BetterSqlite3.Database): void {
+  database.transaction(() => {
+    for (const kind of ['music','audiobooks','books','comics']) {
+      ensureColumn(database,`${kind}_items`,'disc','INTEGER NOT NULL DEFAULT 0');
+    }
+    database.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(17,?)').run(Date.now());
+  })();
+}
+
+function migrateMediaLibraries(database: BetterSqlite3.Database): void {
+  database.transaction(() => {
+    for (const kind of ['music', 'audiobooks', 'books', 'comics']) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS ${kind}_roots (
+          id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+          scanned_at INTEGER, message TEXT
+        );
+        CREATE TABLE IF NOT EXISTS ${kind}_items (
+          id TEXT PRIMARY KEY, root_id TEXT NOT NULL REFERENCES ${kind}_roots(id) ON DELETE CASCADE,
+          relative_path TEXT NOT NULL, title TEXT NOT NULL, extension TEXT NOT NULL,
+          creator TEXT NOT NULL DEFAULT '', collection TEXT NOT NULL DEFAULT '',
+          track INTEGER NOT NULL DEFAULT 0, disc INTEGER NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0,
+          chapters_json TEXT NOT NULL DEFAULT '[]', size INTEGER NOT NULL, modified_at REAL NOT NULL,
+          UNIQUE(root_id,relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS ${kind}_items_group ON ${kind}_items(collection,track,title);
+        CREATE TABLE IF NOT EXISTS ${kind}_progress (
+          profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          item_id TEXT NOT NULL REFERENCES ${kind}_items(id) ON DELETE CASCADE,
+          position REAL NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL, PRIMARY KEY(profile_id,item_id)
+        );
+      `);
+    }
+    database.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(16,?)').run(Date.now());
+  })();
 }
 
 /**
- * IPTV state is a cache of what a provider's playlist and guide said at the
- * last refresh, keyed by source. Channels and programmes cascade from their
- * source so removing a source in the UI cannot leave orphaned rows behind.
+ * Photo roots are independent of the video catalog. Items are rebuilt from
+ * their source folders, while the root record preserves availability state.
  */
+function migratePhotoLibrary(database: BetterSqlite3.Database): void {
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS photo_roots (
+        id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'available' CHECK(state IN ('available','unavailable')),
+        scanned_at INTEGER, message TEXT
+      );
+      CREATE TABLE IF NOT EXISTS photo_items (
+        id TEXT PRIMARY KEY, root_id TEXT NOT NULL REFERENCES photo_roots(id) ON DELETE CASCADE,
+        relative_path TEXT NOT NULL, parent TEXT NOT NULL, name TEXT NOT NULL,
+        size INTEGER NOT NULL, modified_at REAL NOT NULL, UNIQUE(root_id,relative_path)
+      );
+      CREATE INDEX IF NOT EXISTS photo_items_folder ON photo_items(root_id,parent,name);
+      CREATE INDEX IF NOT EXISTS photo_items_date ON photo_items(modified_at DESC,id);
+      CREATE TABLE IF NOT EXISTS photo_directories (
+        root_id TEXT NOT NULL REFERENCES photo_roots(id) ON DELETE CASCADE,
+        relative_path TEXT NOT NULL, parent TEXT NOT NULL, name TEXT NOT NULL,
+        PRIMARY KEY(root_id,relative_path)
+      );
+      CREATE INDEX IF NOT EXISTS photo_directories_parent ON photo_directories(root_id,parent);
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(?,?)').run(PHOTO_LIBRARY_MIGRATION_VERSION, Date.now());
+  })();
+}
+
 function migrateIptvSources(database: BetterSqlite3.Database): void {
   if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(IPTV_SOURCES_MIGRATION_VERSION)) return;
 

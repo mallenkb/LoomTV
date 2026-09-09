@@ -3387,7 +3387,7 @@ export default function VideoPlayer({
     positionSeconds: position,
     durationSeconds: duration,
     rate: playbackRate,
-    title: title || 'LoomTV playback',
+    title: title || 'Loom playback',
     ...(hasEpisodes ? { seriesTitle: title } : {}),
     ...(currentSeason > 0 ? { season: currentSeason } : {}),
     ...(currentEpisode > 0 ? { episode: currentEpisode } : {}),

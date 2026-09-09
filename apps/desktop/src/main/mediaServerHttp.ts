@@ -39,7 +39,7 @@ export function writeLanLandingPage(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LoomTV</title>
+<title>Loom Media Server</title>
 <style>
 :root{color-scheme:dark;--bg:#050505;--panel:#101010;--line:#2a2a2a;--text:#fff;--muted:#a4a4a4;--accent:#FC9C03;}
 *{box-sizing:border-box;letter-spacing:normal!important}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:grid;place-items:center;padding:24px}
@@ -54,11 +54,11 @@ ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:
 <main>
 <div class="brand"><div class="mark">L</div><div class="name">loomtv</div></div>
 <div class="eyebrow">LAN host online</div>
-<h1>This is your private LoomTV library.</h1>
+<h1>This is your private Loom Media Server library.</h1>
 <p>${htmlEscape(statusCopy)}</p>
 <div class="box"><div class="label">Desktop address</div><div class="value">${htmlEscape(baseUrl)}</div></div>
 <ol>
-<li>Open <b>LoomTV mobile</b>, not this browser page.</li>
+<li>Open <b>Loom mobile</b>, not this browser page.</li>
 <li>Choose this desktop and tap <b>Connect</b>.</li>
 <li>Approve the device in the desktop prompt. If approval is unavailable, use <b>Connect manually</b> with the address and PIN from Settings &gt; Network.</li>
 </ol>
@@ -149,7 +149,7 @@ export function proxyWebRendererAsset(
   });
   proxyRequest.on('error', () => {
     if (!res.headersSent) res.writeHead(502);
-    res.end('The LoomTV web development server is unavailable.');
+    res.end('The Loom web development server is unavailable.');
   });
   proxyRequest.end();
 }

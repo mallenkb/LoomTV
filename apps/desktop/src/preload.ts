@@ -42,6 +42,7 @@ import type {
   TranscodeOptions,
   UpdateState,
 } from './shared/desktopProtocol.ts';
+import type { PhotoBrowseRequest } from './shared/photoLibrary.ts';
 import type { IpcEventChannel, IpcInvokeChannel } from './shared/ipcChannels';
 import type { IpcContract, IpcEventContract } from './shared/ipcContract';
 
@@ -71,6 +72,30 @@ const ipcRenderer = {
 // ─── desktopApi — existing library/media/settings surface ────────────────────
 
 const desktopApi = {
+  mediaLibraries: {
+    publication: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,id: string) => ipcRenderer.invoke('media-libraries:publication',kind,id),
+    roots: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind) => ipcRenderer.invoke('media-libraries:roots',kind),
+    add: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind, folderPath?: string) => folderPath
+      ? ipcRenderer.invoke('media-libraries:add', kind, folderPath)
+      : ipcRenderer.invoke('media-libraries:add', kind),
+    remove: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,id: string) => ipcRenderer.invoke('media-libraries:remove',kind,id),
+    scan: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,id: string) => ipcRenderer.invoke('media-libraries:scan',kind,id),
+    cancel: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,id: string) => ipcRenderer.invoke('media-libraries:cancel',kind,id),
+    browse: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,request: { query?: string; offset?: number; rootId?: string; inProgress?: boolean }) => ipcRenderer.invoke('media-libraries:browse',kind,request),
+    open: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,id: string) => ipcRenderer.invoke('media-libraries:open',kind,id),
+    progress: (kind: import('./shared/mediaLibraries.ts').MediaLibraryKind,id: string,position: number,completed: boolean) => ipcRenderer.invoke('media-libraries:progress',kind,id,position,completed),
+  },
+  photos: {
+    roots: () => ipcRenderer.invoke('photos:roots'),
+    add: (folderPath?: string) => folderPath
+      ? ipcRenderer.invoke('photos:add', folderPath)
+      : ipcRenderer.invoke('photos:add'),
+    remove: (rootId: string) => ipcRenderer.invoke('photos:remove', rootId),
+    scan: (rootId: string) => ipcRenderer.invoke('photos:scan', rootId),
+    cancel: (rootId: string) => ipcRenderer.invoke('photos:cancel', rootId),
+    browse: (request: PhotoBrowseRequest) => ipcRenderer.invoke('photos:browse', request),
+    read: (photoId: string) => ipcRenderer.invoke('photos:read', photoId),
+  },
   getLibrary: () => ipcRenderer.invoke('library:get'),
   getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
   getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),

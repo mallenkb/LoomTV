@@ -442,9 +442,9 @@ function completeOpenApi(document) {
 const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
   openapi: '3.0.3',
   info: {
-    title: 'LoomTV Hosted API',
+    title: 'Loom Hosted API',
     version: PUBLIC_API_VERSION,
-    description: 'Versioned browser and client API for a headless LoomTV server.',
+    description: 'Versioned browser and client API for a headless Loom Media Server.',
   },
   servers: [{ url: '/' }],
   security: [{ bearerAuth: [] }],
@@ -603,7 +603,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
   /** @param {ApiRequest} req @param {string} [permission] @returns {Promise<Principal>} */
   async function requirePrincipal(req, permission) {
     const authenticated = await principalForRequest(req);
-    if (!authenticated || typeof authenticated.id !== 'string' || !authenticated.id) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
+    if (!authenticated || typeof authenticated.id !== 'string' || !authenticated.id) throw requestError(401, 'auth_required', 'A valid Loom session is required.');
     const account = recordOf(authenticated);
     if (typeof account.name !== 'string' || typeof account.type !== 'string' || typeof account.role !== 'string'
       || !isStringArray(account.permissions)
@@ -671,7 +671,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       if (errorDetails(error).code === 'EACCES') {
         return { accessible: false, retryable: true, reason: 'permission_denied', message: 'The server cannot read that folder. Check its permissions, or save it and retry later.' };
       }
-      return { accessible: false, retryable: true, reason: 'unavailable', message: 'That folder is not reachable right now. Save it and LoomTV will pick it up once the share is back.' };
+      return { accessible: false, retryable: true, reason: 'unavailable', message: 'That folder is not reachable right now. Save it and Loom will pick it up once the share is back.' };
     }
   }
 
@@ -729,7 +729,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         code: errorDetails(error).name === 'AbortError' ? 'timeout' : 'unreachable',
         message: errorDetails(error).name === 'AbortError'
           ? `${labels[id]} did not answer in time.`
-          : `LoomTV could not reach ${labels[id]}. Check this server's internet access.`,
+          : `Loom could not reach ${labels[id]}. Check this server's internet access.`,
       };
     } finally {
       clearTimeout(timer);
@@ -1114,7 +1114,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       }
       if (resource === 'setup' && segments[1] === 'owner' && segments.length === 2 && req.method === 'POST') {
         const setup = requireSetupService();
-        if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
+        if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The Loom owner has already been created.');
         const body = await readJsonBody(req);
         const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
         if (!['bearer','cookie'].some((mode) => mode === sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
@@ -1140,7 +1140,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         }
         setup.begin({
           ownerName: name,
-          serverName: optionalString(body.serverName, 'serverName', 80) || `${name}’s LoomTV`,
+          serverName: optionalString(body.serverName, 'serverName', 80) || `${name}’s Loom Media Server`,
         });
         // The owner should land on a library, not on an empty profile chooser.
         let defaultProfile = null;
@@ -1219,7 +1219,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         requireSetupService();
         await requirePrincipal(req, 'library.manage');
         if (!desktopChannel.isTrustedRequest(req) || typeof pickFolder !== 'function') {
-          throw requestError(501, 'picker_unavailable', 'A native folder picker is available only in the LoomTV desktop app.');
+          throw requestError(501, 'picker_unavailable', 'A native folder picker is available only in the Loom desktop app.');
         }
         const picked = await pickFolder();
         if (!picked) {
@@ -1337,7 +1337,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         return true;
       }
       if (resource === 'auth' && segments[1] === 'owner' && req.method === 'POST') {
-        if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
+        if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The Loom owner has already been created.');
         const body = await readJsonBody(req);
         const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
         if (!['bearer','cookie'].some((mode) => mode === sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');

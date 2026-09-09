@@ -102,7 +102,7 @@ export default function NetworkSettingsSection({
             Local Network Sharing
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Watch this library on LoomTV mobile over your home network. Nearby LoomTV devices connect automatically by default.
+            Watch this library on Loom mobile over your home network. Nearby Loom devices connect automatically by default.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -115,8 +115,8 @@ export default function NetworkSettingsSection({
                 {isTogglingNetworkSharing
                   ? 'Preparing automatic local connection.'
                   : isNetworkSharingOn
-                  ? requireApproval ? 'New devices wait for your approval.' : 'Nearby LoomTV devices connect automatically.'
-                  : 'Turn on to connect nearby LoomTV devices.'}
+                  ? requireApproval ? 'New devices wait for your approval.' : 'Nearby Loom devices connect automatically.'
+                  : 'Turn on to connect nearby Loom devices.'}
               </p>
             </div>
             <Button
@@ -205,7 +205,7 @@ export default function NetworkSettingsSection({
                   <p className="mt-3 text-xs text-[var(--loom-muted)]">
                     {requireApproval
                       ? 'New devices ask for approval. The PIN remains available as a manual fallback.'
-                      : 'Discovered LoomTV devices connect automatically. The PIN remains available as a manual fallback.'}
+                      : 'Discovered Loom devices connect automatically. The PIN remains available as a manual fallback.'}
                   </p>
                 </div>
 
@@ -296,7 +296,7 @@ export default function NetworkSettingsSection({
               Server Administration
             </CardTitle>
             <CardDescription className="text-[var(--loom-muted)]">
-              Manage accounts and libraries for the LoomTV server running on this computer. It opens as a separate page in your browser.
+              Manage accounts and libraries for the Loom Media Server running on this computer. It opens as a separate page in your browser.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -326,7 +326,7 @@ export default function NetworkSettingsSection({
                 className="settings-network-card rounded-lg bg-[var(--loom-surface-2)] p-4"
               >
                 <p className={`text-sm font-semibold ${unifiedServer.error ? 'text-red-200' : 'text-white'}`}>
-                  {unifiedServer.error ? 'The LoomTV server did not start' : 'Starting the LoomTV server...'}
+                  {unifiedServer.error ? 'The Loom Media Server did not start' : 'Starting the Loom Media Server...'}
                 </p>
                 {unifiedServer.error && (
                   <p className="mt-1 text-xs leading-5 text-[var(--loom-muted)]">{unifiedServer.error}</p>
@@ -373,7 +373,7 @@ export default function NetworkSettingsSection({
             </div>
             {discoveredPeers.length === 0 ? (
               <p className="text-xs text-[var(--loom-faint)]">
-                {isScanningPeers ? 'Looking for LoomTV devices...' : 'No other LoomTV devices found. Make sure sharing is on over there.'}
+                {isScanningPeers ? 'Looking for Loom devices...' : 'No other Loom devices found. Make sure sharing is on over there.'}
               </p>
             ) : (
               <SharedListHighlight activeId={remoteLibraryAddress} className="loom-shared-highlight-list space-y-1">

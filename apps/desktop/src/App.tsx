@@ -11,6 +11,8 @@ import ProfileGate from './components/profiles/ProfileGate';
 import Home from './pages/Home';
 const MyList = lazyRouteComponent(() => import('./pages/MyList'));
 const Movies = lazyRouteComponent(() => import('./pages/Movies'));
+const Photos = lazyRouteComponent(() => import('./pages/Photos'));
+const MediaLibrary = lazyRouteComponent(() => import('./pages/MediaLibrary'));
 const Others = lazyRouteComponent(() => import('./pages/Others'));
 const TVShows = lazyRouteComponent(() => import('./pages/TVShows'));
 const MovieDetail = lazyRouteComponent(() => import('./pages/MovieDetail'));
@@ -28,6 +30,7 @@ import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import LoomLogo from './components/LoomLogo';
 import DesktopOnboarding from './components/DesktopOnboarding';
+import FirstRunLibrarySetup from './components/onboarding/FirstRunLibrarySetup';
 import {
   isLibraryFilterPath,
   LibraryFilterVisibilityContext,
@@ -83,7 +86,7 @@ function StartupSplash({ message = 'Preparing your library' }: { message?: strin
       className="fixed inset-0 z-[10000] grid select-none place-items-center bg-black text-white"
       role="status"
       aria-live="polite"
-      aria-label={`LoomTV startup: ${message}`}
+      aria-label={`Loom startup: ${message}`}
     >
       <div className="grid justify-items-center gap-7">
         <div style={{ '--loom-logo-word': '#f5f5f5' } as React.CSSProperties}>
@@ -293,7 +296,10 @@ function DesktopBootstrap() {
 
     const handleModeChanged = (event: Event) => {
       const next = (event as CustomEvent<DesktopLibraryMode>).detail;
-      if (next === 'host' || next === 'remote') setMode(next);
+      if (next === 'host' || next === 'remote') {
+        setInitialSetup(null);
+        setMode(next);
+      }
     };
     window.addEventListener('loomtv:desktop-library-mode-changed', handleModeChanged);
     return () => {
@@ -331,9 +337,9 @@ function DesktopBootstrap() {
 
   return (
     <ErrorBoundary
-      title="LoomTV could not start this session"
+      title="Loom could not start this session"
       description="Reloading keeps your library, profiles, and saved positions intact."
-      actionLabel="Reload LoomTV"
+      actionLabel="Reload Loom"
       containerClassName="h-screen w-screen"
       onReset={() => window.location.reload()}
     >
@@ -358,6 +364,10 @@ function DesktopBootstrap() {
  */
 function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode | null }) {
   const { activeProfile, gateOpen, generation, isLoading } = useProfiles();
+  const [firstRunSetupDismissed, setFirstRunSetupDismissed] = useState(false);
+  useEffect(() => {
+    if (!isLoading && activeProfile && activeProfile.type !== 'owner') setFirstRunSetupDismissed(true);
+  }, [activeProfile, isLoading]);
   if (isLoading) return <div className="h-screen bg-[var(--loom-bg)]" />;
   if (!activeProfile) {
     return <><StartupReadySignal /><ProfileGate initialSetup={initialSetup} /></>;
@@ -365,14 +375,23 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
   return (
     <>
       <LibraryProvider key={generation}>
-        <AppShell />
+        <AppShell
+          showFirstRunLibrarySetup={initialSetup === 'host' && activeProfile.type === 'owner' && !firstRunSetupDismissed}
+          onFirstRunLibrarySetupDismissed={() => setFirstRunSetupDismissed(true)}
+        />
       </LibraryProvider>
       {gateOpen && <ProfileGate />}
     </>
   );
 }
 
-function AppShell() {
+function AppShell({
+  showFirstRunLibrarySetup = false,
+  onFirstRunLibrarySetupDismissed,
+}: {
+  showFirstRunLibrarySetup?: boolean;
+  onFirstRunLibrarySetupDismissed?: () => void;
+}) {
   const shouldReduceMotion = useReducedMotion();
   const { state: libraryState } = useLibrary();
   const { activeProfile, gateOpen, openGate } = useProfiles();
@@ -380,6 +399,17 @@ function AppShell() {
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [librarySetupOpen, setLibrarySetupOpen] = useState(showFirstRunLibrarySetup);
+  const dismissLibrarySetup = useCallback(() => {
+    setLibrarySetupOpen(false);
+    onFirstRunLibrarySetupDismissed?.();
+  }, [onFirstRunLibrarySetupDismissed]);
+  useEffect(() => {
+    if (showFirstRunLibrarySetup && activeProfile?.type === 'owner') setLibrarySetupOpen(true);
+  }, [activeProfile?.type, showFirstRunLibrarySetup]);
+  useEffect(() => {
+    if (activeProfile?.type !== 'owner') setLibrarySetupOpen(false);
+  }, [activeProfile?.type]);
   // A renderer reload can preserve the document element while the player
   // component is being replaced. Never leave the native-player transparency
   // mode latched over the normal library shell after playback has closed.
@@ -395,7 +425,8 @@ function AppShell() {
   const showLibraryFilter = !nowPlaying && !gateOpen && isLibraryFilterPath(location.pathname);
   const hideContinueBar = Boolean(nowPlaying) || !showContinueBarOnRoute;
   const reserveContinueBarSpace = showContinueBarOnRoute && !nowPlaying;
-  const appUnderlayHidden = Boolean(nowPlaying || gateOpen);
+  const librarySetupVisible = librarySetupOpen && activeProfile?.type === 'owner';
+  const appUnderlayHidden = Boolean(nowPlaying || gateOpen || librarySetupVisible);
   const markHomeReady = useCallback(() => {
     setHomeReady(true);
     markAppReady();
@@ -546,7 +577,7 @@ function AppShell() {
           <ErrorBoundary
             key={location.pathname}
             title="This page ran into a problem"
-            description="The rest of LoomTV is still running. Retry, or pick another section from the sidebar."
+            description="The rest of Loom is still running. Retry, or pick another section from the sidebar."
           >
             <PlaybackActionsContext.Provider value={{ handlePlayMedia, handlePlayLiveChannel, handlePlayArchiveMovie }}>
               <Outlet />
@@ -586,6 +617,7 @@ function AppShell() {
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
         <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
       </div>
+      {librarySetupVisible && <FirstRunLibrarySetup onComplete={dismissLibrarySetup} onSkip={dismissLibrarySetup} />}
     </div>
     </LibraryFilterVisibilityContext.Provider>
   );
@@ -648,6 +680,11 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: Home }),
   createRoute({ getParentRoute: () => rootRoute, path: '/my-list', component: MyList }),
   createRoute({ getParentRoute: () => rootRoute, path: '/movies', component: Movies }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/photos', component: Photos }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/music', component: () => <MediaLibrary key="music" kind="music" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/audiobooks', component: () => <MediaLibrary key="audiobooks" kind="audiobooks" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/books', component: () => <MediaLibrary key="books" kind="books" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/comics', component: () => <MediaLibrary key="comics" kind="comics" /> }),
   createRoute({ getParentRoute: () => rootRoute, path: '/others', beforeLoad: () => Others.preload?.(), component: OthersRoute }),
   createRoute({ getParentRoute: () => rootRoute, path: '/tv', beforeLoad: () => TVShows.preload?.(), component: () => <TVShows kind="series" /> }),
   createRoute({ getParentRoute: () => rootRoute, path: '/anime', beforeLoad: () => TVShows.preload?.(), component: () => <TVShows kind="anime" /> }),

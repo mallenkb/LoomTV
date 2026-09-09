@@ -232,7 +232,7 @@ function HomeEmptyState({
         </div>
         <h2 className="text-2xl font-semibold text-white">Add your first library folder</h2>
         <p className="mx-auto mt-3 max-w-[460px] text-sm leading-6 text-[var(--loom-muted)]">
-          Choose where LoomTV should look for your movies, TV shows, or anime. The folder will be scanned right away.
+          Choose where Loom should look for your movies, TV shows, or anime. The folder will be scanned right away.
         </p>
         {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <div className="mt-8 grid gap-3 sm:grid-cols-3">
