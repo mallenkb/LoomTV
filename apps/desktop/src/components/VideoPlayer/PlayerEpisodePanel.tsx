@@ -392,7 +392,7 @@ export default function PlayerEpisodePanel({
                 sectionRefs.current[season] = node;
               }}
             >
-              <div className="sticky top-0 z-10 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
+              <div className="sticky top-0 z-20 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
                 <span className="flex items-center gap-2 text-xs font-semibold text-white">
                   {sourceMode ? 'Sources' : seasonCode(season)}
                   {season === currentSeason && (
