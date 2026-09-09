@@ -1,6 +1,7 @@
 import type { SettingsData } from './databasePlaybackRepository.ts';
 
 export const SECURE_SETTINGS_FIELD = '__loomtvSecureSettings';
+export const SECURE_SETTINGS_RECOVERY_FIELD = '__loomtvSecureSettingsRecovery';
 export const SECURE_SETTINGS_VERSION = 1;
 export const SECRET_SETTINGS_KEYS = [
   'metadataApiKeys',
@@ -135,18 +136,30 @@ export function readSecureSettings(stored: SettingsData, codec: SecureSettingsCo
   const raw = { ...stored };
   const envelope = raw[SECURE_SETTINGS_FIELD];
   delete raw[SECURE_SETTINGS_FIELD];
+  delete raw[SECURE_SETTINGS_RECOVERY_FIELD];
 
   const legacySecrets = collectSecrets(raw);
   for (const key of SECRET_SETTINGS_KEYS) delete raw[key];
 
   if (hasOwn(stored, SECURE_SETTINGS_FIELD)) {
     const decrypted = decryptEnvelope(envelope, codec);
-    for (const key of Object.keys(legacySecrets)) {
-      if (hasOwn(decrypted, key) && JSON.stringify(decrypted[key]) !== JSON.stringify(legacySecrets[key])) {
-        throw new SecureSettingsCorruptError('Plaintext and encrypted credentials conflict. Both copies were retained.');
+    assertValidSettingsSecrets(legacySecrets);
+    const merged = { ...decrypted };
+    // Older releases preserve unknown fields, including the encrypted envelope,
+    // while saving their current credentials at the top level. Keep those
+    // nonempty values and recover credentials absent from the older release.
+    for (const [key, value] of Object.entries(legacySecrets)) {
+      if (key === 'metadataApiKeys' && isRecord(value)) {
+        const keys = { ...(isRecord(decrypted[key]) ? decrypted[key] : {}) };
+        for (const [provider, credential] of Object.entries(value)) {
+          if (credential !== '' || !hasOwn(keys, provider)) keys[provider] = credential;
+        }
+        merged[key] = keys;
+      } else if (value !== '' || !hasOwn(merged, key)) {
+        merged[key] = value;
       }
     }
-    const settings = { ...raw, ...legacySecrets, ...decrypted };
+    const settings = { ...raw, ...merged };
     assertValidSettingsSecrets(settings);
     return {
       settings,
@@ -154,7 +167,7 @@ export function readSecureSettings(stored: SettingsData, codec: SecureSettingsCo
     };
   }
 
-  if (Object.keys(legacySecrets).length === 0) return { settings: stored, needsMigration: false };
+  if (Object.keys(legacySecrets).length === 0) return { settings: raw, needsMigration: false };
   assertValidSettingsSecrets(stored);
   if (!codec.isEncryptionAvailable()) throw new SecureSettingsUnavailableError();
   return { settings: { ...raw, ...legacySecrets }, needsMigration: true };
@@ -164,6 +177,7 @@ export function writeSecureSettings(settings: SettingsData, codec: SecureSetting
   if (hasOwn(settings, SECURE_SETTINGS_FIELD)) throw new SecureSettingsCorruptError('Settings must be decrypted before saving.');
   assertValidSettingsSecrets(settings);
   const output = { ...settings };
+  delete output[SECURE_SETTINGS_RECOVERY_FIELD];
   const secrets = collectSecrets(settings);
   for (const key of SECRET_SETTINGS_KEYS) delete output[key];
 
@@ -184,12 +198,28 @@ export function createSecureSettingsPersistence(store: {
   save: (settings: SettingsData) => void;
   transaction: <T>(action: () => T) => T;
 }, codec: SecureSettingsCodec) {
+  function protectedRecord(settings: SettingsData, stored: SettingsData | null): SettingsData {
+    const output = writeSecureSettings(settings, codec);
+    const previous = stored?.[SECURE_SETTINGS_RECOVERY_FIELD];
+    const recovery = Array.isArray(previous) ? [...previous] : [];
+    if (stored && hasOwn(stored, SECURE_SETTINGS_FIELD)) {
+      const legacy = collectSecrets(stored);
+      if (Object.keys(legacy).length > 0) {
+        recovery.push({
+          encrypted: stored[SECURE_SETTINGS_FIELD],
+          legacy: writeSecureSettings(legacy, codec)[SECURE_SETTINGS_FIELD],
+        });
+      }
+    }
+    if (recovery.length) output[SECURE_SETTINGS_RECOVERY_FIELD] = recovery;
+    return output;
+  }
   return {
     load: (): SettingsData | null => store.transaction(() => {
       const stored = store.load();
       if (!stored) return null;
       const result = readSecureSettings(stored, codec);
-      if (result.needsMigration) store.save(writeSecureSettings(result.settings, codec));
+      if (result.needsMigration) store.save(protectedRecord(result.settings, stored));
       return result.settings;
     }),
     save: (settings: SettingsData): void => store.transaction(() => {
@@ -202,7 +232,7 @@ export function createSecureSettingsPersistence(store: {
       for (const key of SECRET_SETTINGS_KEYS) {
         if (incoming[key] === undefined) delete incoming[key];
       }
-      store.save(writeSecureSettings({ ...retainedSecrets, ...incoming }, codec));
+      store.save(protectedRecord({ ...retainedSecrets, ...incoming }, stored));
     }),
   };
 }

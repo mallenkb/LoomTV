@@ -9,7 +9,7 @@ import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 import type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 import { z } from 'zod';
 import { normalizeSidebarNavOrder } from '../lib/sidebarNavOrder';
-import { assertValidSettingsSecrets, loadOrInitializeSettings, parseSettingsJson, SecureSettingsCorruptError } from './secureSettings.ts';
+import { assertValidSettingsSecrets, loadOrInitializeSettings, parseSettingsJson } from './secureSettings.ts';
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
@@ -47,10 +47,6 @@ const settingsInputSchema = z.looseObject({
   metadataApiKeys: z.unknown().optional(),
   metadataOfflineMode: z.unknown().optional(),
   omdbApiKey: z.unknown().optional(),
-  openSubtitlesAutoDownload: z.unknown().optional(),
-  openSubtitlesLanguages: z.unknown().optional(),
-  openSubtitlesPassword: z.unknown().optional(),
-  openSubtitlesUsername: z.unknown().optional(),
   playbackDisplaySleepTimeoutMinutes: z.unknown().optional(),
   playbackSkipBackSeconds: z.unknown().optional(),
   playbackSkipForwardSeconds: z.unknown().optional(),
@@ -176,8 +172,16 @@ function normalizeSkipAnalysis(raw: SettingsInput): SkipAnalysisSettings {
 
 function normalizeSettings(input: unknown): AppSettings {
   const result = settingsInputSchema.safeParse(input);
-  if (!result.success) throw new SecureSettingsCorruptError('Saved settings have an invalid structure.');
-  const raw: SettingsInput = result.data;
+  const parsed: SettingsInput = result.success ? result.data : {};
+  const legacyOpenSubtitlesKeys = new Set([
+    'openSubtitlesUsername',
+    'openSubtitlesPassword',
+    'openSubtitlesLanguages',
+    'openSubtitlesAutoDownload',
+  ]);
+  const raw = Object.fromEntries(
+    Object.entries(parsed).filter(([key]) => !legacyOpenSubtitlesKeys.has(key)),
+  ) as SettingsInput;
   const metadataApiKeys: Record<string, string> = {};
   const rawKeys = raw.metadataApiKeys && typeof raw.metadataApiKeys === 'object' && !Array.isArray(raw.metadataApiKeys)
     ? raw.metadataApiKeys
@@ -188,7 +192,7 @@ function normalizeSettings(input: unknown): AppSettings {
   for (const [provider, value] of Object.entries(rawKeys)) {
     const providerId = normalizeProviderId(provider);
     const apiKey = typeof value === 'string' ? value.trim() : '';
-    if (providerId && apiKey) metadataApiKeys[providerId] = apiKey;
+    if (providerId && providerId !== 'opensubtitles' && apiKey) metadataApiKeys[providerId] = apiKey;
   }
 
   if (typeof raw.omdbApiKey === 'string' && raw.omdbApiKey.trim()) metadataApiKeys.omdb = raw.omdbApiKey.trim();
@@ -201,16 +205,6 @@ function normalizeSettings(input: unknown): AppSettings {
     tmdbApiKey: metadataApiKeys.tmdb || '',
     metadataApiKeys,
     metadataOfflineMode: Boolean(raw.metadataOfflineMode),
-    openSubtitlesUsername: typeof raw.openSubtitlesUsername === 'string'
-      ? raw.openSubtitlesUsername.trim().slice(0, 120)
-      : '',
-    openSubtitlesPassword: typeof raw.openSubtitlesPassword === 'string'
-      ? raw.openSubtitlesPassword
-      : '',
-    openSubtitlesLanguages: typeof raw.openSubtitlesLanguages === 'string' && raw.openSubtitlesLanguages.trim()
-      ? raw.openSubtitlesLanguages.trim().toLowerCase()
-      : 'en',
-    openSubtitlesAutoDownload: Boolean(raw.openSubtitlesAutoDownload),
     autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
       ? autoSyncIntervalHours
       : 72,

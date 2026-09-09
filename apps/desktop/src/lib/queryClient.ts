@@ -37,15 +37,6 @@ export function queryScope(): readonly unknown[] {
 // This bounds metadata entries, not decoded WebKit images. Active queries are
 // retained; inactive results have both a TTL and a count limit.
 let trimming = false;
-let trimScheduled = false;
-function scheduleQueryCacheTrim(): void {
-  if (trimScheduled) return;
-  trimScheduled = true;
-  setTimeout(() => {
-    trimScheduled = false;
-    trimQueryCache();
-  }, 0);
-}
 const sizes = new Map<string, number>();
 function approximateBytes(value: unknown, seen = new WeakSet<object>(), budget = 8 * 1024 * 1024): number {
   if (typeof value === 'string') return value.length * 2;
@@ -102,7 +93,7 @@ queryClient.getQueryCache().subscribe(event => {
   if (event.type === 'removed') sizes.delete(event.query.queryHash);
   if (event.type === 'updated' && event.action.type === 'success') {
     sizes.set(event.query.queryHash, approximateBytes(event.query.state.data));
-    scheduleQueryCacheTrim();
+    trimQueryCache();
   }
 });
 
@@ -132,6 +123,7 @@ async function scheduledRead<T>(read: () => Promise<T>, signal: AbortSignal): Pr
 
 export async function cachedDesktopRead<T>(family: string, args: readonly unknown[], read: () => Promise<T>, staleTime = 60_000): Promise<T> {
   const expensive = family === 'getThumbnail' || family === 'requestMetadataProvider' || family === 'getMediaSegments';
+  const recoverCancellation = family === 'requestMetadataProvider' || family.startsWith('discover-');
   const scope = queryScope();
   const identity = JSON.stringify(scope);
   const options = {
@@ -146,7 +138,7 @@ export async function cachedDesktopRead<T>(family: string, args: readonly unknow
       // Imperative reads have no observers. Invalidating them during a write
       // cancels their promises even while a page is waiting for the result.
       // Restart against the updated cache, but never cross a profile/session.
-      if (!isCancelledError(error) || attempt >= 2 || JSON.stringify(queryScope()) !== identity) throw error;
+      if (!recoverCancellation || !isCancelledError(error) || attempt >= 2 || JSON.stringify(queryScope()) !== identity) throw error;
     }
   }
 }

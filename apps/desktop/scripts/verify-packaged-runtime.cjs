@@ -118,10 +118,6 @@ function nativeLibraryName(targetPlatform) {
   return 'libvlc.so';
 }
 
-function nativeExecutableName(targetPlatform) {
-  return targetPlatform === 'win32' ? 'mpv.exe' : 'mpv';
-}
-
 function regularFile(candidate) {
   try {
     return fs.lstatSync(candidate).isFile();
@@ -353,19 +349,29 @@ function verifyLibVlcPayload(targetPlatform, targetArch) {
 }
 
 function verifyMpvPayload(targetPlatform, targetArch) {
-  const payloadRoot = nativePayloadRoot('mpv');
+  const payloadRoot = path.join(resources, 'mpv', 'lib');
   if (!directory(payloadRoot)) {
-    fail(`Missing MPV payload directory for ${targetPlatform}/${targetArch}: ${payloadRoot}`);
+    fail(`Missing libmpv payload directory for ${targetPlatform}/${targetArch}: ${payloadRoot}`);
     return;
   }
-  const executableName = nativeExecutableName(targetPlatform);
-  const executablePath = findNamedFile(payloadRoot, executableName);
-  if (!executablePath) {
-    fail(`Missing bundled MPV executable for ${targetPlatform}/${targetArch}: ${path.join(payloadRoot, executableName)}`);
-  } else {
-    verifyNativeFile(executablePath, 'bundled MPV executable', targetPlatform, true);
-  }
-  verifyOptionalHashManifest(payloadRoot, 'MPV', targetPlatform, targetArch);
+  const libraryName = targetPlatform === 'darwin'
+    ? 'libmpv.dylib'
+    : targetPlatform === 'win32' ? 'mpv-2.dll' : 'libmpv.so';
+  const bridgeName = targetPlatform === 'darwin'
+    ? 'libloomtv_mpv_bridge.dylib'
+    : targetPlatform === 'win32' ? 'loomtv_mpv_bridge.dll' : 'loomtv_mpv_bridge.so';
+  verifyNativeFile(
+    path.join(payloadRoot, libraryName),
+    'bundled libmpv library',
+    targetPlatform,
+    false,
+  );
+  verifyNativeFile(
+    path.join(payloadRoot, bridgeName),
+    'bundled LoomTV libmpv bridge',
+    targetPlatform,
+    false,
+  );
 }
 
 const packageDir = packageDirCandidates().find((candidate) => exists(resourcesDir(candidate))) || packageDirCandidates()[0];

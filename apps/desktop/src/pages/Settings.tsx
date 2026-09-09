@@ -171,25 +171,6 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
         </>
       ),
     },
-    {
-      id: 'opensubtitles',
-      label: 'OpenSubtitles API Key',
-      badge: 'Subtitles',
-      placeholder: 'OpenSubtitles API key',
-      description: (
-        <>
-          Downloads missing subtitles. Create a consumer key in your{' '}
-          <button
-            type="button"
-            onClick={() => openExternal('https://www.opensubtitles.com/en/users/consumers')}
-            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
-          >
-            OpenSubtitles account <ExternalLink className="w-3 h-3" />
-          </button>
-          .
-        </>
-      ),
-    },
   ];
 }
 
@@ -200,10 +181,6 @@ export default function Settings() {
   const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
-  const [openSubtitlesUsername, setOpenSubtitlesUsername] = useState('');
-  const [openSubtitlesPassword, setOpenSubtitlesPassword] = useState('');
-  const [openSubtitlesLanguages, setOpenSubtitlesLanguages] = useState('en');
-  const [openSubtitlesAutoDownload, setOpenSubtitlesAutoDownload] = useState(false);
   const [editingKeys, setEditingKeys] = useState<Record<string, boolean>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
   const [newProviderName, setNewProviderName] = useState('');
@@ -437,11 +414,12 @@ export default function Settings() {
   useEffect(() => {
     Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()]).then(([s, profilePreferences]) => {
       const loadedKeys = {
-        ...(s.metadataApiKeys || {}),
+        ...Object.fromEntries(
+          Object.entries(s.metadataApiKeys || {}).filter(([provider]) => normalizeProviderId(provider) !== 'opensubtitles'),
+        ),
         tmdb: s.metadataApiKeys?.tmdb || s.tmdbApiKey || '',
         omdb: s.metadataApiKeys?.omdb || s.omdbApiKey || '',
         fanart: s.metadataApiKeys?.fanart || '',
-        opensubtitles: s.metadataApiKeys?.opensubtitles || '',
         tvdb: s.metadataApiKeys?.tvdb || '',
       };
       setMetadataKeys(loadedKeys);
@@ -449,10 +427,6 @@ export default function Settings() {
       if (s.metadataOfflineMode && activeProfile?.type === 'owner' && !isRemoteLibraryMode) {
         void persistSettings({ metadataOfflineMode: false });
       }
-      setOpenSubtitlesUsername(s.openSubtitlesUsername || '');
-      setOpenSubtitlesPassword(s.openSubtitlesPassword || '');
-      setOpenSubtitlesLanguages(s.openSubtitlesLanguages || 'en');
-      setOpenSubtitlesAutoDownload(Boolean(s.openSubtitlesAutoDownload));
       setEditingKeys(
         Object.fromEntries(
           Object.entries(loadedKeys).map(([provider, value]) => [provider, !value]),
@@ -614,7 +588,7 @@ export default function Settings() {
   const cleanedMetadataKeys = (keys: Record<string, string> = metadataKeys) => Object.fromEntries(
     Object.entries(keys)
       .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
-      .filter(([provider, value]) => provider && value),
+      .filter(([provider, value]) => provider && provider !== 'opensubtitles' && value),
   ) as Record<string, string>;
 
   const saveMetadataSettings = async (keys: Record<string, string>): Promise<boolean> => {
@@ -624,10 +598,6 @@ export default function Settings() {
       omdbApiKey: cleanedKeys.omdb || '',
       tmdbApiKey: cleanedKeys.tmdb || '',
       metadataOfflineMode: false,
-      openSubtitlesUsername: openSubtitlesUsername.trim(),
-      openSubtitlesPassword: openSubtitlesPassword.trim(),
-      openSubtitlesLanguages: openSubtitlesLanguages.trim() || 'en',
-      openSubtitlesAutoDownload,
     })) return false;
 
     setMetadataKeys(cleanedKeys);
@@ -681,13 +651,6 @@ export default function Settings() {
   const handleSaveApiKeys = async () => {
     await saveMetadataSettings(metadataKeys);
   };
-
-  const handleOpenSubtitlesEnabledChange = useCallback((enabled: boolean) => {
-    setOpenSubtitlesAutoDownload(enabled);
-    void persistSettings({ openSubtitlesAutoDownload: enabled }).then((saved) => {
-      if (!saved) setOpenSubtitlesAutoDownload(!enabled);
-    });
-  }, [persistSettings]);
 
   const handleTestApiKeys = async () => {
     const cleanedKeys = cleanedMetadataKeys(metadataKeys);
@@ -1304,10 +1267,6 @@ export default function Settings() {
             editingKeys={editingKeys}
             visibleKeys={visibleKeys}
             customProviders={customProviders}
-            openSubtitlesUsername={openSubtitlesUsername}
-            openSubtitlesPassword={openSubtitlesPassword}
-            openSubtitlesLanguages={openSubtitlesLanguages}
-            openSubtitlesAutoDownload={openSubtitlesAutoDownload}
             newProviderName={newProviderName}
             newProviderKey={newProviderKey}
             savedKey={savedKey}
@@ -1318,10 +1277,6 @@ export default function Settings() {
             setProviderEditing={setProviderEditing}
             toggleProviderVisibility={toggleProviderVisibility}
             deleteMetadataKey={handleDeleteMetadataKey}
-            setOpenSubtitlesUsername={setOpenSubtitlesUsername}
-            setOpenSubtitlesPassword={setOpenSubtitlesPassword}
-            setOpenSubtitlesLanguages={setOpenSubtitlesLanguages}
-            setOpenSubtitlesAutoDownload={handleOpenSubtitlesEnabledChange}
             setNewProviderName={setNewProviderName}
             setNewProviderKey={setNewProviderKey}
             addMetadataKey={handleAddMetadataKey}

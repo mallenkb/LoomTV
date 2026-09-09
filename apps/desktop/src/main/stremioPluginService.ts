@@ -299,6 +299,35 @@ export class StremioPluginService {
     }
   }
 
+  // Host startup only. Keep default installation separate from owner-managed
+  // plugin changes, and preserve existing installs and prior removal choices.
+  installDefaultCinemeta(): Promise<void> {
+    return this.enqueueMutation(async () => {
+      const addonId = 'com.linvo.cinemeta';
+      const registry = this.getRegistry();
+      if (registry.get(addonId) || this.deps.listAudit?.(addonId, 1).length) return;
+      const previous = registry.toJSON();
+      try {
+        const review = await registry.reviewManifestUrl('https://v3-cinemeta.strem.io/manifest.json');
+        if (review.addonId !== addonId) {
+          throw new StremioPluginServiceError(
+            'STREMIO_PLUGIN_OFFICIAL_ID_MISMATCH',
+            'The official add-on endpoint returned an unexpected manifest identity.',
+          );
+        }
+        registry.approve(addonId, { confirmed: true, reviewToken: review.reviewToken });
+        this.deps.saveState(registry.toJSON(), {
+          addonId,
+          eventType: 'addon_approved',
+          actor: 'system:default-cinemeta',
+        });
+      } catch (error) {
+        this.restoreRegistry(previous);
+        throw error;
+      }
+    });
+  }
+
   listManaged(): readonly StremioInstallRecord[] {
     this.deps.authorizeManagement();
     return this.getRegistry().list();

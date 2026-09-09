@@ -295,10 +295,6 @@ export interface SettingsPayload {
   tmdbApiKey?: string;
   metadataApiKeys?: MetadataApiKeys;
   metadataOfflineMode?: boolean;
-  openSubtitlesUsername?: string;
-  openSubtitlesPassword?: string;
-  openSubtitlesLanguages?: string;
-  openSubtitlesAutoDownload?: boolean;
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;

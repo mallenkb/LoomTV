@@ -1,4 +1,4 @@
-import { CheckCircle, Download, Eye, EyeOff, Key, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { CheckCircle, Eye, EyeOff, Key, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { MetadataKeyTestResult } from '@/lib/desktopApi';
@@ -12,10 +12,6 @@ type MetadataSettingsSectionProps = {
   editingKeys: Record<string, boolean>;
   visibleKeys: Record<string, boolean>;
   customProviders: string[];
-  openSubtitlesUsername: string;
-  openSubtitlesPassword: string;
-  openSubtitlesLanguages: string;
-  openSubtitlesAutoDownload: boolean;
   newProviderName: string;
   newProviderKey: string;
   savedKey: boolean;
@@ -26,10 +22,6 @@ type MetadataSettingsSectionProps = {
   setProviderEditing: (providerId: string, isEditing: boolean) => void;
   toggleProviderVisibility: (providerId: string) => void;
   deleteMetadataKey: (providerId: string) => void;
-  setOpenSubtitlesUsername: (value: string) => void;
-  setOpenSubtitlesPassword: (value: string) => void;
-  setOpenSubtitlesLanguages: (value: string) => void;
-  setOpenSubtitlesAutoDownload: (value: boolean) => void;
   setNewProviderName: (value: string) => void;
   setNewProviderKey: (value: string) => void;
   addMetadataKey: () => void;
@@ -43,10 +35,6 @@ export default function MetadataSettingsSection({
   editingKeys,
   visibleKeys,
   customProviders,
-  openSubtitlesUsername,
-  openSubtitlesPassword,
-  openSubtitlesLanguages,
-  openSubtitlesAutoDownload,
   newProviderName,
   newProviderKey,
   savedKey,
@@ -57,10 +45,6 @@ export default function MetadataSettingsSection({
   setProviderEditing,
   toggleProviderVisibility,
   deleteMetadataKey,
-  setOpenSubtitlesUsername,
-  setOpenSubtitlesPassword,
-  setOpenSubtitlesLanguages,
-  setOpenSubtitlesAutoDownload,
   setNewProviderName,
   setNewProviderKey,
   addMetadataKey,
@@ -76,7 +60,7 @@ export default function MetadataSettingsSection({
             Metadata API Keys
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Add the services you use. TVmaze and Jikan need no keys; TheTVDB is optional for TV metadata and artwork.
+            Add the services you use. TVmaze and Jikan need no keys, and OpenSubtitles subtitles are built into the player.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -250,69 +234,6 @@ export default function MetadataSettingsSection({
               </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
-            <Download className="w-4 h-4 text-[var(--loom-accent)]" />
-            OpenSubtitles (optional)
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Online subtitles are kept separate from tracks embedded in the video and subtitle files you add yourself.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <label className="flex items-start gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <input
-              type="checkbox"
-              checked={openSubtitlesAutoDownload}
-              onChange={(event) => setOpenSubtitlesAutoDownload(event.target.checked)}
-              className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
-            />
-            <span>
-              <span className="block text-sm font-semibold text-white">Enable OpenSubtitles</span>
-              <span className="mt-1 block text-xs text-[var(--loom-muted)]">
-                Off by default. When enabled, LoomTV may download missing subtitles during scans and shows them in a separate OpenSubtitles group in the player. Embedded and added subtitle files remain available either way.
-              </span>
-            </span>
-          </label>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Username</span>
-              <input
-                type="text"
-                value={openSubtitlesUsername}
-                onChange={(event) => setOpenSubtitlesUsername(event.target.value)}
-                placeholder="OpenSubtitles username"
-                className="w-full bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)]"
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Password</span>
-              <input
-                type="password"
-                value={openSubtitlesPassword}
-                onChange={(event) => setOpenSubtitlesPassword(event.target.value)}
-                placeholder="OpenSubtitles password"
-                className="w-full bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)]"
-              />
-            </label>
-          </div>
-
-          <label className="block space-y-1">
-            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Languages</span>
-            <input
-              type="text"
-              value={openSubtitlesLanguages}
-              onChange={(event) => setOpenSubtitlesLanguages(event.target.value)}
-              placeholder="en, es, fr"
-              className="w-full bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)]"
-            />
-            <span className="block text-xs text-[var(--loom-muted)]">Use comma-separated language codes. Example: en, es, fr.</span>
-          </label>
         </CardContent>
       </Card>
 

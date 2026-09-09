@@ -4,6 +4,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { loadSettings, saveSettings } from '../src/main/databasePlaybackRepository.ts';
 import {
   SECURE_SETTINGS_FIELD,
+  SECURE_SETTINGS_RECOVERY_FIELD,
   SECRET_SETTINGS_KEYS,
   SecureSettingsCorruptError,
   SecureSettingsUnavailableError,
@@ -54,13 +55,64 @@ test('plaintext migration requires the secret store and never returns a plaintex
   assert.throws(() => writeSecureSettings(secrets, f.codec), SecureSettingsUnavailableError);
 });
 
-test('mixed storage retains nonoverlapping legacy secrets and rejects conflicting copies', () => {
+test('mixed storage keeps credentials saved by the older app and recovers missing fields', () => {
   const { codec } = fixture();
   const stored = writeSecureSettings({ tmdbApiKey: 'key' }, codec);
   assert.deepEqual(readSecureSettings({ ...stored, omdbApiKey: 'other' }, codec), {
     settings: { tmdbApiKey: 'key', omdbApiKey: 'other' }, needsMigration: true,
   });
-  assert.throws(() => readSecureSettings({ ...stored, tmdbApiKey: 'conflict' }, codec), SecureSettingsCorruptError);
+  assert.equal(readSecureSettings({ ...stored, tmdbApiKey: 'updated-by-older-app' }, codec).settings.tmdbApiKey, 'updated-by-older-app');
+});
+
+test('legacy migration restores missing API keys without rotating the active LAN identity', () => {
+  const { codec } = fixture();
+  const stored = writeSecureSettings(secrets, codec);
+  const result = readSecureSettings({
+    ...stored,
+    metadataApiKeys: { tmdb: 'new-tmdb', custom: '' },
+    omdbApiKey: '',
+    localNetworkHmacSecret: 'cd'.repeat(32),
+    localNetworkShareToken: '654321',
+  }, codec);
+  assert.deepEqual(result.settings.metadataApiKeys, { tmdb: 'new-tmdb', custom: 'custom-secret' });
+  assert.equal(result.settings.omdbApiKey, secrets.omdbApiKey);
+  assert.equal(result.settings.localNetworkHmacSecret, 'cd'.repeat(32));
+  assert.equal(result.settings.localNetworkShareToken, '654321');
+});
+
+test('mixed credential migration preserves encrypted recovery copies across subsequent saves', t => {
+  const database = new BetterSqlite3(':memory:');
+  t.after(() => database.close());
+  database.exec('CREATE TABLE app_settings (id INTEGER PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');
+  const { codec } = fixture();
+  const original = writeSecureSettings(secrets, codec);
+  saveSettings(database, { ...original, tmdbApiKey: 'new-legacy-key' });
+  let failWrite = true;
+  const persistence = createSecureSettingsPersistence({
+    load: () => loadSettings(database),
+    save: settings => { saveSettings(database, settings); if (failWrite) throw new Error('write failed'); },
+    transaction: action => database.transaction(action)(),
+  }, codec);
+  const before = loadSettings(database);
+  assert.throws(() => persistence.load(), /write failed/);
+  assert.deepEqual(loadSettings(database), before);
+  failWrite = false;
+  const restored = persistence.load();
+  assert.ok(restored);
+  assert.equal(restored.tmdbApiKey, 'new-legacy-key');
+  assert.equal(Object.hasOwn(restored, SECURE_SETTINGS_RECOVERY_FIELD), false);
+  const persisted = loadSettings(database);
+  assert.ok(persisted);
+  const recovery = persisted[SECURE_SETTINGS_RECOVERY_FIELD] as Array<{ encrypted: unknown; legacy: unknown }>;
+  assert.equal(recovery.length, 1);
+  assert.deepEqual(recovery[0].encrypted, original[SECURE_SETTINGS_FIELD]);
+  assert.equal(readSecureSettings({ [SECURE_SETTINGS_FIELD]: recovery[0].legacy }, codec).settings.tmdbApiKey, 'new-legacy-key');
+  assert.equal(JSON.stringify(persisted).includes('new-legacy-key'), false);
+  persistence.save({ theme: 'light' });
+  assert.deepEqual(loadSettings(database)?.[SECURE_SETTINGS_RECOVERY_FIELD], recovery);
+  assert.equal(persistence.load()?.tmdbApiKey, 'new-legacy-key');
+  persistence.save({ tmdbApiKey: '' });
+  assert.equal(persistence.load()?.tmdbApiKey, '');
 });
 
 test('invalid envelopes and payloads fail without returning defaults', () => {

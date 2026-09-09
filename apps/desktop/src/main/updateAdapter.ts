@@ -21,7 +21,6 @@ interface UpdateAdapterDeps<TState extends UpdateAdapterState> {
   getState: () => TState;
   configure: () => void;
   checkForUpdates: () => Promise<TState>;
-  promptForDownloadedUpdate: () => void;
   startupDelayMs?: number;
   checkIntervalMs?: number;
   setTimeout?: (callback: () => void, delayMs: number) => TimerHandle;
@@ -66,11 +65,7 @@ export function createUpdateAdapter<TState extends UpdateAdapterState>(
   const checkNow = async () => {
     if (!shouldCheck()) return deps.getState();
 
-    const nextState = await deps.checkForUpdates();
-    if (nextState.status === 'downloaded') {
-      deps.promptForDownloadedUpdate();
-    }
-    return nextState;
+    return deps.checkForUpdates();
   };
 
   return {

@@ -457,6 +457,11 @@ export function loadSettingsFromDatabase(): SettingsData | null {
   return secureSettingsPersistence().load();
 }
 
+export function loadMetadataOfflineModeFromDatabase(): boolean | null {
+  const stored = loadSettingsRecord(getDb());
+  return stored ? Boolean(stored.metadataOfflineMode) : null;
+}
+
 export function saveSettingsToDatabase(settings: SettingsData): void {
   secureSettingsPersistence().save(settings);
 }

@@ -448,6 +448,12 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   border-radius: 9999px;
 }
 
+/* Keep every top-player surface frosted even when the utility class is not
+   emitted by the desktop stylesheet. */
+.loom-player-top-controls .loom-player-top-control {
+  backdrop-filter: blur(24px) saturate(130%);
+}
+
 .loom-app-shell {
   background: var(--loom-bg);
 }
@@ -618,21 +624,20 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 
 .loom-modern-category-pill {
   border-color: var(--loom-panel-border);
-  background: color-mix(in srgb, var(--loom-panel) 96%, transparent);
+  background: color-mix(in srgb, var(--loom-panel) 65%, transparent);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(22px) saturate(130%);
 }
 
 /* Keep desktop Electron and browser navigation frosted independently of Tauri. */
 :root[data-loom-client="desktop"]:not([data-loom-runtime="tauri"]) .loom-modern-category-pill {
   background: color-mix(in srgb, var(--loom-panel) 65%, transparent);
-  -webkit-backdrop-filter: blur(22px) saturate(130%);
   backdrop-filter: blur(22px) saturate(130%);
 }
 
 @media (min-width: 1025px) {
   :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill {
     background: color-mix(in srgb, var(--loom-panel) 65%, transparent);
-    -webkit-backdrop-filter: blur(22px) saturate(130%);
     backdrop-filter: blur(22px) saturate(130%);
   }
 }

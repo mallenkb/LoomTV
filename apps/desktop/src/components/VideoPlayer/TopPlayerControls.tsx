@@ -37,7 +37,7 @@ function TopPlayerControls({
           onBack();
         }}
         onDoubleClick={(event) => event.stopPropagation()}
-        className="loom-player-top-control flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+        className="loom-player-top-control flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-xl transition-[background-color,color,border-color] duration-200 hover:bg-black/70 hover:text-white"
         aria-label="Back"
         tabIndex={visible ? 0 : -1}
       >
@@ -45,7 +45,7 @@ function TopPlayerControls({
         Back
       </button>
 
-      <div className="loom-player-top-control pointer-events-none absolute left-1/2 top-1/2 max-w-[60%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/35 px-4 py-1.5 text-center text-xs font-medium text-white/80 shadow-lg backdrop-blur-md">
+      <div className="loom-player-top-control pointer-events-none absolute left-1/2 top-1/2 max-w-[60%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/55 px-4 py-1.5 text-center text-xs font-medium text-white shadow-lg backdrop-blur-xl">
         <span className="block truncate">{label}</span>
       </div>
 
@@ -58,7 +58,7 @@ function TopPlayerControls({
               onAction();
             }}
             onDoubleClick={(event) => event.stopPropagation()}
-            className="loom-player-top-control flex h-10 items-center rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+            className="loom-player-top-control flex h-10 items-center rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-xl transition-[background-color,color,border-color] duration-200 hover:bg-black/70 hover:text-white"
             tabIndex={visible ? 0 : -1}
           >
             {actionLabel}
@@ -72,7 +72,7 @@ function TopPlayerControls({
               onToggleFullscreen();
             }}
             onDoubleClick={(event) => event.stopPropagation()}
-            className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+            className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-xl transition-[background-color,color,border-color] duration-200 hover:bg-black/70 hover:text-white"
             title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             aria-pressed={fullscreen}
@@ -90,7 +90,7 @@ function TopPlayerControls({
             onClose();
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-[background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white"
+          className="loom-player-top-control grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-xl transition-[background-color,color,border-color] duration-200 hover:bg-black/70 hover:text-white"
           title="Close player"
           aria-label="Close player"
           tabIndex={visible ? 0 : -1}

@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 type GatewayDependencies = {
   loadSettings: () => AppSettings;
+  loadMetadataOfflineMode?: () => boolean;
   getMetadataApiKey: (settings: AppSettings, providerId: string) => string | undefined;
 };
 
@@ -53,8 +54,8 @@ async function responseJson(response: Response, provider: string): Promise<unkno
 
 export function createMetadataProviderGateway(deps: GatewayDependencies) {
   return async function requestMetadataProvider(request: MetadataProviderRequest): Promise<unknown> {
-    const settings = deps.loadSettings();
-    if (settings.metadataOfflineMode) {
+    // Public providers only need the offline preference, not saved credentials.
+    if (deps.loadMetadataOfflineMode ? deps.loadMetadataOfflineMode() : deps.loadSettings().metadataOfflineMode) {
       throw new Error('Metadata offline mode is enabled. Turn it off to contact metadata providers.');
     }
     if (request.provider === 'anilist') {
@@ -78,13 +79,14 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
       const response = await safeFetch(`https://v3-cinemeta.strem.io/${request.path}`, {
         headers: { accept: 'application/json' },
       }, {
-        allowedHosts: ['v3-cinemeta.strem.io'], maxBytes: 4 * 1024 * 1024,
+        allowedHosts: ['v3-cinemeta.strem.io', 'cinemeta-catalogs.strem.io'], maxBytes: 4 * 1024 * 1024,
         retries: 2, provider: 'cinemeta', operation: 'metadata.cinemeta.catalog',
       });
       return responseJson(response, 'Cinemeta');
     }
 
     if (request.provider === 'omdb') {
+      const settings = deps.loadSettings();
       const apiKey = deps.getMetadataApiKey(settings, 'omdb');
       if (!apiKey) throw new Error('OMDb API key is missing.');
       const url = queryUrl('https://www.omdbapi.com/', { ...request.query, apikey: apiKey });
@@ -128,7 +130,7 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
     if (!TMDB_PATH_PATTERN.test(request.path) || request.path.includes('..')) {
       throw new Error('TMDB path is not allowed.');
     }
-    const credential = deps.getMetadataApiKey(settings, 'tmdb');
+    const credential = deps.getMetadataApiKey(deps.loadSettings(), 'tmdb');
     if (!credential) throw new Error('TMDB API key is missing.');
     const url = queryUrl(`https://api.themoviedb.org/3/${request.path}`, {
       language: 'en-US',

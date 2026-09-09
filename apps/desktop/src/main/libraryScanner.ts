@@ -14,11 +14,6 @@ import {
 import { cleanMediaTitle } from './metadata/helpers.ts';
 import type { EpisodeFile, MediaItem } from './metadata/types.ts';
 import {
-  downloadMissingOpenSubtitlesForVideo,
-  openSubtitlesIsConfigured,
-  type OpenSubtitlesScanOptions,
-} from './openSubtitles.ts';
-import {
   createSubtitleRecords,
   isLikelyAnimePath,
   shouldTreatAsTV,
@@ -34,7 +29,6 @@ export interface ScanContext {
   tmdbApiKey?: string;
   tvdbApiKey?: string;
   fanartApiKey?: string;
-  openSubtitles?: OpenSubtitlesScanOptions;
   folderKind?: ScanFolderKind;
 }
 
@@ -52,7 +46,6 @@ export type BuildTVItemRequest = {
   tmdbApiKey?: string;
   tvdbApiKey?: string;
   fanartApiKey?: string;
-  openSubtitles?: OpenSubtitlesScanOptions;
 };
 
 export type BuildMovieItemRequest = {
@@ -100,18 +93,6 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
       .filter((entry) => !entry.isDirectory())
       .map((entry) => entry.name)
       .filter(isSubtitleFileName);
-  }
-
-  async function downloadOpenSubtitlesForVideos(folderPath: string, videoFiles: string[], ctx: ScanContext): Promise<void> {
-    if (!openSubtitlesIsConfigured(ctx.openSubtitles) || videoFiles.length === 0) return;
-
-    for (const videoFile of videoFiles) {
-      const videoPath = path.join(folderPath, videoFile);
-      const results = await downloadMissingOpenSubtitlesForVideo(videoPath, ctx.openSubtitles);
-      results
-        .filter((result) => result.status === 'error')
-        .forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
-    }
   }
 
   async function buildImageItems(folderPath: string, imageFiles: string[]): Promise<MediaItem[]> {
@@ -188,7 +169,6 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
     .filter((entry) => !entry.isDirectory())
     .map((entry) => entry.name)
     .filter(isVideoFileName);
-  await downloadOpenSubtitlesForVideos(folderPath, videoFiles, ctx);
   const subtitleFiles = await subtitleFilesInDirectory(folderPath);
   const subDirs = dirEntries.filter((entry) => entry.isDirectory());
   const hasSeasonDirs = subDirs.some((entry) => isSeasonDirectoryName(entry.name));
@@ -257,7 +237,6 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
       tmdbApiKey: ctx.tmdbApiKey,
       tvdbApiKey: ctx.tvdbApiKey,
       fanartApiKey: ctx.fanartApiKey,
-      openSubtitles: ctx.openSubtitles,
     });
   }
 
@@ -298,7 +277,6 @@ async function scanFolder(
       : rootEntries
           .filter((entry) => !entry.isDirectory() && isImageFileName(entry.name))
           .map((entry) => entry.name);
-    await downloadOpenSubtitlesForVideos(folderPath, rootVideoFiles, ctx);
     const rootSubtitleFiles = await subtitleFilesInDirectory(folderPath);
 
     await processWithConcurrencyInOrder(
@@ -366,7 +344,6 @@ async function scanFolder(
                 .map((directoryEntry) => directoryEntry.name)
                 .filter(isImageFileName);
 
-          await downloadOpenSubtitlesForVideos(fullPath, videoFiles, ctx);
           const subtitleFiles = await subtitleFilesInDirectory(fullPath);
           const subDirs = dirEntries.filter((directoryEntry) => directoryEntry.isDirectory());
           const hasSeasonDirs = subDirs.some((directoryEntry) => isSeasonDirectoryName(directoryEntry.name));
@@ -390,7 +367,6 @@ async function scanFolder(
                   tmdbApiKey: ctx.tmdbApiKey,
                   tvdbApiKey: ctx.tvdbApiKey,
                   fanartApiKey: ctx.fanartApiKey,
-                  openSubtitles: ctx.openSubtitles,
                 });
                 return tvItem ? [tvItem] : [];
               }
@@ -430,7 +406,6 @@ async function scanFolder(
               tmdbApiKey: ctx.tmdbApiKey,
               tvdbApiKey: ctx.tvdbApiKey,
               fanartApiKey: ctx.fanartApiKey,
-              openSubtitles: ctx.openSubtitles,
             });
             const looseVideoFiles = ctx.folderKind
               ? []

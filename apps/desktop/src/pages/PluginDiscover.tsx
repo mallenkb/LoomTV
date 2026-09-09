@@ -1,7 +1,7 @@
 import { cachedDesktopRead, queryClient, queryScope, trimQueryCache } from '@/lib/queryClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Compass, RefreshCw, WifiOff } from 'lucide-react';
+import { ChevronDown, RefreshCw, WifiOff } from 'lucide-react';
 import { useLocation, useNavigate } from '@/lib/navigation';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -236,6 +236,14 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   return 'The provider request failed.';
+}
+
+function isCancelledRequest(error: unknown): boolean {
+  const name = typeof error === 'object' && error !== null && 'name' in error
+    ? String(error.name)
+    : '';
+  return /^(CancelledError|CanceledError|AbortError)$/.test(name)
+    || /\b(CancelledError|CanceledError|AbortError)\b|^Request cancel[le]*d$/i.test(errorMessage(error));
 }
 
 function isNetworkFailure(error: unknown): boolean {
@@ -1093,7 +1101,7 @@ async function fetchJikanAnimeCatalog(
   const hasFilters = Boolean(trimmedQuery || genreIds.length || year.trim());
   let path = 'anime';
   let requestQuery: Record<string, string | number | boolean> = {
-    limit: DISCOVER_RESULT_LIMIT,
+    limit: Math.min(DISCOVER_RESULT_LIMIT, 25),
     sfw: true,
   };
 
@@ -1632,7 +1640,9 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
         setPlatformFilter(current => normalizeProviderFilterValue(current, options));
       }
     } catch (error) {
-      if (type === activeContentTypeRef.current && region === regionRef.current) setProviderError(errorMessage(error));
+      if (type === activeContentTypeRef.current && region === regionRef.current) {
+        setProviderError(isCancelledRequest(error) ? null : errorMessage(error));
+      }
     } finally {
       if (type === activeContentTypeRef.current && region === regionRef.current) setProviderOptionsLoading(false);
     }
@@ -1761,6 +1771,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       hydrateRatings(filteredItems);
     } catch (loadError) {
       if (requestRevision !== catalogRequestRevision.current) return;
+      if (isCancelledRequest(loadError)) return;
       setItems([]);
       setError(errorMessage(loadError));
       setErrorKind(isNetworkFailure(loadError) ? 'offline' : 'provider');
@@ -2049,20 +2060,21 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
           </div>
         </header>
 
-        {error && errorKind !== 'offline' && (
-          <div role="alert" className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            <p className="flex items-start gap-2">
-              <Compass className="mt-0.5 h-4 w-4 shrink-0" />
-              {error}
-            </p>
-          </div>
-        )}
-
         {loading ? (
           <PosterGridShimmer className="mt-4" />
         ) : gridEntries.length === 0 ? (
           errorKind === 'offline' ? (
             <DiscoverOfflineState onRetry={retryCatalog} onBrowseLibrary={() => navigate('/')} />
+          ) : error ? (
+            <div role="status" className="mx-auto mt-10 max-w-md space-y-3 text-center">
+              <p className="text-sm text-[var(--loom-muted)]">
+                Titles could not be loaded right now. Please try again shortly.
+              </p>
+              <button type="button" onClick={retryCatalog}
+                className="rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]">
+                Try again
+              </button>
+            </div>
           ) : (
             <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">{emptyStateMessage}</p>
           )

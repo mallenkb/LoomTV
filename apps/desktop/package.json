@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "LoomTV",
-  "version": "1.0.149",
+  "version": "1.0.159",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.20.0",
@@ -239,20 +239,6 @@
         {
           "from": "resources/libvlc/darwin/arm64/packaged-runtime-manifest.json",
           "to": "libvlc/darwin/arm64/runtime-manifest.json"
-        },
-        {
-          "from": "resources/mpv/darwin/arm64",
-          "to": "mpv/darwin/arm64",
-          "filter": [
-            "**/*",
-            "!runtime-manifest.json",
-            "!packaged-runtime-manifest.json",
-            "!.loomtv-native-runtime-staging.json"
-          ]
-        },
-        {
-          "from": "resources/mpv/darwin/arm64/packaged-runtime-manifest.json",
-          "to": "mpv/darwin/arm64/runtime-manifest.json"
         },
         {
           "from": "resources/ffmpeg/mac",

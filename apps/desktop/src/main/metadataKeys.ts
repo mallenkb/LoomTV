@@ -59,22 +59,6 @@ async function testFanartKey(value: string): Promise<MetadataKeyTestResult> {
   };
 }
 
-async function testOpenSubtitlesKey(value: string): Promise<MetadataKeyTestResult> {
-  const key = value.trim();
-  if (!key) return { provider: 'opensubtitles', ok: false, message: 'Missing key.' };
-  const response = await safeFetch('https://api.opensubtitles.com/api/v1/infos/languages', {
-    headers: {
-      'Api-Key': key,
-      'User-Agent': 'LoomTV v1',
-    },
-  }, { allowedHosts: ['.opensubtitles.com'] });
-  return {
-    provider: 'opensubtitles',
-    ok: response.ok,
-    message: response.ok ? 'OpenSubtitles key works.' : `OpenSubtitles returned ${response.status}.`,
-  };
-}
-
 async function testTVDBKey(value: string): Promise<MetadataKeyTestResult> {
   const key = value.trim();
   if (!key) return { provider: 'tvdb', ok: false, message: 'Missing key.' };
@@ -107,7 +91,6 @@ export async function testMetadataKeys(keys: Record<string, string>): Promise<Me
       if (provider === 'tmdb') return await testTMDBKey(value);
       if (provider === 'omdb') return await testOMDbKey(value);
       if (provider === 'fanart') return await testFanartKey(value);
-      if (provider === 'opensubtitles') return await testOpenSubtitlesKey(value);
       if (provider === 'tvdb') return await testTVDBKey(value);
       return { provider, ok: false, message: 'No built-in test for this provider.' };
     } catch (error) {

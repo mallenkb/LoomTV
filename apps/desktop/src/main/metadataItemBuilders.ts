@@ -38,8 +38,6 @@ import {
 } from './libraryScanConcurrency.ts';
 
 export type MetadataItemBuilderDependencies = {
-  downloadMissingOpenSubtitlesForFolder: typeof import('./openSubtitles.ts').downloadMissingOpenSubtitlesForFolder;
-  openSubtitlesIsConfigured: typeof import('./openSubtitles.ts').openSubtitlesIsConfigured;
   extractSeasons: (folderPath: string, folderName: string, episodeFiles?: EpisodeFile[]) => Promise<Array<{ number: number; title: string; episodeCount: number }>>;
   scanEpisodeFiles: (folderPath: string) => Promise<EpisodeFile[]>;
   probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
@@ -67,7 +65,6 @@ export type MetadataItemBuilderDependencies = {
 
 export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies) {
   const {
-    downloadMissingOpenSubtitlesForFolder,
     extractSeasons,
     fetchAniListAnimeMetadata,
     fetchFanartMovieLogos,
@@ -88,7 +85,6 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     getLocalFolderArtworkUrl,
     getLocalMovieArtworkUrl,
     getLocalThumbnailUrl,
-    openSubtitlesIsConfigured,
     orderedArtworkCandidates,
     probeMediaFile: unboundedProbeMediaFile,
     scanEpisodeFiles,
@@ -157,14 +153,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     tmdbApiKey,
     tvdbApiKey,
     fanartApiKey,
-    openSubtitles,
   }: BuildTVItemRequest): Promise<MediaItem | null> {
-    if (openSubtitlesIsConfigured(openSubtitles)) {
-      const results = await downloadMissingOpenSubtitlesForFolder(fullPath, openSubtitles);
-      const failures = results.filter((result) => result.status === 'error');
-      failures.forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
-    }
-
     const episodeFiles = await scanEpisodeFiles(fullPath);
     const localSeasons = await extractSeasons(fullPath, entryName, episodeFiles);
     const episodeProbes = await mapWithConcurrency(

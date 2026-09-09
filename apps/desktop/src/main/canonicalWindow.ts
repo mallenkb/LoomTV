@@ -15,7 +15,6 @@ const SETUP_EXTERNAL_HOSTS = new Set([
   'www.themoviedb.org',
   'fanart.tv',
   'www.omdbapi.com',
-  'www.opensubtitles.com',
 ]);
 
 function allowedSetupExternalUrl(value: string): boolean {

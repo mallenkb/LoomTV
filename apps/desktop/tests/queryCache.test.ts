@@ -3,7 +3,7 @@ import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import test, { afterEach } from 'node:test';
-import { QueryObserver } from '@tanstack/react-query';
+import { isCancelledError, QueryObserver } from '@tanstack/react-query';
 
 // Exercise the production cache and installed TanStack implementation. Only
 // browser storage access is replaced, so tests do not touch user profiles.
@@ -164,6 +164,46 @@ test('expensive reads are limited to four and cancelled queued reads never reach
 });
 
 // Run explicitly with LOOMTV_QUERY_CACHE_BENCHMARK=1, not on every unit-test run.
+test('Discover recovers nested provider reads cancelled by a settings invalidation', async () => {
+  let finishOldRead!: (value: string) => void;
+  let calls = 0;
+  const result = cachedDesktopRead('discover-anime', ['cancellation'], () =>
+    cachedDesktopRead('requestMetadataProvider', ['cancellation'], () => {
+      calls += 1;
+      return calls === 1 ? new Promise<string>(resolve => { finishOldRead = resolve; }) : Promise.resolve('fresh catalog');
+    }));
+  await nextTurn();
+  invalidateDesktopData();
+  assert.equal(await result, 'fresh catalog');
+  finishOldRead('stale catalog');
+  await nextTurn();
+  assert.equal(calls, 2);
+  assert.equal(await cachedDesktopRead('discover-anime', ['cancellation'], async () => 'unexpected'), 'fresh catalog');
+});
+
+test('cancelled metadata does not restart under a different profile', async () => {
+  setQueryProfile('before');
+  let calls = 0;
+  let finish!: (value: string) => void;
+  const result = cachedDesktopRead('requestMetadataProvider', ['profile'], () => {
+    calls += 1;
+    return new Promise<string>(resolve => { finish = resolve; });
+  });
+  const rejected = assert.rejects(result, isCancelledError);
+  await nextTurn();
+  setQueryProfile('after');
+  await rejected;
+  finish('old profile');
+  await nextTurn();
+  assert.equal(calls, 1);
+});
+
+test('oversized provider results reach their caller even when evicted immediately', async () => {
+  const result = await cachedDesktopRead('requestMetadataProvider', ['large'], async () => 'x'.repeat(5 * 1024 * 1024));
+  assert.equal(result.length, 5 * 1024 * 1024);
+  assert.equal(queryClient.getQueryCache().getAll().length, 0);
+});
+
 test('cleanup benchmark compares repeated matching with direct eviction', {
   skip: process.env.LOOMTV_QUERY_CACHE_BENCHMARK !== '1',
 }, t => {

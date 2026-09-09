@@ -177,10 +177,6 @@ const desktopApi = {
     tmdbApiKey?: string;
     metadataApiKeys?: Record<string, string>;
     metadataOfflineMode?: boolean;
-    openSubtitlesUsername?: string;
-    openSubtitlesPassword?: string;
-    openSubtitlesLanguages?: string;
-    openSubtitlesAutoDownload?: boolean;
     autoSyncIntervalHours?: number;
     playbackSkipBackSeconds?: number;
     playbackSkipForwardSeconds?: number;

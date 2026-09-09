@@ -127,11 +127,6 @@ import {
 } from './main/autoUpdater';
 import { testMetadataKeys } from './main/metadataKeys';
 import {
-  downloadMissingOpenSubtitlesForFolder,
-  openSubtitlesCacheKey,
-  openSubtitlesIsConfigured,
-} from './main/openSubtitles';
-import {
   createLibraryDeliveryProjections,
   stripInlineArtworkFromLibrary,
 } from './main/libraryProjections';
@@ -201,6 +196,7 @@ import {
   recoverRunningSegmentAnalysisJobs,
   requeueWaitingSegmentAnalysisJobs,
   resetAutomaticAnalysisData,
+  loadMetadataOfflineModeFromDatabase,
 } from './main/database';
 import {
   broadcastProfilesChanged,
@@ -612,7 +608,6 @@ function metadataRequestWhenOnline<TArgs extends unknown[], TResult>(
 }
 
 const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuilders({
-  downloadMissingOpenSubtitlesForFolder,
   extractSeasons,
   fetchFanartMovieLogos: metadataRequestWhenOnline(fetchFanartMovieLogos, () => []),
   fetchFanartTVLogos: metadataRequestWhenOnline(fetchFanartTVLogos, () => []),
@@ -636,7 +631,6 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   getLocalFolderArtworkUrl,
   getLocalMovieArtworkUrl,
   getLocalThumbnailUrl,
-  openSubtitlesIsConfigured,
   orderedArtworkCandidates,
   probeMediaFile: probeMediaFileAsync,
   scanEpisodeFiles,
@@ -668,15 +662,6 @@ async function scanLibrary(
     tmdbApiKey: getMetadataApiKey(settings, 'tmdb'),
     tvdbApiKey: getMetadataApiKey(settings, 'tvdb'),
     fanartApiKey: getMetadataApiKey(settings, 'fanart'),
-    openSubtitles: {
-      apiKey: getMetadataApiKey(settings, 'opensubtitles'),
-      username: settings.openSubtitlesUsername,
-      password: settings.openSubtitlesPassword,
-      languages: settings.openSubtitlesLanguages,
-      autoDownload: settings.openSubtitlesAutoDownload,
-      userAgent: `LoomTV v${app.getVersion() || 'dev'}`,
-      isEnabled: () => Boolean(loadSettings().openSubtitlesAutoDownload),
-    },
   };
   // A quick scan may reuse a folder only while the metadata-provider setup is
   // unchanged. Store a one-way fingerprint rather than any provider secret.
@@ -687,7 +672,6 @@ async function scanLibrary(
       tvdb: ctx.tvdbApiKey || '',
       omdb: ctx.omdbApiKey || '',
       fanart: ctx.fanartApiKey || '',
-      opensubtitles: openSubtitlesCacheKey(ctx.openSubtitles),
     }))
     .digest('hex');
   const folderGroups = normalizeLibraryFolderGroups(data);
@@ -1528,6 +1512,7 @@ const unifiedDesktopSetupHooks: UnifiedDesktopSetupHooks = {
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 function presentPrimaryWindow(): void {
+  if (!app.isReady() || isAppShuttingDown) return;
   if (openUnifiedDesktopSetup(() => createWindow())) return;
   createWindow();
 }
@@ -1641,7 +1626,11 @@ const analysisCoordinator = createAnalysisCoordinator({
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
 const stremioPluginService = createDesktopStremioPluginService();
-const requestMetadataProvider = createMetadataProviderGateway({ loadSettings, getMetadataApiKey });
+const requestMetadataProvider = createMetadataProviderGateway({
+  loadSettings,
+  getMetadataApiKey,
+  loadMetadataOfflineMode: () => loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode),
+});
 
 const stremioPluginSummaryForRenderer = (record: Parameters<typeof stremioPluginSummary>[0]) => (
   stremioPluginSummary(record, getStremioAddonConfigurationState(record.addonId))
@@ -2307,6 +2296,12 @@ app.whenReady().then(async () => {
   }
   presentPrimaryWindow();
   recordPlaybackDiagnostic('desktop.window.requested');
+
+  if (!(loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode))) {
+    void stremioPluginService.installDefaultCinemeta().catch((error) => {
+      console.warn('Default Cinemeta installation will retry on next startup:', describeErrorForLog(error));
+    });
+  }
 
   void startBackgroundServices().catch((error) => {
     console.error('LoomTV background startup failed:', error);
