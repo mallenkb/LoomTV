@@ -569,7 +569,31 @@ jobs:
         shell: bash
         run: |
           remote_dir="$(mktemp -d)"
-          gh release download "$RELEASE_TAG" --dir "$remote_dir" --pattern '*'
+          download_log="$RUNNER_TEMP/loomtv-release-download-${GITHUB_RUN_ATTEMPT}.log"
+          max_attempts=5
+          delay_seconds=5
+          for attempt in $(seq 1 "$max_attempts"); do
+            rm -rf "$remote_dir"
+            mkdir -p "$remote_dir"
+            if gh release download "$RELEASE_TAG" --dir "$remote_dir" --pattern '*' >"$download_log" 2>&1; then
+              cat "$download_log"
+              break
+            fi
+
+            cat "$download_log" >&2
+            if (( attempt == max_attempts )); then
+              echo "Release asset download failed after $max_attempts attempts." >&2
+              exit 1
+            fi
+            if ! grep -Eiq 'HTTP (408|429|500|502|503|504)|timed out|timeout|temporarily unavailable|connection (reset|refused)|unexpected EOF' "$download_log"; then
+              echo 'Release asset download failed with a non-transient error; not retrying.' >&2
+              exit 1
+            fi
+
+            echo "Transient release asset download failure; retrying in ${delay_seconds}s (attempt $((attempt + 1))/$max_attempts)." >&2
+            sleep "$delay_seconds"
+            delay_seconds=$((delay_seconds * 2))
+          done
           node scripts/release-evidence.cjs --verify --assets "$remote_dir" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --tag-oid "$RELEASE_TAG_OID"
 
       - name: Verify GitHub/SLSA subjects for every uploaded artifact
