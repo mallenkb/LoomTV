@@ -681,6 +681,7 @@ export default function Sidebar() {
   const updateDownloadPercent = updateState?.status === 'downloading'
     ? Math.max(0, Math.min(100, Math.round(updateState.downloadPercent || 0)))
     : 0;
+  const UpdateIcon = updateState?.status === 'installing' ? RefreshCw : Download;
   const scanProgress = Math.max(0, Math.min(100, Math.round(state.scanProgress || 0)));
   const scanButtonLabel = state.isScanning
     ? `Refreshing library ${scanProgress}%`
@@ -767,21 +768,33 @@ export default function Sidebar() {
                 if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
               }}
               disabled={updateState?.status !== 'downloaded'}
-              className="loom-modern-sidebar-action relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-surface-2)] text-[var(--loom-text)] disabled:cursor-wait"
+              className={cn(
+                'relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] disabled:cursor-wait',
+                updateState?.status === 'downloaded'
+                  ? 'hover:bg-[var(--loom-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--loom-accent)]'
+                  : 'cursor-wait',
+              )}
               title={updateState?.message || updateButtonLabel}
               aria-label={updateButtonLabel}
+              aria-busy={updateState?.status === 'downloading' || updateState?.status === 'installing'}
             >
               {updateState?.status === 'downloading' && (
                 <span
-                  className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)]/35 transition-[height] duration-300"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent-foreground)]/20 transition-[height] duration-300"
                   style={{ height: `${updateDownloadPercent}%` }}
                   aria-hidden="true"
                 />
               )}
               <span className="relative z-10 flex flex-col items-center leading-none">
-                <Download className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
+                <UpdateIcon className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse', updateState?.status === 'installing' && 'animate-spin')} />
+                {updateState?.status === 'downloaded' && (
+                  <span className="mt-1 text-[9px] font-semibold">Update</span>
+                )}
                 {updateState?.status === 'downloading' && (
                   <span className="mt-1 text-[9px] font-semibold tabular-nums">{updateDownloadPercent}%</span>
+                )}
+                {updateState?.status === 'installing' && (
+                  <span className="mt-1 text-[9px] font-semibold">Restart</span>
                 )}
               </span>
             </button>
@@ -950,17 +963,22 @@ export default function Sidebar() {
                 if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
               }}
               disabled={updateState?.status !== 'downloaded'}
-              className="relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-[var(--loom-active-bg)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
+              className={cn(
+                'relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors disabled:cursor-wait',
+                updateState?.status === 'downloaded' ? 'hover:bg-[var(--loom-accent-hover)]' : 'cursor-wait',
+              )}
               title={updateState?.message || 'Update LoomTV'}
+              aria-label={updateButtonLabel}
+              aria-busy={updateState?.status === 'downloading' || updateState?.status === 'installing'}
             >
               {updateState?.status === 'downloading' && (
                 <span
-                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent)]/20 transition-[width] duration-300"
+                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent-foreground)]/20 transition-[width] duration-300"
                   style={{ width: `${updateDownloadPercent}%` }}
                   aria-hidden="true"
                 />
               )}
-              <Download className={cn('relative z-10 h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
+              <UpdateIcon className={cn('relative z-10 h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse', updateState?.status === 'installing' && 'animate-spin')} />
               <span className="relative z-10">{updateButtonLabel}</span>
             </button>
           )}

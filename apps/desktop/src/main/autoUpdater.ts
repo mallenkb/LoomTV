@@ -13,6 +13,7 @@ import { createUpdateAdapter } from './updateAdapter';
 import { safeFetch } from './safeFetch';
 import { parseRequiredJson } from './runtimeValidation.ts';
 import { openSettingsInWindow } from './openSettings';
+import { isPlaybackActivityActive } from './ffmpegGovernor';
 import { z } from 'zod';
 
 const UPDATE_OWNER = 'mallenkb';
@@ -88,7 +89,6 @@ let updaterConfigured = false;
 let updateCheckInFlight = false;
 let updateCheckPromise: Promise<UpdateState> | null = null;
 let updateInstallStarted = false;
-let updatePromptInFlight = false;
 let updateMenu: Menu | null = null;
 let updateQuitFallbackTimer: NodeJS.Timeout | null = null;
 let updateQuitFallbackCleanup: (() => void) | null = null;
@@ -129,6 +129,9 @@ function setUpdateState(nextState: Partial<UpdateState>) {
 }
 
 function showUpdateDialog(message: string, detail: string, type: 'info' | 'warning' | 'error' = 'info'): void {
+  // Background update activity must never interrupt an active video. The
+  // sidebar and Settings page expose the pending state without a modal.
+  if (isPlaybackActivityActive()) return;
   const mainWindow = deps.getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   void dialog.showMessageBox(mainWindow, {
@@ -214,31 +217,6 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
       checkedAt: new Date().toISOString(),
     });
   }
-}
-
-function showUpdateDownloadedPrompt() {
-  const mainWindow = deps.getMainWindow();
-  if (updatePromptInFlight || !mainWindow || mainWindow.isDestroyed()) return;
-  updatePromptInFlight = true;
-
-  const stateMessage = updateState.message || 'An update is available.';
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: 'Update Ready',
-    message: 'LoomTV update downloaded',
-    detail: `${stateMessage} Restart now to apply the update.`,
-    buttons: ['Restart and Update', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-  })
-    .then((response) => {
-      if (response.response === 0) {
-        void installDownloadedUpdate();
-      }
-    })
-    .finally(() => {
-      updatePromptInFlight = false;
-    });
 }
 
 export function clearUpdateQuitFallback(): void {
@@ -720,7 +698,8 @@ async function handleManualUpdateCheck() {
   }
 
   if (checkedState.status === 'downloaded') {
-    showUpdateDownloadedPrompt();
+    // The downloaded state is actionable from the sidebar, Settings, or the
+    // explicit Install Downloaded Update menu item. Do not open a modal here.
     return;
   }
 
@@ -876,7 +855,7 @@ function configureAutoUpdater() {
       message: 'Update downloaded. Restart LoomTV to install it.',
       checkedAt: new Date().toISOString(),
     });
-    showUpdateDownloadedPrompt();
+    // The sidebar announces readiness without interrupting playback.
   });
 
   autoUpdater.on('error', (error) => {
@@ -904,7 +883,6 @@ export function startUpdateAdapter() {
       getState: getUpdateState,
       configure: configureAutoUpdater,
       checkForUpdates,
-      promptForDownloadedUpdate: showUpdateDownloadedPrompt,
     });
   }
   updateAdapter.start();
