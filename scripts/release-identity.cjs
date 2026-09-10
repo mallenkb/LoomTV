@@ -11,6 +11,7 @@ const UPDATE_CONFIG = [
   'releaseType: release',
   '',
 ].join('\n');
+const STABLE_DESKTOP_APP_ID = 'com.mallenkb.loommediaserver';
 
 function parseReleaseTag(releaseTag) {
   if (typeof releaseTag !== 'string') {
@@ -51,6 +52,12 @@ function verifyReleaseIdentity(workspaceRoot, releaseTag) {
   }
   if (desktopPackage.productName !== 'LoomTV') {
     failures.push(`apps/desktop/package.json productName must be LoomTV; received ${desktopPackage.productName}.`);
+  }
+  if (desktopPackage.build?.appId !== STABLE_DESKTOP_APP_ID) {
+    failures.push(`apps/desktop/package.json build.appId must remain ${STABLE_DESKTOP_APP_ID}; received ${desktopPackage.build?.appId}.`);
+  }
+  if (desktopPackage.build?.productName !== desktopPackage.productName) {
+    failures.push(`apps/desktop/package.json build.productName must match productName (${desktopPackage.productName}); received ${desktopPackage.build?.productName}.`);
   }
   if (desktopPackage.build?.artifactName !== '${productName}-${version}-${os}-${arch}.${ext}') {
     failures.push('apps/desktop/package.json build.artifactName must use the package version and platform tokens.');

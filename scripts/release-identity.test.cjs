@@ -16,6 +16,8 @@ function fixtureWorkspace(version = '1.2.3') {
     version,
     productName: 'LoomTV',
     build: {
+      appId: 'com.mallenkb.loommediaserver',
+      productName: 'LoomTV',
       artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
       publish: [{ provider: 'github', owner: 'mallenkb', repo: 'LoomTV', releaseType: 'release' }],
     },

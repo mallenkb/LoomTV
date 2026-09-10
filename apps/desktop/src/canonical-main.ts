@@ -40,7 +40,7 @@ import {
 
 if (squirrelStartup) app.quit();
 
-app.setName('Loom');
+app.setName('LoomTV');
 const configuredUserDataDir = String(process.env.LOOMTV_DATA_DIR || '').trim();
 const USER_DATA_DIR = configuredUserDataDir
   ? path.resolve(configuredUserDataDir)

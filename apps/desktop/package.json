@@ -111,8 +111,8 @@
     "zod": "catalog:"
   },
   "build": {
-    "appId": "com.mallenkb.loomtv",
-    "productName": "Loom",
+    "appId": "com.mallenkb.loommediaserver",
+    "productName": "LoomTV",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "afterSign": "scripts/after-sign.cjs",
     "afterPack": "scripts/ensure-update-config.cjs",
