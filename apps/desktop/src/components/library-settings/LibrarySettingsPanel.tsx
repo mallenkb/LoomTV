@@ -38,8 +38,7 @@ const AUTO_SYNC_OPTIONS = [
   { value: 168, label: 'Every 1 week' },
 ];
 
-const LEGACY_LIBRARY_KINDS = ['movies', 'tvShows', 'anime', 'others'] as const;
-type LegacyLibraryKind = (typeof LEGACY_LIBRARY_KINDS)[number];
+type LegacyLibraryKind = 'movies' | 'tvShows' | 'anime' | 'others';
 const LIBRARY_SIDEBAR_IDS: Partial<Record<LibraryKind, SidebarNavItemId>> = {
   movies: 'movies',
   tvShows: 'tv',
@@ -212,7 +211,7 @@ export default function LibrarySettingsPanel({
     return LIBRARY_TYPE_DEFINITIONS.map((definition) => {
       const legacySection = folderSections.find((section) => section.key === definition.kind);
       let folders: UnifiedFolder[] = [];
-      let itemCount: number | null = 0;
+      let itemCount: number | null;
 
       if (legacySection) {
         folders = legacySection.folders.map((folder) => {
