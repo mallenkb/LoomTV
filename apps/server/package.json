@@ -1,8 +1,8 @@
 {
   "name": "loom-media-server-headless",
-  "productName": "LoomTV Server",
+  "productName": "Loom Media Server",
   "version": "1.0.105",
-  "description": "Headless LoomTV server for NAS and always-on hosts",
+  "description": "Headless Loom Media Server for NAS and always-on hosts",
   "license": "MIT",
   "private": true,
   "type": "module",

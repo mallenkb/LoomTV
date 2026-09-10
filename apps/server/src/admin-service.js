@@ -391,11 +391,11 @@ function validateBackupEnvelope(value, { requireCanonical = false } = {}) {
   }
   if (!isRecord(value) || typeof value.format !== 'string'
     || ![BACKUP_FORMAT, LEGACY_BACKUP_FORMAT].includes(value.format)) {
-    throw backupError('The selected file is not a LoomTV backup.');
+    throw backupError('The selected file is not a Loom backup.');
   }
   const expectedVersion = value.format === BACKUP_FORMAT ? BACKUP_VERSION : LEGACY_BACKUP_VERSION;
   if (value.version !== expectedVersion || !isRecord(value.data)) {
-    throw backupError('This LoomTV backup format is not supported by this server.');
+    throw backupError('This Loom backup format is not supported by this server.');
   }
   if (typeof value.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(value.checksum)) {
     throw backupError('The backup checksum is missing or malformed.');
@@ -1415,7 +1415,7 @@ export function createHeadlessAdminService(options) {
       return {
         apiVersion: 1,
         app: {
-          name: 'LoomTV',
+          name: 'Loom Media Server',
           version: health.version || options.version || '0.0.0',
           uptimeSeconds: health.uptimeSeconds || 0,
           baseUrl: options.baseUrl,
@@ -1448,7 +1448,7 @@ export function createHeadlessAdminService(options) {
       while (ownerCreationPromise) await ownerCreationPromise.catch(() => undefined);
       ownerCreationPromise = (async () => {
         const state = await loadState();
-        if (state.owner) throw Object.assign(new Error('The LoomTV owner has already been created.'), { status: 409 });
+        if (state.owner) throw Object.assign(new Error('The Loom owner has already been created.'), { status: 409 });
         // Trusted desktop setup and the shared web setup follow the same owner
         // flow. Deployments that opt into a bootstrap secret still verify it
         // here, before any account state is written.

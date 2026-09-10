@@ -206,7 +206,7 @@ export function normalizeMediaSessionSnapshot(input: unknown): MediaSessionSnaps
     supportedCommands: normalizeSupportedCommands(raw.supportedCommands),
     skipForwardSeconds: normalizeSkipSeconds(raw.skipForwardSeconds),
     skipBackSeconds: normalizeSkipSeconds(raw.skipBackSeconds),
-    title: normalizeText(raw.title, 'LoomTV'),
+    title: normalizeText(raw.title, 'Loom'),
     ...(seriesTitle ? { seriesTitle } : {}),
     ...(season ? { season } : {}),
     ...(episode ? { episode } : {}),

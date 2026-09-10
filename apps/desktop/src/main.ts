@@ -353,6 +353,7 @@ protocol.registerSchemesAsPrivileged([
   ...MEDIA_PROTOCOL_SCHEMES.map((scheme) => ({ scheme, privileges: mediaSchemePrivileges })),
 ]);
 
+// Preserve the established runtime identity used by the OS credential store.
 app.setName('LoomTV');
 const configuredUserDataDir = String(process.env.LOOMTV_DATA_DIR || '').trim();
 const USER_DATA_DIR = configuredUserDataDir
@@ -401,9 +402,9 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
   // intercepted by the video surface beneath it.
   const result = await dialog.showMessageBox({
     type: 'question',
-    title: 'LoomTV device request',
+    title: 'Loom device request',
     message: `${request.deviceName} wants to connect`,
-    detail: `Network address: ${request.address}\n\nAllow this device to browse and stream your LoomTV library? This request expires in ${secondsRemaining} seconds.`,
+    detail: `Network address: ${request.address}\n\nAllow this device to browse and stream your Loom Media Server library? This request expires in ${secondsRemaining} seconds.`,
     buttons: ['Allow', 'Deny'],
     defaultId: 1,
     cancelId: 1,
@@ -1793,9 +1794,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
     try {
       const bundle = exportProfileData(profileId);
       const result = await dialog.showSaveDialog({
-        title: 'Export LoomTV profile',
+        title: 'Export Loom profile',
         defaultPath: `${bundle.profile.name.replace(/[^a-z0-9_-]+/gi, '-') || 'profile'}.loomprofile.json`,
-        filters: [{ name: 'LoomTV Profile', extensions: ['loomprofile.json', 'json'] }],
+        filters: [{ name: 'Loom Profile', extensions: ['loomprofile.json', 'json'] }],
       });
       if (result.canceled || !result.filePath) return { ok: false };
       await fs.promises.writeFile(result.filePath, JSON.stringify(bundle), { encoding: 'utf8', flag: 'wx' }).catch(async (error: NodeJS.ErrnoException) => {
@@ -1811,9 +1812,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
     requireOwner();
     try {
       const result = await dialog.showOpenDialog({
-        title: 'Import LoomTV profile',
+        title: 'Import Loom profile',
         properties: ['openFile'],
-        filters: [{ name: 'LoomTV Profile', extensions: ['json'] }],
+        filters: [{ name: 'Loom Profile', extensions: ['json'] }],
       });
       const filePath = result.filePaths[0];
       if (result.canceled || !filePath) return { ok: false };
@@ -2189,7 +2190,7 @@ async function startBackgroundServices(): Promise<void> {
         const webUrl = new URL(`http://127.0.0.1:${getMediaServerPort()}/app/`);
         webUrl.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
         void shell.openExternal(webUrl.toString()).catch((error) => {
-          console.warn('[tray] Could not open LoomTV in the default browser:', error);
+          console.warn('[tray] Could not open Loom in the default browser:', error);
         });
       },
       onOpenAdmin: () => {
@@ -2304,10 +2305,10 @@ app.whenReady().then(async () => {
   }
 
   void startBackgroundServices().catch((error) => {
-    console.error('LoomTV background startup failed:', error);
+    console.error('Loom background startup failed:', error);
   });
 }).catch((error) => {
-  console.error('Failed to start LoomTV:', error);
+  console.error('Failed to start Loom Media Server:', error);
   // A failed startup must not remain as a headless process holding the single
   // instance lock. This is especially important when a native dependency
   // (such as better-sqlite3) has not been rebuilt for the current Electron ABI.

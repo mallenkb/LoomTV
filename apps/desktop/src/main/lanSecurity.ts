@@ -18,6 +18,10 @@ import { checkPairRateLimit, recordPairFailure, recordPairSuccess, resetPairRate
 import { HttpBodyError, readJsonBody, writeJson } from './httpResponses';
 import { advertiseLanService, unadvertiseLanService } from './lanDiscovery';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
+import {
+  SecureSettingsCorruptError,
+  SecureSettingsUnavailableError,
+} from './secureSettings.ts';
 
 const MAX_SIGNED_LAN_URL_TTL_SECONDS = 15 * 60;
 const IMAGE_CACHE_BUST_QUERY_PARAM = 'loomtvImageBust';
@@ -87,6 +91,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     requestPairingApproval,
   } = deps;
   let pairingSecretExpiresAt = 0;
+  let secureSettingsFailureLogged = false;
   const pendingPairingApprovals = new Map<string, PendingPairingApproval>();
   const requestAuthorizations = new WeakMap<IncomingMessage, { ok: boolean; device?: LanPairedDevice }>();
   const pendingPairedDeviceTouches = new Map<string, { lastSeenAt: number; lastAddress: string }>();
@@ -107,7 +112,18 @@ export function createLanSecurity(deps: LanSecurityDeps) {
   }
 
   function isLanSharingEnabled(): boolean {
-    return Boolean(loadSettings().localNetworkSharingEnabled);
+    try {
+      return Boolean(loadSettings().localNetworkSharingEnabled);
+    } catch (error) {
+      if (!(error instanceof SecureSettingsCorruptError) && !(error instanceof SecureSettingsUnavailableError)) {
+        throw error;
+      }
+      if (!secureSettingsFailureLogged) {
+        secureSettingsFailureLogged = true;
+        console.warn('[lan-security] Local network sharing is disabled because secure settings could not be read.');
+      }
+      return false;
+    }
   }
 
   function getLanShareToken(): string {

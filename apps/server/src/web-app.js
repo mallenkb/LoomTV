@@ -13,7 +13,7 @@ const DEFAULT_HLS_PATH = (() => {
   try { return require.resolve('hls.js/dist/hls.min.js'); } catch { return null; }
 })();
 
-const FALLBACK_WEB_APP = '<!doctype html><html lang="en"><meta charset="utf-8"><title>LoomTV</title><body><p>LoomTV web client is unavailable.</p></body></html>';
+const FALLBACK_WEB_APP = '<!doctype html><html lang="en"><meta charset="utf-8"><title>Loom</title><body><p>Loom web client is unavailable.</p></body></html>';
 
 /** @param {import('./setup-page.js').SetupPageOptions & { getHls?: () => Promise<string | Buffer> }} options */
 export function createWebAppPage(options = {}) {

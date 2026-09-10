@@ -1,0 +1,2524 @@
+<!doctype html>
+<!--
+  WORK REPORT · INTERACTIVE MOCKUP  (DesignOS build)
+  Sample only — content is illustrative.
+
+  This is the third template: a live, clickable prototype rather than a
+  document about one. It shares the shell, tokens, and header contract with
+  the audit and plan templates, so a mockup can sit in the same library.
+
+  What the template gives you
+  01 A control bar: surface (mobile / tablet / desktop), radius theme, colour
+     mode, spec overlay, grid — all driven by DesignOS token switches, so the
+     same markup renders three surfaces without a second layout.
+  02 A device frame whose chrome changes with the surface.
+  03 A real flow: three screens with working navigation and live state
+     (selection changes the price; submit runs a loading state, then success).
+  04 Explicit non-happy states — loading, empty, error — reachable from the
+     control bar, because a mockup that only shows the happy path hides the
+     decisions that matter.
+  05 A spec overlay that annotates the components with their DesignOS variant
+     and token, so the mockup doubles as handoff.
+  06 A component contract table and a state-coverage matrix beneath the stage,
+     including an honest note on what is NOT designed yet.
+  Everything inside the frame is built from .dos-* components.
+-->
+<html lang="en" data-color-mode="light" data-radius="normal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Interactive mockup: unified library onboarding, one Libraries settings table, and a grouped sidebar for LoomTV.">
+<meta name="generator" content="Work Report">
+<title>LoomTV Libraries · Interactive Mockup</title>
+<style>
+/* GENERATED from design-os/tokens.css — do not edit.
+   DesignOS semantic tokens, Light Mode, plus the added roles.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+:root {
+  --text-primary:#0a0a0a;
+  --text-secondary:#404040;
+  --text-tertiary:#525252;
+  --text-quarternary:#737373;
+  --text-disabled:#a3a3a3;
+  --text-error:#b91c1c;
+  --text-error-secondary:#f87171;
+  --text-warning:#b45309;
+  --text-warning-secondary:#fbbf24;
+  --text-success:#047857;
+  --text-brand:#171717;
+  --text-brand-secondary:#a3a3a3;
+  --border-primary:#f0f0f0;
+  --border-secondary:#e5e5e5;
+  --border-tertiary:#d4d4d4;
+  --border-disabled:#f0f0f0;
+  --border-error:#dc2626;
+  --border-error-secondary:#fecaca;
+  --border-warning:#b45309;
+  --border-warning-secondary:#fde68a;
+  --border-success:#059669;
+  --border-brand:#171717;
+  --border-brand-secondary:#e5e5e5;
+  --icon-primary:#171717;
+  --icon-secondary:#525252;
+  --icon-tertiary:#737373;
+  --icon-disabled:#a3a3a3;
+  --icon-error:#dc2626;
+  --icon-error-secondary:#f87171;
+  --icon-warning:#b45309;
+  --icon-warning-secondary:#fbbf24;
+  --icon-success:#059669;
+  --icon-brand:#171717;
+  --icon-brand-secondary:#a3a3a3;
+  --bg-primary:#ffffff;
+  --bg-primary_hover:#f7f7f7;
+  --bg-secondary:#f7f7f7;
+  --bg-tertiary:#f0f0f0;
+  --bg-quarternary:#e5e5e5;
+  --bg-disabled:#f7f7f7;
+  --bg-error:#fef2f2;
+  --bg-error-secondary:#fee2e2;
+  --bg-warning:#fffbeb;
+  --bg-warning-secondary:#fef3c7;
+  --bg-success:#ecfdf5;
+  --bg-brand-primary:#f7f7f7;
+  --bg-brand-secondary:#f0f0f0;
+  --bg-alt:#171717;
+  --opacity-light-10:#ffffff1a;
+  --opacity-light-20:#ffffff33;
+  --opacity-light-30:#ffffff4d;
+  --opacity-light-40:#ffffff66;
+  --opacity-light-50:#ffffff80;
+  --opacity-light-60:#ffffff99;
+  --opacity-light-70:#ffffffb2;
+  --opacity-light-80:#ffffffcc;
+  --opacity-light-90:#ffffffe5;
+  --opacity-dark-10:#0000001a;
+  --opacity-dark-20:#00000033;
+  --opacity-dark-30:#0000004d;
+  --opacity-dark-40:#00000066;
+  --opacity-dark-50:#00000080;
+  --opacity-dark-60:#00000099;
+  --opacity-dark-70:#000000b2;
+  --opacity-dark-80:#000000cc;
+  --opacity-dark-90:#000000e5;
+  --bg-error-solid:#b91c1c;
+  --bg-success-secondary:#d1fae5;
+  --bg-success-solid:#059669;
+  --bg-warning-solid:#f59e0b;
+  --bg-brand-primary_hover:#f0f0f0;
+  --bg-brand-solid:#0a0a0a;
+  --icon-success-secondary:#34d399;
+  --border-success-secondary:#a7f3d0;
+  --text-alt:#ffffff;
+  --text-placeholder:#a3a3a3;
+  --text-placeholder-alt:#d4d4d4;
+  --icon-dark:#0a0a0a;
+  --icon-white:#ffffff;
+  --bg-primary_press:#f0f0f0;
+  --text-success-secondary:#34d399;
+  --border-white:#ffffff;
+  --bg-dark:#171717;
+  --bg-white:#ffffff;
+  --text-white:#ffffff;
+  --text-dark:#000000;
+  --icon-alt:#ffffff;
+  --bg-info:#eff6ff;
+  --bg-info-secondary:#dbeafe;
+  --bg-info-solid:#1d4ed8;
+  --text-info:#1d4ed8;
+  --text-info-secondary:#60a5fa;
+  --border-info:#2563eb;
+  --border-info-secondary:#bfdbfe;
+  --icon-info:#2563eb;
+  --icon-info-secondary:#60a5fa;
+  --border-alt:#ffffff;
+  --alpha-brand-accent-85:#0a0a0ad9;
+  --border-alt-2:#000000;
+  --alpha-brand-accent-10:#0a0a0a1a;
+  --alpha-brand-accent-40:#0a0a0a66;
+  --alpha-brand-accent-60:#0a0a0a99;
+  --alpha-brand-accent-20:#0a0a0a33;
+  --alpha-neutral-accent-10:#0a0a0a1a;
+  --alpha-neutral-accent-20:#0a0a0a33;
+  --alpha-neutral-accent-40:#0a0a0a66;
+  --alpha-neutral-accent-60:#0a0a0a99;
+  --alpha-neutral-accent-85:#0a0a0ad9;
+  --alpha-success-accent-10:#0596691a;
+  --alpha-success-accent-20:#05966933;
+  --alpha-success-accent-40:#05966966;
+  --alpha-success-accent-60:#05966999;
+  --alpha-success-accent-85:#059669d9;
+  --alpha-warning-accent-10:#f59e0b1a;
+  --alpha-warning-accent-20:#f59e0b33;
+  --alpha-warning-accent-40:#f59e0b66;
+  --alpha-warning-accent-60:#f59e0b99;
+  --alpha-warning-accent-85:#f59e0bd9;
+  --alpha-blue-accent-10:#2563eb1a;
+  --alpha-blue-accent-20:#2563eb33;
+  --alpha-blue-accent-40:#2563eb66;
+  --alpha-blue-accent-60:#2563eb99;
+  --alpha-blue-accent-85:#2563ebd9;
+  --alpha-error-accent-10:#dc26261a;
+  --alpha-error-accent-20:#dc262633;
+  --alpha-error-accent-40:#dc262666;
+  --alpha-error-accent-60:#dc262699;
+  --alpha-error-accent-85:#dc2626d9;
+  --chart-blue:#3b82f6;
+  --chart-orange:#fb923c;
+  --chart-green:#16a34a;
+  --chart-red:#dc2626;
+  --chart-purple:#a855f7;
+  --chart-yellow:#facc15;
+  --chart-pink:#ec4899;
+  --chart-dark:#525252;
+  --chart-lime:#65a30d;
+  --chart-cyan:#06b6d4;
+  --chart-success:#10b981;
+  --chart-success-light:#6ee7b7;
+  --icon-quarternary:#a3a3a3;
+  --bg-secondary_hover:#f0f0f0;
+  --bg-secondary_press:#e5e5e5;
+  --bg-brand-hover:#262626;
+  --bg-brand-press:#404040;
+  --black:#000000;
+  --white:#ffffff;
+  --bg-brand-primary_press:#e5e5e5;
+  --icon-quinary:#d4d4d4;
+  --spacing-0:0px;
+  --spacing-2:2px;
+  --spacing-4:4px;
+  --spacing-6:6px;
+  --spacing-8:8px;
+  --spacing-12:12px;
+  --spacing-16:16px;
+  --spacing-20:20px;
+  --spacing-24:24px;
+  --spacing-32:32px;
+  --spacing-40:40px;
+  --spacing-48:48px;
+  --spacing-56:56px;
+  --spacing-64:64px;
+  --spacing-96:96px;
+  --spacing-128:128px;
+  --spacing-160:160px;
+  --spacing-192:192px;
+  --spacing-224:224px;
+  --spacing-256:256px;
+  --spacing-320:320px;
+  --spacing-384:384px;
+  --spacing-480:480px;
+  --spacing-560:560px;
+  --spacing-640:640px;
+  --spacing-720:720px;
+  --spacing-768:768px;
+  --spacing-960:960px;
+  --spacing-1280:1280px;
+  --spacing-1440:1440px;
+  --spacing-1920:1920px;
+  --screen-size:1440px;
+  --padding-padding:24px;
+  --spacing-1024:1024px;
+  --spacing-80:80px;
+  --spacing-1080:1080px;
+  --gap-gap:24px;
+  --spacing-72:72px;
+  --font-size-display:72px;
+  --font-size-header-h1:60px;
+  --font-size-header-h2:48px;
+  --font-size-header-h3:36px;
+  --font-size-header-h4:30px;
+  --font-size-header-h5:24px;
+  --font-size-header-h6:20px;
+  --font-size-paragraph-lg:18px;
+  --font-size-paragraph-md:16px;
+  --font-size-paragraph-sm:14px;
+  --font-size-caption-md:12px;
+  --font-size-caption-sm:10px;
+  --radius-none:0px;
+  --radius-xxs:2px;
+  --radius-xs:4px;
+  --radius-sm:6px;
+  --radius-md:8px;
+  --radius-lg:12px;
+  --radius-xl:16px;
+  --radius-2xl:20px;
+  --radius-3xl:24px;
+  --radius-4xl:32px;
+  --radius-full:100000px;
+  --width-xxs:320px;
+  --width-xs:384px;
+  --width-sm:480px;
+  --width-md:560px;
+  --width-lg:640px;
+  --width-xl:768px;
+  --width-2xl:1024px;
+  --width-3xl:1080px;
+  --width-4xl:1280px;
+  --width-5xl:1440px;
+  --width-6xl:1920px;
+  --width-xxxs:256px;
+  --family-display:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --weight-regular:400;
+  --family-heading:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --family-text:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --family-caption:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --weight-bold:700;
+  --weight-medium:500;
+  --weight-semibold:600;
+  --text-on-error-solid:#ffffff;
+  --text-on-warning-solid:#0a0a0a;
+  --text-on-success-solid:#0a0a0a;
+  --text-on-info-solid:#ffffff;
+  --bg-error-solid_hover:#b91c1c;
+  --bg-error-solid_press:#991b1b;
+  --bg-error_press:#fecaca;
+  --focus-ring-width:3px;
+  --focus-ring:var(--alpha-neutral-accent-20);
+  --focus-ring-error:var(--alpha-error-accent-20);
+  --border-control:#8d8d8d;
+  --border-focus-ring:#171717;
+  --shadow-xs:0 4px 6px -3px rgba(10,10,10,.06);
+  --shadow-sm:0 1px 2px -1px rgba(10,10,10,.1);
+  --shadow-md:0 4px 12px -2px rgba(10,10,10,.08);
+  --shadow-lg:0 12px 16px -4px rgba(10,10,10,.08),0 4px 6px -2px rgba(10,10,10,.03);
+  --shadow-card:0 4px 24px rgba(10,10,10,.05);
+  --shadow-evidence:0 24px 60px rgba(10,10,10,.14);
+  --ring-offset:var(--bg-primary);
+  --ring-brand:rgba(10,10,10,0.12);
+  --ring-error:rgba(255,0,0,0.12);
+  --motion-state:160ms;
+  --motion-ease:cubic-bezier(.2,0,0,1);
+  --line-height-paragraph-md:1.5;
+  --line-height-paragraph-sm:1.4286;
+  --line-height-caption-md:1.5;
+  --button:100000px;
+  --modal:32px;
+  --modal-inner-container:20px;
+  --input:8px;
+  --calendar-header:100000px;
+  --pagination:100000px;
+  --card:12px;
+  --nav-item:12px;
+  /* Template-only aliases and page-level values. Not DesignOS tokens — these
+     name things the document shell needs, in terms of DesignOS roles. */
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --family-text:var(--font-sans);--family-caption:var(--font-sans);
+  --weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;
+  --font-size-caption-md:12px;--font-size-paragraph-sm:14px;--font-size-paragraph-md:16px;
+  --line-height-caption-md:1.5;--line-height-paragraph-sm:1.4286;--line-height-paragraph-md:1.5;
+  --canvas:var(--bg-secondary);--surface-header:var(--canvas);
+  --ink:var(--text-primary);--charcoal:var(--text-secondary);--stone:var(--text-tertiary);
+  --brand:var(--text-brand);--border:var(--border-secondary);--border-soft:var(--border-primary);--sand:var(--border-secondary);
+  --content:1180px;
+}
+html[data-radius="full"]{--button:100000px;--modal:32px;--modal-inner-container:20px;--input:8px;--calendar-header:100000px;--pagination:100000px;--card:12px;--nav-item:12px;}
+html[data-radius="normal"]{--button:8px;--modal:16px;--modal-inner-container:12px;--input:8px;--calendar-header:12px;--pagination:10px;--card:8px;--nav-item:8px;}
+html[data-radius="sharp"]{--button:0px;--modal:0px;--modal-inner-container:0px;--input:0px;--calendar-header:0px;--pagination:0px;--card:0px;--nav-item:0px;}
+html[data-radius="slightly-rounded"]{--button:12px;--modal:20px;--modal-inner-container:16px;--input:12px;--calendar-header:16px;--pagination:14px;--card:12px;--nav-item:8px;}
+html[data-color-mode="dark"]{
+/* GENERATED from design-os/tokens.css — do not edit.
+   Dark Mode overrides. Bare declarations — the caller supplies the wrapper.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+  --text-primary:#ffffff;
+  --text-secondary:#d4d4d4;
+  --text-tertiary:#a3a3a3;
+  --text-quarternary:#a3a3a3;
+  --text-disabled:#737373;
+  --text-error:#fee2e2;
+  --text-warning:#fef3c7;
+  --text-warning-secondary:#f59e0b;
+  --text-success:#d1fae5;
+  --text-brand:#fcfcfc;
+  --text-brand-secondary:#f7f7f7;
+  --border-primary:#262626;
+  --border-secondary:#262626;
+  --border-tertiary:#404040;
+  --border-disabled:#404040;
+  --border-error:#dc262666;
+  --border-error-secondary:#7f1d1d;
+  --border-warning:#f59e0b66;
+  --border-warning-secondary:#78350f;
+  --border-success:#05966966;
+  --border-brand:#e5e5e5;
+  --border-brand-secondary:#525252;
+  --icon-primary:#ffffff;
+  --icon-secondary:#d4d4d4;
+  --icon-disabled:#737373;
+  --icon-error:#fee2e2;
+  --icon-warning:#fef3c7;
+  --icon-success:#d1fae5;
+  --icon-brand:#f7f7f7;
+  --bg-primary:#0a0a0a;
+  --bg-primary_hover:#262626;
+  --bg-secondary:#171717;
+  --bg-tertiary:#262626;
+  --bg-quarternary:#404040;
+  --bg-disabled:#262626;
+  --bg-error:#dc262666;
+  --bg-error-secondary:#dc262633;
+  --bg-warning:#f59e0b66;
+  --bg-warning-secondary:#f59e0b33;
+  --bg-success:#05966966;
+  --bg-brand-primary:#171717;
+  --bg-brand-secondary:#525252;
+  --bg-alt:#ffffff;
+  --opacity-light-10:#0e0f111a;
+  --opacity-light-20:#0e0f1133;
+  --opacity-light-30:#0e0f114d;
+  --opacity-light-40:#0e0f1166;
+  --opacity-light-50:#0e0f1180;
+  --opacity-light-60:#0e0f1199;
+  --opacity-light-70:#0e0f11b2;
+  --opacity-light-80:#0e0f11cc;
+  --opacity-light-90:#0e0f11e5;
+  --opacity-dark-10:#ffffff1a;
+  --opacity-dark-20:#ffffff33;
+  --opacity-dark-30:#ffffff4d;
+  --opacity-dark-40:#ffffff66;
+  --opacity-dark-50:#ffffff80;
+  --opacity-dark-60:#ffffff99;
+  --opacity-dark-70:#ffffffb2;
+  --opacity-dark-80:#ffffffcc;
+  --opacity-dark-90:#ffffffe5;
+  --bg-error-solid:#dc2626;
+  --bg-success-secondary:#05966933;
+  --bg-warning-solid:#d97706;
+  --bg-brand-primary_hover:#262626;
+  --bg-brand-solid:#ffffff;
+  --border-success-secondary:#064e3b;
+  --text-alt:#000000;
+  --text-placeholder:#737373;
+  --text-placeholder-alt:#404040;
+  --bg-primary_press:#404040;
+  --text-success-secondary:#10b981;
+  --icon-alt:#000000;
+  --bg-info:#2563eb1a;
+  --bg-info-secondary:#2563eb;
+  --bg-info-solid:#2563eb;
+  --text-info:#dbeafe;
+  --border-info:#3b82f6;
+  --border-info-secondary:#1e3a8a;
+  --icon-info:#dbeafe;
+  --border-alt:#000000;
+  --alpha-brand-accent-85:#ffffffd9;
+  --border-alt-2:#ffffff;
+  --alpha-brand-accent-10:#0000001a;
+  --alpha-brand-accent-40:#00000066;
+  --alpha-brand-accent-60:#00000099;
+  --alpha-brand-accent-20:#00000033;
+  --alpha-neutral-accent-10:#ffffff;
+  --alpha-neutral-accent-20:#ffffff;
+  --alpha-neutral-accent-40:#ffffff;
+  --alpha-neutral-accent-60:#ffffff;
+  --alpha-neutral-accent-85:#ffffff;
+  --alpha-success-accent-10:#ffffff;
+  --alpha-success-accent-20:#ffffff;
+  --alpha-success-accent-40:#ffffff;
+  --alpha-success-accent-60:#ffffff;
+  --alpha-success-accent-85:#ffffff;
+  --alpha-warning-accent-10:#ffffff;
+  --alpha-warning-accent-20:#ffffff;
+  --alpha-warning-accent-40:#ffffff;
+  --alpha-warning-accent-60:#ffffff;
+  --alpha-warning-accent-85:#ffffff;
+  --alpha-error-accent-10:#ffffff;
+  --alpha-error-accent-20:#ffffff;
+  --alpha-error-accent-40:#ffffff;
+  --alpha-error-accent-60:#ffffff;
+  --alpha-error-accent-85:#ffffff;
+  --chart-blue:#60a5fa;
+  --chart-orange:#fdba74;
+  --chart-green:#22c55e;
+  --chart-red:#ef4444;
+  --chart-purple:#d8b4fe;
+  --chart-yellow:#fde047;
+  --chart-pink:#f472b6;
+  --chart-dark:#a3a3a3;
+  --chart-lime:#a3e635;
+  --chart-cyan:#22d3ee;
+  --chart-success:#34d399;
+  --icon-quarternary:#737373;
+  --bg-secondary_hover:#262626;
+  --bg-secondary_press:#404040;
+  --bg-brand-hover:#f7f7f7;
+  --bg-brand-press:#f0f0f0;
+  --bg-brand-primary_press:#262626;
+  --icon-quinary:#737373;
+  --focus-ring:rgba(229,229,229,0.24);
+  --focus-ring-error:rgba(239,68,68,0.32);
+  --ring-brand:rgba(229,229,229,0.16);
+  --ring-error:rgba(239,68,68,0.24);
+  --border-control:#646464;
+  --border-focus-ring:#e5e5e5;
+}
+@media(prefers-color-scheme:dark){html:not([data-color-mode="light"]){
+/* GENERATED from design-os/tokens.css — do not edit.
+   Dark Mode overrides. Bare declarations — the caller supplies the wrapper.
+   Regenerate: node skill-templates-v2/gen-tokens.mjs (build.mjs runs it). */
+  --text-primary:#ffffff;
+  --text-secondary:#d4d4d4;
+  --text-tertiary:#a3a3a3;
+  --text-quarternary:#a3a3a3;
+  --text-disabled:#737373;
+  --text-error:#fee2e2;
+  --text-warning:#fef3c7;
+  --text-warning-secondary:#f59e0b;
+  --text-success:#d1fae5;
+  --text-brand:#fcfcfc;
+  --text-brand-secondary:#f7f7f7;
+  --border-primary:#262626;
+  --border-secondary:#262626;
+  --border-tertiary:#404040;
+  --border-disabled:#404040;
+  --border-error:#dc262666;
+  --border-error-secondary:#7f1d1d;
+  --border-warning:#f59e0b66;
+  --border-warning-secondary:#78350f;
+  --border-success:#05966966;
+  --border-brand:#e5e5e5;
+  --border-brand-secondary:#525252;
+  --icon-primary:#ffffff;
+  --icon-secondary:#d4d4d4;
+  --icon-disabled:#737373;
+  --icon-error:#fee2e2;
+  --icon-warning:#fef3c7;
+  --icon-success:#d1fae5;
+  --icon-brand:#f7f7f7;
+  --bg-primary:#0a0a0a;
+  --bg-primary_hover:#262626;
+  --bg-secondary:#171717;
+  --bg-tertiary:#262626;
+  --bg-quarternary:#404040;
+  --bg-disabled:#262626;
+  --bg-error:#dc262666;
+  --bg-error-secondary:#dc262633;
+  --bg-warning:#f59e0b66;
+  --bg-warning-secondary:#f59e0b33;
+  --bg-success:#05966966;
+  --bg-brand-primary:#171717;
+  --bg-brand-secondary:#525252;
+  --bg-alt:#ffffff;
+  --opacity-light-10:#0e0f111a;
+  --opacity-light-20:#0e0f1133;
+  --opacity-light-30:#0e0f114d;
+  --opacity-light-40:#0e0f1166;
+  --opacity-light-50:#0e0f1180;
+  --opacity-light-60:#0e0f1199;
+  --opacity-light-70:#0e0f11b2;
+  --opacity-light-80:#0e0f11cc;
+  --opacity-light-90:#0e0f11e5;
+  --opacity-dark-10:#ffffff1a;
+  --opacity-dark-20:#ffffff33;
+  --opacity-dark-30:#ffffff4d;
+  --opacity-dark-40:#ffffff66;
+  --opacity-dark-50:#ffffff80;
+  --opacity-dark-60:#ffffff99;
+  --opacity-dark-70:#ffffffb2;
+  --opacity-dark-80:#ffffffcc;
+  --opacity-dark-90:#ffffffe5;
+  --bg-error-solid:#dc2626;
+  --bg-success-secondary:#05966933;
+  --bg-warning-solid:#d97706;
+  --bg-brand-primary_hover:#262626;
+  --bg-brand-solid:#ffffff;
+  --border-success-secondary:#064e3b;
+  --text-alt:#000000;
+  --text-placeholder:#737373;
+  --text-placeholder-alt:#404040;
+  --bg-primary_press:#404040;
+  --text-success-secondary:#10b981;
+  --icon-alt:#000000;
+  --bg-info:#2563eb1a;
+  --bg-info-secondary:#2563eb;
+  --bg-info-solid:#2563eb;
+  --text-info:#dbeafe;
+  --border-info:#3b82f6;
+  --border-info-secondary:#1e3a8a;
+  --icon-info:#dbeafe;
+  --border-alt:#000000;
+  --alpha-brand-accent-85:#ffffffd9;
+  --border-alt-2:#ffffff;
+  --alpha-brand-accent-10:#0000001a;
+  --alpha-brand-accent-40:#00000066;
+  --alpha-brand-accent-60:#00000099;
+  --alpha-brand-accent-20:#00000033;
+  --alpha-neutral-accent-10:#ffffff;
+  --alpha-neutral-accent-20:#ffffff;
+  --alpha-neutral-accent-40:#ffffff;
+  --alpha-neutral-accent-60:#ffffff;
+  --alpha-neutral-accent-85:#ffffff;
+  --alpha-success-accent-10:#ffffff;
+  --alpha-success-accent-20:#ffffff;
+  --alpha-success-accent-40:#ffffff;
+  --alpha-success-accent-60:#ffffff;
+  --alpha-success-accent-85:#ffffff;
+  --alpha-warning-accent-10:#ffffff;
+  --alpha-warning-accent-20:#ffffff;
+  --alpha-warning-accent-40:#ffffff;
+  --alpha-warning-accent-60:#ffffff;
+  --alpha-warning-accent-85:#ffffff;
+  --alpha-error-accent-10:#ffffff;
+  --alpha-error-accent-20:#ffffff;
+  --alpha-error-accent-40:#ffffff;
+  --alpha-error-accent-60:#ffffff;
+  --alpha-error-accent-85:#ffffff;
+  --chart-blue:#60a5fa;
+  --chart-orange:#fdba74;
+  --chart-green:#22c55e;
+  --chart-red:#ef4444;
+  --chart-purple:#d8b4fe;
+  --chart-yellow:#fde047;
+  --chart-pink:#f472b6;
+  --chart-dark:#a3a3a3;
+  --chart-lime:#a3e635;
+  --chart-cyan:#22d3ee;
+  --chart-success:#34d399;
+  --icon-quarternary:#737373;
+  --bg-secondary_hover:#262626;
+  --bg-secondary_press:#404040;
+  --bg-brand-hover:#f7f7f7;
+  --bg-brand-press:#f0f0f0;
+  --bg-brand-primary_press:#262626;
+  --icon-quinary:#737373;
+  --focus-ring:rgba(229,229,229,0.24);
+  --focus-ring-error:rgba(239,68,68,0.32);
+  --ring-brand:rgba(229,229,229,0.16);
+  --ring-error:rgba(239,68,68,0.24);
+  --border-control:#646464;
+  --border-focus-ring:#e5e5e5;
+}}
+/* ── Document shell: type scale, header contract, sheet, cover, memo, footer ── */
+*{box-sizing:border-box}
+/* `clip` rather than `hidden`: hidden turns the root into a scroll container,
+   which stops in-page anchor links from scrolling at all in Chromium. */
+html{overflow-x:clip;background:var(--canvas);scroll-behavior:smooth}
+/* Every anchor target clears the 56px fixed header instead of landing under it. */
+[id]{scroll-margin-top:76px}
+body{margin:0;min-width:0;overflow-x:clip;color:var(--ink);background:var(--canvas);
+  font-family:var(--font-sans);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--border-brand);outline-offset:2px}
+h1,h2,h3,h4,p{margin-top:0}
+img{max-width:100%}
+.sheet{width:min(calc(100% - 40px),var(--content));margin-inline:auto}
+
+/* Header — the shared 56px contract from the report library */
+.folio-bar{position:fixed;inset:0 0 auto;z-index:50;border-bottom:1px solid transparent;
+  background:color-mix(in srgb,var(--surface-header) 82%,transparent);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);transition:border-color 120ms ease}
+.folio-bar.is-scrolled{border-bottom-color:var(--border-primary)}
+.folio-inner{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.folio{display:flex;align-items:center;gap:8px;min-width:0;color:var(--stone);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.folio .home-link{display:inline-flex;align-items:center;gap:7px;color:var(--ink);font-size:15px;font-weight:500;letter-spacing:0;text-transform:none;text-decoration:none}
+.folio .home-link svg{width:18px;height:18px}
+.folio .separator{color:var(--icon-quarternary)}
+.folio .category-link{color:var(--stone);text-decoration:none}
+.folio .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folio-meta{display:flex;align-items:center;gap:0;margin-left:auto}
+.folio-links{display:flex;gap:8px}
+.folio-links a{min-height:42px;display:inline-flex;align-items:center;padding-inline:10px;border-radius:var(--nav-item);
+  color:var(--olive,var(--text-tertiary));font-size:11px;letter-spacing:.06em;text-transform:uppercase;text-decoration:none}
+.folio-links a:hover{background:var(--bg-primary-hover);color:var(--text-primary)}
+.theme-toggle{display:inline-grid;width:42px;min-height:42px;flex:0 0 42px;place-items:center;padding:0;border:0;
+  border-radius:var(--nav-item);background:transparent;color:var(--icon-secondary);cursor:pointer}
+.theme-toggle svg{width:18px;height:18px}
+.theme-toggle [data-theme-icon="moon"]{display:none}
+html[data-color-mode="dark"] .theme-toggle [data-theme-icon="sun"]{display:none}
+html[data-color-mode="dark"] .theme-toggle [data-theme-icon="moon"]{display:block}
+.theme-toggle:hover{background:var(--bg-primary-hover);color:var(--icon-primary)}
+.report{padding-top:52px}
+
+/* Cover */
+.cover{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:70px;padding:76px 0 58px;border-bottom:1px solid var(--border-primary)}
+.kicker{margin:0 0 14px;color:var(--brand);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+h1{max-width:820px;margin-bottom:22px;font-size:clamp(42px,6.4vw,72px);font-weight:500;letter-spacing:-.045em;line-height:1}
+.deck{max-width:720px;margin-bottom:0;color:var(--charcoal);font-size:19px;line-height:1.55}
+.cover-meta{display:flex;flex-wrap:wrap;gap:7px 24px;margin-top:32px;color:var(--stone);
+  font-size:11px;line-height:1.4;letter-spacing:.04em;text-transform:uppercase}
+.cover-meta span::before{content:"—";margin-right:7px;color:var(--brand)}
+.stamp{align-self:start;padding:24px;border:0;border-radius:var(--radius-xl);
+  background:var(--bg-warning-secondary);box-shadow:var(--shadow-card)}
+.stamp-small{color:var(--text-warning);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+.stamp-score{margin-top:12px;color:var(--text-warning);font-size:62px;font-variant-numeric:tabular-nums;line-height:.9}
+.stamp-score span{font-size:19px}
+.stamp p{margin:10px 0 0;color:var(--text-warning);font-size:12px;line-height:1.45}
+
+/* Chapters */
+.chapter{padding:62px 0}
+/* Eyebrow on its own row, heading and lead stacked beneath it — one rhythm for
+   every section head in every template. */
+.chapter-head{display:grid;grid-template-columns:minmax(0,1fr);gap:0;margin-bottom:30px}
+.chapter-head .kicker{margin-bottom:16px}
+.chapter-head h2{max-width:820px;margin:0;font-size:clamp(28px,3.8vw,42px);font-weight:500;letter-spacing:-.03em;line-height:1.08}
+.chapter-head .lead{max-width:720px;margin:12px 0 0;color:var(--stone)}
+
+/* Memo bands */
+.memo{display:grid;grid-template-columns:repeat(4,1fr);gap:28px}
+.memo-block{padding:28px 0 30px}
+.label{margin-bottom:8px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.memo-block h2{margin-bottom:7px;font-size:19px;font-weight:500;line-height:1.25}
+.memo-block p{margin:0;color:var(--stone);font-size:13px;line-height:1.5}
+.audit-brief{border-top:1px solid var(--sand);border-bottom:1px solid var(--sand)}
+
+/* Footer */
+footer{padding:28px 0 38px}
+.footer-inner{display:flex;justify-content:space-between;gap:20px;color:var(--stone);font-size:13px}
+.footer-inner p{margin:0}
+.footer-meta{display:grid;gap:2px;font-size:11px;text-align:right}
+.footer-meta strong{color:var(--ink);font-weight:600}
+
+@media(max-width:900px){
+  .cover{grid-template-columns:minmax(0,1fr);gap:32px;padding:48px 0 40px}
+  .memo{grid-template-columns:repeat(2,1fr);gap:0 24px}
+  .footer-inner{flex-direction:column}
+  .footer-meta{text-align:left}
+}
+@media(max-width:640px){
+  .memo{grid-template-columns:minmax(0,1fr)}
+  .folio-links{display:none}
+  .chapter{padding:44px 0}
+}
+@media print{
+  .folio-bar,.theme-toggle,.no-print{display:none!important}
+  .report{padding-top:0}
+  body{background:var(--bg-white)}
+  .chapter,.decision{break-inside:avoid}
+  .observation,.overview-card,.memo-block,.score-lift,.path-row,.validation,.quick-win,.ledger-row{break-inside:avoid}
+}
+
+[hidden]{display:none!important}
+
+/* Work Report contract: every table cell is vertically centred, whatever the
+   table. Stated once, globally, so a new table cannot opt out by accident. */
+table th, table td{vertical-align:middle}
+/* ── DesignOS components (subset, verbatim contracts from design-os/*.css) ── */
+.dos-status--brand   {--st-soft:var(--bg-brand-primary);--st-soft-2:var(--bg-brand-primary);   --st-solid:var(--bg-brand-solid);  --st-border:var(--border-brand);   --st-content:var(--text-brand);  --st-on-solid:var(--text-alt)}
+.dos-status--success {--st-soft:var(--bg-success);      --st-soft-2:var(--bg-success-secondary);--st-solid:var(--bg-success-solid);--st-border:var(--border-success); --st-content:var(--text-success);--st-on-solid:var(--text-white)}
+.dos-status--warning {--st-soft:var(--bg-warning);      --st-soft-2:var(--bg-warning-secondary);--st-solid:var(--bg-warning-solid);--st-border:var(--border-warning); --st-content:var(--text-warning);--st-on-solid:var(--text-primary)}
+.dos-status--error   {--st-soft:var(--bg-error);        --st-soft-2:var(--bg-error-secondary);  --st-solid:var(--bg-error-solid);  --st-border:var(--border-error);   --st-content:var(--text-error);  --st-on-solid:var(--text-white)}
+.dos-status--info    {--st-soft:var(--bg-info);         --st-soft-2:var(--bg-info-secondary);   --st-solid:var(--bg-info-solid);   --st-border:var(--border-info);    --st-content:var(--text-info);   --st-on-solid:var(--text-white)}
+.dos-status--neutral {--st-soft:var(--bg-secondary);    --st-soft-2:var(--bg-tertiary);         --st-solid:var(--bg-dark);         --st-border:var(--border-secondary);--st-content:var(--text-primary);--st-on-solid:var(--text-white)}
+
+.dos-badge{display:inline-flex;align-items:center;gap:var(--spacing-0);height:var(--dos-badge-height,28px);
+  padding:var(--spacing-4) var(--spacing-6);border:1px solid transparent;border-radius:var(--button);
+  background:var(--st-soft-2);color:var(--st-content);font-family:var(--family-caption);
+  font-size:var(--font-size-caption-md);line-height:var(--line-height-caption-md);
+  font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden}
+.dos-badge--sm{--dos-badge-height:24px;font-size:11px}
+.dos-badge__label{display:inline-flex;align-items:center;justify-content:center;gap:var(--spacing-4);padding:0 var(--spacing-4)}
+.dos-badge__icon{display:block;flex:none;width:12px;height:12px}
+.dos-badge__dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--st-solid)}
+/* Outline is part of the DesignOS contract but unused by these templates —
+   badges here are Light (no modifier) or Solid only. */
+.dos-badge--outline{background:var(--bg-primary);border-color:var(--st-border)}
+.dos-badge--solid{background:var(--st-solid);color:var(--st-on-solid);border-color:transparent}
+
+.dos-btn{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand);--dos-btn-border:transparent;--dos-btn-border-width:0;
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:var(--spacing-4);
+  height:var(--dos-btn-height,40px);padding:var(--dos-btn-pad-y,10px) var(--dos-btn-pad-x,12px);
+  border:var(--dos-btn-border-width) solid var(--dos-btn-border);border-radius:var(--button);
+  background-color:var(--dos-btn-bg);color:var(--dos-btn-fg);font-family:var(--family-text);
+  font-size:var(--dos-btn-font-size,14px);line-height:1.4286;font-weight:var(--weight-medium);
+  white-space:nowrap;cursor:pointer;appearance:none;-webkit-appearance:none;
+  transition:background-color var(--motion-state) var(--motion-ease),border-color var(--motion-state) var(--motion-ease),color var(--motion-state) var(--motion-ease)}
+.dos-btn__label{display:inline-flex;align-items:center;padding:0 var(--spacing-4)}
+.dos-btn__icon{display:block;flex:none;width:var(--dos-btn-icon-size,16px);height:var(--dos-btn-icon-size,16px)}
+.dos-btn:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring);z-index:10}
+.dos-btn--sm{--dos-btn-height:32px;--dos-btn-pad-y:var(--spacing-6);--dos-btn-pad-x:var(--spacing-12)}
+.dos-btn--lg{--dos-btn-height:48px;--dos-btn-pad-y:14px;--dos-btn-pad-x:var(--spacing-16);--dos-btn-icon-size:20px}
+.dos-btn--xl{--dos-btn-height:56px;--dos-btn-pad-y:var(--spacing-16);--dos-btn-pad-x:var(--spacing-24);--dos-btn-font-size:16px;--dos-btn-icon-size:20px}
+.dos-btn--icon-only{width:var(--dos-btn-height,40px);padding:0}
+.dos-btn--default{--dos-btn-bg:var(--bg-brand-solid);--dos-btn-fg:var(--text-alt)}
+.dos-btn--secondary{--dos-btn-bg:var(--bg-secondary);--dos-btn-fg:var(--text-primary)}
+.dos-btn--outline{--dos-btn-bg:var(--bg-primary);--dos-btn-fg:var(--text-brand);--dos-btn-border:var(--border-brand-secondary);--dos-btn-border-width:1px}
+.dos-btn--ghost{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand)}
+.dos-btn--link{--dos-btn-bg:transparent;--dos-btn-fg:var(--text-brand);height:auto;padding:0;border-radius:0;text-decoration:underline;text-underline-offset:3px}
+.dos-btn--default:hover{--dos-btn-bg:var(--bg-brand-hover)}
+.dos-btn--secondary:hover{--dos-btn-bg:var(--bg-secondary-hover)}
+.dos-btn--outline:hover,.dos-btn--ghost:hover{--dos-btn-bg:var(--bg-brand-primary-hover)}
+.dos-btn--default:active{--dos-btn-bg:var(--bg-brand-press)}
+.dos-btn--secondary:active{--dos-btn-bg:var(--bg-secondary-press)}
+.dos-btn--outline:active,.dos-btn--ghost:active{--dos-btn-bg:var(--bg-brand-primary-press)}
+.dos-btn:disabled{--dos-btn-bg:var(--bg-disabled);--dos-btn-fg:var(--text-disabled);cursor:not-allowed}
+
+.dos-btn-group{display:inline-flex;align-items:center;width:fit-content;max-width:100%;align-self:flex-start;
+  gap:var(--spacing-0);padding:var(--spacing-0);border:1px solid var(--border-primary);
+  border-radius:var(--button);overflow:hidden}
+.dos-btn-group__item{display:flex;align-items:center;justify-content:center;gap:var(--spacing-0);flex:none;
+  height:44px;padding:var(--spacing-8) var(--spacing-12);border:0;background:var(--bg-primary);
+  color:var(--text-primary);font-family:var(--family-text);font-size:var(--font-size-paragraph-sm);
+  line-height:var(--line-height-paragraph-sm);font-weight:var(--weight-medium);white-space:nowrap;cursor:pointer}
+.dos-btn-group--sm .dos-btn-group__item{height:32px}
+.dos-btn-group__item+.dos-btn-group__item{border-left:1px solid var(--border-primary)}
+.dos-btn-group__item:hover{background:var(--bg-primary-hover)}
+.dos-btn-group__item[aria-pressed="true"],.dos-btn-group__item.is-active{background:var(--bg-brand-primary-press);color:var(--text-primary)}
+.dos-btn-group__item:focus-visible{outline:none;box-shadow:inset 0 0 0 var(--focus-ring-width) var(--focus-ring)}
+/* Icon Only = True: a fixed square, glyph centred, name carried by aria-label. */
+.dos-btn-group__item--icon{width:40px;padding:0}
+.dos-btn-group--sm .dos-btn-group__item--icon{width:34px}
+.dos-btn-group__item--icon svg{display:block;width:18px;height:18px}
+
+.dos-alert{position:relative;display:flex;align-items:flex-start;gap:var(--spacing-16);
+  padding:var(--spacing-20) var(--spacing-16);border:0;border-radius:var(--card);
+  background:var(--st-soft);color:var(--text-primary);font-family:var(--family-text);
+  font-size:var(--font-size-paragraph-sm);line-height:var(--line-height-paragraph-sm);
+  box-shadow:var(--shadow-xs)}
+.dos-alert--default{background:var(--bg-primary);border:1px solid var(--border-primary);
+  padding:var(--spacing-16);box-shadow:var(--shadow-md)}
+.dos-alert--solid{background:var(--st-solid);border:0;padding:var(--spacing-16);color:var(--st-on-solid);
+  box-shadow:var(--shadow-md)}
+.dos-alert--solid .dos-alert__icon,.dos-alert--solid .dos-alert__title{color:var(--st-on-solid)}
+.dos-alert__icon{display:block;flex:none;width:20px;height:20px;color:var(--st-content)}
+.dos-alert__body{display:flex;flex:1 0 0;min-width:0;flex-direction:column;gap:var(--spacing-8)}
+.dos-alert__title{margin:0;font-size:15px;font-weight:var(--weight-semibold)}
+.dos-alert__text{margin:0;color:var(--text-secondary);font-size:13px;line-height:1.5}
+.dos-alert--small{align-items:center;min-height:48px;padding:var(--spacing-12) var(--spacing-16);
+  gap:var(--spacing-12);box-shadow:none}
+.dos-alert--small .dos-alert__title{color:inherit}
+.dos-alert--small.dos-alert--default{box-shadow:var(--shadow-sm)}
+.dos-alert--small .dos-alert__icon{width:16px;height:16px}
+
+.dos-toggle{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:calc(var(--tg-h,20px)*1.8);
+  height:var(--tg-h,20px);border-radius:var(--radius-full);background:var(--bg-quarternary);cursor:pointer;
+  transition:background-color var(--motion-state) var(--motion-ease)}
+.dos-toggle--sm{--tg-h:18px}
+.dos-toggle::after{content:"";position:absolute;top:2px;left:2px;width:calc(var(--tg-h,20px) - 4px);height:calc(var(--tg-h,20px) - 4px);
+  border-radius:50%;background:var(--bg-primary);transition:transform var(--motion-state) var(--motion-ease)}
+.dos-toggle:checked{background:var(--bg-brand-solid)}
+.dos-toggle:checked::after{transform:translateX(calc(var(--tg-h,20px)*.8))}
+.dos-toggle:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+
+.dos-choice{display:flex;align-items:flex-start;gap:var(--spacing-8);cursor:pointer}
+.dos-choice__box{appearance:none;-webkit-appearance:none;flex:none;width:18px;height:18px;margin:1px 0 0;
+  border:1px solid var(--border-control);border-radius:var(--radius-sm);background:var(--bg-primary);cursor:pointer}
+.dos-choice__box:checked{background:var(--bg-brand-solid);border-color:var(--bg-brand-solid);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size:100% 100%}
+html[data-color-mode="dark"] .dos-choice__box:checked{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.dos-choice__box:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.dos-choice__title{font-size:14px;font-weight:var(--weight-medium);color:var(--text-primary)}
+.dos-choice__subtext{font-size:12px;color:var(--text-quarternary)}
+
+.dos-field{display:flex;flex-direction:column;gap:var(--spacing-4);width:100%;font-family:var(--family-text)}
+.dos-field__label{display:flex;align-items:center;gap:var(--spacing-4);font-size:var(--font-size-caption-md);
+  font-weight:var(--weight-medium);color:var(--text-primary)}
+.dos-field__required{color:var(--text-error)}
+.dos-field__hint{font-size:var(--font-size-caption-md);color:var(--text-quarternary)}
+.dos-field.is-error .dos-field__hint{color:var(--text-error)}
+.dos-input{display:flex;align-items:center;gap:var(--spacing-8);height:var(--dos-input-height,40px);width:100%;
+  padding:var(--spacing-8) var(--spacing-12);border:1px solid var(--border-primary);border-radius:var(--input);
+  background:var(--bg-primary);color:var(--text-primary);overflow:hidden;
+  transition:border-color var(--motion-state) var(--motion-ease),box-shadow var(--motion-state) var(--motion-ease)}
+.dos-field--lg .dos-input{--dos-input-height:48px}
+.dos-input__field{flex:1 0 0;min-width:0;border:0;background:transparent;color:inherit;font:inherit;outline:none}
+.dos-input__field::placeholder{color:var(--text-placeholder)}
+.dos-input__icon{flex:none;width:18px;height:18px;color:var(--icon-tertiary)}
+.dos-input:focus-within{border-color:var(--border-control);box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.dos-field.is-error .dos-input{border-color:var(--border-error)}
+
+.dos-divider{display:flex;align-items:center;width:100%;color:var(--text-quarternary);font-size:12px}
+.dos-divider::before,.dos-divider::after{content:"";flex:1 0 0;height:1px;background:var(--border-primary)}
+.dos-divider>span{padding:0 var(--spacing-12)}
+.dos-divider--line{gap:0}
+.dos-divider--line::after{display:none}
+
+.dos-tooltip{position:relative;display:inline-flex}
+.dos-tooltip__bubble{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(4px);
+  z-index:40;width:max-content;max-width:240px;padding:var(--spacing-8) var(--spacing-12);border-radius:var(--radius-md);
+  background:var(--bg-alt);color:var(--text-alt);font-size:12px;line-height:1.45;text-align:left;
+  opacity:0;pointer-events:none;transition:opacity var(--motion-state) var(--motion-ease),transform var(--motion-state) var(--motion-ease);
+  box-shadow:var(--shadow-card)}
+.dos-tooltip:hover .dos-tooltip__bubble,.dos-tooltip:focus-within .dos-tooltip__bubble{opacity:1;transform:translateX(-50%) translateY(0)}
+.dos-tooltip__title{display:block;font-weight:var(--weight-semibold)}
+
+.dos-loader{display:inline-block;width:20px;height:20px;border:2px solid var(--border-secondary);
+  border-top-color:var(--icon-primary);border-radius:50%;animation:dos-spin 700ms linear infinite}
+@keyframes dos-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.dos-choice__box--radio{border-radius:var(--radius-full)}
+.dos-choice__box--radio:checked{background-image:none;box-shadow:inset 0 0 0 4px var(--bg-primary)}
+
+/* A badge used as a filter control. Same anatomy, same status family; the
+   pressed state is the Solid style, so nothing new is invented. */
+button.dos-badge{--dos-badge-height:32px;border:1px solid transparent;background:var(--st-soft);
+  color:var(--st-content);font-family:var(--family-text);font-weight:var(--weight-medium);cursor:pointer;
+  transition:background-color var(--motion-state) var(--motion-ease),color var(--motion-state) var(--motion-ease)}
+button.dos-badge:hover{background:var(--st-solid);color:var(--st-on-solid)}
+button.dos-badge[aria-pressed="true"]{background:var(--st-solid);color:var(--st-on-solid)}
+button.dos-badge:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+button.dos-badge .count{opacity:.62;font-variant-numeric:tabular-nums}
+button.dos-badge[aria-pressed="true"] .count{opacity:.72}
+/* ── Interactive mockup: control bar, stage, device frame, spec overlay ── */
+.controls{--stage-pad:40px;--stage-max:1560px;position:sticky;top:52px;z-index:40;padding:14px 0;border-bottom:1px solid var(--border-primary);
+  background:color-mix(in srgb,var(--canvas) 88%,transparent);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+/* The control bar stays on the document measure (1180px) — only the stage is
+   allowed past it. Width comes from .sheet; this rule only lays out the row. */
+.controls .dos-btn-group{box-shadow:var(--shadow-sm)}
+.controls-inner{display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px}
+.control{display:flex;align-items:center;gap:8px}
+.ctl-value{color:var(--charcoal);font-size:13px;font-variant-numeric:tabular-nums}
+.control[hidden]{display:none}
+.control-switch{display:flex;align-items:center;gap:8px;color:var(--charcoal);font-size:13px;cursor:pointer}
+.controls .spacer{flex:1 0 8px}
+
+.stage{position:relative;padding:44px 0 64px;background:
+  radial-gradient(circle at 1px 1px,var(--border-secondary) 1px,transparent 0) 0 0/24px 24px,var(--canvas);
+  background-blend-mode:normal}
+.stage.no-grid{background:var(--canvas)}
+.stage-inner{display:block}
+
+/* The frame is a real device viewport. It never reflows to fit the page —
+   it scales, and the scale is stated, so a measurement read off the mockup
+   is still a measurement. */
+.device-scaler{display:flex;justify-content:center;align-items:flex-start;width:100%}
+.device{position:relative;flex:none;align-self:flex-start;width:var(--frame-w,390px);
+  border:1px solid var(--border-tertiary);border-radius:var(--frame-radius,36px);background:var(--bg-primary);
+  box-shadow:var(--shadow-evidence);overflow:hidden;
+  transform:scale(var(--scale,1));transform-origin:top center}
+.device[data-surface="mobile"]{--frame-radius:36px}
+.device[data-surface="tablet"]{--frame-radius:24px}
+.device[data-surface="desktop"]{--frame-radius:16px}
+.scale-note{margin:14px 0 0;color:var(--stone);font-size:11px;letter-spacing:.06em;text-transform:uppercase;text-align:center}
+.device-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 20px;
+  border-bottom:1px solid var(--border-primary);background:var(--bg-secondary);color:var(--text-quarternary);font-size:11px}
+.device-dots{display:flex;gap:6px}
+.device-dots i{width:9px;height:9px;border-radius:50%;background:var(--bg-quarternary)}
+.device-url{flex:1 0 0;max-width:360px;padding:4px 12px;border-radius:99px;background:var(--bg-primary);
+  color:var(--text-quarternary);font-size:11px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device[data-surface="mobile"] .device-url{display:none}
+
+/* App shell inside the frame */
+.mock{display:flex;flex-direction:column;height:var(--frame-h,844px);overflow:hidden;
+  background:var(--bg-primary);font-size:14px}
+
+/* iOS status bar — part of the viewport, so it lives inside .mock and only on
+   the phone. Geometry is the supplied 375x44 status-bar SVG; the time is real
+   text rather than the SVG's outlined glyphs so it can be stamped at runtime. */
+.mock-status{flex:none;display:flex;align-items:center;justify-content:space-between;
+  height:44px;padding:0 24px 0 28px;color:var(--text-primary)}
+.device[data-surface="tablet"] .mock-status,
+.device[data-surface="desktop"] .mock-status{display:none}
+.device[data-surface="mobile"] .device-bar{display:none}
+.status-time{font-size:15px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.status-icons{display:flex;align-items:center;gap:5px}
+.status-icons svg{display:block;height:11px}
+.status-cellular{width:17px}
+.status-wifi{width:16px}
+.status-battery{width:25px}
+
+/* Mobile web adds the browser's address bar, and it costs real viewport height —
+   the app content area shrinks by exactly that much, as it would on a phone. */
+.mock-browser{display:none}
+.device[data-surface="mobile"][data-mobile-mode="web"] .mock-browser{
+  flex:none;display:flex;align-items:center;gap:10px;height:52px;padding:0 12px 8px;
+  border-bottom:1px solid var(--border-primary);background:var(--bg-primary)}
+.browser-pill{display:flex;align-items:center;justify-content:center;gap:6px;flex:1 0 0;min-width:0;
+  height:38px;padding:0 12px;border-radius:var(--radius-lg);background:var(--bg-secondary);
+  color:var(--text-tertiary);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.browser-pill svg{flex:none;width:13px;height:13px;color:var(--icon-tertiary)}
+.browser-reload{display:grid;place-items:center;flex:none;width:34px;height:34px;color:var(--icon-secondary)}
+.browser-reload svg{width:18px;height:18px}
+.mock-top{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border-primary)}
+.mock-brand{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
+.mock-brand i{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--bg-brand-solid);
+  color:var(--text-alt);font-size:12px;font-weight:700;font-style:normal}
+.mock-top nav{display:none;gap:2px;margin-left:18px}
+.device[data-surface="tablet"] .mock-top nav,.device[data-surface="desktop"] .mock-top nav{display:flex}
+.mock-top nav a{padding:8px 12px;border-radius:var(--nav-item);color:var(--text-tertiary);font-size:13px;text-decoration:none}
+.mock-top nav a[aria-current="page"]{background:var(--bg-secondary);color:var(--text-primary);font-weight:500}
+.mock-top .grow{flex:1 0 0}
+
+.mock-body{flex:1 1 auto;min-height:0;padding:20px;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-width:none;-ms-overflow-style:none}
+.mock-body::-webkit-scrollbar{width:0;height:0;display:none}
+.device[data-wide] .mock-body{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;
+  align-content:start;padding:24px 28px}
+.device[data-wide] .mock-aside{display:block}
+.mock-aside{display:none}
+
+.mock h2{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.01em}
+.mock .sub{margin:0 0 18px;color:var(--text-tertiary);font-size:13px}
+.mock-screen[hidden]{display:none}
+
+.policy{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;
+  margin-bottom:10px;padding:14px;border:1px solid var(--border-primary);border-radius:var(--card);
+  background:var(--bg-primary);text-align:left;cursor:pointer;font:inherit;color:inherit;
+  transition:border-color var(--motion-state) var(--motion-ease),background-color var(--motion-state) var(--motion-ease)}
+.policy:hover{background:var(--bg-primary-hover);border-color:var(--border-secondary)}
+.policy:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.policy i{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:var(--bg-tertiary);
+  color:var(--icon-secondary);font-style:normal}
+.policy i svg{width:20px;height:20px}
+.policy > span{min-width:0}
+.policy .p-name{display:block;font-size:14px;font-weight:600}
+.policy .p-meta{display:block;margin-top:2px;color:var(--text-quarternary);font-size:12px}
+
+.mock-summary{padding:16px;border:1px solid var(--border-primary);border-radius:var(--card);background:var(--bg-secondary)}
+.mock-summary h3{margin:0 0 12px;font-size:13px;font-weight:600}
+.sum-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;color:var(--text-tertiary);font-size:13px}
+.sum-row b{color:var(--text-primary);font-weight:500;font-variant-numeric:tabular-nums}
+.sum-total{margin-top:8px;padding-top:12px;border-top:1px solid var(--border-secondary);font-size:15px;color:var(--text-primary)}
+.sum-total b{font-size:19px;font-weight:700}
+
+.mock-actions{flex:none;display:flex;gap:10px;padding:16px 20px;border-top:1px solid var(--border-primary);background:var(--bg-primary)}
+.device[data-wide] .mock-actions{justify-content:flex-end}
+.mock-actions .dos-btn{flex:1 0 0}
+.device[data-wide] .mock-actions .dos-btn{flex:0 0 auto}
+
+.mock-tabs{flex:none;display:flex;border-top:1px solid var(--border-primary);background:var(--bg-primary)}
+.device[data-surface="desktop"] .mock-tabs,.device[data-surface="tablet"] .mock-tabs{display:none}
+.mock-tabs a{flex:1 0 0;display:grid;place-items:center;gap:4px;padding:10px 0 14px;color:var(--text-quarternary);
+  font-size:10px;text-decoration:none}
+.mock-tabs a svg{width:20px;height:20px}
+.mock-tabs a[aria-current="page"]{color:var(--text-primary)}
+
+.choice-list{display:grid;gap:8px;margin-bottom:18px}
+.choice-card{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:start;padding:14px;
+  border:1px solid var(--border-primary);border-radius:var(--card);cursor:pointer}
+.choice-card:has(:checked){border-color:var(--border-brand);background:var(--bg-secondary)}
+.choice-card .price{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.addon{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--border-primary)}
+.addon:first-of-type{border-top:0}
+.addon .a-name{font-size:13px;font-weight:500}
+.addon .a-note{margin-top:2px;color:var(--text-quarternary);font-size:12px}
+
+.mock-empty,.mock-error{display:grid;place-items:center;gap:10px;padding:44px 20px;text-align:center}
+.mock-empty svg,.mock-error svg{width:36px;height:36px;color:var(--icon-quarternary)}
+.mock-empty p,.mock-error p{margin:0;color:var(--text-tertiary);font-size:13px;max-width:320px}
+.mock-loading{display:grid;gap:12px;padding:20px 0}
+.skeleton{height:64px;border-radius:var(--card);background:linear-gradient(90deg,var(--bg-secondary) 25%,var(--bg-tertiary) 37%,var(--bg-secondary) 63%);
+  background-size:400% 100%;animation:skeleton 1.4s ease infinite}
+@keyframes skeleton{0%{background-position:100% 50%}100%{background-position:0 50%}}
+
+.mock-success{display:grid;place-items:center;gap:12px;padding:34px 20px 24px;text-align:center}
+.mock-success .ring{display:grid;place-items:center;width:60px;height:60px;border-radius:50%;background:var(--bg-success);color:var(--text-success)}
+.mock-success .ring svg{width:28px;height:28px}
+.mock-success h2{margin:0}
+
+/* ── Scenario panel ───────────────────────────────────────────────────────
+   Three separate things, three separate controls, so they never blur:
+   FLOW      which journey is on screen        — one at a time
+   CONDITION what is true about the world      — many at once, priority-resolved
+   STATE     the momentary render of a screen  — one at a time
+   The readout closes the loop: it says, in words, what the switches produced. */
+/* The stage is the one section allowed past the document's 1180px measure —
+   a 1440px frame cannot be shown at a useful scale inside it. Everything else
+   on the page stays on .sheet. One token drives both the outer padding and the
+   gap between the configurator and the frame. */
+.stage{--stage-pad:40px;--stage-max:1560px}
+/* Never narrower than the document measure, wider whenever there is room for
+   the 40px inset — so the stage only ever grows past .sheet, never shrinks
+   inside it in the band just above 1180px. */
+.stage .stage-inner{margin-inline:auto;
+  width:min(max(calc(100% - var(--stage-pad) * 2),min(calc(100% - 40px),var(--content))),var(--stage-max))}
+/* The frame column is sized to the frame, so the configurator and the device
+   sit together as one cluster instead of being pushed apart by empty canvas. */
+.stage .stage-inner{display:grid;grid-template-columns:330px auto;
+  gap:var(--stage-pad);align-items:start;justify-content:center}
+.stage-frame{display:flex;flex-direction:column;align-items:center;min-width:0}
+/* One auto track, so justify-content actually centres it — a 1fr track would
+   fill the stage and leave the hugged frame sitting at its start edge. */
+.stage.no-panel .stage-inner{grid-template-columns:auto}
+.stage.no-panel .panel{display:none}
+
+.panel{position:sticky;top:120px;padding:20px;border:1px solid var(--border-secondary);
+  border-radius:var(--radius-xl);background:var(--bg-primary);box-shadow:var(--shadow-card)}
+/* The problem frames the whole page, so it sits above the control bar rather
+   than inside the configurator. The flow switcher rides with it because the
+   statement changes per flow. */
+.problem-band{padding:30px 0 26px}
+.problem-inner{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:20px 32px}
+.problem-copy{min-width:0}
+.problem-band .kicker{margin-bottom:10px}
+.problem-text{margin:0;max-width:760px;color:var(--text-primary);font-size:19px;font-weight:500;line-height:1.4}
+.panel-group{margin-top:18px;padding-top:16px;border-top:1px solid var(--border-primary)}
+.panel-group:first-of-type{margin-top:0;padding-top:0;border-top:0}
+.panel-label{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;
+  color:var(--text-primary);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.panel-label em{color:var(--stone);font-size:11px;font-style:normal;font-weight:400;letter-spacing:0;text-transform:none}
+/* The 18px control is optically centred on the first text line by giving that
+   line an 18px line box — no magic margins to drift when the type changes. */
+.cond{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;padding:8px 0;cursor:pointer}
+.cond > .dos-choice__box{margin:0;grid-row:1}
+.cond > span{display:block;min-width:0}
+.cond .cond-name{display:block;font-size:13px;line-height:18px}
+.cond .cond-say{display:block;margin-top:3px;color:var(--text-quarternary);font-size:11px;line-height:1.45}
+.cond input:checked ~ span .cond-name{font-weight:600}
+.cond input:checked ~ span .cond-say{color:var(--text-tertiary)}
+.cond-rank{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:99px;background:var(--bg-tertiary);
+  color:var(--text-tertiary);font-size:9px;font-weight:700;letter-spacing:.06em;vertical-align:1px}
+
+.readout{margin-top:18px;padding:14px;border-radius:var(--radius-lg);background:var(--bg-secondary)}
+.readout-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:10px;padding:5px 0;font-size:12px;line-height:1.45}
+.readout-row dt{color:var(--text-quarternary)}
+.readout-row dd{margin:0;color:var(--text-primary);font-weight:500}
+.readout dl{margin:0}
+.readout-gap{margin-top:10px;padding:8px 10px;border:1px dashed var(--border-warning);border-radius:var(--radius-md);
+  color:var(--text-warning);font-size:11px;line-height:1.45}
+.readout-link{display:block;margin-top:10px;color:var(--text-quarternary);font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  overflow-wrap:anywhere}
+
+.mock-banner{margin-bottom:16px}
+.mock-banner[hidden]{display:none}
+
+@media(max-width:1100px){
+  .stage,.controls{--stage-pad:24px}
+  .stage .stage-inner{grid-template-columns:auto;justify-items:center}
+  .panel{position:static}
+}
+@media(max-width:640px){.stage,.controls{--stage-pad:16px}}
+/* ── LoomTV library mockup (new patterns, token-built, .ha-* namespace) ── */
+.mock-body.ha-body{padding:0;overflow:hidden}
+.ha-app{display:flex;height:100%;min-height:100%}
+.ha-railwrap{flex:none;display:flex;flex-direction:column;width:178px;border-right:1px solid var(--border-primary);background:var(--bg-secondary);overflow:hidden}
+.ha-app[data-railmode="before"] .ha-railwrap{width:58px}
+.ha-rail{flex:1 1 auto;min-height:0;overflow-y:auto;padding:10px 8px;scrollbar-width:none}
+.ha-rail::-webkit-scrollbar{width:0;height:0;display:none}
+.ha-sec{padding:10px 10px 4px;color:var(--text-quarternary);font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+.ha-app[data-railmode="before"] .ha-sec{display:none}
+.ha-sec button{all:unset;cursor:pointer;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit}
+.ha-ri{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:var(--nav-item);background:transparent;color:var(--text-tertiary);font-family:var(--family-text);font-size:12.5px;font-weight:500;text-align:left;cursor:pointer}
+.ha-ri svg{flex:none;width:18px;height:18px}
+.ha-ri:hover{background:var(--bg-primary-hover)}
+.ha-ri.is-active{background:var(--bg-tertiary);color:var(--text-primary);font-weight:600}
+.ha-ri .ct{margin-left:auto;font-size:10px;font-variant-numeric:tabular-nums;color:var(--text-quarternary)}
+.ha-ri.is-dim{opacity:.55}
+.ha-ri .ha-emptytag{margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-quarternary)}
+.ha-app[data-railmode="before"] .ha-ri{justify-content:center;padding:10px 0}
+.ha-app[data-railmode="before"] .ha-ri span,.ha-app[data-railmode="before"] .ha-ri .ct,.ha-app[data-railmode="before"] .ha-ri .ha-emptytag{display:none}
+.ha-div{height:1px;margin:6px 10px;background:var(--border-primary)}
+.ha-app[data-railmode="before"] .ha-div{margin:6px 14px}
+.ha-morebtn{flex:none;margin:0 8px 10px;padding:9px 10px;border:1px dashed var(--border-tertiary);border-radius:var(--nav-item);background:transparent;color:var(--text-tertiary);font-size:12px;font-weight:600;cursor:pointer}
+.ha-app[data-railmode="before"] .ha-morebtn{margin:0 6px 8px;padding:9px 0;font-size:11px}
+.ha-main{flex:1 1 auto;min-width:0;overflow-y:auto;padding:18px;scrollbar-width:none}
+.ha-main::-webkit-scrollbar{width:0;height:0;display:none}
+.ha-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.ha-search{flex:1 1 auto}
+.ha-hideempty{display:flex;flex:none;align-items:center;gap:7px;color:var(--text-tertiary);font-size:12px;cursor:pointer;white-space:nowrap}
+.ha-note{margin:10px 0 0;color:var(--text-quarternary);font-size:12px;line-height:1.5}
+.ha-lib{margin-bottom:8px;border:1px solid var(--border-primary);border-radius:var(--card);background:var(--bg-primary);overflow:hidden}
+.ha-libhead{display:flex;align-items:center;gap:2px;padding:8px 8px 8px 12px}
+.ha-libmain{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:5px 6px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.ha-libmain:hover{background:var(--bg-primary-hover)}
+.ha-libmain .dos-badge{flex:none}
+.ha-ex{font-size:10.5px;color:var(--text-quarternary);font-style:italic}
+.ha-ok{flex:none;font-size:10.5px;font-weight:600;color:var(--text-success);white-space:nowrap}
+.ha-checking{flex:none;font-size:10.5px;color:var(--text-quarternary);white-space:nowrap}
+.ha-setup{margin-bottom:10px}
+.ha-libmain:focus-visible{outline:none;box-shadow:0 0 0 var(--focus-ring-width) var(--focus-ring)}
+.ha-lic{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--bg-tertiary);color:var(--icon-secondary)}
+.ha-lic svg{width:18px;height:18px}
+.ha-libhead .t{min-width:0;flex:1 1 auto}
+.ha-libhead .n{display:block;font-size:13.5px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ha-libhead .m{display:block;margin-top:1px;font-size:11px;color:var(--text-quarternary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ha-eye{flex:none;display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--icon-tertiary);cursor:pointer}
+.ha-eye:hover{background:var(--bg-tertiary);color:var(--icon-primary)}
+.ha-eye svg{width:16px;height:16px}
+.ha-eye.off{color:var(--icon-disabled)}
+.ha-chev{flex:none;width:14px;height:14px;color:var(--icon-tertiary)}
+.ha-chev svg{display:block;width:100%;height:100%}
+.ha-folders{border-top:1px solid var(--border-primary);padding:6px 12px 10px}
+.ha-folder{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border-primary);font-size:11px}
+.ha-folder:first-child{border-top:0}
+.ha-folder code{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.ha-folder .rm{flex:none;border:0;background:transparent;color:var(--text-error);font-size:14px;line-height:1;cursor:pointer;padding:2px 4px}
+.ha-addfolder{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:6px;padding:9px;border:1px dashed var(--border-tertiary);border-radius:var(--radius-md);background:transparent;color:var(--text-tertiary);font-size:12px;font-weight:600;cursor:pointer}
+.ha-addfolder:hover{border-color:var(--border-control);color:var(--text-primary)}
+.ha-steps{display:flex;gap:6px;margin-bottom:14px}
+.ha-step{flex:1 1 0;height:4px;border-radius:99px;background:var(--bg-quarternary)}
+.ha-step.done{background:var(--bg-brand-solid)}
+.ha-starter{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
+.ha-starterlabel{color:var(--text-quarternary);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.ha-types{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ha-t{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:10px;border:1px solid var(--border-primary);border-radius:var(--card);background:var(--bg-primary);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.ha-t svg{width:18px;height:18px;color:var(--icon-secondary);margin-bottom:4px}
+.ha-t b{font-size:12.5px;font-weight:600;color:var(--text-primary)}
+.ha-t span{font-size:10.5px;color:var(--text-quarternary);line-height:1.4}
+.ha-t:hover{border-color:var(--border-tertiary)}
+.ha-t[aria-pressed="true"]{border-color:var(--border-brand);background:var(--bg-secondary)}
+.ha-t[aria-pressed="true"] svg{color:var(--icon-primary)}
+.ha-tip{margin-bottom:14px}
+.ha-dblock{margin-bottom:10px;border:1px solid var(--border-primary);border-radius:var(--card);padding:10px 12px;background:var(--bg-primary)}
+.ha-dblock h4{margin:0 0 2px;font-size:13px}
+.ha-dblock .dhint{margin:0 0 6px;font-size:11px;color:var(--text-quarternary)}
+.ha-draftnote{margin:8px 0 0;font-size:12px;color:var(--text-warning)}
+.ha-scan{margin-top:12px;padding:12px;border:1px solid var(--border-primary);border-radius:var(--card);background:var(--bg-secondary)}
+.ha-scanrow{display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px}
+.ha-scanrow b{font-variant-numeric:tabular-nums}
+.ha-prog{height:8px;border-radius:99px;background:var(--bg-quarternary);overflow:hidden}
+.ha-prog span{display:block;height:100%;width:0;border-radius:99px;background:var(--bg-brand-solid);transition:width 180ms linear}
+.ha-sheet{position:absolute;inset:auto 0 0 0;z-index:20;max-height:75%;overflow:auto;border-top:1px solid var(--border-secondary);border-radius:16px 16px 0 0;background:var(--bg-primary);box-shadow:var(--shadow-lg);padding:10px}
+.ha-sheet h4{margin:4px 6px 8px;font-size:12px;color:var(--text-tertiary)}
+.mock{position:relative}
+.device[data-wide] .mock-body.ha-body{display:flex}
+.device[data-wide] .mock-body.ha-body .ha-app{flex:1 1 auto;min-width:0}
+.ha-kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px;color:var(--text-tertiary)}
+.ha-kv b{color:var(--text-primary);font-weight:500;text-align:right}
+.ha-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.ha-table th,.ha-table td{padding:9px 10px;border-bottom:1px solid var(--border-primary);text-align:left}
+.ha-table th{color:var(--text-quarternary);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase}
+.ha-table td{color:var(--text-secondary)}
+.ha-doc h3{margin:0 0 6px;font-size:15px}
+.ha-doc p,.ha-doc li{font-size:13px;color:var(--text-secondary);line-height:1.6}
+.ha-doc ol,.ha-doc ul{margin:8px 0;padding-left:20px}
+.device[data-surface="mobile"] .ha-railwrap{width:56px}
+.device[data-surface="mobile"] .ha-sec{display:none}
+.device[data-surface="mobile"] .ha-ri{justify-content:center;padding:10px 0}
+.device[data-surface="mobile"] .ha-ri span,.device[data-surface="mobile"] .ha-ri .ct,.device[data-surface="mobile"] .ha-ri .ha-emptytag{display:none}
+.device[data-surface="mobile"] .ha-div{margin:6px 14px}
+.device[data-surface="mobile"] .ha-morebtn{margin:0 6px 8px;padding:9px 0;font-size:11px}
+.device[data-surface="mobile"] .ha-main{padding:12px}
+.device[data-surface="mobile"] .ha-types{grid-template-columns:repeat(2,1fr)}
+.device[data-surface="mobile"] .ha-toolbar{flex-wrap:wrap}
+.ha-toolbar{flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="report">
+
+  <header class="folio-bar">
+    <div class="sheet folio-inner">
+      <div class="folio">
+        <a class="home-link" href="../work-report-library.html">
+          <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M2.75 5.5h5l1.5 1.75h8v8.5a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>Report</a>
+        <span class="separator" aria-hidden="true">/</span>
+        <a class="category-link" href="../mockups/index.html">Mockups</a>
+        <span class="separator" aria-hidden="true">/</span>
+        <span class="title">LoomTV libraries &middot; Interactive mockup</span>
+      </div>
+      <div class="folio-meta">
+        <nav class="folio-links" aria-label="Page navigation">
+          <a href="#stage">Prototype</a>
+        </nav>
+        <button class="theme-toggle" data-theme-toggle type="button" aria-pressed="false" aria-label="Switch to dark mode" title="Switch to dark mode">
+          <svg data-theme-icon="sun" aria-hidden="true" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3.25" stroke="currentColor" stroke-width="1.4"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <svg data-theme-icon="moon" aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M15.8 12.8A6.8 6.8 0 0 1 7.2 4.2 6.8 6.8 0 1 0 15.8 12.8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Problem — the page-level frame for everything below it -->
+    <section class="problem-band">
+      <div class="sheet problem-inner">
+        <div class="problem-copy">
+          <p class="kicker">Problem</p>
+          <p class="problem-text" data-problem>Adding folders means visiting nine separate pages with nine different empty states. Music, Books, Comics and Audiobooks are invisible in Settings, and every library pins itself to an already-crowded rail.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Control bar -->
+    <div class="controls no-print" id="stage">
+      <div class="sheet controls-inner">
+        <div class="control">
+          <div class="dos-btn-group dos-btn-group--sm" role="group" aria-label="Surface">
+            <button class="dos-btn-group__item dos-btn-group__item--icon" type="button" data-surface-btn="mobile" aria-pressed="false" aria-label="Mobile · 390 × 844" title="Mobile · 390 × 844"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 18.6h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+            <button class="dos-btn-group__item dos-btn-group__item--icon is-active" type="button" data-surface-btn="desktop" aria-pressed="true" aria-label="Web · 1440 × 900" title="Web · 1440 × 900"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="4" width="19" height="12.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M9 20h6M12 16.5V20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+            <button class="dos-btn-group__item dos-btn-group__item--icon" type="button" data-surface-btn="tablet" aria-pressed="false" aria-label="Tablet · 1133 × 744" title="Tablet · 1133 × 744"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="4.5" y="3" width="15" height="18" rx="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 18.2h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          </div>
+        </div>
+        <div class="control" data-size-control="mobile">
+          <span class="ctl-value">390 &times; 844</span>
+          <div class="dos-btn-group dos-btn-group--sm" role="group" aria-label="Mobile context">
+            <button class="dos-btn-group__item is-active" type="button" data-mobile-btn="app" aria-pressed="true">App</button>
+            <button class="dos-btn-group__item" type="button" data-mobile-btn="web" aria-pressed="false">Web</button>
+          </div>
+        </div>
+        <div class="control" data-size-control="tablet" hidden>
+          <span class="ctl-value" data-tablet-size>1133 &times; 744</span>
+          <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-rotate aria-label="Rotate the tablet">
+            <svg class="dos-btn__icon" aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M4 8.2A6.2 6.2 0 0 1 15.6 6.6M16 11.8A6.2 6.2 0 0 1 4.4 13.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M3.4 4.6v3.6h3.6M16.6 15.4v-3.6H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="dos-btn__label">Rotate</span>
+          </button>
+        </div>
+        <div class="control" data-size-control="desktop" hidden>
+          <div class="dos-btn-group dos-btn-group--sm" role="group" aria-label="Web viewport">
+            <button class="dos-btn-group__item is-active" type="button" data-desktop-btn="desktop-1440" aria-pressed="true">1440 &times; 900</button>
+            <button class="dos-btn-group__item" type="button" data-desktop-btn="desktop-1280" aria-pressed="false">1280 &times; 832</button>
+          </div>
+        </div>
+        <div class="control">
+          <div class="dos-btn-group dos-btn-group--sm" role="group" aria-label="Radius theme">
+            <button class="dos-btn-group__item dos-btn-group__item--icon" type="button" data-radius-btn="full" aria-pressed="false" aria-label="Full radius · pill" title="Full radius · pill"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="4.75" y="4.75" width="14.5" height="14.5" rx="7.25" stroke="currentColor" stroke-width="1.5"/></svg></button>
+            <button class="dos-btn-group__item dos-btn-group__item--icon is-active" type="button" data-radius-btn="normal" aria-pressed="true" aria-label="Normal radius · 8px" title="Normal radius · 8px"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="4.75" y="4.75" width="14.5" height="14.5" rx="4" stroke="currentColor" stroke-width="1.5"/></svg></button>
+            <button class="dos-btn-group__item dos-btn-group__item--icon" type="button" data-radius-btn="sharp" aria-pressed="false" aria-label="Sharp radius · square" title="Sharp radius · square"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="4.75" y="4.75" width="14.5" height="14.5" rx="0" stroke="currentColor" stroke-width="1.5"/></svg></button>
+          </div>
+        </div>
+        <span class="spacer"></span>
+        <label class="control-switch"><input class="dos-toggle dos-toggle--sm" type="checkbox" data-panel-toggle checked> Panel</label>
+        <label class="control-switch"><input class="dos-toggle dos-toggle--sm" type="checkbox" data-grid-toggle checked> Grid</label>
+        <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-restart><span class="dos-btn__label">Restart flow</span></button>
+      </div>
+    </div>
+
+    <!-- Stage -->
+    <section class="stage" data-stage>
+      <div class="sheet stage-inner">
+        <aside class="panel no-print" aria-label="Flow and scenario controls">
+          <div class="panel-group">
+            <div class="panel-label">Scenario <em>one at a time</em></div>
+            <label class="cond"><input class="dos-choice__box dos-choice__box--radio" type="radio" name="scenario" value="fresh" data-scenario checked><span><span class="cond-name">Fresh install</span><span class="cond-say">No folders anywhere. Onboarding is the front door.</span></span></label>
+            <label class="cond"><input class="dos-choice__box dos-choice__box--radio" type="radio" name="scenario" value="half" data-scenario><span><span class="cond-name">Half set up</span><span class="cond-say">Movies + TV linked. Music, Books and the rest are still empty.</span></span></label>
+            <label class="cond"><input class="dos-choice__box dos-choice__box--radio" type="radio" name="scenario" value="full" data-scenario><span><span class="cond-name">Everything linked</span><span class="cond-say">All nine libraries have folders. Sidebar grouping earns its keep.</span></span></label>
+            <label class="cond"><input class="dos-choice__box dos-choice__box--radio" type="radio" name="scenario" value="nasfail" data-scenario><span><span class="cond-name">NAS folder missing</span><span class="cond-say">One Movies path drops. Inline error + retry, library intact.</span></span></label>
+            <label class="cond"><input class="dos-choice__box dos-choice__box--radio" type="radio" name="scenario" value="denied" data-scenario><span><span class="cond-name">Picker cancelled</span><span class="cond-say">Folder dialog dismissed. Draft is kept, nothing is lost.</span></span></label>
+          </div>
+
+          <div class="panel-group">
+            <div class="panel-label">Sidebar <em>before / after</em></div>
+            <div class="dos-btn-group dos-btn-group--sm" role="group" aria-label="Sidebar style">
+              <button class="dos-btn-group__item is-active" type="button" data-rail-btn="after" aria-pressed="true">Grouped</button>
+              <button class="dos-btn-group__item" type="button" data-rail-btn="before" aria-pressed="false">Today</button>
+            </div>
+          </div>
+
+          <div class="panel-group">
+            <div class="panel-label">Screen state <em>momentary render</em></div>
+            <div class="dos-btn-group dos-btn-group--sm" role="group" aria-label="Screen state">
+              <button class="dos-btn-group__item is-active" type="button" data-state-btn="default" aria-pressed="true">Default</button>
+              <button class="dos-btn-group__item" type="button" data-state-btn="loading" aria-pressed="false">Loading</button>
+              <button class="dos-btn-group__item" type="button" data-state-btn="empty" aria-pressed="false">Empty</button>
+            </div>
+          </div>
+
+          <div class="readout" aria-live="polite">
+            <dl>
+              <div class="readout-row"><dt>Lands on</dt><dd data-out-screen>Libraries</dd></div>
+              <div class="readout-row"><dt>Says</dt><dd data-out-message>Nothing &mdash; no interruption is shown</dd></div>
+              <div class="readout-row"><dt>Coverage</dt><dd data-out-coverage>Designed</dd></div>
+            </dl>
+            <p class="readout-gap" data-out-gap hidden>Not designed yet. The frame shows the nearest screen, not the real answer.</p>
+            <code class="readout-link" data-out-link>#flow=libraries&amp;scenario=fresh</code>
+          </div>
+        </aside>
+
+        <div class="stage-frame">
+        <div class="device-scaler" data-scaler>
+        <div class="device" data-surface="mobile" data-device>
+
+          <div class="device-bar">
+            <div class="device-dots"><i></i><i></i><i></i></div>
+            <div class="device-url">loomtv.local/settings/library</div>
+            <span data-device-label>390 &times; 760</span>
+          </div>
+
+          <div class="mock">
+            <div class="mock-status" aria-hidden="true">
+              <span class="status-time" data-status-time>9:41</span>
+              <span class="status-icons">
+                <svg class="status-cellular" viewBox="293 17 18 12" fill="none"><path d="M294.67 24.3366H295.67C296.222 24.3366 296.67 24.7843 296.67 25.3366V27.3366C296.67 27.8889 296.222 28.3366 295.67 28.3366H294.67C294.118 28.3366 293.67 27.8889 293.67 27.3366V25.3366C293.67 24.7843 294.118 24.3366 294.67 24.3366ZM299.337 22.3366H300.337C300.889 22.3366 301.337 22.7843 301.337 23.3366V27.3366C301.337 27.8889 300.889 28.3366 300.337 28.3366H299.337C298.784 28.3366 298.337 27.8889 298.337 27.3366V23.3366C298.337 22.7843 298.784 22.3366 299.337 22.3366ZM304.003 20.0033H305.003C305.556 20.0033 306.003 20.451 306.003 21.0033V27.3366C306.003 27.8889 305.556 28.3366 305.003 28.3366H304.003C303.451 28.3366 303.003 27.8889 303.003 27.3366V21.0033C303.003 20.451 303.451 20.0033 304.003 20.0033ZM308.67 17.6699H309.67C310.222 17.6699 310.67 18.1176 310.67 18.6699V27.3366C310.67 27.8889 310.222 28.3366 309.67 28.3366H308.67C308.118 28.3366 307.67 27.8889 307.67 27.3366V18.6699C307.67 18.1176 308.118 17.6699 308.67 17.6699Z" fill="currentColor"/></svg>
+                <svg class="status-wifi" viewBox="315 17 16 12" fill="none"><path d="M323.327 19.6074C325.542 19.6075 327.674 20.4589 329.28 21.9857C329.4 22.1036 329.594 22.1021 329.713 21.9824L330.869 20.8157C330.929 20.755 330.963 20.6728 330.962 20.5872C330.962 20.5016 330.927 20.4198 330.866 20.3597C326.651 16.3202 320.001 16.3202 315.786 20.3597C315.725 20.4197 315.691 20.5015 315.69 20.5871C315.689 20.6727 315.723 20.755 315.783 20.8157L316.94 21.9824C317.059 22.1023 317.252 22.1038 317.373 21.9857C318.979 20.4588 321.11 19.6074 323.327 19.6074ZM323.327 23.4031C324.544 23.403 325.718 23.8555 326.621 24.6727C326.743 24.7887 326.935 24.7862 327.054 24.6671L328.209 23.5004C328.269 23.4392 328.303 23.3562 328.302 23.2699C328.301 23.1837 328.266 23.1014 328.204 23.0414C325.456 20.485 321.2 20.485 318.452 23.0414C318.389 23.1014 318.354 23.1837 318.353 23.27C318.352 23.3563 318.386 23.4393 318.447 23.5004L319.602 24.6671C319.721 24.7862 319.913 24.7887 320.035 24.6727C320.937 23.8561 322.11 23.4036 323.327 23.4031ZM325.546 26.1874C325.607 26.1268 325.641 26.0434 325.64 25.9569C325.638 25.8704 325.6 25.7884 325.536 25.7304C324.261 24.6515 322.392 24.6515 321.117 25.7304C321.053 25.7884 321.015 25.8703 321.013 25.9568C321.012 26.0433 321.045 26.1268 321.107 26.1874L323.105 28.2031C323.163 28.2623 323.243 28.2956 323.327 28.2956C323.41 28.2956 323.49 28.2623 323.548 28.2031L325.546 26.1874Z" fill="currentColor"/></svg>
+                <svg class="status-battery" viewBox="336 17 25 12" fill="none"><rect x="336.5" y="17.8301" width="21" height="10.33" rx="2.17" stroke="currentColor" stroke-opacity=".35"/><rect x="338" y="19.3301" width="18" height="7.33" rx="1.33" fill="currentColor"/><path d="M359 21C359.781 21.3268 360.33 22.0983 360.33 22.998C360.33 23.8976 359.781 24.6682 359 24.9951V21Z" fill="currentColor" fill-opacity=".35"/></svg>
+              </span>
+            </div>
+            <div class="mock-browser" aria-hidden="true">
+              <span class="browser-pill">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M4.5 7V5.2a3.5 3.5 0 1 1 7 0V7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><rect x="3.2" y="7" width="9.6" height="6.4" rx="1.8" stroke="currentColor" stroke-width="1.3"/></svg>
+                starcover.example
+              </span>
+              <span class="browser-reload">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M16 10a6 6 0 1 1-1.9-4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M16.2 3.4v3.2H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+            </div>
+            <div class="mock-top">
+              <span class="mock-brand"><i>L</i> LoomTV</span>
+              <nav aria-label="Primary">
+                <a href="#stage" data-topnav="libraries" aria-current="page">Libraries</a><a href="#stage" data-topnav="onboarding">Onboarding</a><a href="#stage" data-topnav="sidebar">Sidebar</a>
+              </nav>
+              <span class="grow"></span>
+              <span class="dos-badge dos-badge--sm dos-status--neutral"><span class="dos-badge__label" data-lib-count>0 of 9 linked</span></span>
+            </div>
+
+            <div class="mock-body ha-body">
+              <div class="ha-app" data-railmode="after">
+                <nav class="ha-railwrap" aria-label="Sidebar preview">
+                  <div class="ha-rail" data-rail></div>
+                  <button class="ha-morebtn" type="button" data-more hidden aria-label="Show overflow sidebar items">More</button>
+                </nav>
+                <div class="ha-main">
+                <div class="mock-banner" data-banner hidden></div>
+                <!-- Screen 1 · unified libraries -->
+                <section class="mock-screen" data-screen="libraries">
+                  <h2>Libraries</h2>
+                  <p class="sub">Every collection in one place. A library is a name, a type, and one or more folders.</p>
+                  <div class="ha-toolbar">
+                    <div class="dos-field ha-search">
+                      <div class="dos-input"><svg class="dos-input__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><input class="dos-input__field" data-libsearch placeholder="Filter libraries" aria-label="Filter libraries"></div>
+                    </div>
+                    <label class="ha-hideempty"><input class="dos-toggle dos-toggle--sm" type="checkbox" data-hideempty checked> Hide empty</label>
+                  </div>
+                  <div data-state-slot="default">
+                    <div data-setupbar></div>
+                    <div data-lib-rows></div>
+                    <p class="ha-note" data-hidden-note hidden></p>
+                    <p class="ha-note">Borrowed from Plex and Jellyfin: several folders merge into one library. Nothing moves on disk.</p>
+                  </div>
+                  <div data-state-slot="loading" hidden>
+                    <div class="mock-loading"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+                  </div>
+                  <div data-state-slot="empty" hidden>
+                    <div class="mock-empty">
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 5.5h5l1.5 1.75h8v8.5a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                      <h2>No libraries yet</h2>
+                      <p>Add your first library. It takes about a minute, and the rest can follow later.</p>
+                      <button class="dos-btn dos-btn--sm dos-btn--default" type="button" data-goto="types"><span class="dos-btn__label">New library</span></button>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Screen 2 · pick types -->
+                <section class="mock-screen" data-screen="types" hidden>
+                  <div class="ha-steps" aria-hidden="true"><span class="ha-step done"></span><span class="ha-step"></span><span class="ha-step"></span></div>
+                  <h2>What do you want to add?</h2>
+                  <p class="sub">Step 1 of 3. Pick one or several — folders come next, per library.</p>
+                  <div class="ha-starter">
+                    <span class="ha-starterlabel">Starters</span>
+                    <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-starter="video"><span class="dos-btn__label">Video starter</span></button>
+                    <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-starter="listenread"><span class="dos-btn__label">Listen + read</span></button>
+                    <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-starter="all"><span class="dos-btn__label">Everything</span></button>
+                  </div>
+                  <div class="ha-types" data-types role="group" aria-label="Library types"></div>
+                  <p class="ha-note">Not sure which fits? Pick Custom — folders can move to another library later.</p>
+                  <div class="dos-field" style="margin-top:14px">
+                    <label class="dos-field__label" for="ha-name">Library name</label>
+                    <div class="dos-input"><input class="dos-input__field" id="ha-name" data-libname value="Movies"></div>
+                    <span class="dos-field__hint" data-multihint hidden>Several picked — names default to their type. Rename later in Libraries.</span>
+                  </div>
+                  <div data-state-slot="loading" hidden>
+                    <div class="mock-loading"><div class="skeleton"></div><div class="skeleton"></div></div>
+                  </div>
+                </section>
+
+                <!-- Screen 3 · add folders -->
+                <section class="mock-screen" data-screen="folders" hidden>
+                  <div class="ha-steps" aria-hidden="true"><span class="ha-step done"></span><span class="ha-step done"></span><span class="ha-step"></span></div>
+                  <h2>Where are the files?</h2>
+                  <p class="sub">Step 2 of 3. Several folders can feed one library — local or mounted NAS.</p>
+                  <div class="dos-alert dos-alert--small dos-status--info ha-tip">
+                    <svg class="dos-alert__icon" aria-hidden="true" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.25" stroke="currentColor" stroke-width="1.4"/><path d="M10 9v4.5M10 6.6v.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    <div class="dos-alert__body"><p class="dos-alert__text">Loom never moves your files. Unavailable folders stay listed until you reconnect them.</p></div>
+                  </div>
+                  <div data-draftfolders></div>
+                  <p class="ha-draftnote" data-draftnote hidden></p>
+                  <div data-state-slot="loading" hidden>
+                    <div class="mock-loading"><div class="skeleton"></div><div class="skeleton"></div></div>
+                  </div>
+                </section>
+
+                <!-- Screen 4 · review and scan -->
+                <section class="mock-screen" data-screen="review" hidden>
+                  <div class="ha-steps" aria-hidden="true"><span class="ha-step done"></span><span class="ha-step done"></span><span class="ha-step done"></span></div>
+                  <h2>Review and scan</h2>
+                  <p class="sub">Step 3 of 3. Check the folders, then start the first scan.</p>
+                  <div data-state-slot="default">
+                    <div class="mock-summary">
+                      <h3 data-reviewtitle>Movies</h3>
+                      <div data-reviewrows></div>
+                      <div class="sum-row"><span>Scan after adding</span><b><input class="dos-toggle dos-toggle--sm" type="checkbox" data-autoscan checked aria-label="Scan after adding"></b></div>
+                    </div>
+                    <div class="ha-scan" data-scanbox hidden>
+                      <div class="ha-scanrow"><span data-scanlabel>Scanning…</span><b data-scanpct>0%</b></div>
+                      <div class="ha-prog"><span data-scanfill></span></div>
+                    </div>
+                  </div>
+                  <div data-state-slot="loading" hidden>
+                    <div class="mock-loading"><div class="skeleton"></div><div class="skeleton"></div></div>
+                  </div>
+                  <div data-state-slot="empty" hidden>
+                    <div class="mock-empty">
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 5.5h5l1.5 1.75h8v8.5a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                      <h2>No folders yet</h2>
+                      <p>Go back one step and add at least one folder, or skip for now.</p>
+                    </div>
+                  </div>
+                  <div data-state-slot="error" hidden>
+                    <div class="mock-error">
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/><path d="M12 7.6v5M12 15.4v.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                      <h2>The first scan failed</h2>
+                      <p>Nothing was added. Check the folder is still mounted and try again.</p>
+                      <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-retry><span class="dos-btn__label">Try again</span></button>
+                    </div>
+                  </div>
+                  <div data-state-slot="success" hidden>
+                    <div class="mock-success">
+                      <span class="ring"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                      <h2 data-successtitle>Libraries added</h2>
+                      <p class="sub" style="margin:0" data-successsub>Scanning in the background. The sidebar updates as titles arrive.</p>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:center;margin-top:6px">
+                      <button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-goto="types"><span class="dos-btn__label">Add more</span></button>
+                      <button class="dos-btn dos-btn--sm dos-btn--default" type="button" data-goto="libraries"><span class="dos-btn__label">Open Libraries</span></button>
+                    </div>
+                  </div>
+                </section>
+                </div>
+              </div>
+            </div>
+
+            <div class="mock-actions">
+              <button class="dos-btn dos-btn--lg dos-btn--outline" type="button" data-back hidden><span class="dos-btn__label">Back</span></button>
+              <button class="dos-btn dos-btn--lg dos-btn--default" type="button" data-primary>
+                <span class="dos-btn__label" data-primary-label>New library</span>
+              </button>
+            </div>
+
+            <nav class="mock-tabs" aria-label="Sections">
+              <a href="#stage" data-goto="libraries" aria-current="page"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.75 5.5h5l1.5 1.75h8v8.5a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Libraries</a>
+              <a href="#stage" data-goto="types"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>New</a>
+              <a href="#stage" data-goto="review"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.9-4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M16.2 3.4v3.2H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Scan</a>
+            </nav>
+          </div>
+        </div>
+        </div>
+        <p class="scale-note" data-scale-note>Actual size</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter sheet ha-doc" aria-label="Analysis">
+      <div class="chapter-head">
+        <p class="kicker">Analysis</p>
+        <h2>One library model, applied nine times</h2>
+        <p class="lead">Plex, Jellyfin and Emby all use the same shape — a library is a type, a name, and one or more folders — and the same setup loop. Loom has the pieces but spreads them across nine pages. The mockup above unifies them.</p>
+      </div>
+      <div class="memo audit-brief">
+        <div class="memo-block"><p class="label">Plex / Jellyfin pattern</p><h2>Type, name, folders</h2><p>Setup wizard and Settings share one Add Library dialog: pick a content type, name it, attach folders. Several folders merge into one library. Mixed-type folders are discouraged in favour of typed libraries.</p></div>
+        <div class="memo-block"><p class="label">Loom today</p><h2>Nine pages, nine empty states</h2><p>Movies, TV, Anime, Photos, Music, Audiobooks, Books, Comics and Others each onboard separately. Settings shows Movies, TV, Anime and Others only — Music, Books, Comics and Audiobooks have no Settings entry at all.</p></div>
+        <div class="memo-block"><p class="label">Sidebar today</p><h2>Fourteen flat entries</h2><p>Every library, live source, add-on and custom group pins itself to one icon-only rail with no sections, no counts and no overflow. New kinds only make it longer.</p></div>
+        <div class="memo-block"><p class="label">Proposal</p><h2>Wizard, table, grouped rail</h2><p>One Add Library flow everywhere, one Libraries table for all nine kinds, and a rail with sections, per-library visibility and a More overflow. Try Fresh install, then Grouped vs Today.</p></div>
+      </div>
+      <h3>Five changes, in order</h3>
+      <ol>
+        <li><b>Add Library wizard (type → folders → review).</b> Same flow in first-run onboarding and behind Settings → New library. Multi-select types so a starter set is three steps, not nine pages.</li>
+        <li><b>One Libraries table.</b> All nine kinds plus custom groups in a single list with folder counts, item counts, status and per-row actions. This fixes “I can’t see the rest”.</li>
+        <li><b>Visibility is a setting, not a side effect.</b> Per-library eye toggle plus Hide-empty master switch. Empty libraries stay out of the rail until they have content.</li>
+        <li><b>Grouped rail with More overflow.</b> Watch / Listen &amp; Read / Personal / System sections, collapsible, with counts. Rare destinations (extra live sources, add-ons, custom groups) collapse into More.</li>
+        <li><b>Folders stay multi-path with inline health.</b> Several folders per library, NAS and permission states on the row, per-library scan — the same health model Settings already has, extended to all kinds.</li>
+      </ol>
+    </section>
+
+    <section class="chapter sheet ha-doc" aria-label="Handoff">
+      <div class="chapter-head">
+        <p class="kicker">Handoff</p>
+        <h2>Contract and coverage</h2>
+        <p class="lead">Everything in the frame is a DesignOS component except the four patterns named as new. They are token-built and listed so they can enter the system deliberately.</p>
+      </div>
+      <h3>Component contract</h3>
+      <table class="ha-table">
+        <tr><th>Pattern</th><th>Built with</th><th>Status</th></tr>
+        <tr><td>Primary / outline / small buttons</td><td>.dos-btn --default --outline --sm --lg</td><td>Built</td></tr>
+        <tr><td>Count, type and status badges</td><td>.dos-badge --sm + .dos-status--*</td><td>Built</td></tr>
+        <tr><td>Tips and NAS / picker notices</td><td>.dos-alert --small --info --warning --error</td><td>Built</td></tr>
+        <tr><td>Filter + name fields</td><td>.dos-field .dos-input .dos-input__field</td><td>Built</td></tr>
+        <tr><td>Hide-empty, scan-after toggles</td><td>.dos-toggle --sm</td><td>Built</td></tr>
+        <tr><td>Type picker cards</td><td>.dos-choice__box --radio inside .choice-card</td><td>Built</td></tr>
+        <tr><td>Loading skeletons, success ring</td><td>.mock-loading .skeleton, .mock-success .ring</td><td>Built (template)</td></tr>
+        <tr><td>App rail, library row, stepper, scan bar</td><td>.ha-railwrap .ha-lib .ha-steps .ha-prog</td><td>New — needs design</td></tr>
+      </table>
+      <h3>State coverage</h3>
+      <table class="ha-table">
+        <tr><th>Scenario</th><th>Libraries</th><th>Types</th><th>Folders</th><th>Review</th></tr>
+        <tr><td>Fresh install</td><td>Empty + New library</td><td>Designed</td><td>Draft, one path each</td><td>Summary + scan + success</td></tr>
+        <tr><td>Half set up</td><td>Mixed rows, hidden-empty note</td><td>Designed</td><td>Designed</td><td>Designed</td></tr>
+        <tr><td>Everything linked</td><td>Grouped rail + counts</td><td>Designed</td><td>Designed</td><td>Designed</td></tr>
+        <tr><td>NAS folder missing</td><td>Row error + retry</td><td>Designed</td><td>Designed</td><td>Scan-failed + retry</td></tr>
+        <tr><td>Picker cancelled</td><td>Designed</td><td>Designed</td><td>Draft kept notice</td><td>No-folders empty</td></tr>
+      </table>
+      <h3>Not designed yet</h3>
+      <p>Real OS folder picker, real scan counts, drag-reorder of rail sections, per-profile library visibility, and the Custom (Others) group editor are out of scope. The frame shows the nearest equivalent and says so in the readout where it matters.</p>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="sheet footer-inner">
+      <p>Work Report &middot; Interactive mockup.<br>4 screens &middot; 5 viewports &middot; 5 scenarios</p>
+      <div class="footer-meta">
+        <span><strong>Generated</strong> <time datetime="2026-08-19">Aug 19, 2026</time></span>
+        <span><strong>Template</strong> Interactive Mockup v1 &middot; DesignOS</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script>
+/* One theme runtime per document: bootstrap + controller + scroll state. */
+(function () {
+  var root = document.documentElement;
+  var KEY = 'work-report-theme';
+  var stored = null;
+  try { stored = localStorage.getItem(KEY); } catch (e) {}
+  if (stored === 'light' || stored === 'dark') root.setAttribute('data-color-mode', stored);
+  function sync() {
+    var dark = root.getAttribute('data-color-mode') === 'dark';
+    document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
+      btn.setAttribute('aria-pressed', String(dark));
+      var label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+      btn.setAttribute('aria-label', label);
+      btn.setAttribute('title', label);
+    });
+  }
+  document.addEventListener('click', function (event) {
+    var btn = event.target.closest('[data-theme-toggle]');
+    if (!btn) return;
+    var next = root.getAttribute('data-color-mode') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-color-mode', next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+  });
+  var bar = document.querySelector('.folio-bar');
+  if (bar) {
+    var onScroll = function () { bar.classList.toggle('is-scrolled', window.scrollY > 8); };
+    addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+  sync();
+})();
+
+if (false) {
+(function () {
+  var root = document.documentElement;
+  var stage = document.querySelector('[data-stage]');
+  var device = document.querySelector('[data-device]');
+  var deviceLabel = document.querySelector('[data-device-label]');
+  var screens = Array.prototype.slice.call(document.querySelectorAll('.mock-screen'));
+  var primary = document.querySelector('[data-primary]');
+  var primaryLabel = document.querySelector('[data-primary-label]');
+  var back = document.querySelector('[data-back]');
+
+  /* Real device viewports. The frame is never reflowed to fit the page — it is
+     scaled, and the scale is stated under the stage. Tablet defaults to
+     landscape; portrait exists only as the rotated state of that frame. */
+  var PRESETS = {
+    'mobile':           { w: 390,  h: 844,  type: 'Mobile', label: '390 × 844' },
+    'tablet-landscape': { w: 1133, h: 744,  type: 'Tablet', label: '1133 × 744 · landscape' },
+    'tablet-portrait':  { w: 744,  h: 1133, type: 'Tablet', label: '744 × 1133 · portrait' },
+    'desktop-1440':     { w: 1440, h: 900,  type: 'Web',    label: '1440 × 900' },
+    'desktop-1280':     { w: 1280, h: 832,  type: 'Web',    label: '1280 × 832' }
+  };
+  var frame = { surface: 'mobile', tablet: 'tablet-landscape', desktop: 'desktop-1440', mobile: 'app' };
+  var scaler = document.querySelector('[data-scaler]');
+  var scaleNote = document.querySelector('[data-scale-note]');
+  var tabletSize = document.querySelector('[data-tablet-size]');
+
+  function presetKey() {
+    if (frame.surface === 'tablet') return frame.tablet;
+    if (frame.surface === 'desktop') return frame.desktop;
+    return 'mobile';
+  }
+  function fit() {
+    var p = PRESETS[presetKey()];
+    /* Budget comes from the stage box minus the configurator. The scaler is
+       sized from the result, so measuring the scaler here would be circular. */
+    var stageInner = document.querySelector('.stage-inner');
+    var panelEl = stageInner.querySelector('.panel');
+    var gap = parseFloat(getComputedStyle(stageInner).columnGap) || 0;
+    var panelWidth = (panelEl && getComputedStyle(panelEl).display !== 'none')
+      ? panelEl.getBoundingClientRect().width + gap : 0;
+    var available = stageInner.clientWidth - panelWidth;
+    var scale = Math.min(1, available / p.w);
+    device.style.setProperty('--scale', scale);
+    scaler.style.width = (p.w * scale) + 'px';
+    /* Derive the reserved height from the preset, never from the frame: the
+       frame sits inside this box, so measuring it here would be circular. */
+    var chrome = device.querySelector('.device-bar').offsetHeight;
+    var border = device.offsetWidth - device.clientWidth;
+    scaler.style.height = ((p.h + chrome + border) * scale) + 'px';
+    if (scaleNote) {
+      /* Round first: a scale of 0.9995 must not print as "shown at 100%". */
+      var pct = Math.round(scale * 100);
+      var typeLabel = p.type === 'Mobile' ? 'Mobile ' + frame.mobile : p.type;
+      scaleNote.textContent = typeLabel + ' · ' + p.label + ' · '
+        + (pct >= 100 ? 'actual size' : 'shown at ' + pct + '%');
+    }
+  }
+  function applyFrame() {
+    var key = presetKey(), p = PRESETS[key];
+    device.dataset.surface = frame.surface;
+    device.dataset.mobileMode = frame.mobile;
+    device.style.setProperty('--frame-w', p.w + 'px');
+    device.style.setProperty('--frame-h', p.h + 'px');
+    if (p.w >= 1000) device.setAttribute('data-wide', ''); else device.removeAttribute('data-wide');
+    if (deviceLabel) deviceLabel.textContent = p.label;
+    if (tabletSize) tabletSize.innerHTML = key === 'tablet-portrait' ? '744 &times; 1133' : '1133 &times; 744';
+    document.querySelectorAll('[data-size-control]').forEach(function (control) {
+      control.hidden = control.dataset.sizeControl !== frame.surface;
+    });
+    fit();
+  }
+  addEventListener('resize', fit);
+
+  var order = ['policies', 'quote', 'confirm'];
+  var LABELS = { policies: 'Choose a policy', quote: 'Continue to payment', confirm: 'Done' };
+  var state = { screen: 'policies', policy: 'Motor Comprehensive', base: 1840, cover: 0, addons: 0 };
+
+  function money(n) { return 'GHS ' + n.toLocaleString('en-US'); }
+
+  function pressGroup(buttons, active) {
+    buttons.forEach(function (b) {
+      var on = b === active;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+  }
+
+  function renderTotals() {
+    var total = state.base + state.cover + state.addons;
+    var set = function (sel, value) {
+      var el = document.querySelector(sel); if (el) el.textContent = value;
+    };
+    set('[data-summary-name]', state.policy);
+    set('[data-summary-base]', money(state.base + state.cover));
+    set('[data-summary-addons]', money(state.addons));
+    set('[data-summary-total]', money(total));
+    set('[data-confirm-total]', money(total));
+    set('[data-confirm-name]', state.policy);
+  }
+
+  function show(screen) {
+    state.screen = screen;
+    screens.forEach(function (s) { s.hidden = s.dataset.screen !== screen; });
+    primaryLabel.textContent = LABELS[screen];
+    back.hidden = screen === 'policies';
+    primary.disabled = false;
+    renderTotals();
+  }
+
+  /* Surface + viewport + radius + grid + specs */
+  var surfaceBtns = Array.prototype.slice.call(document.querySelectorAll('[data-surface-btn]'));
+  surfaceBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      frame.surface = btn.dataset.surfaceBtn;
+      pressGroup(surfaceBtns, btn);
+      applyFrame();
+    });
+  });
+  var desktopBtns = Array.prototype.slice.call(document.querySelectorAll('[data-desktop-btn]'));
+  desktopBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      frame.desktop = btn.dataset.desktopBtn;
+      pressGroup(desktopBtns, btn);
+      applyFrame();
+    });
+  });
+  var mobileBtns = Array.prototype.slice.call(document.querySelectorAll('[data-mobile-btn]'));
+  mobileBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      frame.mobile = btn.dataset.mobileBtn;
+      pressGroup(mobileBtns, btn);
+      applyFrame();
+    });
+  });
+  var rotate = document.querySelector('[data-rotate]');
+  if (rotate) rotate.addEventListener('click', function () {
+    frame.tablet = frame.tablet === 'tablet-landscape' ? 'tablet-portrait' : 'tablet-landscape';
+    applyFrame();
+  });
+  var radiusBtns = Array.prototype.slice.call(document.querySelectorAll('[data-radius-btn]'));
+  radiusBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      root.setAttribute('data-radius', btn.dataset.radiusBtn);
+      pressGroup(radiusBtns, btn);
+    });
+  });
+  var grid = document.querySelector('[data-grid-toggle]');
+  if (grid) grid.addEventListener('change', function () { stage.classList.toggle('no-grid', !grid.checked); });
+
+  /* ── Scenarios ──────────────────────────────────────────────────────────
+     One scenario at a time. Each names the screen it lands on, what the
+     product says there, and whether that answer has actually been designed —
+     a scenario switcher that can always render *something* has to be explicit
+     about which of those somethings is a real decision. */
+  var SCENARIOS = {
+    happy:    { name: 'Happy path',             screen: 'policies', designed: true },
+    nocard:   { name: 'No card on file',        screen: 'quote', tone: 'info',    designed: true,
+                message: 'You will add a card at the next step.', action: 'Add a card' },
+    ncdlost:  { name: 'No-claim discount lost', screen: 'quote', tone: 'warning', designed: true,
+                message: 'A claim in this period removed your 20% no-claim discount.', action: 'Continue to payment' },
+    expired:  { name: 'Quote expired',          screen: 'quote', tone: 'warning', designed: false,
+                message: 'This price expired. Re-pricing may change the amount.', action: 'Re-price' },
+    declined: { name: 'Card declined',          screen: 'quote', tone: 'error',   designed: false,
+                message: 'Your card was declined. Your price is held for 20 minutes.', action: 'Use another card' },
+    lapsed:   { name: 'Policy lapsed',          screen: 'policies', tone: 'error', designed: false,
+                message: 'This policy lapsed on 2 Aug. Renewal is closed — you will need a new quote.', action: 'Get a new quote' },
+    offline:  { name: 'Device offline',         screen: 'policies', tone: 'error', designed: true,
+                message: 'No connection. We cannot price a renewal right now.', action: 'Retry' }
+  };
+  var SCREEN_NAMES = { policies: 'Policies', quote: 'Quote', confirm: 'Confirmation' };
+  var TONE_ICON = {
+    error: '<circle cx="10" cy="10" r="7.25" stroke="currentColor" stroke-width="1.4"/><path d="M10 6v4.8M10 13.4v.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+    warning: '<path d="M10 3.4 2.9 16.1h14.2L10 3.4Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 8.4v3.4M10 13.7v.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+    info: '<circle cx="10" cy="10" r="7.25" stroke="currentColor" stroke-width="1.4"/><path d="M10 9v4.5M10 6.6v.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'
+  };
+  var banner = document.querySelector('[data-banner]');
+  var out = {
+    screen: document.querySelector('[data-out-screen]'),
+    message: document.querySelector('[data-out-message]'),
+    coverage: document.querySelector('[data-out-coverage]'),
+    gap: document.querySelector('[data-out-gap]'),
+    link: document.querySelector('[data-out-link]')
+  };
+
+  function currentScenario() {
+    var picked = document.querySelector('[data-scenario]:checked');
+    return picked ? picked.value : 'happy';
+  }
+
+  function resolve() {
+    var key = currentScenario();
+    var s = SCENARIOS[key];
+    if (s.message) {
+      banner.hidden = false;
+      banner.className = 'mock-banner dos-alert dos-alert--small dos-status--' + s.tone;
+      banner.innerHTML = '<svg class="dos-alert__icon" aria-hidden="true" viewBox="0 0 20 20" fill="none">'
+        + TONE_ICON[s.tone] + '</svg><div class="dos-alert__body"><p class="dos-alert__text">'
+        + s.message + '</p></div>';
+    } else {
+      banner.hidden = true;
+    }
+    show(s.screen);
+    if (s.action) primaryLabel.textContent = s.action;
+
+    out.screen.textContent = SCREEN_NAMES[s.screen];
+    out.message.textContent = s.message || 'Nothing — no interruption is shown';
+    out.coverage.textContent = s.designed ? 'Designed' : 'Not designed';
+    out.gap.hidden = s.designed;
+    if (!s.designed) {
+      out.gap.textContent = '“' + s.name + '” is not designed. The frame shows the nearest screen with a placeholder message, not the real answer.';
+    }
+    out.link.textContent = '#scenario=' + key;
+  }
+
+  document.querySelectorAll('[data-scenario]').forEach(function (radio) {
+    radio.addEventListener('change', resolve);
+  });
+  var panelToggle = document.querySelector('[data-panel-toggle]');
+  if (panelToggle) panelToggle.addEventListener('change', function () {
+    stage.classList.toggle('no-panel', !panelToggle.checked);
+    fit();
+  });
+
+  /* Screen states — the momentary render, independent of the conditions above. */
+  var stateBtns = Array.prototype.slice.call(document.querySelectorAll('[data-state-btn]'));
+  stateBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var next = btn.dataset.stateBtn;
+      show('policies');
+      document.querySelectorAll('[data-state-slot]').forEach(function (slot) {
+        slot.hidden = slot.dataset.stateSlot !== next;
+      });
+      pressGroup(stateBtns.filter(function (b) { return b.classList.contains('dos-btn-group__item'); }),
+        stateBtns.filter(function (b) { return b.dataset.stateBtn === next && b.classList.contains('dos-btn-group__item'); })[0]);
+    });
+  });
+
+  /* Flow */
+  document.querySelectorAll('[data-policy]').forEach(function (card) {
+    card.addEventListener('click', function () {
+      state.policy = card.dataset.policy;
+      state.base = parseInt(card.dataset.base, 10);
+      state.cover = 0; state.addons = 0;
+      document.querySelectorAll('[data-addon]').forEach(function (t) { t.checked = false; });
+      var first = document.querySelector('[data-cover]');
+      if (first) first.checked = true;
+      var title = document.querySelector('[data-quote-title]');
+      if (title) title.textContent = 'Renew ' + state.policy;
+      document.querySelectorAll('[data-price-for]').forEach(function (el) {
+        el.textContent = money(state.base + parseInt(el.dataset.priceFor, 10));
+      });
+      show('quote');
+    });
+  });
+  document.querySelectorAll('[data-cover]').forEach(function (radio) {
+    radio.addEventListener('change', function () { state.cover = parseInt(radio.value, 10); renderTotals(); });
+  });
+  document.querySelectorAll('[data-addon]').forEach(function (toggle) {
+    toggle.addEventListener('change', function () {
+      var value = parseInt(toggle.dataset.addon, 10);
+      state.addons += toggle.checked ? value : -value;
+      renderTotals();
+    });
+  });
+
+  primary.addEventListener('click', function () {
+    if (state.screen === 'policies') { document.querySelector('[data-policy]').focus(); return; }
+    if (state.screen === 'confirm') { show('policies'); return; }
+    primary.disabled = true;
+    primaryLabel.textContent = 'Confirming…';
+    setTimeout(function () { show('confirm'); }, 900);
+  });
+  back.addEventListener('click', function () {
+    show(order[Math.max(0, order.indexOf(state.screen) - 1)]);
+  });
+  var restart = document.querySelector('[data-restart]');
+  if (restart) restart.addEventListener('click', function () {
+    state.cover = 0; state.addons = 0;
+    document.querySelectorAll('[data-addon]').forEach(function (t) { t.checked = false; });
+    document.querySelectorAll('[data-state-slot]').forEach(function (slot) { slot.hidden = slot.dataset.stateSlot !== 'default'; });
+    var happy = document.querySelector('[data-scenario][value="happy"]');
+    if (happy) happy.checked = true;
+    show('policies');
+    resolve();
+  });
+
+  /* The status bar carries the time this mockup was generated, not a fixed 9:41. */
+  var clock = document.querySelector('[data-status-time]');
+  if (clock) {
+    var now = new Date();
+    var hours = now.getHours() % 12 || 12;
+    clock.textContent = hours + ':' + String(now.getMinutes()).padStart(2, '0');
+    clock.setAttribute('datetime', now.toISOString());
+  }
+
+  show('policies');
+  applyFrame();
+  resolve();
+})();
+}
+</script>
+<script>
+/* LoomTV libraries controller: frame chrome + library draft model + rail. */
+(function () {
+  var root = document.documentElement;
+  var stage = document.querySelector('[data-stage]');
+  var device = document.querySelector('[data-device]');
+  var deviceLabel = document.querySelector('[data-device-label]');
+  var scaler = document.querySelector('[data-scaler]');
+  var scaleNote = document.querySelector('[data-scale-note]');
+  var tabletSize = document.querySelector('[data-tablet-size]');
+  var app = document.querySelector('.ha-app');
+  var rail = document.querySelector('[data-rail]');
+  var moreBtn = document.querySelector('[data-more]');
+  var banner = document.querySelector('[data-banner]');
+  var screens = Array.prototype.slice.call(document.querySelectorAll('.mock-screen'));
+  var primary = document.querySelector('[data-primary]');
+  var primaryLabel = document.querySelector('[data-primary-label]');
+  var back = document.querySelector('[data-back]');
+
+  /* ---------- frame chrome (same contract as the template shell) ---------- */
+  var PRESETS = {
+    'mobile':           { w: 390,  h: 844,  type: 'Mobile', label: '390 × 844' },
+    'tablet-landscape': { w: 1133, h: 744,  type: 'Tablet', label: '1133 × 744 · landscape' },
+    'tablet-portrait':  { w: 744,  h: 1133, type: 'Tablet', label: '744 × 1133 · portrait' },
+    'desktop-1440':     { w: 1440, h: 900,  type: 'Web',    label: '1440 × 900' },
+    'desktop-1280':     { w: 1280, h: 832,  type: 'Web',    label: '1280 × 832' }
+  };
+  var frame = { surface: 'desktop', tablet: 'tablet-landscape', desktop: 'desktop-1440', mobile: 'app' };
+  function presetKey() {
+    if (frame.surface === 'tablet') return frame.tablet;
+    if (frame.surface === 'desktop') return frame.desktop;
+    return 'mobile';
+  }
+  function fit() {
+    var p = PRESETS[presetKey()];
+    var stageInner = document.querySelector('.stage-inner');
+    var panelEl = stageInner.querySelector('.panel');
+    var gap = parseFloat(getComputedStyle(stageInner).columnGap) || 0;
+    var panelWidth = (panelEl && getComputedStyle(panelEl).display !== 'none')
+      ? panelEl.getBoundingClientRect().width + gap : 0;
+    var available = stageInner.clientWidth - panelWidth;
+    var sc = Math.min(1, available / p.w);
+    device.style.setProperty('--scale', sc);
+    scaler.style.width = (p.w * sc) + 'px';
+    var chrome = device.querySelector('.device-bar').offsetHeight;
+    var border = device.offsetWidth - device.clientWidth;
+    scaler.style.height = ((p.h + chrome + border) * sc) + 'px';
+    if (scaleNote) {
+      var pct = Math.round(sc * 100);
+      var typeLabel = p.type === 'Mobile' ? 'Mobile ' + frame.mobile : p.type;
+      scaleNote.textContent = typeLabel + ' · ' + p.label + ' · ' + (pct >= 100 ? 'actual size' : 'shown at ' + pct + '%');
+    }
+  }
+  function applyFrame() {
+    var key = presetKey(), p = PRESETS[key];
+    device.dataset.surface = frame.surface;
+    device.dataset.mobileMode = frame.mobile;
+    device.style.setProperty('--frame-w', p.w + 'px');
+    device.style.setProperty('--frame-h', p.h + 'px');
+    if (p.w >= 1000) device.setAttribute('data-wide', ''); else device.removeAttribute('data-wide');
+    if (deviceLabel) deviceLabel.textContent = p.label;
+    if (tabletSize) tabletSize.innerHTML = key === 'tablet-portrait' ? '744 &times; 1133' : '1133 &times; 744';
+    document.querySelectorAll('[data-size-control]').forEach(function (c) { c.hidden = c.dataset.sizeControl !== frame.surface; });
+    fit();
+  }
+  addEventListener('resize', fit);
+  function pressGroup(buttons, active) {
+    buttons.forEach(function (b) {
+      var on = b === active;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+  }
+  document.querySelectorAll('[data-surface-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () { frame.surface = btn.dataset.surfaceBtn; pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-surface-btn]')), btn); applyFrame(); });
+  });
+  document.querySelectorAll('[data-desktop-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () { frame.desktop = btn.dataset.desktopBtn; pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-desktop-btn]')), btn); applyFrame(); });
+  });
+  document.querySelectorAll('[data-mobile-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () { frame.mobile = btn.dataset.mobileBtn; pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-mobile-btn]')), btn); applyFrame(); });
+  });
+  var rotate = document.querySelector('[data-rotate]');
+  if (rotate) rotate.addEventListener('click', function () { frame.tablet = frame.tablet === 'tablet-landscape' ? 'tablet-portrait' : 'tablet-landscape'; applyFrame(); });
+  document.querySelectorAll('[data-radius-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () { root.setAttribute('data-radius', btn.dataset.radiusBtn); pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-radius-btn]')), btn); });
+  });
+  var grid = document.querySelector('[data-grid-toggle]');
+  if (grid) grid.addEventListener('change', function () { stage.classList.toggle('no-grid', !grid.checked); });
+  var panelToggle = document.querySelector('[data-panel-toggle]');
+  if (panelToggle) panelToggle.addEventListener('change', function () { stage.classList.toggle('no-panel', !panelToggle.checked); fit(); });
+
+  /* ---------- icons + library model ---------- */
+  function svg(paths) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+  }
+  var ICONS = {
+    film: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>'),
+    tv: svg('<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6"/>'),
+    anime: svg('<path d="m12 3 2.7 5.8 6.3.8-4.6 4.3 1.2 6.1L12 17l-5.6 3 1.2-6.1L3 9.6l6.3-.8L12 3Z"/>'),
+    photos: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m5 18 5-5 3 3 3-3 3 3"/>'),
+    music: svg('<path d="M9 18V6l10-2v11"/><circle cx="7" cy="18" r="2.4"/><circle cx="17" cy="15" r="2.4"/>'),
+    audiobooks: svg('<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="13" width="4" height="7" rx="1.5"/><rect x="17" y="13" width="4" height="7" rx="1.5"/>'),
+    books: svg('<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Z"/><path d="M5 17a3 3 0 0 1 3-3h11"/>'),
+    comics: svg('<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>'),
+    others: svg('<path d="M2.75 5.5h5l1.5 1.75h8v8.5a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.5Z"/>'),
+    discover: svg('<circle cx="12" cy="12" r="8.5"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/>'),
+    mylist: svg('<path d="M7 3.5h10V21l-5-3.5L7 21V3.5Z"/>'),
+    live: svg('<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/>'),
+    archive: svg('<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/>'),
+    eye: svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.5"/>'),
+    eyeoff: svg('<path d="M4 4l16 16M9.9 6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.7M6 8A16 16 0 0 0 2.5 12S6 18.5 12 18.5c1.1 0 2.2-.2 3.1-.6"/>'),
+    chev: svg('<path d="m9 6 6 6-6 6"/>'),
+    plus: svg('<path d="M12 5v14M5 12h14"/>')
+  };
+  ICONS.movies = ICONS.film;
+  var TYPES = [
+    { id: 'movies', name: 'Movies', hint: 'TMDB · OMDb', ex: 'Dune, Toy Story', sample: '128 videos', pool: ['/Users/you/Movies', '/Volumes/NAS/Movies'] },
+    { id: 'tv', name: 'TV Shows', hint: 'TVmaze · TVDB', ex: 'Breaking Bad', sample: '34 episodes', pool: ['/Users/you/TV Shows', '/Volumes/NAS/TV Shows'] },
+    { id: 'anime', name: 'Anime', hint: 'Jikan (MAL)', ex: 'Naruto, Frieren', sample: '57 episodes', pool: ['/Users/you/Anime'] },
+    { id: 'photos', name: 'Photos', hint: 'Folder view', ex: 'holiday snaps', sample: '412 photos', pool: ['/Users/you/Pictures'] },
+    { id: 'music', name: 'Music', hint: 'Audio scan', ex: 'albums, MP3s', sample: '861 tracks', pool: ['/Users/you/Music'] },
+    { id: 'audiobooks', name: 'Audiobooks', hint: 'Chapters + position', ex: 'Audible downloads', sample: '23 books', pool: ['/Users/you/Audiobooks'] },
+    { id: 'books', name: 'Books', hint: 'ePub · PDF', ex: 'ePub novels', sample: '140 books', pool: ['/Users/you/Books'] },
+    { id: 'comics', name: 'Comics & Manga', hint: 'CBZ · CBR · PDF', ex: 'manga volumes', sample: '88 books', pool: ['/Users/you/Comics'] },
+    { id: 'others', name: 'Custom', hint: 'Mixed video folders', ex: 'anything mixed', sample: '46 videos', pool: ['/Users/you/Videos', '/Users/you/Kids', '/Users/you/Fitness'] }
+  ];
+  function typeOf(id) { return TYPES.find(function (t) { return t.id === id; }); }
+  function baseName(path) { return path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path; }
+
+  var state = {
+    scenario: 'fresh', screen: 'libraries', railmode: 'after',
+    libs: [], extras: [], draft: { sel: [], names: {}, folders: {} },
+    hideEmpty: true, filter: '', expanded: {}, scanTimers: [], reviewFailedOnce: false, deniedNoteShown: false,
+    draftNote: '', verified: {}, checking: {}, libNote: null
+  };
+  function emptyLibs() {
+    return TYPES.map(function (t) { return { type: t.id, name: t.name, folders: [], count: 0, visible: true }; });
+  }
+  function lib(id) { return state.libs.find(function (l) { return l.type === id; }); }
+
+  var SCENARIOS = {
+    fresh: { screen: 'libraries', label: 'Libraries', msg: 'Nothing — nine empty libraries, one front door', banner: null },
+    half: { screen: 'libraries', label: 'Libraries', msg: 'Movies + TV linked — the rest still need a home', banner: null },
+    full: { screen: 'libraries', label: 'Libraries', msg: 'Nothing — grouped rail carries the full set', banner: null },
+    nasfail: { screen: 'libraries', label: 'Libraries', msg: 'One NAS path is down — row keeps its place with retry', tone: 'error', banner: '“/Volumes/NAS/Movies” is unavailable. Saved titles stay; reconnect or remove the folder.' },
+    denied: { screen: 'folders', label: 'Add folders', msg: 'Picker dismissed — the draft is kept, nothing added', tone: 'warning', banner: null }
+  };
+  function seed(scn) {
+    state.scanTimers.forEach(clearInterval); state.scanTimers = [];
+    state.reviewFailedOnce = false; state.deniedNoteShown = false;
+    state.draftNote = ''; state.verified = {}; state.checking = {}; state.libNote = null;
+    state.libs = emptyLibs(); state.extras = [];
+    state.draft = { sel: [], names: {}, folders: {} };
+    if (scn === 'half' || scn === 'nasfail') {
+      lib('movies').folders = [{ path: '/Users/mallenkb/My Movies/Movies', status: 'ok' }];
+      lib('movies').count = 12;
+      lib('tv').folders = [{ path: '/Users/mallenkb/My Movies/TV Shows', status: 'ok' }];
+      lib('tv').count = 8;
+      lib('anime').count = 0;
+      if (scn === 'nasfail') {
+        lib('movies').folders.push({ path: '/Volumes/NAS/Movies', status: 'missing' });
+        lib('anime').folders = [{ path: '/Users/mallenkb/My Movies/Anime', status: 'ok' }];
+        lib('anime').count = 12;
+      }
+    }
+    if (scn === 'full') {
+      var counts = { movies: 128, tv: 34, anime: 57, photos: 412, music: 861, audiobooks: 23, books: 140, comics: 88, others: 46 };
+      state.libs.forEach(function (l) {
+        var t = typeOf(l.type);
+        l.folders = [{ path: t.pool[0], status: 'ok' }];
+        if (t.pool[1] && (l.type === 'movies' || l.type === 'others')) l.folders.push({ path: t.pool[1], status: 'ok' });
+        l.count = counts[l.type] || 0;
+      });
+      lib('others').name = 'Custom';
+      state.extras = [
+        { id: 'live:news', label: 'News 24', icon: 'live' },
+        { id: 'live:sport', label: 'Sport+', icon: 'live' },
+        { id: 'stremio:archive', label: 'Archive.org', icon: 'archive' }
+      ];
+    }
+    if (scn === 'denied') {
+      state.draft = { sel: ['movies'], names: {}, folders: { movies: [] } };
+      state.deniedNoteShown = true;
+    }
+    state.expanded = {};
+  }
+
+  /* ---------- rail ---------- */
+  function isLinked(l) { return l.folders.length > 0; }
+  function railItems() {
+    var items = [];
+    function pushLib(l) {
+      items.push({ id: 'lib:' + l.type, label: l.name, icon: l.type, count: l.count, empty: !isLinked(l), visible: l.visible });
+    }
+    if (state.railmode === 'before') {
+      ['anime', 'tv', 'movies'].forEach(function (id) { pushLib(lib(id)); });
+      items.push({ id: 'discover', label: 'Discover', icon: 'discover' });
+      items.push({ id: 'mylist', label: 'My List', icon: 'mylist' });
+      items.push({ id: 'div1', div: true });
+      ['photos', 'music', 'audiobooks', 'books', 'comics'].forEach(function (id) { pushLib(lib(id)); });
+      items.push({ id: 'div2', div: true });
+      state.extras.forEach(function (e) { items.push({ id: e.id, label: e.label, icon: e.icon }); });
+      lib('others').folders.forEach(function (f) { items.push({ id: 'folder:' + f.path, label: baseName(f.path), icon: 'others' }); });
+      return { flat: items, more: [] };
+    }
+    var watch = [], listen = [], personal = [], system = [], more = [];
+    ['movies', 'tv', 'anime'].forEach(function (id) { watch.push(lib(id)); });
+    ['music', 'audiobooks', 'books', 'comics'].forEach(function (id) { listen.push(lib(id)); });
+    personal.push(lib('photos'));
+    lib('others').folders.forEach(function (f) { personal.push({ type: '__group', name: baseName(f.path), folders: [f], count: lib('others').count, visible: lib('others').visible, icon: 'others' }); });
+    if (!lib('others').folders.length) personal.push(lib('others'));
+    system.push({ type: '__nav', name: 'Discover', icon: 'discover' }, { type: '__nav', name: 'My List', icon: 'mylist' });
+    state.extras.forEach(function (e) { more.push({ type: '__nav', name: e.label, icon: e.icon }); });
+    function vis(list) {
+      return list.filter(function (l) {
+        if (l.visible === false) return false;
+        if (state.hideEmpty && (l.count === 0 && (!l.folders || !l.folders.length)) && l.type !== '__nav') return false;
+        return true;
+      });
+    }
+    return { sections: [{ t: 'Watch', items: vis(watch) }, { t: 'Listen & read', items: vis(listen) }, { t: 'Personal', items: vis(personal) }, { t: 'System', items: system }], more: more };
+  }
+  function railItemHTML(it, activeId) {
+    if (it.div) return '<div class="ha-div"></div>';
+    var active = it.id === activeId ? ' is-active' : '';
+    var dim = it.empty ? ' is-dim' : '';
+    var tag = it.empty && state.railmode === 'after' ? '' : '';
+    var count = (it.count > 0 && state.railmode === 'after') ? '<span class="ct">' + it.count + '</span>' : '';
+    return '<button class="ha-ri' + active + dim + '" type="button" title="' + it.label + '">' +
+      (ICONS[it.icon] || ICONS.others) + '<span>' + it.label + '</span>' + count + tag + '</button>';
+  }
+  function renderRail() {
+    var r = railItems();
+    var activeId = isLinked(lib('movies')) ? 'lib:movies' : 'lib:tv';
+    var html = '';
+    if (state.railmode === 'before') {
+      html = r.flat.map(function (it) { return railItemHTML(it, activeId); }).join('');
+      moreBtn.hidden = true;
+    } else {
+      r.sections.forEach(function (s) {
+        if (!s.items.length) return;
+        html += '<div class="ha-sec">' + s.t + '</div>';
+        s.items.forEach(function (l) {
+          var it = { id: 'lib:' + (l.type || l.name), label: l.name, icon: l.icon || l.type, count: l.count || 0, empty: !(l.folders && l.folders.length) && l.type !== '__nav' };
+          html += railItemHTML(it, activeId);
+        });
+      });
+      if (r.more.length) { moreBtn.hidden = false; moreBtn.textContent = 'More · ' + r.more.length; }
+      else moreBtn.hidden = true;
+    }
+    rail.innerHTML = html;
+    app.dataset.railmode = state.railmode;
+    closeSheet();
+  }
+  function closeSheet() { var s = app.querySelector('.ha-sheet'); if (s) s.remove(); }
+  moreBtn.addEventListener('click', function () {
+    if (app.querySelector('.ha-sheet')) { closeSheet(); return; }
+    var r = railItems();
+    var sh = document.createElement('div');
+    sh.className = 'ha-sheet';
+    sh.innerHTML = '<h4>More</h4>' + r.more.map(function (l) {
+      return '<button class="ha-ri" type="button">' + (ICONS[l.icon] || ICONS.others) + '<span>' + l.name + '</span></button>';
+    }).join('');
+    sh.addEventListener('click', closeSheet);
+    app.appendChild(sh);
+  });
+
+  /* ---------- libraries table ---------- */
+  function statusBadge(l) {
+    var missing = l.folders.some(function (f) { return f.status === 'missing'; });
+    if (missing) return '<span class="dos-badge dos-badge--sm dos-status--error"><span class="dos-badge__label">Needs attention</span></span>';
+    if (!l.folders.length) return '<span class="dos-badge dos-badge--sm dos-status--neutral"><span class="dos-badge__label">Empty</span></span>';
+    return '<span class="dos-badge dos-badge--sm dos-status--success"><span class="dos-badge__label">Available</span></span>';
+  }
+  function renderRows() {
+    var box = document.querySelector('[data-lib-rows]');
+    var q = state.filter.trim().toLowerCase();
+    var visibleCount = 0, hiddenEmpty = 0;
+    var html = state.libs.map(function (l) {
+      var t = typeOf(l.type);
+      if (q && (l.name + ' ' + t.name + ' ' + t.hint).toLowerCase().indexOf(q) < 0) return '';
+      var linked = isLinked(l);
+      if (linked) visibleCount++;
+      var meta = linked ? l.folders.length + (l.folders.length === 1 ? ' folder' : ' folders') + ' · ' + l.count + ' items · ' + t.hint : t.hint + ' · no folders yet';
+      var open = !!state.expanded[l.type];
+      var eye = '<button class="ha-eye' + (l.visible ? '' : ' off') + '" type="button" data-eye="' + l.type + '" aria-pressed="' + l.visible + '" title="Show in sidebar" aria-label="Toggle ' + l.name + ' in sidebar">' + (l.visible ? ICONS.eye : ICONS.eyeoff) + '</button>';
+      var row = '<div class="ha-lib"' + (l.visible ? '' : ' style="opacity:.6"') + '>' +
+        '<div class="ha-libhead">' +
+        '<button class="ha-libmain" type="button" data-expand="' + l.type + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse ' : 'Expand ') + l.name + ' folders">' +
+        '<span class="ha-lic">' + ICONS[l.type] + '</span>' +
+        '<span class="t"><span class="n">' + l.name + '</span><span class="m">' + meta + '</span></span>' +
+        statusBadge(l) + '</button>' + eye +
+        '<span class="ha-chev" style="transform:rotate(' + (open ? 90 : 0) + 'deg)" aria-hidden="true">' + ICONS.chev + '</span></div>';
+      if (open) {
+        row += '<div class="ha-folders">';
+        l.folders.forEach(function (f) {
+          row += '<div class="ha-folder"><code title="' + f.path + '">' + f.path + '</code>' +
+            (f.status === 'missing' ? '<span class="dos-badge dos-badge--sm dos-status--warning"><span class="dos-badge__label">Missing</span></span><button class="dos-btn dos-btn--sm dos-btn--outline" type="button" data-rescanrow="' + l.type + '"><span class="dos-btn__label">Retry</span></button>' : '') +
+            '<button class="rm" type="button" data-rm="' + l.type + '|' + f.path + '" aria-label="Remove ' + f.path + '">×</button></div>';
+        });
+        row += '<button class="ha-addfolder" type="button" data-addlib="' + l.type + '"><span aria-hidden="true">+</span> Add folder</button>';
+        if (state.libNote && state.libNote.lib === l.type) row += '<p class="ha-draftnote">' + state.libNote.msg + '</p>';
+        row += '</div>';
+      }
+      row += '</div>';
+      return row;
+    }).join('');
+    box.innerHTML = html || '<p class="ha-note">No libraries match this filter.</p>';
+    if (state.hideEmpty) hiddenEmpty = state.libs.filter(function (l) { return !isLinked(l); }).length;
+    var note = document.querySelector('[data-hidden-note]');
+    if (state.railmode === 'after' && hiddenEmpty > 0) { note.hidden = false; note.textContent = hiddenEmpty + ' empty ' + (hiddenEmpty === 1 ? 'library' : 'libraries') + ' hidden from the sidebar.'; }
+    else note.hidden = true;
+    document.querySelector('[data-lib-count]').textContent = visibleCount + ' of 9 linked';
+  }
+
+  /* ---------- type picker + draft ---------- */
+  function renderTypes() {
+    var box = document.querySelector('[data-types]');
+    box.innerHTML = TYPES.map(function (t) {
+      var on = state.draft.sel.indexOf(t.id) >= 0;
+      return '<button class="ha-t" type="button" data-type="' + t.id + '" aria-pressed="' + on + '">' + ICONS[t.id] + '<b>' + t.name + '</b><span>' + t.hint + '</span><span class="ha-ex">e.g. ' + t.ex + '</span></button>';
+    }).join('');
+    var single = state.draft.sel.length === 1 ? state.draft.names[state.draft.sel[0]] || typeOf(state.draft.sel[0]).name : '';
+    document.querySelector('[data-libname]').value = state.draft.sel.length === 1 ? single : (state.draft.sel.length ? state.draft.sel.length + ' libraries' : '');
+    document.querySelector('[data-multihint]').hidden = state.draft.sel.length < 2;
+  }
+  function renderDraft() {
+    var box = document.querySelector('[data-draftfolders]');
+    if (!state.draft.sel.length) { box.innerHTML = '<p class="ha-note">Nothing picked yet — go back and choose at least one type.</p>'; }
+    else {
+      box.innerHTML = state.draft.sel.map(function (id) {
+        var t = typeOf(id);
+        var name = state.draft.names[id] || t.name;
+        var folders = state.draft.folders[id] || [];
+        var rows = folders.map(function (p) {
+          var key = id + '|' + p;
+          var st = state.checking[key] ? '<span class="ha-checking">Checking…</span>' : (state.verified[key] ? '<span class="ha-ok">Readable · ' + state.verified[key] + '</span>' : '');
+          return '<div class="ha-folder"><code>' + p + '</code>' + st + '<button class="rm" type="button" data-drm="' + id + '|' + p + '" aria-label="Remove ' + p + '">×</button></div>';
+        }).join('');
+        return '<div class="ha-dblock"><h4>' + name + '</h4><p class="dhint">' + t.hint + '</p>' + rows +
+          '<button class="ha-addfolder" type="button" data-addfolder="' + id + '"><span aria-hidden="true">+</span> Add folder</button></div>';
+      }).join('');
+    }
+    var note = document.querySelector('[data-draftnote]');
+    var msg = state.draftNote || (state.deniedNoteShown ? 'Picker dismissed — nothing added. The draft is kept.' : '');
+    if (msg) { note.hidden = false; note.textContent = msg; }
+    else note.hidden = true;
+  }
+  function nextPoolPath(id) {
+    var t = typeOf(id), used = state.draft.folders[id] || [];
+    return t.pool.find(function (p) { return used.indexOf(p) < 0; }) || t.pool[0];
+  }
+  function renderSetupBar() {
+    var box = document.querySelector('[data-setupbar]');
+    if (state.scenario === 'fresh') {
+      box.innerHTML = '<div class="dos-alert dos-alert--small dos-status--info ha-setup"><div class="dos-alert__body"><p class="dos-alert__text">Welcome. Add your first library — it takes about a minute.</p></div><button class="dos-btn dos-btn--sm dos-btn--default" type="button" data-goto="types"><span class="dos-btn__label">Start</span></button></div>';
+    } else if (state.scenario === 'half') {
+      var linked = state.libs.filter(isLinked).length;
+      box.innerHTML = '<div class="dos-alert dos-alert--small dos-status--info ha-setup"><div class="dos-alert__body"><p class="dos-alert__text">Movies and TV are in. ' + (9 - linked) + ' still empty — add the rest any time.</p></div><button class="dos-btn dos-btn--sm dos-btn--default" type="button" data-goto="types"><span class="dos-btn__label">Add more</span></button></div>';
+    } else box.innerHTML = '';
+  }
+  function renderReview() {
+    var n = state.draft.sel.length;
+    document.querySelector('[data-reviewtitle]').textContent = n === 1 ? (state.draft.names[state.draft.sel[0]] || typeOf(state.draft.sel[0]).name) : n + ' libraries';
+    document.querySelector('[data-reviewrows]').innerHTML = state.draft.sel.map(function (id) {
+      var t = typeOf(id), folders = state.draft.folders[id] || [];
+      return '<div class="sum-row"><span>' + (state.draft.names[id] || t.name) + ' · ' + folders.length + (folders.length === 1 ? ' folder' : ' folders') + '</span><b>' + t.hint + '</b></div>';
+    }).join('') || '<div class="sum-row"><span>Nothing selected yet</span><b>—</b></div>';
+    document.querySelector('[data-scanbox]').hidden = true;
+  }
+
+  /* ---------- screens, slots, chrome ---------- */
+  var order = ['libraries', 'types', 'folders', 'review'];
+  var NAMES = { libraries: 'Libraries', types: 'Pick type', folders: 'Add folders', review: 'Review' };
+  var PRIMARY = { libraries: 'New library', types: 'Continue', folders: 'Review', review: 'Add libraries' };
+  function currentSection() { return document.querySelector('.mock-screen[data-screen="' + state.screen + '"]'); }
+  function applyStateSlot(s) {
+    var sec = currentSection();
+    var slots = sec.querySelectorAll('[data-state-slot]');
+    var ok = false;
+    slots.forEach(function (slot) {
+      var match = slot.dataset.stateSlot === s;
+      slot.hidden = !match;
+      if (match) ok = true;
+    });
+    var out = { coverage: document.querySelector('[data-out-coverage]'), gap: document.querySelector('[data-out-gap]') };
+    if (!slots.length || ok) { out.coverage.textContent = 'Designed'; out.gap.hidden = true; }
+    else {
+      slots.forEach(function (slot) { slot.hidden = slot.dataset.stateSlot !== 'default'; });
+      out.coverage.textContent = 'Not designed';
+      out.gap.hidden = false;
+      out.gap.textContent = '“' + NAMES[state.screen] + ' · ' + s + '” is not designed. The frame shows the default render instead.';
+    }
+    pressGroup(Array.prototype.slice.call(document.querySelectorAll('.controls [data-state-btn]')), document.querySelector('.controls [data-state-btn="' + (ok || !slots.length ? s : 'default') + '"]'));
+  }
+  function show(screen) {
+    state.screen = screen;
+    screens.forEach(function (s) { s.hidden = s.dataset.screen !== screen; });
+    back.hidden = screen === 'libraries';
+    primaryLabel.textContent = screen === 'review' && reviewSlot() === 'success' ? 'Done' : PRIMARY[screen];
+    if (screen === 'types') renderTypes();
+    if (screen === 'folders') renderDraft();
+    if (screen === 'review') { renderReview(); }
+    applyStateSlot('default');
+    document.querySelectorAll('.mock-tabs [data-goto]').forEach(function (a) {
+      if (a.dataset.goto === screen) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('[data-topnav]').forEach(function (a) {
+      var map = { libraries: 'libraries', onboarding: 'types', sidebar: 'libraries' };
+      if (map[a.dataset.topnav] === screen) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    document.querySelector('[data-out-screen]').textContent = NAMES[screen];
+    document.querySelector('[data-out-link]').textContent = '#flow=libraries&scenario=' + state.scenario + '&screen=' + screen;
+  }
+  function reviewSlot() {
+    var sec = document.querySelector('.mock-screen[data-screen="review"]');
+    var vis = Array.prototype.slice.call(sec.querySelectorAll('[data-state-slot]')).find(function (s) { return !s.hidden; });
+    return vis ? vis.dataset.stateSlot : 'default';
+  }
+  function setReviewSlot(s) {
+    var sec = document.querySelector('.mock-screen[data-screen="review"]');
+    sec.querySelectorAll('[data-state-slot]').forEach(function (slot) { slot.hidden = slot.dataset.stateSlot !== s; });
+  }
+  function resolve() {
+    var scn = SCENARIOS[state.scenario];
+    if (scn.banner) {
+      banner.hidden = false;
+      banner.className = 'mock-banner dos-alert dos-alert--small dos-status--' + (scn.tone || 'info');
+      banner.innerHTML = '<div class="dos-alert__body"><p class="dos-alert__text">' + scn.banner + '</p></div>';
+    } else banner.hidden = true;
+    document.querySelector('[data-out-message]').textContent = scn.msg;
+    document.querySelector('[data-out-coverage]').textContent = 'Designed';
+    document.querySelector('[data-out-gap]').hidden = true;
+    renderRail(); renderRows(); renderSetupBar();
+    show(scn.screen);
+    document.querySelector('[data-out-link]').textContent = '#flow=libraries&scenario=' + state.scenario;
+  }
+
+  /* ---------- events ---------- */
+  document.querySelectorAll('[data-scenario]').forEach(function (r) {
+    r.addEventListener('change', function () { state.scenario = r.value; state.filter = ''; document.querySelector('[data-libsearch]').value = ''; resolve(); });
+  });
+  document.querySelectorAll('[data-rail-btn]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.railmode = b.dataset.railBtn;
+      pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-rail-btn]')), b);
+      renderRail(); renderRows();
+    });
+  });
+  document.querySelectorAll('.controls [data-state-btn]').forEach(function (b) {
+    b.addEventListener('click', function () { show(state.screen); applyStateSlot(b.dataset.stateBtn); });
+  });
+  var restart = document.querySelector('[data-restart]');
+  if (restart) restart.addEventListener('click', function () {
+    state.scenario = 'fresh'; state.railmode = 'after';
+    document.querySelector('[data-scenario][value="fresh"]').checked = true;
+    pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-rail-btn]')), document.querySelector('[data-rail-btn="after"]'));
+    seed('fresh'); resolve();
+  });
+  document.querySelectorAll('[data-topnav]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (a.dataset.topnav === 'onboarding') show('types'); else show('libraries');
+    });
+  });
+  device.addEventListener('click', function (e) {
+    var go = e.target.closest('[data-goto]');
+    if (go) { e.preventDefault(); show(go.dataset.goto); return; }
+    var tp = e.target.closest('[data-type]');
+    if (tp) {
+      var id = tp.dataset.type, i = state.draft.sel.indexOf(id);
+      if (i >= 0) state.draft.sel.splice(i, 1);
+      else { state.draft.sel.push(id); state.draft.folders[id] = state.draft.folders[id] || []; }
+      if (state.draft.sel.length === 1) { var only = state.draft.sel[0]; state.draft.names[only] = document.querySelector('[data-libname]').value.trim() || state.draft.names[only]; }
+      renderTypes(); return;
+    }
+    var st = e.target.closest('[data-starter]');
+    if (st) {
+      var set = st.dataset.starter === 'video' ? ['movies', 'tv', 'anime'] : st.dataset.starter === 'listenread' ? ['music', 'audiobooks', 'books', 'comics'] : TYPES.map(function (t) { return t.id; });
+      state.draft.sel = set.slice();
+      set.forEach(function (sid) { state.draft.folders[sid] = state.draft.folders[sid] || []; });
+      renderTypes(); return;
+    }
+    var af = e.target.closest('[data-addfolder]');
+    if (af) {
+      if (state.scenario === 'denied' && !af.dataset.tried) { af.dataset.tried = '1'; state.deniedNoteShown = true; renderDraft(); return; }
+      var fid = af.dataset.addfolder;
+      var arr = state.draft.folders[fid] = state.draft.folders[fid] || [];
+      var cand = nextPoolPath(fid);
+      if (arr.indexOf(cand) >= 0) { state.draftNote = '“' + baseName(cand) + '” is already in this library — skipped the duplicate.'; renderDraft(); return; }
+      arr.push(cand);
+      state.draftNote = ''; state.deniedNoteShown = false;
+      state.checking[fid + '|' + cand] = true;
+      renderDraft();
+      setTimeout(function () {
+        delete state.checking[fid + '|' + cand];
+        state.verified[fid + '|' + cand] = typeOf(fid).sample;
+        if (state.screen === 'folders') renderDraft();
+      }, 800);
+      return;
+    }
+    var drm = e.target.closest('[data-drm]');
+    if (drm) {
+      var parts = drm.dataset.drm.split('|'), arr = state.draft.folders[parts[0]] || [];
+      state.draft.folders[parts[0]] = arr.filter(function (p) { return p !== parts[1]; });
+      renderDraft(); return;
+    }
+    var ex = e.target.closest('[data-expand]');
+    if (ex) {
+      var lid = ex.dataset.expand;
+      state.expanded[lid] = !state.expanded[lid];
+      renderRows(); return;
+    }
+    var eye = e.target.closest('[data-eye]');
+    if (eye) { var l = lib(eye.dataset.eye); l.visible = !l.visible; renderRows(); renderRail(); return; }
+    var rm = e.target.closest('[data-rm]');
+    if (rm) {
+      var rp = rm.dataset.rm.split('|'), rl = lib(rp[0]);
+      rl.folders = rl.folders.filter(function (f) { return f.path !== rp[1]; });
+      if (!rl.folders.length) rl.count = 0;
+      renderRows(); renderRail(); return;
+    }
+    var al = e.target.closest('[data-addlib]');
+    if (al) {
+      var all = lib(al.dataset.addlib), pool = typeOf(all.type).pool;
+      var nxt = pool.find(function (p) { return all.folders.every(function (f) { return f.path !== p; }); });
+      state.expanded[all.type] = true;
+      if (!nxt) { state.libNote = { lib: all.type, msg: 'Every suggested folder is already in ' + all.name + '.' }; renderRows(); return; }
+      state.libNote = null;
+      all.folders.push({ path: nxt, status: 'ok' });
+      if (!all.count) all.count = 10 + all.folders.length * 7;
+      renderRows(); renderRail(); return;
+    }
+    var rs = e.target.closest('[data-rescanrow]');
+    if (rs) {
+      var rsl = lib(rs.dataset.rescanrow);
+      rs.disabled = true;
+      setTimeout(function () {
+        rsl.folders.forEach(function (f) { f.status = 'ok'; });
+        if (!rsl.count) rsl.count = 12;
+        banner.hidden = true;
+        renderRows(); renderRail();
+      }, 900);
+      return;
+    }
+    if (e.target.closest('[data-retry]')) { runScan(); return; }
+  });
+  device.addEventListener('input', function (e) {
+    if (e.target.matches('[data-libsearch]')) { state.filter = e.target.value; renderRows(); }
+    if (e.target.matches('[data-libname]') && state.draft.sel.length === 1) state.draft.names[state.draft.sel[0]] = e.target.value;
+  });
+  device.addEventListener('change', function (e) {
+    if (e.target.matches('[data-hideempty]')) { state.hideEmpty = e.target.checked; renderRail(); renderRows(); }
+  });
+  back.addEventListener('click', function () { show(order[Math.max(0, order.indexOf(state.screen) - 1)]); });
+  primary.addEventListener('click', function () {
+    if (state.screen === 'libraries') { state.draft = { sel: [], names: {}, folders: {} }; state.deniedNoteShown = false; show('types'); }
+    else if (state.screen === 'types') {
+      if (!state.draft.sel.length) return;
+      state.draft.sel.forEach(function (id) { state.draft.folders[id] = state.draft.folders[id] || []; });
+      var nm = document.querySelector('[data-libname]').value.trim();
+      if (state.draft.sel.length === 1 && nm) state.draft.names[state.draft.sel[0]] = nm;
+      show('folders');
+    }
+    else if (state.screen === 'folders') show('review');
+    else if (state.screen === 'review') {
+      if (reviewSlot() === 'success') {
+        state.draft.sel.forEach(function (id) {
+          var l = lib(id), paths = state.draft.folders[id] || [];
+          paths.forEach(function (p) { if (l.folders.every(function (f) { return f.path !== p; })) l.folders.push({ path: p, status: 'ok' }); });
+          if (paths.length && !l.count) l.count = 20 + paths.length * 9;
+          var nm2 = state.draft.names[id] || (state.draft.sel.length === 1 ? document.querySelector('[data-libname]').value.trim() : '');
+          if (nm2) l.name = nm2;
+        });
+        state.scenario = 'full';
+        renderRail(); renderRows(); renderSetupBar(); show('libraries');
+        document.querySelector('[data-out-message]').textContent = 'Libraries added — sidebar and table updated together';
+      } else runScan();
+    }
+  });
+  function runScan() {
+    var empty = state.draft.sel.every(function (id) { return !(state.draft.folders[id] || []).length; });
+    if (empty) { setReviewSlot('empty'); return; }
+    if (state.scenario === 'nasfail' && !state.reviewFailedOnce) {
+      state.reviewFailedOnce = true;
+      setReviewSlot('error');
+      return;
+    }
+    setReviewSlot('default');
+    var box = document.querySelector('[data-scanbox]');
+    box.hidden = false;
+    var fill = document.querySelector('[data-scanfill]');
+    var pct = document.querySelector('[data-scanpct]');
+    var n = state.draft.sel.length, found = 0, p = 0;
+    document.querySelector('[data-scanlabel]').textContent = 'Scanning ' + n + (n === 1 ? ' library…' : ' libraries…');
+    state.scanTimers.forEach(clearInterval); state.scanTimers = [];
+    var timer = setInterval(function () {
+      p = Math.min(100, p + 7 + Math.floor(Math.random() * 9));
+      found += 3 + Math.floor(Math.random() * 14);
+      fill.style.width = p + '%';
+      pct.textContent = p + '% · ' + found + ' found';
+      if (p >= 100) {
+        clearInterval(timer);
+        document.querySelector('[data-successtitle]').textContent = n === 1 ? 'Library added' : n + ' libraries added';
+        setReviewSlot('success');
+        primaryLabel.textContent = 'Done';
+      }
+    }, 160);
+    state.scanTimers.push(timer);
+  }
+
+  var clock = document.querySelector('[data-status-time]');
+  if (clock) {
+    var now = new Date();
+    clock.textContent = (now.getHours() % 12 || 12) + ':' + String(now.getMinutes()).padStart(2, '0');
+    clock.setAttribute('datetime', now.toISOString());
+  }
+  var hash = location.hash || '';
+  var hm = /scenario=([a-z]+)/.exec(hash);
+  if (hm && SCENARIOS[hm[1]]) {
+    state.scenario = hm[1];
+    var radio = document.querySelector('[data-scenario][value="' + hm[1] + '"]');
+    if (radio) radio.checked = true;
+  }
+  var hr = /rail=(before|after)/.exec(hash);
+  if (hr) {
+    state.railmode = hr[1];
+    pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-rail-btn]')), document.querySelector('[data-rail-btn="' + hr[1] + '"]'));
+  }
+  var hsurf = /surface=(mobile|tablet|desktop)/.exec(hash);
+  if (hsurf) {
+    frame.surface = hsurf[1];
+    pressGroup(Array.prototype.slice.call(document.querySelectorAll('[data-surface-btn]')), document.querySelector('[data-surface-btn="' + hsurf[1] + '"]'));
+  }
+  seed(state.scenario);
+  applyFrame();
+  resolve();
+  var hs = /screen=(libraries|types|folders|review)/.exec(hash);
+  if (hs) show(hs[1]);
+})();
+</script>
+</body>
+</html>

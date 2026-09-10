@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090909">
-  <title>LoomTV</title>
+  <title>Loom</title>
   <style>
     /* Sizes are in rem so the browser's own text-size setting scales the whole
        interface, and no container uses a fixed height that would clip enlarged text. */
@@ -83,7 +83,7 @@
   <div id="liveAlert" role="alert" aria-live="assertive" class="skip"></div>
 
   <div id="bootView" class="auth card">
-    <div class="eyebrow">LoomTV</div>
+    <div class="eyebrow">Loom</div>
     <h1>Connecting</h1>
     <p class="muted"><span class="spinner" aria-hidden="true"></span> Reading server capabilities…</p>
     <div id="bootStatus" class="status"></div>
@@ -91,9 +91,9 @@
   </div>
 
   <div id="authView" class="auth card hidden">
-    <div class="eyebrow">LoomTV hosted client</div>
+    <div class="eyebrow">Loom hosted client</div>
     <h1 id="authTitle">Sign in</h1>
-    <p id="authCopy" class="muted">Connect to your always-on LoomTV server.</p>
+    <p id="authCopy" class="muted">Connect to your always-on Loom Media Server.</p>
     <form id="authForm" class="form">
       <label id="nameField" class="hidden">Owner name<input id="name" autocomplete="name"></label>
       <label id="usernameField">Username<input id="username" autocomplete="username"></label>
@@ -406,10 +406,10 @@
         showOnly('authView');
         sessionMode = window.location.protocol === 'https:' ? 'cookie' : 'bearer';
         $('cleartextNotice').classList.toggle('hidden', sessionMode !== 'bearer');
-        $('authTitle').textContent = onboarding ? 'Create your LoomTV owner' : 'Sign in';
+        $('authTitle').textContent = onboarding ? 'Create your Loom owner' : 'Sign in';
         $('authCopy').textContent = onboarding
           ? 'Choose the first owner password to protect this server.'
-          : 'Connect to your always-on LoomTV server.';
+          : 'Connect to your always-on Loom Media Server.';
         $('nameField').classList.toggle('hidden', !onboarding);
         $('usernameField').classList.toggle('hidden', onboarding);
         $('authSubmit').textContent = onboarding ? 'Create owner' : 'Sign in';
@@ -895,8 +895,8 @@
       }
 
       function safeDownloadName(title) {
-        const normalized = String(title || 'LoomTV video').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
-        return `${normalized || 'LoomTV video'}.media`;
+        const normalized = String(title || 'Loom video').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+        return `${normalized || 'Loom video'}.media`;
       }
 
       function filenameFromDisposition(disposition, fallback) {
@@ -1434,7 +1434,7 @@
 
       $('createInvitation').onclick = () => createInvitation().catch((error) => handleFailure('sharingStatus', error));
       $('copyInvitation').onclick = async () => {
-        const text = `LoomTV invitation\nID: ${$('createdInvitationId').value}\nSecret: ${$('createdInvitationSecret').value}`;
+        const text = `Loom invitation\nID: ${$('createdInvitationId').value}\nSecret: ${$('createdInvitationSecret').value}`;
         try {
           await navigator.clipboard.writeText(text);
           setStatus('sharingStatus', 'Invitation copied. Send it through a private channel.');

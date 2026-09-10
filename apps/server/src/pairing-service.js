@@ -139,7 +139,7 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       const requestSecret = randomBytes(32).toString('base64url');
       const credentialSecret = randomBytes(32).toString('base64url');
       const encrypted = encryptCredentialSecret(requestSecret, credentialSecret);
-      const name = String(input.name || input.deviceName || 'LoomTV device').trim().slice(0, 80) || 'LoomTV device';
+      const name = String(input.name || input.deviceName || 'Loom device').trim().slice(0, 80) || 'Loom device';
       const kind = String(input.kind || input.platform || 'unknown').trim().toLowerCase().slice(0, 32) || 'unknown';
       const permissions = normalizePermissions(input.permissions);
       if (!isLocalNetworkAddress(input.address) && !permissions.includes('remote.access')) {

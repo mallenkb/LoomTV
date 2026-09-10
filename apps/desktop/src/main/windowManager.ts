@@ -114,7 +114,7 @@ export function createWindow(): void {
     // enough room to remain readable without overlapping.
     minWidth: 1180,
     minHeight: 768,
-    title: 'LoomTV',
+    title: 'Loom',
     show: false,
     ...windowChromeOptions(process.platform),
     // Native mpv renders in a borderless window behind LoomTV. Normal app

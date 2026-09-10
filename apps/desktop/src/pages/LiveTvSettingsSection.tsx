@@ -232,7 +232,7 @@ export default function LiveTvSettingsSection() {
           <DialogHeader>
             <DialogTitle className="text-[var(--loom-text)]">Edit live TV source</DialogTitle>
             <DialogDescription className="text-[var(--loom-muted)]">
-              Change how this source appears or where LoomTV loads its playlist and guide.
+              Change how this source appears or where Loom loads its playlist and guide.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -328,7 +328,7 @@ export default function LiveTvSettingsSection() {
           <CardTitle className="text-white">Add a live TV source</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
             Paste an M3U playlist URL from your provider. Add its XMLTV guide URL to get now-and-next
-            listings; if the playlist advertises its own guide, LoomTV uses that. Playlist, guide, and
+            listings; if the playlist advertises its own guide, Loom uses that. Playlist, guide, and
             channel URLs must all use HTTPS — plain-HTTP channels are skipped.
           </CardDescription>
         </CardHeader>

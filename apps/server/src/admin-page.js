@@ -24,10 +24,10 @@ export const DEFAULT_ADMIN_ICONS_PATH = path.resolve(MODULE_DIR, '../../desktop/
 
 const FALLBACK_ADMIN_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0a0a0a">
-<title>LoomTV server control</title><style>
+<title>Loom Media Server control</title><style>
 :root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#fafafa}
 body{display:grid;min-height:100vh;place-items:center;margin:0;padding:24px}main{max-width:560px;padding:30px;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(23,23,23,.88)}h1{margin:0 0 10px;color:#FC9C03}p{line-height:1.6;color:#a3a3a3}code{color:#FC9C03}
-</style></head><body><main><h1>LoomTV server</h1><p>The admin UI asset was not copied into this server image. Mount or package <code>admin.html</code>, then configure the server with its path.</p></main></body></html>`;
+</style></head><body><main><h1>Loom Media Server</h1><p>The admin UI asset was not copied into this server image. Mount or package <code>admin.html</code>, then configure the server with its path.</p></main></body></html>`;
 
 /**
  * @typedef {import('node:http').IncomingMessage} Request
@@ -307,7 +307,7 @@ export function createAdminApiHandler(options = {}) {
         if (typeof authenticate === 'function') {
           principal = await authenticate(req);
           if (!principal) {
-            writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid LoomTV admin token is required.' });
+            writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid Loom admin token is required.' });
             return true;
           }
           const permitted = typeof authorizePrincipal === 'function'
@@ -318,7 +318,7 @@ export function createAdminApiHandler(options = {}) {
             return true;
           }
         } else if (!await authorize(req, requiredPermission)) {
-          writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid LoomTV admin token is required.' });
+          writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid Loom admin token is required.' });
           return true;
         }
       } catch (error) {
@@ -326,7 +326,7 @@ export function createAdminApiHandler(options = {}) {
         if (isObject(error) && error.status === 503) {
           writeJson(res, 503, { error: 'state_unavailable', message: 'The server account state is temporarily unavailable.' });
         } else {
-          writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid LoomTV admin token is required.' });
+          writeJson(res, 401, { error: 'admin_auth_required', message: 'A valid Loom admin token is required.' });
         }
         return true;
       }
@@ -343,7 +343,7 @@ export function createAdminApiHandler(options = {}) {
         return true;
       }
       if (pathname === `${prefix}/onboarding/owner` && method === 'POST') {
-        if (configured) throw requestError(409, 'The LoomTV owner has already been created.');
+        if (configured) throw requestError(409, 'The Loom owner has already been created.');
         const body = await readJsonBody(req, maxBodyBytes);
         writeJson(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),

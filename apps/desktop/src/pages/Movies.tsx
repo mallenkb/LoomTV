@@ -98,7 +98,7 @@ function EmptyMoviesState({
         </div>
         <h3 className="text-2xl font-semibold text-white">Add a Movies folder</h3>
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
-          Choose a folder containing your films. LoomTV will scan it and build your movie library.
+          Choose a folder containing your films. Loom will scan it and build your movie library.
         </p>
         {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <Button onClick={onAddFolder} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">

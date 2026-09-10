@@ -1,6 +1,8 @@
-# Video roadmap
+# Product roadmap
 
-LoomTV is staying video-only for the current roadmap. Music, photos, books, comics, live TV, and DVR do not block this work.
+The active Electron expansion order is Photos, Music, Audiobooks, Books, then Comics and manga. Start with photo folders, nested browsing, All photos, and viewing. See [Media library expansion](multimedia-execution-plan.md) for the execution plan. Tauri is outside this work.
+
+The remaining sections track video and platform work alongside that expansion.
 
 ## Release and platform validation
 
@@ -16,7 +18,7 @@ LoomTV is staying video-only for the current roadmap. Music, photos, books, comi
 - Add an Android Chromecast sender and DLNA discovery/control without bypassing canonical cast-session authorization.
 - Add multiple saved-server switching to mobile and TV.
 - Add hosted device/session approval, naming, history, termination, invitation, download, and remote-policy management views.
-- Add clearer remote HTTPS certificate lifecycle and reverse-proxy readiness checks. LoomTV will remain private and self-hosted; no hosted relay or subscription is planned.
+- Add clearer remote HTTPS certificate lifecycle and reverse-proxy readiness checks. Loom will remain private and self-hosted; no hosted relay or subscription is planned.
 - Make scan jobs cancellable, throttled, scheduled, and resumable across process restarts for large NAS libraries.
 - Improve user-facing distinctions among an offline NAS, a removed file, a revoked capability, a decoder failure, and exhausted transcode capacity.
 
