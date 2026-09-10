@@ -158,14 +158,20 @@ function getDb(): BetterSqlite3.Database {
   if (db) return db;
 
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
-  db = new BetterSqlite3(databasePath());
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-  backupBeforeProfilesMigration(db);
-  migrateDatabase(db);
-  scheduleDatabaseMaintenance(db);
-  return db;
+  const connection = new BetterSqlite3(databasePath());
+  try {
+    connection.pragma('journal_mode = WAL');
+    connection.pragma('foreign_keys = ON');
+    connection.pragma('busy_timeout = 5000');
+    backupBeforeProfilesMigration(connection);
+    migrateDatabase(connection);
+    db = connection;
+    scheduleDatabaseMaintenance(connection);
+    return connection;
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
 }
 
 function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {

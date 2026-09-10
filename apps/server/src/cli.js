@@ -9,7 +9,7 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 const HELP = `Usage: loomtv-server [options]
 
-Starts the LoomTV headless HTTP service. The service exposes the runtime
+Starts the Loom Media Server headless HTTP service. The service exposes the runtime
 health contract, authenticated administration, catalog scanning, direct media
 delivery, and on-demand HLS transcoding without Electron.
 

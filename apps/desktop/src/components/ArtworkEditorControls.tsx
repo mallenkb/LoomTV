@@ -825,7 +825,7 @@ export default function ArtworkEditorControls({
         ? 'Choose a description returned by a metadata provider. Only the saved description will change.'
       : metadataApplyTarget === 'episodes'
         ? 'Choose a match to replace only the episode names. Artwork and the rest of the show metadata will stay unchanged.'
-        : 'Select the result you want to apply. LoomTV will update the poster, background, summary, rating, genres, and episode names from that source.';
+        : 'Select the result you want to apply. Loom will update the poster, background, summary, rating, genres, and episode names from that source.';
   const isArtworkTarget = metadataApplyTarget === 'cover' || metadataApplyTarget === 'poster' || metadataApplyTarget === 'logo';
   const metadataArtworkChoices = useMemo<MetadataArtworkChoice[]>(() => {
     if (!isArtworkTarget) return [];

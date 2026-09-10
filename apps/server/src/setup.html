@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0a0a0a">
-  <title>Set up LoomTV</title>
+  <title>Set up Loom</title>
   <style>
     :root {
       color-scheme: dark;
@@ -224,7 +224,7 @@
   <div class="page">
     <aside class="rail">
       <div>
-        <svg class="brand-logo" viewBox="0 0 86 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LoomTV">
+        <svg class="brand-logo" viewBox="0 0 86 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Loom">
           <path d="M27.3787 16.1202C27.0955 15.5557 26.9823 15.6686 26.9823 5H25V15.6686C25 17.3056 25.9628 18.8297 27.8884 18.8297H29.4742V16.9669H28.4548C27.8884 16.9669 27.5486 16.6847 27.3787 16.1202Z" fill="var(--loom-logo-word)" />
           <path d="M35.3639 8.8385C32.5888 8.8385 30.1534 10.9835 30.1534 13.9752C30.1534 16.5154 32.1357 18.9991 35.194 18.9991C38.3656 19.0555 40.2913 16.5718 40.2913 13.9752C40.3479 11.3222 38.1391 8.8385 35.3639 8.8385ZM35.3073 17.1928C33.3817 17.1928 32.0224 15.7816 32.0224 13.9188C32.0224 12.2818 33.3817 10.7577 35.194 10.7577C37.1197 10.7013 38.5355 12.1689 38.5355 13.9752C38.4789 15.6687 37.063 17.1928 35.3073 17.1928Z" fill="var(--loom-logo-word)" />
           <path d="M46.4636 8.83846C44.1981 8.83846 41.4796 10.6448 41.4796 13.9188C41.4796 16.9105 43.745 18.9426 46.4636 18.9426C49.1821 18.999 51.7873 16.9669 51.7873 13.9752C51.844 10.9835 49.352 8.78202 46.9733 8.83846H46.4636ZM46.5202 17.1927C44.7645 17.1927 43.292 15.838 43.292 13.9188C43.292 12.1689 44.8211 10.7577 46.3503 10.7577H46.5768C48.1626 10.7012 49.9184 11.9995 49.9184 13.9188C49.9184 15.7815 48.4458 17.1927 46.5202 17.1927Z" fill="var(--loom-logo-word)" />
@@ -245,7 +245,7 @@
 
     <main class="panel card" id="card" aria-live="polite">
       <div class="card-head">
-        <h1 id="cardTitle">Starting LoomTV...</h1>
+        <h1 id="cardTitle">Starting Loom...</h1>
         <p id="cardCopy">Checking whether this server has been set up.</p>
       </div>
       <div class="card-body">
@@ -319,7 +319,7 @@
         <!-- Step 4 · Ready -->
         <section id="stepReady" hidden>
           <div class="summary" id="readySummary"></div>
-          <p class="notice"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#scan-search"></use></svg><span>LoomTV is matching titles, episode details, posters, and backdrops. Home opens when your library is ready.</span></p>
+          <p class="notice"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#scan-search"></use></svg><span>Loom is matching titles, episode details, posters, and backdrops. Home opens when your library is ready.</span></p>
           <div class="ready-progress" id="readyProgress" data-state="working" role="status" aria-live="polite">
             <div class="ready-progress-track" aria-hidden="true"><div class="ready-progress-bar"></div></div>
             <p class="ready-progress-copy" id="readyProgressCopy">Preparing your library...</p>
@@ -385,7 +385,7 @@
         account: ['Create your account', 'Set the owner account and server name.'],
         libraries: ['Add your libraries', 'Choose the folders that hold your videos.'],
         metadata: ['Add API keys', 'Optional. Add any metadata services you use.'],
-        ready: ['Preparing your library', 'Keep LoomTV open while setup finishes your metadata and artwork.'],
+        ready: ['Preparing your library', 'Keep Loom open while setup finishes your metadata and artwork.'],
       };
       const LIBRARY_SECTIONS = [
         { kind: 'movies', title: 'Movies', description: 'Folders added here always scan into Movies.' },
@@ -507,7 +507,7 @@
         const offline = state.roots.filter((root) => root.state !== 'online').length;
         const configuredProviders = state.metadata?.configuredProviders || [];
         const rows = [
-          ['Server', state.status?.serverName || 'LoomTV'],
+          ['Server', state.status?.serverName || 'Loom Media Server'],
           ['Libraries', state.roots.length ? `${state.roots.length} folder${state.roots.length === 1 ? '' : 's'}${offline ? `, ${offline} unavailable` : ''}` : 'None yet'],
           ['Metadata', configuredProviders.length ? configuredProviders.map((provider) => METADATA_PROVIDERS.find((entry) => entry.id === provider)?.label || provider).join(', ') : 'Set up later'],
         ];
@@ -710,7 +710,7 @@
           ? 'Type a server path, or Browse device to open Finder or Explorer.'
           : serverBrowser
             ? 'Type the full server path, or Browse server to choose a mounted folder.'
-            : 'Type the full path to a folder that the LoomTV server can read.';
+            : 'Type the full path to a folder that the Loom Media Server can read.';
         $('rootPath').value = '';
         fieldError('folderDialogError', '');
         $('picker').hidden = true;
@@ -823,7 +823,7 @@
         try {
           const result = await api('/setup/complete', { method: 'POST', body: { returnTo } });
           $('readyProgress').dataset.state = 'complete';
-          $('readyProgressCopy').textContent = 'Library ready. Opening LoomTV...';
+          $('readyProgressCopy').textContent = 'Library ready. Opening Loom...';
           window.location.replace(result.redirect || (returnTo === 'admin' ? '/admin/' : '/app/'));
         } catch (error) {
           state.finishing = false;
@@ -881,7 +881,7 @@
           if (!status.ownerConfigured) { showStep('account'); window.setTimeout(() => $('ownerName').focus(), 0); return; }
           await enterStep(status.step === 'account' ? 'libraries' : status.step);
         } catch (error) {
-          $('cardTitle').textContent = 'LoomTV is not answering';
+          $('cardTitle').textContent = 'Loom is not answering';
           $('cardCopy').textContent = 'Setup could not reach this server. Check that it is running, then reload this page.';
           showError(error.message);
           $('actions').hidden = true;

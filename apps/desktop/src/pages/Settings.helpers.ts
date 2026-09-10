@@ -24,13 +24,13 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
 export const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';
 
 export const LOADER_OPTIONS: { id: AppLoaderStyle; label: string; description: string }[] = [
-  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the LoomTV logo.' },
+  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the Loom logo.' },
   { id: 'logo-mark', label: 'Logo Only', description: 'Compact logo-only loader for tighter surfaces.' },
-  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full LoomTV wordmark animation for branded screens.' },
+  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full Loom wordmark animation for branded screens.' },
 ];
 
 export const APP_LICENSE = {
-  name: 'LoomTV',
+  name: 'Loom',
   license: 'MIT',
   copyright: 'Copyright (c) 2026 malllenkb',
 };
@@ -69,15 +69,14 @@ export const THIRD_PARTY_DEPENDENCIES = [
 ];
 
 export const METADATA_ATTRIBUTIONS = [
-  { name: 'Cinemeta / Stremio', details: 'Movie and TV discovery catalogs and metadata when no TMDB key is configured.', url: 'https://v3-cinemeta.strem.io/' },
-  { name: 'OpenSubtitles v3 / Stremio', details: 'Online subtitles from OpenSubtitles, delivered by the official Stremio v3 add-on. Discovered through the Stremio official add-on registry.', url: 'https://github.com/Stremio/stremio-official-addons' },
-  { name: 'OpenSubtitles', details: 'Subtitle service and community contributions. Subtitle content is subject to the provider\'s terms, not the registry\'s MIT license.', url: 'https://www.opensubtitles.org/' },
   { name: 'TMDB', details: 'Movie and TV posters, backdrops, cast data, ratings, and metadata.', url: 'https://www.themoviedb.org/' },
   { name: 'TheTVDB', details: 'TV series, season, episode, and artwork metadata.', url: 'https://thetvdb.com/' },
   { name: 'TVmaze', details: 'Keyless TV discovery, ratings, and show and episode metadata. TVmaze data is provided under CC BY-SA.', url: 'https://www.tvmaze.com/api' },
   { name: 'Jikan / MyAnimeList', details: 'Anime posters, ratings, and anime metadata.', url: 'https://jikan.moe/' },
   { name: 'OMDb API', details: 'Ratings for movies and completed series, plus fallback title metadata.', url: 'https://www.omdbapi.com/' },
   { name: 'Fanart.tv', details: 'Clearlogos and media-center artwork.', url: 'https://fanart.tv/' },
+  { name: 'Cinemeta / Stremio', details: 'Movie and TV discovery catalogs and metadata when no TMDB key is configured.', url: 'https://v3-cinemeta.strem.io/' },
+  { name: 'OpenSubtitles v3 / Stremio', details: 'Online subtitles from OpenSubtitles, delivered by the official Stremio v3 add-on. Discovered through the Stremio official add-on registry.', url: 'https://github.com/Stremio/stremio-official-addons' },
 ];
 
 export function normalizeProviderId(value: string): string {

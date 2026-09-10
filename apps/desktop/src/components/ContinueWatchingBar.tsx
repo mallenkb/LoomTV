@@ -439,7 +439,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
                 onError={() => setFailedSources((previous) => [...previous, thumbnailSrc])}
               />
             ) : (
-              <span className="flex h-full w-full items-center justify-center text-[10px] text-[var(--loom-faint)]">LoomTV</span>
+              <span className="flex h-full w-full items-center justify-center text-[10px] text-[var(--loom-faint)]">Loom</span>
             )}
             <span className="absolute inset-0 grid place-items-center bg-transparent transition-colors group-hover:bg-black/15">
               <Play className="h-8 w-8 fill-current text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />

@@ -464,7 +464,7 @@ export function createCanonicalVideoServer(options) {
         jsonResponse(res, 200, {
           ok: true,
           service: SERVICE_NAME,
-          message: 'LoomTV headless service is running.',
+          message: 'Loom Media Server headless service is running.',
           health: '/api/health',
         }, req.method);
         return;

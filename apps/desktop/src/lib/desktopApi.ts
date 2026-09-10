@@ -569,7 +569,7 @@ function normalizeLocalNetworkBaseUrl(value: string): string {
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const parsed = new URL(withProtocol);
   if (parsed.protocol !== 'https:') throw new Error('Enter a secure HTTPS address.');
-  if (!parsed.port) throw new Error('Include the secure port shown by the LoomTV host.');
+  if (!parsed.port) throw new Error('Include the secure port shown by the Loom Media Server host.');
   return parsed.origin;
 }
 
@@ -592,7 +592,7 @@ async function refreshRemoteCredentials(): Promise<ReturnType<typeof getRemoteDe
   const response = await fetchRequestWithTimeout(`${session.baseUrl}/api/v2/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...REMOTE_PROFILE_API_HEADER },
-    body: JSON.stringify({ refreshToken: session.refreshToken, deviceName: 'LoomTV Desktop' }),
+    body: JSON.stringify({ refreshToken: session.refreshToken, deviceName: 'Loom Desktop' }),
   }, REMOTE_REQUEST_TIMEOUT_MS);
   if (!response.ok) {
     clearRemoteDesktopSession();
@@ -609,7 +609,7 @@ async function refreshRemoteCredentials(): Promise<ReturnType<typeof getRemoteDe
 
 async function remoteRequest(pathname: string, init: RequestInit = {}, retry = true): Promise<Response> {
   if (window.desktopApi?.remoteLibraryRequest) {
-    if (!isRemoteDesktopMode()) throw new Error('This laptop is not connected to a LoomTV host.');
+    if (!isRemoteDesktopMode()) throw new Error('This laptop is not connected to a Loom Media Server host.');
     const headers = Object.fromEntries(new Headers(init.headers).entries());
     const result = await window.desktopApi.remoteLibraryRequest(pathname, {
       method: (init.method || 'GET') as RemoteLibraryRequest['method'],
@@ -621,7 +621,7 @@ async function remoteRequest(pathname: string, init: RequestInit = {}, retry = t
   }
 
   let session = getRemoteDesktopSession();
-  if (!session || !isRemoteDesktopMode()) throw new Error('This laptop is not connected to a LoomTV host.');
+  if (!session || !isRemoteDesktopMode()) throw new Error('This laptop is not connected to a Loom Media Server host.');
   if (session.accessTokenExpiresAt <= Date.now() + 60_000) {
     session = await refreshRemoteCredentials();
   }
@@ -710,7 +710,7 @@ async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
     }
   }
 
-  throw new Error('No LoomTV host was discovered. Select a host or enter its IP address manually.');
+  throw new Error('No Loom Media Server host was discovered. Select a host or enter its IP address manually.');
 }
 
 function bearerHeaders(token: string, init?: RequestInit): RequestInit {
@@ -919,7 +919,7 @@ const desktopTransport = {
         isTranscoded: plan?.sourceAction === 'transcode',
         isRemuxed: plan?.mode === 'remux',
         playbackMode: plan?.mode || 'direct-stream',
-        decisionReason: plan?.reason || 'Signed stream supplied by the paired LoomTV host',
+        decisionReason: plan?.reason || 'Signed stream supplied by the paired Loom Media Server host',
       };
     }
     if (window.desktopApi) {
@@ -1104,7 +1104,7 @@ const desktopTransport = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code: normalizedCode,
-        deviceName: 'LoomTV browser',
+        deviceName: 'Loom browser',
       }),
     }, REMOTE_REQUEST_TIMEOUT_MS);
     if (!response.ok) {
@@ -1289,7 +1289,7 @@ const desktopTransport = {
 
   async addLibraryFolderPath(kind: LibraryFolderKind, folderPath: string): Promise<LibraryIndexPayload> {
     if (window.desktopApi?.addLibraryFolderPath) return window.desktopApi.addLibraryFolderPath(kind, folderPath);
-    throw new Error('Folders can only be added from the LoomTV host desktop app.');
+    throw new Error('Folders can only be added from the Loom Media Server host desktop app.');
   },
 
   async removeLibraryFolder(folderPath: string): Promise<LibraryIndexPayload> {
@@ -1302,14 +1302,14 @@ const desktopTransport = {
 
   async pickLibraryFolder(currentPath?: string): Promise<string | null> {
     if (window.desktopApi?.pickLibraryFolder) return window.desktopApi.pickLibraryFolder(currentPath);
-    throw new Error('Folders can only be selected from the LoomTV host desktop app.');
+    throw new Error('Folders can only be selected from the Loom Media Server host desktop app.');
   },
 
   async updateLibraryFolder(folderPath: string, nextFolderPath: string, kind: LibraryFolderKind): Promise<LibraryIndexPayload> {
     if (window.desktopApi?.updateLibraryFolder) {
       return window.desktopApi.updateLibraryFolder(folderPath, nextFolderPath, kind);
     }
-    throw new Error('Folder paths can only be edited from the LoomTV host desktop app.');
+    throw new Error('Folder paths can only be edited from the Loom Media Server host desktop app.');
   },
 
   async getMediaServerPort(): Promise<number> {
@@ -1503,7 +1503,7 @@ const desktopTransport = {
 
   async chooseProfileAvatar(): Promise<string | null> {
     if (window.desktopApi?.chooseProfileAvatar) return window.desktopApi.chooseProfileAvatar();
-    throw new Error('Profile images can only be selected from the LoomTV desktop app.');
+    throw new Error('Profile images can only be selected from the Loom desktop app.');
   },
 
   async getActiveProfileState(): Promise<ActiveProfileState> {
@@ -1524,17 +1524,17 @@ const desktopTransport = {
       return payload.profiles || [payload.profile];
     }
     if (window.desktopApi?.createProfile) return window.desktopApi.createProfile(input);
-    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+    throw new Error('Profiles can only be managed from the Loom desktop app.');
   },
 
   async updateProfile(profileId: string, patch: ProfileUpdateInput): Promise<ProfileSummary[]> {
     if (window.desktopApi?.updateProfile) return window.desktopApi.updateProfile(profileId, patch);
-    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+    throw new Error('Profiles can only be managed from the Loom desktop app.');
   },
 
   async deleteProfile(profileId: string): Promise<ProfileSummary[]> {
     if (window.desktopApi?.deleteProfile) return window.desktopApi.deleteProfile(profileId);
-    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+    throw new Error('Profiles can only be managed from the Loom desktop app.');
   },
   async exportProfile(profileId: string): Promise<ProfileTransferResult> {
     return window.desktopApi?.exportProfile?.(profileId) || { ok: false, error: 'Profile export is unavailable.' };
@@ -1564,7 +1564,7 @@ const desktopTransport = {
   async selectGuestProfile(): Promise<ProfileSummary> {
     if (isRemoteDesktopMode()) return this.selectProfile('guest');
     if (window.desktopApi?.selectGuestProfile) return window.desktopApi.selectGuestProfile();
-    throw new Error('Guest is available only in the LoomTV desktop app.');
+    throw new Error('Guest is available only in the Loom desktop app.');
   },
 
   async lockProfile(): Promise<ActiveProfileState> {
@@ -1579,17 +1579,17 @@ const desktopTransport = {
 
   async reorderProfiles(profileIds: string[]): Promise<ProfileSummary[]> {
     if (window.desktopApi?.reorderProfiles) return window.desktopApi.reorderProfiles(profileIds);
-    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+    throw new Error('Profiles can only be managed from the Loom desktop app.');
   },
 
   async changeProfilePin(profileId: string, pin: string | null): Promise<ProfileSummary> {
     if (window.desktopApi?.changeProfilePin) return window.desktopApi.changeProfilePin(profileId, pin);
-    throw new Error('Profile PINs can only be managed from the LoomTV desktop app.');
+    throw new Error('Profile PINs can only be managed from the Loom desktop app.');
   },
 
   async resetOwnerProfile(confirmation: string): Promise<ProfileSummary> {
     if (window.desktopApi?.resetOwnerProfile) return window.desktopApi.resetOwnerProfile(confirmation);
-    throw new Error('The Owner can only be reset from the LoomTV desktop app.');
+    throw new Error('The Owner can only be reset from the Loom desktop app.');
   },
 
   async setAutomaticProfileSignIn(enabled: boolean): Promise<ActiveProfileState> {
@@ -1945,7 +1945,7 @@ const desktopTransport = {
         releaseUrl: release.html_url,
         checkedAt: new Date().toISOString(),
         message: latestVersion
-          ? `Latest release is LoomTV ${latestVersion}.`
+          ? `Latest release is Loom ${latestVersion}.`
           : 'Checked for updates.',
       };
     } catch (error) {

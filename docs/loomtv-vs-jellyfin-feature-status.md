@@ -49,7 +49,7 @@ The following are not complete in the current video scope:
 - Collections, playlists beyond profile lists, editions, alternate versions, extras, local NFO import/export, and trickplay thumbnails.
 - Webhooks, notifications, synchronized watch rooms, live TV, and DVR.
 
-Music, photos, books, and comics are intentionally outside the current video-only product scope.
+Electron support for other media is planned in this order: Photos, Music, Audiobooks, Books, then Comics and manga. The first photo folder workflow is implemented in source, with runtime and visual verification still outstanding. See [the execution plan](multimedia-execution-plan.md). This status table continues to describe video capabilities.
 
 ## Evidence commands
 
