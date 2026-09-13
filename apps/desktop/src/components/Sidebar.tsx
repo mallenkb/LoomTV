@@ -777,7 +777,10 @@ export default function Sidebar() {
               }}
               disabled={updateState?.status !== 'downloaded'}
               className={cn(
-                'relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] disabled:cursor-wait',
+                'relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full disabled:cursor-wait',
+                updateState?.status === 'downloading'
+                  ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
+                  : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
                 updateState?.status === 'downloaded'
                   ? 'hover:bg-[var(--loom-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--loom-accent)]'
                   : 'cursor-wait',
@@ -788,7 +791,7 @@ export default function Sidebar() {
             >
               {updateState?.status === 'downloading' && (
                 <span
-                  className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent-foreground)]/20 transition-[height] duration-300"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)] transition-[height] duration-300"
                   style={{ height: `${updateDownloadPercent}%` }}
                   aria-hidden="true"
                 />
@@ -974,7 +977,10 @@ export default function Sidebar() {
               }}
               disabled={updateState?.status !== 'downloaded'}
               className={cn(
-                'relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors disabled:cursor-wait',
+                'relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg px-3 text-xs font-semibold transition-colors disabled:cursor-wait',
+                updateState?.status === 'downloading'
+                  ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
+                  : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
                 updateState?.status === 'downloaded' ? 'hover:bg-[var(--loom-accent-hover)]' : 'cursor-wait',
               )}
               title={updateState?.message || 'Update Loom'}
@@ -983,7 +989,7 @@ export default function Sidebar() {
             >
               {updateState?.status === 'downloading' && (
                 <span
-                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent-foreground)]/20 transition-[width] duration-300"
+                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent)] transition-[width] duration-300"
                   style={{ width: `${updateDownloadPercent}%` }}
                   aria-hidden="true"
                 />

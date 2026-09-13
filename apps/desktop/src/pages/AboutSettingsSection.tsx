@@ -108,7 +108,10 @@ export default function AboutSettingsSection({
                 onClick={onUpdateAction}
                 disabled={isUpdateBusy}
                 className={cn(
-                  'relative inline-flex h-9 min-w-36 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors',
+                  'relative inline-flex h-9 min-w-36 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 text-xs font-semibold transition-colors',
+                  isUpdateDownloading
+                    ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
+                    : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
                   isUpdateBusy
                     ? 'cursor-wait shadow-inner shadow-black/20'
                     : 'hover:bg-[var(--loom-accent-hover)]',
@@ -117,7 +120,7 @@ export default function AboutSettingsSection({
               >
                 {isUpdateDownloading && (
                   <span
-                    className="pointer-events-none absolute inset-y-0 left-0 bg-black/20 transition-[width] duration-300"
+                    className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent)] transition-[width] duration-300"
                     style={{ width: `${updateDownloadPercent}%` }}
                     aria-hidden="true"
                   />

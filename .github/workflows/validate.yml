@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: validate-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Validate the latest commit instead of making it wait for an older run.
+  cancel-in-progress: true
 
 jobs:
   code:
@@ -236,11 +237,11 @@ jobs:
 
   unsigned-package:
     name: Unsigned package smoke (${{ matrix.platform }})
+    # Desktop packages do not consume mobile build outputs. Mobile checks still
+    # run and must pass for the overall workflow to succeed.
     needs:
       - code
       - supply-chain
-      - mobile-android-config
-      - mobile-ios-native
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     permissions:
