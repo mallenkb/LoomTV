@@ -870,11 +870,11 @@ export default function ArtworkEditorControls({
         },
       };
     }).sort((left, right) => (
-      ARTWORK_PROVIDER_PRIORITY[left.candidate.source] - ARTWORK_PROVIDER_PRIORITY[right.candidate.source]
-      || artworkResolutionRank(metadataArtworkDimensions[left.imageUrl], artworkTarget)
+      artworkResolutionRank(metadataArtworkDimensions[left.imageUrl], artworkTarget)
       - artworkResolutionRank(metadataArtworkDimensions[right.imageUrl], artworkTarget)
       || artworkPixelArea(metadataArtworkDimensions[right.imageUrl])
         - artworkPixelArea(metadataArtworkDimensions[left.imageUrl])
+      || ARTWORK_PROVIDER_PRIORITY[left.candidate.source] - ARTWORK_PROVIDER_PRIORITY[right.candidate.source]
       || left.imageUrl.localeCompare(right.imageUrl)
     ));
   }, [failedMetadataArtwork, isArtworkTarget, metadataApplyTarget, metadataArtworkDimensions, metadataCandidates]);
