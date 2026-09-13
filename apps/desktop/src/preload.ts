@@ -119,6 +119,11 @@ const desktopApi = {
   publishMediaSession: (snapshot: MediaSessionSnapshot): Promise<MediaSessionDiagnostics> =>
     ipcRenderer.invoke('media-control:publish', snapshot),
   releaseMediaSession: () => ipcRenderer.invoke('media-control:release'),
+  onPlaybackSleepTimerReset: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('playback:sleep-timer-reset', handler);
+    return () => ipcRenderer.removeListener('playback:sleep-timer-reset', handler);
+  },
   onMediaSessionCommand: (
     callback: (command: MediaSessionCommand, handledInMain: boolean) => void,
   ) => {

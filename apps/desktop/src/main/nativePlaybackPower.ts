@@ -8,7 +8,7 @@ type NativePlaybackPowerState = {
 
 type PlaybackPowerSession = {
   timeoutMinutes: number;
-  expired: boolean;
+  pauseBeforeSleep: () => void;
   timer: NodeJS.Timeout | null;
 };
 
@@ -25,7 +25,7 @@ function configuredTimeoutMinutes(): number {
 }
 
 function reconcileDisplaySleepBlocker(): void {
-  const shouldBlock = [...playbackSessions.values()].some((session) => !session.expired);
+  const shouldBlock = playbackSessions.size > 0;
   try {
     if (shouldBlock) {
       if (displaySleepBlockerId === null || !powerSaveBlocker.isStarted(displaySleepBlockerId)) {
@@ -46,13 +46,17 @@ function reconcileDisplaySleepBlocker(): void {
 function resetSessionTimer(session: PlaybackPowerSession, timeoutMinutes: number): void {
   if (session.timer) clearTimeout(session.timer);
   session.timeoutMinutes = timeoutMinutes;
-  session.expired = false;
   session.timer = null;
   if (timeoutMinutes <= 0) return;
   session.timer = setTimeout(() => {
     session.timer = null;
-    session.expired = true;
-    reconcileDisplaySleepBlocker();
+    // Keep the blocker until the engine reports paused or the session closes.
+    // Sending a pause command alone does not confirm playback has stopped.
+    try {
+      session.pauseBeforeSleep();
+    } catch (error) {
+      console.warn('[playback] Could not pause playback for the sleep timer:', error);
+    }
   }, timeoutMinutes * 60_000);
   session.timer.unref();
 }
@@ -61,6 +65,7 @@ function resetSessionTimer(session: PlaybackPowerSession, timeoutMinutes: number
 export function syncNativePlaybackDisplaySleep(
   sessionId: string,
   state: NativePlaybackPowerState,
+  pauseBeforeSleep: () => void,
 ): void {
   const shouldBlock = (state.status === 'loading' || state.status === 'ready') && state.paused !== true;
   const existing = playbackSessions.get(sessionId);
@@ -71,10 +76,13 @@ export function syncNativePlaybackDisplaySleep(
     return;
   }
 
-  if (existing) return;
+  if (existing) {
+    existing.pauseBeforeSleep = pauseBeforeSleep;
+    return;
+  }
 
   const timeoutMinutes = configuredTimeoutMinutes();
-  const session: PlaybackPowerSession = { timeoutMinutes, expired: false, timer: null };
+  const session: PlaybackPowerSession = { timeoutMinutes, pauseBeforeSleep, timer: null };
   resetSessionTimer(session, timeoutMinutes);
   playbackSessions.set(sessionId, session);
   reconcileDisplaySleepBlocker();

@@ -203,6 +203,9 @@ export default function Settings() {
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
   const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
+  useEffect(() => window.desktopApi?.onPlaybackSleepTimerReset?.(() => {
+    setPlaybackDisplaySleepTimeoutMinutes(0);
+  }), []);
   const [savedPlaybackSettings, setSavedPlaybackSettings] = useState<SavedPlaybackSettings | null>(null);
   const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);

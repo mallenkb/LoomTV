@@ -307,7 +307,12 @@ class LibMpvSession {
 
   private emit(patch: Partial<MpvPlaybackState>): void {
     this.state = { ...this.state, ...patch, sessionId: this.id };
-    syncNativePlaybackDisplaySleep(this.id, this.state);
+    syncNativePlaybackDisplaySleep(this.id, this.state, () => {
+      if (!this.owner.isDestroyed()) {
+        this.owner.send('media-control:command', { type: 'pause' }, true);
+      }
+      this.command({ type: 'set-paused', paused: true });
+    });
     if (!this.owner.isDestroyed()) this.owner.send('mpv:state', { ...patch, sessionId: this.id, status: this.state.status });
   }
 

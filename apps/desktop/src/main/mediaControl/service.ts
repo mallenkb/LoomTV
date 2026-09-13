@@ -82,6 +82,7 @@ export type MediaSessionController = {
   publish: (owner: MediaSessionOwner, snapshot: unknown) => MediaSessionDiagnostics;
   release: (ownerId: number) => boolean;
   releaseAll: () => void;
+  pause: () => void;
   diagnostics: () => MediaSessionDiagnostics;
   ownerId: () => number | null;
   /** Latest published snapshot, for tests and for artwork re-publication. */
@@ -260,8 +261,8 @@ export function createMediaSessionController(
       awaitingPlayToReclaim = false;
 
       startAdapter();
-      if (!adapter) return diagnostics();
 
+      // Power management still needs playback state when OS media controls fail.
       if (ownerChanged || isMediaSessionDiscontinuity(published, snapshot)) {
         published = snapshot;
         publishSnapshot(snapshot);
@@ -280,6 +281,8 @@ export function createMediaSessionController(
     },
 
     releaseAll,
+
+    pause: () => routeCommand({ type: 'pause' }),
 
     diagnostics,
 

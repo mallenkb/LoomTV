@@ -23,7 +23,7 @@ import {
   describeErrorForLog,
 } from './main/serverSecurity';
 import { isTrustedIpcSender } from './main/trustedIpcSender.ts';
-import { releaseAllMediaSessions } from './main/systemMediaKeys.ts';
+import { initializePlaybackPowerMonitoring, releaseAllMediaSessions } from './main/systemMediaKeys.ts';
 import {
   destroyLanDiscovery,
   discoverLanPeers,
@@ -2253,6 +2253,7 @@ async function startBackgroundServices(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');
   applyAppIcon();
   prepareDesktopProfileStartup();

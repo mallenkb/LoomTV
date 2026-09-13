@@ -448,6 +448,9 @@ export default function VideoPlayer({
   const [rotation, setRotation] = useState<RotationMode>(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [displaySleepTimeoutMinutes, setDisplaySleepTimeoutMinutes] = useState(0);
+  useEffect(() => window.desktopApi?.onPlaybackSleepTimerReset?.(() => {
+    setDisplaySleepTimeoutMinutes(0);
+  }), []);
   const [displaySleepTimerRemainingSeconds, setDisplaySleepTimerRemainingSeconds] = useState<number | null>(null);
   const [displaySleepTimeoutError, setDisplaySleepTimeoutError] = useState('');
   const [audioDelay, setAudioDelay] = useState(0);
@@ -697,13 +700,28 @@ export default function VideoPlayer({
       return undefined;
     }
     const deadline = Date.now() + fullDurationSeconds * 1_000;
+    // Desktop timers run in main, including Chromium playback. The web client
+    // has no main process, so enforce its deadline on media events as well.
+    const browserVideo = !window.desktopApi?.publishMediaSession ? videoRef.current : null;
     const updateRemaining = () => {
-      setDisplaySleepTimerRemainingSeconds(Math.max(0, Math.ceil((deadline - Date.now()) / 1_000)));
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1_000));
+      setDisplaySleepTimerRemainingSeconds(remaining);
+      if (remaining === 0 && browserVideo) {
+        userPausedRef.current = true;
+        browserVideo.autoplay = false;
+        browserVideo.pause();
+      }
     };
     updateRemaining();
     const timer = window.setInterval(updateRemaining, 1_000);
-    return () => window.clearInterval(timer);
-  }, [displaySleepTimeoutMinutes, paused]);
+    browserVideo?.addEventListener('timeupdate', updateRemaining);
+    browserVideo?.addEventListener('playing', updateRemaining);
+    return () => {
+      window.clearInterval(timer);
+      browserVideo?.removeEventListener('timeupdate', updateRemaining);
+      browserVideo?.removeEventListener('playing', updateRemaining);
+    };
+  }, [displaySleepTimeoutMinutes, paused, filePath]);
 
   const hasEpisodes = episodes.length > 0 && episodeFiles.length > 0;
   const videoTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'video'), [mediaTracks]);
@@ -3325,9 +3343,17 @@ export default function VideoPlayer({
       case 'play':
         if (paused) togglePlay();
         break;
-      case 'pause':
-        if (!paused) togglePlay();
+      case 'pause': {
+        userPausedRef.current = true;
+        const engine = playbackEngineRef.current;
+        if (engine) {
+          void engine.pause().catch((error) => console.warn('[player] Pause failed:', error));
+        } else if (videoRef.current) {
+          videoRef.current.autoplay = false;
+          videoRef.current.pause();
+        }
         break;
+      }
       case 'toggle':
         togglePlay();
         break;

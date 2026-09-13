@@ -257,6 +257,7 @@ export type DesktopBridgeApi = {
       onFullscreenChanged?: (callback: (fullscreen: boolean) => void) => () => void;
       publishMediaSession?: (snapshot: MediaSessionSnapshot) => Promise<MediaSessionDiagnostics>;
       releaseMediaSession?: () => Promise<boolean>;
+      onPlaybackSleepTimerReset?: (callback: () => void) => () => void;
       onMediaSessionCommand?: (
         callback: (command: MediaSessionCommand, handledInMain: boolean) => void,
       ) => () => void;

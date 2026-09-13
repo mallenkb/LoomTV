@@ -225,6 +225,7 @@ export type IpcInvokeChannel = keyof IpcContract;
 export interface IpcEventContract {
   'libvlc:state': { args: [state: LibVlcPlaybackState] };
   'window:fullscreen-changed': { args: [fullscreen: boolean] };
+  'playback:sleep-timer-reset': { args: [] };
   'media-control:command': { args: [command: MediaSessionCommand, handledInMain: boolean] };
   'library:scan-progress': { args: [progress: import('./desktopProtocol.ts').LibraryScanProgress] };
   'profile:active-changed': { args: [state: ActiveProfileState] };

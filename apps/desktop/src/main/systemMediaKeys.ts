@@ -1,4 +1,4 @@
-import { app, BrowserWindow, type WebContents } from 'electron';
+import { app, BrowserWindow, powerMonitor, type WebContents } from 'electron';
 import path from 'node:path';
 import type { MediaSessionDiagnostics, MediaSessionSnapshot } from '../shared/mediaControlProtocol.ts';
 import { commandLibVlcPlayback } from './libvlcPlayback.ts';
@@ -7,6 +7,8 @@ import { createArtworkStaging } from './mediaControl/artworkStaging.ts';
 import { mediaSessionAdapterCandidates } from './mediaControl/adapters.ts';
 import { createEngineDispatcher } from './mediaControl/engineDispatch.ts';
 import { createMediaSessionController } from './mediaControl/service.ts';
+import { refreshNativePlaybackDisplaySleepTimeout, releaseNativePlaybackDisplaySleep, syncNativePlaybackDisplaySleep } from './nativePlaybackPower';
+import { loadSettings, saveSettings } from './settings';
 
 /**
  * Electron glue for LoomTV's system media session.
@@ -21,6 +23,45 @@ import { createMediaSessionController } from './mediaControl/service.ts';
  * `playback:activity`: one governs transcoder scheduling, the other governs who
  * owns the operating system's media session.
  */
+
+let rendererPowerSessionId: string | null = null;
+let powerMonitoringStarted = false;
+
+function releaseRendererPlaybackPower(): void {
+  if (rendererPowerSessionId) releaseNativePlaybackDisplaySleep(rendererPowerSessionId);
+  rendererPowerSessionId = null;
+}
+
+function syncRendererPlaybackPower(): void {
+  const snapshot = controller.snapshot();
+  if (snapshot?.engine !== 'chromium' || snapshot.state !== 'playing') {
+    releaseRendererPlaybackPower();
+    return;
+  }
+  const sessionId = `media-session:chromium:${controller.ownerId()}:${snapshot.sessionId}`;
+  if (rendererPowerSessionId !== sessionId) releaseRendererPlaybackPower();
+  rendererPowerSessionId = sessionId;
+  syncNativePlaybackDisplaySleep(sessionId, { status: 'ready' }, () => controller.pause());
+}
+
+export function initializePlaybackPowerMonitoring(): void {
+  if (powerMonitoringStarted) return;
+  powerMonitoringStarted = true;
+  powerMonitor.on('lock-screen', pauseForDeviceInactivity);
+  powerMonitor.on('suspend', pauseForDeviceInactivity);
+  powerMonitor.on('user-did-resign-active', pauseForDeviceInactivity);
+}
+
+function pauseForDeviceInactivity(): void {
+  controller.pause();
+  const settings = loadSettings();
+  if (!settings.playbackDisplaySleepTimeoutMinutes) return;
+  saveSettings({ ...settings, playbackDisplaySleepTimeoutMinutes: 0 });
+  refreshNativePlaybackDisplaySleepTimeout();
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('playback:sleep-timer-reset');
+  }
+}
 
 const logWarning = (message: string, error?: unknown) => {
   if (error === undefined) console.warn(message);
@@ -72,6 +113,7 @@ function watchOwner(webContents: WebContents): void {
   webContents.once('destroyed', () => {
     watchedOwners.delete(ownerId);
     controller.release(ownerId);
+    syncRendererPlaybackPower();
   });
 }
 
@@ -112,6 +154,7 @@ export function publishMediaSessionSnapshot(
     snapshot,
   );
 
+  syncRendererPlaybackPower();
   const published = controller.snapshot();
   if (published) stageArtwork(published);
   return diagnostics;
@@ -119,11 +162,18 @@ export function publishMediaSessionSnapshot(
 
 /** Release the session held by this renderer, if it holds it. */
 export function releaseMediaSession(webContents: WebContents): boolean {
-  return controller.release(webContents.id);
+  const released = controller.release(webContents.id);
+  syncRendererPlaybackPower();
+  return released;
 }
 
 /** Tear the session down completely. Used on quit. */
 export function releaseAllMediaSessions(): void {
+  powerMonitor.removeListener('lock-screen', pauseForDeviceInactivity);
+  powerMonitor.removeListener('suspend', pauseForDeviceInactivity);
+  powerMonitor.removeListener('user-did-resign-active', pauseForDeviceInactivity);
+  powerMonitoringStarted = false;
+  releaseRendererPlaybackPower();
   watchedOwners.clear();
   ownerWindow = null;
   artworkStaging?.clear();

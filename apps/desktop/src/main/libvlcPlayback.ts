@@ -1561,7 +1561,16 @@ class LibVlcPlaybackSession {
       if (patch.status === 'error') console.error('[playback] Recent state transitions', playbackDiagnostics());
     }
     this.state = { ...this.state, ...patch };
-    syncNativePlaybackDisplaySleep(this.id, this.state);
+    syncNativePlaybackDisplaySleep(this.id, {
+      ...this.state,
+      // The renderer gets optimistic state, but sleep waits for LibVLC to pause.
+      paused: this.state.paused === true && (!this.player || Number(this.runtime.api.playerGetState(this.player)) === 4),
+    }, () => {
+      if (!this.owner.isDestroyed()) {
+        this.owner.send('media-control:command', { type: 'pause' }, true);
+      }
+      this.command({ type: 'set-paused', paused: true });
+    });
     // Track metadata only changes on discovery or selection. Do not clone it
     // across IPC with every position update; the renderer keeps the last list.
     if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', { ...this.state, tracks: patch.tracks });
