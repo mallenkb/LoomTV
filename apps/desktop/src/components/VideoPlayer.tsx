@@ -200,13 +200,23 @@ export default function VideoPlayer({
   isLiveStreamRef.current = isLiveStream;
   const playbackPositionRef = useRef(0);
   const playbackDurationRef = useRef(0);
-  const { position, duration, showRemainingTime, toggleTimeDisplay, updatePlaybackSnapshot, seekSliderRef, progressFillRef, progressThumbRef, scrubTimeHudRef, currentTimeTextRef, durationTimeTextRef } = usePlaybackProgressDisplay(isLiveStreamRef, playbackPositionRef, playbackDurationRef);
+  const { clockEvents, position, duration, showRemainingTime, toggleTimeDisplay, updatePlaybackSnapshot, seekSliderRef, progressFillRef, progressThumbRef, scrubTimeHudRef, currentTimeTextRef, durationTimeTextRef } = usePlaybackProgressDisplay(isLiveStreamRef, playbackPositionRef, playbackDurationRef);
+  const lastProgressWriteRef = useRef<{ profileId: string | undefined; path: string; position: number; duration: number; request: Promise<void> } | null>(null);
   // Every progress write in this component goes through here so a live channel
   // cannot leave a resume point behind, whichever engine reported the position.
   const savePlaybackProgress = useCallback(
-    (path: string, position: number, duration: number): Promise<void> =>
-      isLiveStreamRef.current ? Promise.resolve() : saveResumeProgress(path, position, duration),
-    [],
+    (path: string, position: number, duration: number): Promise<void> => {
+      if (isLiveStreamRef.current) return Promise.resolve();
+      const previous = lastProgressWriteRef.current;
+      if (previous?.profileId === activeProfile?.id && previous?.path === path && previous.position === position && previous.duration === duration) return previous.request;
+      const request = saveResumeProgress(path, position, duration).catch(error => {
+        if (lastProgressWriteRef.current?.request === request) lastProgressWriteRef.current = null;
+        throw error;
+      });
+      lastProgressWriteRef.current = { profileId: activeProfile?.id, path, position, duration, request };
+      return request;
+    },
+    [activeProfile?.id],
   );
   const playableStartPosition = useCallback(
     (path: string, probedDuration: number): number =>
@@ -871,8 +881,8 @@ export default function VideoPlayer({
   const clearHls = useCallback(() => {
     const hls = hlsRef.current;
     if (!hls) return;
-    hls.destroy();
     hlsRef.current = null;
+    hls.destroy();
   }, []);
 
   const clearVideoElement = useCallback((video: HTMLVideoElement) => {
@@ -1128,7 +1138,12 @@ export default function VideoPlayer({
           subtitleStyle: subtitleStyleRef.current,
         } : {}),
       });
-      if (!playerActiveRef.current || token !== loadTokenRef.current) return;
+      if (!playerActiveRef.current || token !== loadTokenRef.current) {
+        if (transcodeResult.ok && transcodeResult.data?.sessionId) {
+          void desktopApi.media.stopTranscode(transcodeResult.data.sessionId).catch(error => console.warn('[player] Could not stop obsolete transcode:', error));
+        }
+        return;
+      }
       if (!transcodeResult.ok || !transcodeResult.data?.playlistUrl) {
         throw new Error(transcodeResult.error || 'Unable to start local stream.');
       }
@@ -2541,20 +2556,16 @@ export default function VideoPlayer({
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
 
-      try {
-        await persistFinalPlaybackProgress();
-      } catch (error) {
+      const progressSave = persistFinalPlaybackProgress().catch(error => {
         console.warn('[player] Could not persist final playback progress:', error);
-      }
+      });
 
       clearHls();
       const engine = playbackEngineRef.current;
       playbackEngineRef.current = null;
-      try {
-        await engine?.destroy();
-      } catch (error) {
+      const engineShutdown = (async () => { await engine?.destroy(); })().catch(error => {
         console.warn('[player] Could not destroy the playback engine cleanly:', error);
-      }
+      });
       setNativePlaybackActive(false);
       setNativeEngineKind(null);
       nativePlaybackEndedRef.current = false;
@@ -2569,6 +2580,7 @@ export default function VideoPlayer({
       } catch (error) {
         console.warn('[player] Could not stop the transcode session cleanly:', error);
       }
+      await Promise.all([progressSave, engineShutdown]);
     })();
 
     shutdownPromiseRef.current = request;
@@ -4008,6 +4020,8 @@ export default function VideoPlayer({
           )}
 
           <SubtitleOverlay
+            paused={paused}
+            clockEvents={clockEvents}
             controlsVisible={showControls && playerState !== 'error'}
             cues={activeOnlineCaption?.cues ?? subtitleCues}
             videoRef={videoRef}

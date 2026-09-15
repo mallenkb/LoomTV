@@ -845,7 +845,7 @@ async function scanLibrary(
       }
 
       try {
-        const selected = process.env.LOOM_SCANNER_ENGINE || 'typescript';
+        const selected = process.env.LOOM_SCANNER_ENGINE || 'auto';
         if (!['typescript', 'rust', 'auto'].includes(selected)) throw new Error('Invalid scanner engine.');
         const binary = scannerBinaryPath(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'));
         const cachedEntry = previousScanCache[folder];

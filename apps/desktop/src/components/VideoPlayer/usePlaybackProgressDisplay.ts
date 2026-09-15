@@ -3,6 +3,14 @@ import { clampSeconds, formatTime, seekAccessibilityText } from './helpers';
 
 const POSITION_UI_UPDATE_INTERVAL_MS = 1000;
 
+function updateText(element: HTMLElement, text: string) {
+  if (element.textContent !== text) element.textContent = text;
+}
+
+function updateAttribute(element: HTMLElement, name: string, value: string) {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
 export function usePlaybackProgressDisplay(
   isLiveStreamRef: RefObject<boolean>,
   playbackPositionRef: RefObject<number>,
@@ -19,6 +27,7 @@ export function usePlaybackProgressDisplay(
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showRemainingTime, setShowRemainingTime] = useState(false);
+  const [clockEvents] = useState(() => new EventTarget());
 
   const syncPlaybackUi = useCallback((nextPosition: number, nextDuration: number) => {
     const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
@@ -30,29 +39,32 @@ export function usePlaybackProgressDisplay(
     const progressPercent = progressRatio * 100;
 
     if (progressFillRef.current) {
-      progressFillRef.current.style.transform = `scaleX(${progressRatio})`;
+      const transform = `scaleX(${progressRatio})`;
+      if (progressFillRef.current.style.transform !== transform) progressFillRef.current.style.transform = transform;
     }
     if (progressThumbRef.current) {
-      progressThumbRef.current.style.left = `${progressPercent}%`;
+      const left = `${progressPercent}%`;
+      if (progressThumbRef.current.style.left !== left) progressThumbRef.current.style.left = left;
     }
     if (scrubTimeHudRef.current) {
-      scrubTimeHudRef.current.style.left = `${progressPercent}%`;
-      scrubTimeHudRef.current.textContent = `${formatTime(safePosition)} / ${formatTime(safeDuration)}`;
+      const left = `${progressPercent}%`;
+      if (scrubTimeHudRef.current.style.left !== left) scrubTimeHudRef.current.style.left = left;
+      updateText(scrubTimeHudRef.current, `${formatTime(safePosition)} / ${formatTime(safeDuration)}`);
     }
     if (currentTimeTextRef.current) {
       const displayTime = showRemainingTimeRef.current
         ? `-${formatTime(Math.max(0, safeDuration - safePosition))}`
         : formatTime(safePosition);
-      currentTimeTextRef.current.textContent = displayTime;
+      updateText(currentTimeTextRef.current, displayTime);
     }
     if (durationTimeTextRef.current) {
-      durationTimeTextRef.current.textContent = formatTime(safeDuration);
+      updateText(durationTimeTextRef.current, formatTime(safeDuration));
     }
     if (seekSliderRef.current) {
-      seekSliderRef.current.setAttribute('aria-disabled', livePlayback || safeDuration <= 0 ? 'true' : 'false');
-      seekSliderRef.current.setAttribute('aria-valuemax', livePlayback ? '100' : String(safeDuration || 0));
-      seekSliderRef.current.setAttribute('aria-valuenow', livePlayback ? '100' : String(Math.min(safePosition, safeDuration || 0)));
-      seekSliderRef.current.setAttribute('aria-valuetext', livePlayback ? 'Live' : seekAccessibilityText(safePosition, safeDuration));
+      updateAttribute(seekSliderRef.current, 'aria-disabled', livePlayback || safeDuration <= 0 ? 'true' : 'false');
+      updateAttribute(seekSliderRef.current, 'aria-valuemax', livePlayback ? '100' : String(safeDuration || 0));
+      updateAttribute(seekSliderRef.current, 'aria-valuenow', livePlayback ? '100' : String(Math.min(safePosition, safeDuration || 0)));
+      updateAttribute(seekSliderRef.current, 'aria-valuetext', livePlayback ? 'Live' : seekAccessibilityText(safePosition, safeDuration));
     }
   }, [isLiveStreamRef]);
 
@@ -70,9 +82,11 @@ export function usePlaybackProgressDisplay(
   ) => {
     const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
     const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
+    const changed = playbackPositionRef.current !== safePosition || playbackDurationRef.current !== safeDuration;
     playbackPositionRef.current = safePosition;
     playbackDurationRef.current = safeDuration;
     syncPlaybackUi(safePosition, safeDuration);
+    if (changed) clockEvents.dispatchEvent(new Event('change'));
 
     const now = performance.now();
     if (options.forceReact || now - lastPositionUiUpdateRef.current >= POSITION_UI_UPDATE_INTERVAL_MS) {
@@ -80,7 +94,7 @@ export function usePlaybackProgressDisplay(
       setPosition(safePosition);
       setDuration(safeDuration);
     }
-  }, [syncPlaybackUi, playbackPositionRef, playbackDurationRef]);
+  }, [syncPlaybackUi, playbackPositionRef, playbackDurationRef, clockEvents]);
 
-  return { position, duration, showRemainingTime, syncPlaybackUi, toggleTimeDisplay, updatePlaybackSnapshot, seekSliderRef, progressFillRef, progressThumbRef, scrubTimeHudRef, currentTimeTextRef, durationTimeTextRef, playbackPositionRef, playbackDurationRef };
+  return { clockEvents, position, duration, showRemainingTime, syncPlaybackUi, toggleTimeDisplay, updatePlaybackSnapshot, seekSliderRef, progressFillRef, progressThumbRef, scrubTimeHudRef, currentTimeTextRef, durationTimeTextRef, playbackPositionRef, playbackDurationRef };
 }

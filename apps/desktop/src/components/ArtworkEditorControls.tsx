@@ -721,9 +721,16 @@ export default function ArtworkEditorControls({
       }
       const dataUrl = URL.createObjectURL(new Blob([reader.result], { type: fileValidation.mimeType }));
       artworkObjectUrlRef.current = dataUrl;
+      const releasePreparedUrl = () => {
+        URL.revokeObjectURL(dataUrl);
+        if (artworkObjectUrlRef.current === dataUrl) artworkObjectUrlRef.current = null;
+      };
       void loadArtworkDimensions(dataUrl, work.controller.signal)
         .then((dimensions) => {
-          if (!isCurrentArtworkWork(work)) return;
+          if (!isCurrentArtworkWork(work)) {
+            releasePreparedUrl();
+            return;
+          }
           setArtworkPreview({
             target,
             url: dataUrl,
@@ -737,6 +744,7 @@ export default function ArtworkEditorControls({
           setArtworkPrepareState(null);
         })
         .catch((error) => {
+          releasePreparedUrl();
           if (!isCurrentArtworkWork(work) || error instanceof DOMException && error.name === 'AbortError') return;
           setArtworkPrepareState(null);
           setArtworkSaveError(error instanceof Error ? error.message : 'Unable to prepare selected artwork.');

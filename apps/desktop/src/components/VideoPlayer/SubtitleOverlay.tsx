@@ -13,6 +13,8 @@ interface SubtitleOverlayProps {
   seekableTimelineRef?: React.RefObject<boolean>;
   style: SubtitleStyleSettings;
   visible: boolean;
+  paused: boolean;
+  clockEvents: EventTarget;
 }
 
 function fallbackTextOutline(width: number, color: string): string {
@@ -42,6 +44,8 @@ function SubtitleOverlay({
   seekableTimelineRef,
   style,
   visible,
+  paused,
+  clockEvents,
 }: SubtitleOverlayProps) {
   const [text, setText] = useState('');
   const [bounds, setBounds] = useState({ blockHeight: 0, viewportHeight: 0 });
@@ -66,8 +70,10 @@ function SubtitleOverlay({
       return;
     }
 
-    let frame = 0;
-    const tick = () => {
+    let frame: number | null = null;
+    const video = videoRef.current;
+    const refresh = () => {
+      if (document.hidden) return;
       const video = videoRef.current;
       const nativeTime = currentTimeRef?.current;
       if (video || (typeof nativeTime === 'number' && Number.isFinite(nativeTime))) {
@@ -84,12 +90,34 @@ function SubtitleOverlay({
           setText(next);
         }
       }
-      frame = requestAnimationFrame(tick);
     };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, timelineOffsetRef, seekableTimelineRef, visible]);
+    const update = () => {
+      refresh();
+      const playing = currentTimeRef ? !paused : video && !video.paused && !video.ended;
+      if (!document.hidden && playing) {
+        if (frame === null) {
+          frame = requestAnimationFrame(() => {
+            frame = null;
+            update();
+          });
+        }
+      } else if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
+    };
+    const events = ['play', 'pause', 'seeking', 'seeked', 'timeupdate', 'loadedmetadata', 'emptied'];
+    events.forEach(event => video?.addEventListener(event, update));
+    clockEvents.addEventListener('change', update);
+    document.addEventListener('visibilitychange', update);
+    update();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      events.forEach(event => video?.removeEventListener(event, update));
+      clockEvents.removeEventListener('change', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, timelineOffsetRef, seekableTimelineRef, visible, paused, clockEvents]);
 
   const textShadow = useMemo(() => {
     const outlineWidth = style.borderEnabled
