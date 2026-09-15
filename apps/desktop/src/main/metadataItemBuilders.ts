@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import { scanFileSize } from './scanning/inventory.ts';
 import path from 'node:path';
 import {
   createMediaItemId,
@@ -446,7 +446,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     forcedType,
   }: BuildMovieItemRequest): Promise<MediaItem> {
     const parsedFile = cleanMediaTitle(fileName);
-    const stats = await fs.promises.stat(fullPath);
+    const fileSize = await scanFileSize(fullPath);
     const probe = await probeMediaFile(fullPath);
     const providerIds = mergeProviderIds(probe.providerIds || {}, parseMetadataProviderIds(`${fullPath} ${fileName}`));
 
@@ -684,7 +684,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       genres,
       cast,
       filePath: fullPath,
-      fileSize: stats.size,
+      fileSize,
       subtitles,
       localMetadata: probe.localMetadata,
       providerIds: mergeProviderIds(

@@ -113,6 +113,7 @@ export type OfficialMetadataServiceDependencies = {
   fetchTVDBMetadataCandidates: typeof import('./metadata/tvdb.ts').fetchTVDBMetadataCandidates;
   fetchTVMetadata: typeof import('./metadata/tvmaze.ts').fetchTVMetadata;
   fetchTVMetadataCandidates: typeof import('./metadata/tvmaze.ts').fetchTVMetadataCandidates;
+  fetchTVMetadataById: typeof import('./metadata/tvmaze.ts').fetchTVMetadataById;
   artworkDeliveryUrl: (source?: string | null) => string;
   artworkDeliveryUrls: (sources?: string[]) => string[];
   orderedArtworkCandidates: (...urls: Array<string | null | undefined>) => string[];
@@ -319,6 +320,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     fetchTVDBMetadataCandidates,
     fetchTVMetadata,
     fetchTVMetadataCandidates,
+    fetchTVMetadataById,
     getMetadataApiKey,
     getMetadataRefreshState,
     loadLibrary,
@@ -753,7 +755,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
 
     const likelyAnime = item.type === 'anime';
-    const [omdbById, omdbBySearch, anilistMeta, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvdbById, tvdbBySearch, tvdbCandidates, tvMeta, tvCandidates] = await Promise.all([
+    const [omdbById, omdbBySearch, anilistMeta, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvdbById, tvdbBySearch, tvdbCandidates, tvMeta, tvCandidates, tvById] = await Promise.all([
       safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
       safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
       safeMetadataProvider(likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null), null),
@@ -766,6 +768,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       safeMetadataProvider(fetchTVDBMetadataCandidates(title, year, tvdbApiKey), []),
       safeMetadataProvider(fetchTVMetadata(title, year), null),
       safeMetadataProvider(fetchTVMetadataCandidates(title, year), []),
+      safeMetadataProvider(Number(providerIds.tvmazeId) > 0
+        ? fetchTVMetadataById(Number(providerIds.tvmazeId), item.title, year)
+        : Promise.resolve(null), null),
     ]);
     const animeCandidates = likelyAnime ? [
       metadataCandidate('AniList', metadataResultMatchesLocalTitle(anilistMeta, localTitles) ? anilistMeta : null, title),
@@ -781,6 +786,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       omdbMetadataCandidate(remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null, title),
     ];
     const tvmazeCandidates = [
+      metadataCandidate('TVmaze', tvById, title),
       metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
       ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
     ];

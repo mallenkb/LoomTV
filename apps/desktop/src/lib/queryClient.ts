@@ -44,7 +44,8 @@ function approximateBytes(value: unknown, seen = new WeakSet<object>(), budget =
   if (seen.has(value)) return 0;
   seen.add(value);
   let bytes = 32;
-  for (const key of Object.keys(value)) {
+  for (const key in value) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
     bytes += key.length * 2 + approximateBytes(Reflect.get(value, key), seen, budget - bytes);
     if (bytes > budget) break;
   }
@@ -95,6 +96,9 @@ queryClient.getQueryCache().subscribe(event => {
     sizes.set(event.query.queryHash, approximateBytes(event.query.state.data));
     trimQueryCache();
   }
+  // Large active details become eligible only after the last page releases
+  // them. Enforce the budget then, even if no further request completes.
+  if (event.type === 'observerRemoved') trimQueryCache();
 });
 
 let activeReads = 0;
@@ -130,6 +134,9 @@ export async function cachedDesktopRead<T>(family: string, args: readonly unknow
     queryKey: [family, ...scope, ...args],
     queryFn: ({ signal }: { signal: AbortSignal }) => expensive ? scheduledRead(read, signal) : read(),
     staleTime,
+    // LibraryContext owns the catalog. Retain only its in-flight request here,
+    // rather than another complete response for the default three minutes.
+    ...(family === 'getLibraryIndex' || family === 'getLibrary' ? { gcTime: 0 } : {}),
   };
   for (let attempt = 0; ; attempt += 1) {
     try {

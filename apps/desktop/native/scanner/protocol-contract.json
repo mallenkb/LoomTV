@@ -1,0 +1,72 @@
+{
+  "version": 2,
+  "maxFrameBytes": 262144,
+  "maxBatchEntries": 128,
+  "maxRequestIdBytes": 128,
+  "maxPathBytes": 32768,
+  "maxExtensions": 128,
+  "maxExtensionBytes": 16,
+  "maxYear": 9999,
+  "maxSequence": 9007199254740991,
+  "commandKinds": [
+    "hello",
+    "discover",
+    "fingerprint",
+    "inspect",
+    "ack",
+    "cancel",
+    "shutdown"
+  ],
+  "commandFields": {
+    "inspect": ["root", "extensions", "max_year", "expected_signature"],
+    "hello": [],
+    "discover": [
+      "root",
+      "extensions",
+      "max_year"
+    ],
+    "ack": [
+      "sequence"
+    ],
+    "cancel": [],
+    "shutdown": [],
+    "fingerprint": [
+      "root",
+      "extensions",
+      "max_year"
+    ]
+  },
+  "eventKinds": [
+    "ready",
+    "batch",
+    "progress",
+    "complete",
+    "cancelled",
+    "error"
+  ],
+  "eventFields": {
+    "ready": [
+      "capabilities"
+    ],
+    "batch": [
+      "sequence",
+      "entries"
+    ],
+    "progress": [
+      "directories",
+      "stats"
+    ],
+    "complete": [
+      "directories",
+      "stats",
+      "peakRssBytes",
+      "signature",
+      "fileCount"
+    ],
+    "cancelled": [],
+    "error": [
+      "filesystem",
+      "message"
+    ]
+  }
+}

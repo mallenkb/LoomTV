@@ -824,12 +824,14 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     }));
   }
 
-  function cleanupOrphanedAutomaticSegments(limit = 250): number {
+  function cleanupOrphanedAutomaticSegments(limit = 250, confirmedPaths?: readonly string[]): number {
+    if (confirmedPaths?.length === 0) return 0;
     const database = getDb();
     const rows = parseDatabaseRows(
       database.prepare(`
         SELECT id, file_revision FROM media_segment_candidates
         WHERE source != 'manual'
+          AND (? IS NULL OR file_path IN (SELECT value FROM json_each(?)))
           AND NOT EXISTS (
             SELECT 1 FROM episode_files WHERE episode_files.file_path = media_segment_candidates.file_path
           )
@@ -839,7 +841,8 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
               AND media_items.file_path != ''
           )
         LIMIT ?
-      `).all(Math.max(1, Math.min(1000, limit))),
+      `).all(confirmedPaths ? JSON.stringify(confirmedPaths) : null,
+        confirmedPaths ? JSON.stringify(confirmedPaths) : null, Math.max(1, Math.min(1000, limit))),
       candidateIdentityRowSchema,
       'orphaned automatic media segment candidate',
     );

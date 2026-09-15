@@ -1,0 +1,108 @@
+{
+  "baselineRevision": "cd042e2ace4e2661ecb8cf65273e120adca8caf1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "note": "Five interleaved fresh-process runs. Measures only artwork normalization of 50,000 committed records and incoming records, as used before checkpoint delta planning. Input creation is included in process peak RSS. No forced garbage collection. Excludes discovery, database writes, providers and Electron rendering. This is not a whole-application memory measurement.",
+  "results": [
+    {
+      "mode": "previous",
+      "repetition": 0,
+      "count": 50000,
+      "normalizationMs": 44.976917,
+      "peakRssBytes": 264503296,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 0
+    },
+    {
+      "mode": "current",
+      "repetition": 0,
+      "count": 50000,
+      "normalizationMs": 35.136,
+      "peakRssBytes": 224378880,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 50000
+    },
+    {
+      "mode": "previous",
+      "repetition": 1,
+      "count": 50000,
+      "normalizationMs": 41.41550000000001,
+      "peakRssBytes": 264093696,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 0
+    },
+    {
+      "mode": "current",
+      "repetition": 1,
+      "count": 50000,
+      "normalizationMs": 29.047957999999994,
+      "peakRssBytes": 225034240,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 50000
+    },
+    {
+      "mode": "previous",
+      "repetition": 2,
+      "count": 50000,
+      "normalizationMs": 37.15279199999999,
+      "peakRssBytes": 264503296,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 0
+    },
+    {
+      "mode": "current",
+      "repetition": 2,
+      "count": 50000,
+      "normalizationMs": 30.878833000000007,
+      "peakRssBytes": 219185152,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 50000
+    },
+    {
+      "mode": "previous",
+      "repetition": 3,
+      "count": 50000,
+      "normalizationMs": 56.46425000000001,
+      "peakRssBytes": 263831552,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 0
+    },
+    {
+      "mode": "current",
+      "repetition": 3,
+      "count": 50000,
+      "normalizationMs": 29.346624999999996,
+      "peakRssBytes": 225886208,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 50000
+    },
+    {
+      "mode": "previous",
+      "repetition": 4,
+      "count": 50000,
+      "normalizationMs": 43.509834000000005,
+      "peakRssBytes": 264978432,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 0
+    },
+    {
+      "mode": "current",
+      "repetition": 4,
+      "count": 50000,
+      "normalizationMs": 30.596500000000006,
+      "peakRssBytes": 225738752,
+      "previousItems": 50000,
+      "nextItems": 50000,
+      "reusedPreviousItems": 50000
+    }
+  ]
+}

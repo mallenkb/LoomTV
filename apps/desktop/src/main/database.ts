@@ -24,6 +24,7 @@ import {
   remapLibraryMediaReferences as remapLibraryMediaReferencesRecord,
   saveLibrary as saveLibraryRecord,
   saveLibraryItem as saveLibraryItemRecord,
+  saveLibraryScanDelta as saveLibraryScanDeltaRecord,
 } from './databaseLibraryRepository.ts';
 import {
   getMetadataRefreshState as getMetadataRefreshStateRecord,
@@ -1270,7 +1271,7 @@ export function removePluginArtworkForAddon(addonId: string): number {
   return rows.length;
 }
 
-export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
+export async function cacheLibraryArtwork(data: LibraryData | string[]): Promise<void> {
   await getArtworkRepository().cacheLibraryArtwork(data);
 }
 export async function backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
@@ -1402,4 +1403,8 @@ export function clearDatabase(): ProfileRecord {
   const owner = getProfile(ownerId);
   if (!owner) throw new Error('The clean Owner profile could not be created.');
   return owner;
+}
+
+export function saveLibraryScanDeltaToDatabase(...args: Parameters<typeof saveLibraryScanDeltaRecord> extends [unknown, ...infer Rest] ? Rest : never): number {
+  return saveLibraryScanDeltaRecord(getDb(), ...args);
 }

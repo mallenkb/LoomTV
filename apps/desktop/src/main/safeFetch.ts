@@ -1,3 +1,4 @@
+import { scanMetrics } from './scanning/scanMetrics.ts';
 import dns from 'node:dns/promises';
 import https from 'node:https';
 import net from 'node:net';
@@ -351,6 +352,8 @@ export async function safeFetch(input: string | URL, init: RequestInit = {}, opt
   let retryCount = 0;
   try {
     for (let attempt = 0; attempt <= resolved.retries; attempt += 1) {
+      const metrics = scanMetrics.getStore();
+      if (metrics) metrics.requestAttempts++;
       const response = await fetchAttempt(input, init, resolved);
       if (mayRetry && (response.status === 429 || response.status >= 500) && attempt < resolved.retries) {
         retryCount += 1;

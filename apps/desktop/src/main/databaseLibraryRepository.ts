@@ -14,6 +14,7 @@ import {
 import { z } from 'zod';
 import { parseStoredJson } from './runtimeValidation.ts';
 import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
+import { createDatabaseSegmentsRepository } from './databaseSegmentsRepository.ts';
 
 type SeasonEntry = { number: number; title: string; episodeCount: number };
 
@@ -491,129 +492,197 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
  * Child rows are reconciled in the same transaction so readers never observe
  * a partially updated season or episode graph.
  */
+const itemStatements = new WeakMap<BetterSqlite3.Database, Map<string, BetterSqlite3.Statement>>();
+function itemStatement(database: BetterSqlite3.Database, sql: string): BetterSqlite3.Statement {
+  let statements = itemStatements.get(database);
+  if (!statements) { statements = new Map(); itemStatements.set(database, statements); }
+  let statement = statements.get(sql);
+  if (!statement) { statement = database.prepare(sql); statements.set(sql, statement); }
+  return statement;
+}
+
 export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaItem): void {
+  database.transaction(() => writeLibraryItem(database, item))();
+}
+
+// Batch callers already own the transaction. Avoid a savepoint and transaction
+// closure for every item while retaining atomic writes for standalone callers.
+function writeLibraryItem(database: BetterSqlite3.Database, item: MediaItem): void {
   const now = Date.now();
-  const tx = database.transaction(() => {
-    database.prepare(`
-      INSERT INTO media_items (
-        id, type, format, title, year, poster, backdrop, logo, summary, rating, content_rating, trailer_url, runtime, season_count, episode_count, provider_ratings_json, file_path, file_size, last_played,
-        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-      ON CONFLICT(id) DO UPDATE SET
-        type = excluded.type,
-        format = excluded.format,
-        title = excluded.title,
-        year = excluded.year,
-        poster = excluded.poster,
-        backdrop = excluded.backdrop,
-        logo = excluded.logo,
-        summary = excluded.summary,
-        rating = excluded.rating,
-        content_rating = excluded.content_rating,
-        trailer_url = excluded.trailer_url,
-        runtime = excluded.runtime,
-        season_count = excluded.season_count,
-        episode_count = excluded.episode_count,
-        provider_ratings_json = excluded.provider_ratings_json,
-        file_path = excluded.file_path,
-        file_size = excluded.file_size,
-        genres_json = excluded.genres_json,
-        cast_json = excluded.cast_json,
-        subtitles_json = excluded.subtitles_json,
-        local_metadata_json = excluded.local_metadata_json,
-        provider_ids_json = excluded.provider_ids_json,
-        streaming_providers_json = excluded.streaming_providers_json,
-        origin_platform_json = excluded.origin_platform_json,
-        poster_candidates_json = excluded.poster_candidates_json,
-        backdrop_candidates_json = excluded.backdrop_candidates_json,
-        logo_candidates_json = excluded.logo_candidates_json,
-        content_ratings_json = excluded.content_ratings_json,
-        updated_at = excluded.updated_at
-    `).run(
+  itemStatement(database, `
+    INSERT INTO media_items (
+      id, type, format, title, year, poster, backdrop, logo, summary, rating, content_rating, trailer_url, runtime, season_count, episode_count, provider_ratings_json, file_path, file_size, last_played,
+      genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      type = excluded.type,
+      format = excluded.format,
+      title = excluded.title,
+      year = excluded.year,
+      poster = excluded.poster,
+      backdrop = excluded.backdrop,
+      logo = excluded.logo,
+      summary = excluded.summary,
+      rating = excluded.rating,
+      content_rating = excluded.content_rating,
+      trailer_url = excluded.trailer_url,
+      runtime = excluded.runtime,
+      season_count = excluded.season_count,
+      episode_count = excluded.episode_count,
+      provider_ratings_json = excluded.provider_ratings_json,
+      file_path = excluded.file_path,
+      file_size = excluded.file_size,
+      genres_json = excluded.genres_json,
+      cast_json = excluded.cast_json,
+      subtitles_json = excluded.subtitles_json,
+      local_metadata_json = excluded.local_metadata_json,
+      provider_ids_json = excluded.provider_ids_json,
+      streaming_providers_json = excluded.streaming_providers_json,
+      origin_platform_json = excluded.origin_platform_json,
+      poster_candidates_json = excluded.poster_candidates_json,
+      backdrop_candidates_json = excluded.backdrop_candidates_json,
+      logo_candidates_json = excluded.logo_candidates_json,
+      content_ratings_json = excluded.content_ratings_json,
+      updated_at = excluded.updated_at
+  `).run(
+    item.id,
+    item.type,
+    item.format || '',
+    item.title || '',
+    item.year || 0,
+    durableArtworkSource(item.poster),
+    durableArtworkSource(item.backdrop),
+    durableArtworkSource(item.logo),
+    item.summary || '',
+    item.rating || 0,
+    item.contentRating || '',
+    item.trailerUrl || '',
+    item.runtime || '',
+    item.seasonCount ?? null,
+    item.episodeCount ?? null,
+    jsonString(item.providerRatings || {}),
+    item.filePath || '',
+    item.fileSize || null,
+    null,
+    jsonString(item.genres || []),
+    jsonString((item.cast || []).map((credit) => ({
+      ...credit,
+      image: durableArtworkSource(credit.image),
+      characterImage: durableArtworkSource(credit.characterImage),
+      voiceActorImage: durableArtworkSource(credit.voiceActorImage),
+    }))),
+    jsonString(item.subtitles || []),
+    item.localMetadata ? jsonString(item.localMetadata) : null,
+    item.providerIds ? jsonString(item.providerIds) : null,
+    item.streamingProviders ? jsonString(item.streamingProviders) : null,
+    item.originPlatform ? jsonString(item.originPlatform) : null,
+    jsonString(durableArtworkSources(item.posterCandidates || [])),
+    jsonString(durableArtworkSources(item.backdropCandidates || [])),
+    jsonString(durableArtworkSources(item.logoCandidates || [])),
+    jsonString(item.contentRatings || {}),
+    now,
+  );
+
+  const children = [
+    { table: 'seasons', keys: ['number'], values: (item.seasons || []).map((s) => [s.number]) },
+    { table: 'episodes', keys: ['season', 'number'], values: (item.episodes || []).map((e) => [e.season, e.number]) },
+    { table: 'episode_files', keys: ['season', 'episode', 'file_path'], values: (item.episodeFiles || []).map((e) => [e.season, e.episode, e.filePath]) },
+  ];
+  for (const child of children) {
+    const retained = new Set(child.values.map((values) => JSON.stringify(values)));
+    const rows = itemStatement(database, `SELECT ${child.keys.join(',')} FROM ${child.table} WHERE media_id = ?`).all(item.id) as Record<string, unknown>[];
+    const remove = itemStatement(database, `DELETE FROM ${child.table} WHERE media_id = ? AND ${child.keys.map((key) => `${key} = ?`).join(' AND ')}`);
+    for (const row of rows) {
+      const values = child.keys.map((key) => row[key]);
+      if (!retained.has(JSON.stringify(values))) remove.run(item.id, ...values);
+    }
+  }
+
+  const insertSeason = itemStatement(database, 'INSERT INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?) ON CONFLICT(media_id, number) DO UPDATE SET title=excluded.title, episode_count=excluded.episode_count WHERE title IS NOT excluded.title OR episode_count IS NOT excluded.episode_count');
+  const insertEpisode = itemStatement(database, `
+    INSERT INTO episodes (media_id, season, number, title, summary, still, rating, air_date, local_metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(media_id, season, number) DO UPDATE SET title=excluded.title, summary=excluded.summary,
+    still=excluded.still, rating=excluded.rating, air_date=excluded.air_date, local_metadata_json=excluded.local_metadata_json
+    WHERE title IS NOT excluded.title OR summary IS NOT excluded.summary OR still IS NOT excluded.still
+    OR rating IS NOT excluded.rating OR air_date IS NOT excluded.air_date OR local_metadata_json IS NOT excluded.local_metadata_json
+  `);
+  const insertEpisodeFile = itemStatement(database, `
+    INSERT INTO episode_files (media_id, season, episode, file_path, title, thumbnail, still, subtitles_json, local_metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(media_id, season, episode, file_path) DO UPDATE SET title=excluded.title, thumbnail=excluded.thumbnail,
+    still=excluded.still, subtitles_json=excluded.subtitles_json, local_metadata_json=excluded.local_metadata_json
+    WHERE title IS NOT excluded.title OR thumbnail IS NOT excluded.thumbnail OR still IS NOT excluded.still
+    OR subtitles_json IS NOT excluded.subtitles_json OR local_metadata_json IS NOT excluded.local_metadata_json
+  `);
+
+  for (const season of item.seasons || []) {
+    insertSeason.run(item.id, season.number, season.title || '', season.episodeCount || 0);
+  }
+  for (const episode of item.episodes || []) {
+    insertEpisode.run(
       item.id,
-      item.type,
-      item.format || '',
-      item.title || '',
-      item.year || 0,
-      durableArtworkSource(item.poster),
-      durableArtworkSource(item.backdrop),
-      durableArtworkSource(item.logo),
-      item.summary || '',
-      item.rating || 0,
-      item.contentRating || '',
-      item.trailerUrl || '',
-      item.runtime || '',
-      item.seasonCount ?? null,
-      item.episodeCount ?? null,
-      jsonString(item.providerRatings || {}),
-      item.filePath || '',
-      item.fileSize || null,
-      null,
-      jsonString(item.genres || []),
-      jsonString((item.cast || []).map((credit) => ({
-        ...credit,
-        image: durableArtworkSource(credit.image),
-        characterImage: durableArtworkSource(credit.characterImage),
-        voiceActorImage: durableArtworkSource(credit.voiceActorImage),
-      }))),
-      jsonString(item.subtitles || []),
-      item.localMetadata ? jsonString(item.localMetadata) : null,
-      item.providerIds ? jsonString(item.providerIds) : null,
-      item.streamingProviders ? jsonString(item.streamingProviders) : null,
-      item.originPlatform ? jsonString(item.originPlatform) : null,
-      jsonString(durableArtworkSources(item.posterCandidates || [])),
-      jsonString(durableArtworkSources(item.backdropCandidates || [])),
-      jsonString(durableArtworkSources(item.logoCandidates || [])),
-      jsonString(item.contentRatings || {}),
-      now,
+      episode.season,
+      episode.number,
+      episode.title || '',
+      episode.summary || '',
+      durableArtworkSource(episode.still),
+      episode.rating || 0,
+      episode.airDate || '',
+      episode.localMetadata ? jsonString(episode.localMetadata) : null,
     );
+  }
+  for (const episodeFile of item.episodeFiles || []) {
+    insertEpisodeFile.run(
+      item.id,
+      episodeFile.season,
+      episodeFile.episode,
+      episodeFile.filePath,
+      episodeFile.title || null,
+      durableArtworkSource(episodeFile.thumbnail),
+      durableArtworkSource(episodeFile.still),
+      jsonString(episodeFile.subtitles || []),
+      episodeFile.localMetadata ? jsonString(episodeFile.localMetadata) : null,
+    );
+  }
+}
 
-    database.prepare('DELETE FROM episode_files WHERE media_id = ?').run(item.id);
-    database.prepare('DELETE FROM episodes WHERE media_id = ?').run(item.id);
-    database.prepare('DELETE FROM seasons WHERE media_id = ?').run(item.id);
-
-    const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
-    const insertEpisode = database.prepare(`
-      INSERT OR REPLACE INTO episodes (media_id, season, number, title, summary, still, rating, air_date, local_metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertEpisodeFile = database.prepare(`
-      INSERT INTO episode_files (media_id, season, episode, file_path, title, thumbnail, still, subtitles_json, local_metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const season of item.seasons || []) {
-      insertSeason.run(item.id, season.number, season.title || '', season.episodeCount || 0);
+/** Commit completed roots only. Folder configuration is owned by folder mutations. */
+export function saveLibraryScanDelta(
+  database: BetterSqlite3.Database,
+  changed: MediaItem[],
+  removed: string[],
+  cache: Record<string, ScanCacheEntry>,
+  aliases: ReadonlyMap<string, string> = new Map(),
+  confirmedRemovedFiles: readonly string[] = [],
+): number {
+  const changes = database.prepare('SELECT total_changes() AS n');
+  const before = (changes.get() as { n: number }).n;
+  const cacheStatement = database.prepare(`INSERT INTO scan_cache
+    (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at, ratings_refreshed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(folder_path) DO UPDATE SET version=excluded.version, folder_kind=excluded.folder_kind,
+    signature=excluded.signature, subtitle_profile=excluded.subtitle_profile, file_count=excluded.file_count,
+    item_count=excluded.item_count, scanned_at=excluded.scanned_at, ratings_refreshed_at=excluded.ratings_refreshed_at`);
+  const remove = database.prepare('DELETE FROM media_items WHERE id = ?');
+  const removeMetadata = database.prepare('DELETE FROM media_metadata_refresh_state WHERE media_id = ?');
+  database.transaction(() => {
+    for (const item of changed) writeLibraryItem(database, item);
+    remapLibraryMediaReferences(database, aliases);
+    for (const id of removed) { remove.run(id); removeMetadata.run(id); }
+    if (confirmedRemovedFiles.length) {
+      const segments = createDatabaseSegmentsRepository(database);
+      for (let start = 0; start < confirmedRemovedFiles.length; start += 256) {
+        const paths = confirmedRemovedFiles.slice(start, start + 256);
+        while (segments.cleanupOrphanedAutomaticSegments(1000, paths) > 0) { /* Drain this confirmed batch. */ }
+      }
     }
-    for (const episode of item.episodes || []) {
-      insertEpisode.run(
-        item.id,
-        episode.season,
-        episode.number,
-        episode.title || '',
-        episode.summary || '',
-        durableArtworkSource(episode.still),
-        episode.rating || 0,
-        episode.airDate || '',
-        episode.localMetadata ? jsonString(episode.localMetadata) : null,
-      );
-    }
-    for (const episodeFile of item.episodeFiles || []) {
-      insertEpisodeFile.run(
-        item.id,
-        episodeFile.season,
-        episodeFile.episode,
-        episodeFile.filePath,
-        episodeFile.title || null,
-        durableArtworkSource(episodeFile.thumbnail),
-        durableArtworkSource(episodeFile.still),
-        jsonString(episodeFile.subtitles || []),
-        episodeFile.localMetadata ? jsonString(episodeFile.localMetadata) : null,
-      );
-    }
-  });
-  tx();
+    for (const [folder, entry] of Object.entries(cache)) cacheStatement.run(folder, entry.version ?? null,
+      entry.folderKind, entry.signature, entry.subtitleProfile || '', entry.fileCount, entry.itemCount,
+      entry.scannedAt, entry.ratingsRefreshedAt || entry.scannedAt);
+  })();
+  return (changes.get() as { n: number }).n - before;
 }

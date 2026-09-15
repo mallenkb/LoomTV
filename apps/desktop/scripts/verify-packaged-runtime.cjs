@@ -374,8 +374,17 @@ function verifyMpvPayload(targetPlatform, targetArch) {
   );
 }
 
-const packageDir = packageDirCandidates().find((candidate) => exists(resourcesDir(candidate))) || packageDirCandidates()[0];
+const packageDir = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : packageDirCandidates().find((candidate) => exists(resourcesDir(candidate))) || packageDirCandidates()[0];
 const resources = resourcesDir(packageDir);
+const scanner = path.join(resources, 'scanner', `${platform}-${arch}`, platform === 'win32' ? 'loom-scanner.exe' : 'loom-scanner');
+const scannerRoot = path.join(resources, 'scanner');
+if (exists(scannerRoot)) for (const entry of fs.readdirSync(scannerRoot, { withFileTypes: true })) {
+  if (entry.isDirectory() && entry.name !== `${platform}-${arch}`) fail(`Unrelated scanner target remains packaged: ${entry.name}`);
+}
+const scannerCheck = spawnSync(process.execPath, [path.join(__dirname, 'verify-scanner.cjs'), scanner], { encoding: 'utf8', timeout: 15000 });
+if (scannerCheck.status !== 0) fail(`Scanner runtime check failed: ${scannerCheck.stderr || scannerCheck.error || ''}`);
 const appAsar = path.join(resources, 'app.asar');
 const unpacked = path.join(resources, 'app.asar.unpacked');
 

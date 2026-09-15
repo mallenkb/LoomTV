@@ -41,8 +41,10 @@
     "verify:windows-release": "pwsh -NoProfile -File scripts/verify-windows-release.ps1",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint .",
-    "pretest": "node scripts/ensure-node-natives.cjs",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts"
+    "pretest": "node scripts/ensure-node-natives.cjs && cargo build --locked --release --manifest-path native/scanner/Cargo.toml",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts",
+    "scanner:build": "node scripts/build-scanner.cjs",
+    "scanner:test": "node scripts/ensure-node-natives.cjs && cargo test --locked --release --manifest-path native/scanner/Cargo.toml && cargo build --locked --release --manifest-path native/scanner/Cargo.toml && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/scanner*.test.ts"
   },
   "keywords": [],
   "author": "malllenkb",

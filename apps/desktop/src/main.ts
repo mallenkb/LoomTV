@@ -1,3 +1,11 @@
+import { scanMetrics, startScanMetrics, measureScanWork } from './main/scanning/scanMetrics.ts';
+import { startMemoryMetrics } from './main/memoryMetrics.ts';
+import { discoverLibraryRoot, inspectLibraryRoot, scannerBinaryPath, type DiscoveryEngine } from './main/scanning/discover.ts';
+import { collectArtworkSourcesForCache } from './main/artworkCache';
+import { canCheckUnchangedRoot } from './main/scanning/quickScanCache';
+import { scanInventory, type DiscoveryInventory } from './main/scanning/inventory.ts';
+import { isCurrentScanCommit, planScanDelta, scanCommits } from './main/scanning/scanPersistence.ts';
+import { hasScannerProcesses, stopScannerProcesses } from './main/scanning/rustScannerClient.ts';
 import {
   app,
   dialog,
@@ -151,7 +159,6 @@ import {
   clearDatabase,
   clearAllGuestProfiles,
   cancelSegmentAnalysisJobs,
-  cleanupOrphanedAutomaticSegments,
   cleanupOrphanedAnalysisData,
   enqueueSegmentAnalysisJob,
   fingerprintCacheBytes,
@@ -183,6 +190,7 @@ import {
   recordMetadataRefresh,
   saveCustomArtwork,
   saveLibraryItemToDatabase,
+  saveLibraryScanDeltaToDatabase,
   saveLibraryToDatabase,
   savePlaybackTrackPreferences,
   saveProfilePreferences,
@@ -247,7 +255,7 @@ import type {
   MediaItem as MetadataMediaItem,
 } from './main/metadata/types';
 import { fetchOMDbMetadata, fetchOMDbMetadataById, fetchOMDbSeasonEpisodes } from './main/metadata/omdb';
-import { fetchTVMetadata, fetchTVMetadataCandidates } from './main/metadata/tvmaze';
+import { fetchTVMetadata, fetchTVMetadataCandidates, fetchTVMetadataById } from './main/metadata/tvmaze';
 import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates } from './main/metadata/tvdb';
 import {
   fetchTMDBMovieMetadata,
@@ -275,7 +283,6 @@ import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinat
 import { setPlaybackActivityLease } from './main/ffmpegGovernor';
 import {
   createLibraryScanFilesAsync,
-  getLibraryFolderSignatureAsync,
 } from './main/libraryScanFiles';
 import {
   createLibraryScanner,
@@ -414,12 +421,14 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 15;
+const SCAN_CACHE_VERSION = 16;
 let libraryMutationVersion = 0;
+const activeScans = new Set<AbortController>();
 let cachedLibrary: LibraryData | null = null;
 
 function advanceLibraryMutationVersion(): void {
   libraryMutationVersion++;
+  for (const scan of activeScans) scan.abort();
   setResourceRegistryCatalogGeneration(libraryMutationVersion);
 }
 
@@ -605,7 +614,7 @@ function metadataRequestWhenOnline<TArgs extends unknown[], TResult>(
 ): (...args: TArgs) => Promise<TResult> {
   return async (...args) => loadSettings().metadataOfflineMode
     ? offlineResult()
-    : request(...args);
+    : measureScanWork('provider', () => request(...args));
 }
 
 const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuilders({
@@ -654,6 +663,15 @@ async function scanLibrary(
     onCheckpoint?: (snapshot: LibraryScanProgress) => void | Promise<void>;
   } = {},
 ): Promise<LibraryData> {
+  if (isAppShuttingDown || isUpdateInstalling()) throw new Error('The app is closing.');
+  const scanGeneration = libraryMutationVersion;
+  const scanProfileId = getDesktopActiveProfileId();
+  const cancellation = new AbortController();
+  const stopMetrics = startScanMetrics();
+  let peakChildRssBytes = 0;
+  activeScans.add(cancellation);
+  try {
+  const completedRoots = new Set<string>();
   const metadataRefreshIntervalMs = 7 * 24 * 60 * 60 * 1000;
   const missingMetadataRetryIntervalMs = 24 * 60 * 60 * 1000;
   const mode: LibraryScanMode = options.force ? 'full' : options.mode || 'quick';
@@ -680,11 +698,21 @@ async function scanLibrary(
   const tvShows: MediaItem[] = [];
   const animeShows: MediaItem[] = [];
   const scannedItemIds = new Set<string>();
-  const existingItems = [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])];
-  const existingItemsById = new Map(existingItems.map((item) => [item.id, item]));
-  const existingItemsByPath = new Map(existingItems
-    .filter((item) => item.filePath)
-    .map((item) => [path.resolve(item.filePath), item]));
+  let existingItemsById: Map<string, MediaItem> | undefined;
+  let existingItemsByPath: Map<string, MediaItem> | undefined;
+  const existingItemFor = (item: MediaItem) => {
+    if (!existingItemsById || !existingItemsByPath) {
+      existingItemsById = new Map();
+      existingItemsByPath = new Map();
+      for (const collection of [data.movies, data.tvShows, data.animeShows]) {
+        for (const previous of collection || []) {
+          existingItemsById.set(previous.id, previous);
+          if (previous.filePath) existingItemsByPath.set(path.resolve(previous.filePath), previous);
+        }
+      }
+    }
+    return existingItemsById.get(item.id) || (item.filePath ? existingItemsByPath.get(path.resolve(item.filePath)) : undefined);
+  };
   const previousScanCache = data.scanCache || {};
   const nextScanCache: LibraryScanCache = {};
   const totalFolders = flattenLibraryFolders(folderGroups).length;
@@ -701,7 +729,7 @@ async function scanLibrary(
         : folderKind === 'tv'
           ? 'tv'
           : item.type;
-    const next = { ...item, type };
+    const next = item.type === type ? item : { ...item, type };
     const identity = next.id || (next.filePath ? createMediaItemId(next.filePath) : '');
     if (identity && scannedItemIds.has(identity)) return;
     if (identity) scannedItemIds.add(identity);
@@ -732,24 +760,15 @@ async function scanLibrary(
   const cachedItemsForFolder = (
     folder: string,
     folderKind: ScanCacheFolderKind,
-    options: { preserveUnavailable?: boolean } = {},
   ): MediaItem[] => {
-    const source = folderKind === 'auto'
-      ? [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]
-      : folderKind === 'movies'
-        ? data.movies || []
-        : folderKind === 'anime'
-          ? data.animeShows || []
-          : data.tvShows || [];
-
-    if (options.preserveUnavailable) {
-      return source.filter((item) => itemBelongsToFolder(item, folder));
+    const collections = folderKind === 'auto'
+      ? [data.movies, data.tvShows, data.animeShows]
+      : [folderKind === 'movies' ? data.movies : folderKind === 'anime' ? data.animeShows : data.tvShows];
+    const result: MediaItem[] = [];
+    for (const collection of collections) {
+      for (const item of collection || []) if (itemBelongsToFolder(item, folder)) result.push(item);
     }
-
-    return source
-      .map(sanitizeStoredItem)
-      .filter((item): item is MediaItem => Boolean(item))
-      .filter((item) => itemBelongsToFolder(item, folder));
+    return result;
   };
 
   const mergeFreshWithCached = (freshItems: MediaItem[], cachedItems: MediaItem[], isComplete: boolean) => {
@@ -784,9 +803,12 @@ async function scanLibrary(
   });
 
   const publishProgress = async (isComplete = false) => {
+    if (scanGeneration !== libraryMutationVersion || scanProfileId !== getDesktopActiveProfileId()) throw new Error('Library or profile changed during scanning.');
     const snapshot = currentLibrarySnapshot(isComplete);
+    scanCommits.set(snapshot, { generation: scanGeneration, roots: [...completedRoots], profileId: scanProfileId });
     if (!isComplete && scannedFolders > checkpointedFolders) {
-      await options.onCheckpoint?.(snapshot);
+      if (options.onCheckpoint) await options.onCheckpoint(snapshot);
+      else if (!saveLibraryScanCheckpoint(snapshot, scanGeneration)) throw new Error('Library changed during scanning.');
       checkpointedFolders = scannedFolders;
     }
     await options.onProgress?.(snapshot);
@@ -797,23 +819,23 @@ async function scanLibrary(
     folderKind: ScanCacheFolderKind,
   ) => {
     for (const folder of folders) {
-      const cachedItems = cachedItemsForFolder(folder, folderKind);
-      const cachedItemsById = new Map(cachedItems.map((item) => [item.id, item]));
-      const cachedItemsByPath = new Map(cachedItems
-        .filter((item) => item.filePath)
-        .map((item) => [path.resolve(item.filePath), item]));
+      const beforeRoot = [movies.length, tvShows.length, animeShows.length];
+      let cachedItems = cachedItemsForFolder(folder, folderKind);
       let refreshProviderRatings = false;
-      const preserveItems = (items: MediaItem[]) => items.map((item) => preserveExistingItemDuringScan(
+      const preserveItems = (items: MediaItem[]) => {
+        const started = performance.now();
+        const result = items.map((item) => preserveExistingItemDuringScan(
           item,
-          existingItemsById.get(item.id)
-            || (item.filePath ? existingItemsByPath.get(path.resolve(item.filePath)) : undefined)
-            || cachedItemsById.get(item.id)
-            || (item.filePath ? cachedItemsByPath.get(path.resolve(item.filePath)) : undefined),
+          existingItemFor(item),
           { refreshRatings: refreshProviderRatings },
         ));
+        const metrics = scanMetrics.getStore();
+        if (metrics) metrics.reconciliationMs += performance.now() - started;
+        return result;
+      };
       const folderStatus = folderStatusFor(folder, folderKind);
       if (folderStatus.state === 'unavailable') {
-        const unavailableItems = cachedItemsForFolder(folder, folderKind, { preserveUnavailable: true });
+        const unavailableItems = cachedItemsForFolder(folder, folderKind);
         appendItems(unavailableItems, folderKind);
         if (previousScanCache[folder]) nextScanCache[folder] = previousScanCache[folder];
         processedFolders.add(folder);
@@ -823,7 +845,41 @@ async function scanLibrary(
       }
 
       try {
-        const folderSignature = await getLibraryFolderSignatureAsync(folder);
+        const selected = process.env.LOOM_SCANNER_ENGINE || 'typescript';
+        if (!['typescript', 'rust', 'auto'].includes(selected)) throw new Error('Invalid scanner engine.');
+        const binary = scannerBinaryPath(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'));
+        const cachedEntry = previousScanCache[folder];
+        let reusedRoot = false;
+        let inspected: Awaited<ReturnType<typeof inspectLibraryRoot>>;
+        if (canCheckUnchangedRoot({ mode, root: folder, folderKind, items: cachedItems, entry: cachedEntry,
+          cacheVersion: SCAN_CACHE_VERSION, providerProfile: metadataProviderProfile, now: Date.now(),
+          metadataRefreshIntervalMs, missingMetadataRetryIntervalMs })) {
+          inspected = await inspectLibraryRoot(folder, cachedEntry.signature, {
+            engine: (process.env.LOOM_SCANNER_ENGINE || 'auto') as DiscoveryEngine,
+            binary, signal: cancellation.signal,
+          });
+          const fingerprint = inspected?.metrics;
+          if (inspected?.unchanged && fingerprint && fingerprint.fileCount === cachedEntry.fileCount) {
+            cancellation.signal.throwIfAborted();
+            appendItems(cachedItems, folderKind);
+            nextScanCache[folder] = cachedEntry;
+            completedRoots.add(folder);
+            peakChildRssBytes = Math.max(peakChildRssBytes, Number(fingerprint.peakRssBytes || 0));
+            console.info('[scanner]', JSON.stringify({ ...fingerprint, reusedItems: cachedItems.length }));
+            reusedRoot = true;
+          }
+        }
+        if (!reusedRoot) {
+        const { inventory, metrics } = inspected?.inventory ? { inventory: inspected.inventory, metrics: inspected.metrics } : await discoverLibraryRoot(folder, {
+          engine: selected as DiscoveryEngine,
+          signal: cancellation.signal,
+          binary,
+        });
+        try {
+        const workMetrics = { probes: 0, probeExecutions: 0, probeCacheHits: 0, probeMs: 0, providers: 0, requestAttempts: 0, rechecks: 0, providerMs: 0, reconciliationMs: 0 };
+        await scanMetrics.run(workMetrics, () => scanInventory.run(inventory, async () => {
+        cachedItems = cachedItems.map((item) => sanitizeStoredItem(item, inventory)).filter((item): item is MediaItem => Boolean(item));
+        const folderSignature = await inventory.signatureAsync();
         const cachedEntry = previousScanCache[folder];
         const ratingsAreFresh = Boolean(
           cachedEntry
@@ -856,24 +912,17 @@ async function scanLibrary(
           if (canUseCachedMetadata && cachedItems.length === cachedEntry.itemCount) {
             appendItems(cachedItems, folderKind);
             nextScanCache[folder] = cachedEntry;
-            processedFolders.add(folder);
-            scannedFolders++;
-            await publishProgress(false);
-            continue;
+            completedRoots.add(folder);
+            return;
           }
         }
 
         const folderCtx: ScanContext = folderKind === 'auto' ? { ...ctx } : { ...ctx, folderKind };
         const directItem = await scanDirectoryAsItem(folder, folderCtx);
-        const items = directItem
-          ? [directItem]
-          : await scanFolder(folder, folderCtx, async (partialItems) => {
-            appendItems(preserveItems(partialItems), folderKind);
-            await publishProgress(false);
-          });
-        const uniqueItems = Array.from(new Map(items.map((item) => [item.id, item])).values());
-
-        if (directItem) appendItems(preserveItems(uniqueItems), folderKind);
+        if (directItem) inventory.stageItems(preserveItems([directItem]));
+        else await scanFolder(folder, folderCtx, (partialItems) => { inventory.stageItems(preserveItems(partialItems)); }, false);
+        const itemCount = inventory.stagedItemCount();
+        for (const item of inventory.stagedItems()) appendItem(item, folderKind);
         if (folderSignature) {
           nextScanCache[folder] = {
             version: SCAN_CACHE_VERSION,
@@ -881,14 +930,25 @@ async function scanLibrary(
             signature: folderSignature.signature,
             subtitleProfile: metadataProviderProfile,
             fileCount: folderSignature.fileCount,
-            itemCount: uniqueItems.length,
+            itemCount,
             scannedAt: Date.now(),
             ratingsRefreshedAt: refreshProviderRatings
               ? Date.now()
               : cachedEntry?.ratingsRefreshedAt || cachedEntry?.scannedAt || Date.now(),
           };
         }
+        if (!(await fs.promises.stat(folder)).isDirectory()) throw new Error('Library root disappeared during scanning.');
+        completedRoots.add(folder);
+        }));
+        peakChildRssBytes = Math.max(peakChildRssBytes, Number('peakRssBytes' in metrics ? metrics.peakRssBytes || 0 : 0));
+        console.info('[scanner]', JSON.stringify({ ...metrics, ...workMetrics }));
+        } finally { inventory.close(); }
+        }
       } catch (error) {
+        movies.length = beforeRoot[0]; tvShows.length = beforeRoot[1]; animeShows.length = beforeRoot[2];
+        scannedItemIds.clear();
+        for (const item of [...movies, ...tvShows, ...animeShows]) scannedItemIds.add(item.id);
+        completedRoots.delete(folder);
         const currentStatus = getLibraryFolderStatus(folder, libraryFolderKindForScanKind(folderKind));
         const message = error instanceof Error ? error.message : String(error);
         folderStatusesByPath.set(folder, {
@@ -898,7 +958,7 @@ async function scanLibrary(
             ? `The folder disconnected during scanning. Saved items were preserved. ${message}`
             : `The folder remained available, but its scan could not finish. Saved items were preserved. ${message}`,
         });
-        appendItems(cachedItemsForFolder(folder, folderKind, { preserveUnavailable: true }), folderKind);
+        appendItems(cachedItemsForFolder(folder, folderKind), folderKind);
         if (previousScanCache[folder]) nextScanCache[folder] = previousScanCache[folder];
         console.warn(`[library] Preserved ${folder} after an incomplete scan:`, error);
       }
@@ -923,23 +983,15 @@ async function scanLibrary(
     scanCache: nextScanCache,
   };
   const repaired = repairSeasonFolderItems(nextLibrary);
-  if (repaired.mediaIdAliases.size > 0) {
-    remapLibraryMediaReferences(repaired.mediaIdAliases);
-  }
-  await options.onProgress?.({
-    ...repaired.data,
-    isComplete: true,
-    scannedFolders,
-    totalFolders,
-  });
-  if (options.backgroundMetadataRefresh !== false) {
-    void refreshIncompleteMetadataQueue(repaired.data).then(() => (
-      refreshDisplayMetadataQueue(repaired.data)
-    )).catch((error) => {
-      console.warn('[metadata] Background refresh after scan failed:', error);
-    });
-  }
+  scanCommits.set(repaired.data, { generation: scanGeneration, roots: [...completedRoots], profileId: scanProfileId,
+    aliases: repaired.mediaIdAliases, backgroundMetadataRefresh: options.backgroundMetadataRefresh !== false });
   return repaired.data;
+  } finally {
+    activeScans.delete(cancellation);
+    const metrics = stopMetrics();
+    console.info('[scanner] scan', JSON.stringify({ ...metrics, peakChildRssBytes,
+      combinedPeakUpperBoundBytes: metrics.peakParentRssBytes + peakChildRssBytes }));
+  }
 }
 
 // ─── Library persistence ──────────────────────────────────────────────────────
@@ -972,13 +1024,15 @@ function isExistingMediaFile(candidatePath?: string): boolean {
   }
 }
 
-function sanitizeStoredItem(item: MediaItem): MediaItem | null {
+function sanitizeStoredItem(item: MediaItem, inventory?: DiscoveryInventory): MediaItem | null {
+  const exists = (filePath?: string) => inventory ? Boolean(filePath && (path.resolve(filePath) === inventory.root || inventory.facts(filePath))) : pathExists(filePath);
+  const isFile = (filePath?: string) => inventory ? Boolean(filePath && inventory.facts(filePath)?.kind === 'file') : isExistingMediaFile(filePath);
   if (item.filePath && isMacSidecarFile(path.basename(item.filePath))) return null;
-  if (item.filePath && !pathExists(item.filePath)) return null;
+  if (item.filePath && !exists(item.filePath)) return null;
 
   const episodeFiles = item.episodeFiles?.filter((episodeFile) =>
     !isMacSidecarFile(path.basename(episodeFile.filePath))
-    && isExistingMediaFile(episodeFile.filePath),
+    && isFile(episodeFile.filePath),
   );
 
   const withStableIdentity = (next: MediaItem): MediaItem => {
@@ -989,7 +1043,7 @@ function sanitizeStoredItem(item: MediaItem): MediaItem | null {
   };
 
   if (item.episodeFiles && (!episodeFiles || episodeFiles.length === 0)) return null;
-  if (!episodeFiles && item.filePath && !isExistingMediaFile(item.filePath)) return null;
+  if (!episodeFiles && item.filePath && !isFile(item.filePath)) return null;
   if (!episodeFiles) return withStableIdentity(item);
 
   const episodeKeys = new Set(episodeFiles.map((episodeFile) => `${episodeFile.season}-${episodeFile.episode}`));
@@ -1031,15 +1085,15 @@ function loadLibraryUncached(): LibraryData {
 
       if (hasExplicitFolderGroups) {
         normalized.movies = (normalized.movies || [])
-          .map(sanitizeStoredItem)
+          .map((item) => sanitizeStoredItem(item))
           .filter((item): item is MediaItem => Boolean(item))
           .map((item) => ({ ...item, type: 'movie' }));
         normalized.tvShows = (normalized.tvShows || [])
-          .map(sanitizeStoredItem)
+          .map((item) => sanitizeStoredItem(item))
           .filter((item): item is MediaItem => Boolean(item))
           .map((item) => ({ ...item, type: 'tv' }));
         normalized.animeShows = (normalized.animeShows || [])
-          .map(sanitizeStoredItem)
+          .map((item) => sanitizeStoredItem(item))
           .filter((item): item is MediaItem => Boolean(item))
           .map((item) => ({ ...item, type: 'anime' }));
         return persistSeasonFolderRepair(normalized, true);
@@ -1222,10 +1276,10 @@ function compactLibraryItemForLocalNetwork(
 let artworkCacheQueue: Promise<void> = Promise.resolve();
 
 async function cacheArtworkNow(data: LibraryData): Promise<void> {
-  const snapshot = stripInlineArtworkFromLibrary(data);
+  const sources = collectArtworkSourcesForCache(data);
   artworkCacheQueue = artworkCacheQueue
     .catch(() => undefined)
-    .then(() => cacheLibraryArtwork(snapshot));
+    .then(() => cacheLibraryArtwork(sources));
   await artworkCacheQueue;
 }
 
@@ -1286,63 +1340,64 @@ function saveLibraryItemMutation(item: MediaItem): void {
 }
 
 function preserveLockedMetadata(previous: LibraryData, next: LibraryData): void {
-  const previousItems = new Map(
-    [...(previous.movies || []), ...(previous.tvShows || []), ...(previous.animeShows || [])]
-      .map((item) => [item.id, item]),
-  );
-  const nextItems = [...(next.movies || []), ...(next.tvShows || []), ...(next.animeShows || [])];
+  const previousItems = new Map<string, MediaItem>();
+  for (const collection of [previous.movies, previous.tvShows, previous.animeShows]) {
+    for (const item of collection || []) previousItems.set(item.id, item);
+  }
 
-  for (const item of nextItems) {
-    const existing = previousItems.get(item.id);
-    if (!existing) continue;
-    const locked = new Set(metadataRefreshCategories.filter((category) => (
-      getMetadataRefreshState(item.id, category)?.locked
-    )));
-    if (locked.has('core')) {
-      item.title = existing.title;
-      item.summary = existing.summary;
-      item.year = existing.year;
-      item.format = existing.format;
-      item.contentRating = existing.contentRating;
-      item.trailerUrl = existing.trailerUrl;
-      item.runtime = existing.runtime;
-      item.seasonCount = existing.seasonCount;
-      item.episodeCount = existing.episodeCount;
-      item.genres = existing.genres;
-      item.providerIds = existing.providerIds;
-    }
-    if (locked.has('cast')) item.cast = existing.cast;
-    if (locked.has('artwork')) {
-      item.poster = existing.poster;
-      item.backdrop = existing.backdrop;
-      item.logo = existing.logo;
-      item.posterCandidates = existing.posterCandidates;
-      item.backdropCandidates = existing.backdropCandidates;
-      item.logoCandidates = existing.logoCandidates;
-    }
-    if (locked.has('ratings')) {
-      item.rating = existing.rating;
-      item.providerRatings = existing.providerRatings;
-      item.contentRatings = existing.contentRatings;
-    }
-    if (locked.has('episodes')) {
-      const existingSeasons = new Map((existing.seasons || []).map((season) => [season.number, season]));
-      const scannedSeasons = item.seasons?.length ? item.seasons : existing.seasons || [];
-      item.seasons = scannedSeasons.map((season) => {
-        const selected = existingSeasons.get(season.number);
-        return selected ? { ...season, title: selected.title || season.title } : season;
-      });
-      const existingEpisodes = new Map((existing.episodes || []).map((episode) => (
-        [`${episode.season}-${episode.number}`, episode]
+  for (const collection of [next.movies, next.tvShows, next.animeShows]) {
+    for (const item of collection || []) {
+      const existing = previousItems.get(item.id);
+      if (!existing || existing === item) continue;
+      const locked = new Set(metadataRefreshCategories.filter((category) => (
+        getMetadataRefreshState(item.id, category)?.locked
       )));
-      const scannedEpisodes = item.episodes?.length ? item.episodes : existing.episodes || [];
-      item.episodes = scannedEpisodes.map((episode) => (
-        existingEpisodes.get(`${episode.season}-${episode.number}`) || episode
-      ));
-    }
-    if (locked.has('streaming-providers')) {
-      item.streamingProviders = existing.streamingProviders;
-      item.originPlatform = existing.originPlatform;
+      if (locked.has('core')) {
+        item.title = existing.title;
+        item.summary = existing.summary;
+        item.year = existing.year;
+        item.format = existing.format;
+        item.contentRating = existing.contentRating;
+        item.trailerUrl = existing.trailerUrl;
+        item.runtime = existing.runtime;
+        item.seasonCount = existing.seasonCount;
+        item.episodeCount = existing.episodeCount;
+        item.genres = existing.genres;
+        item.providerIds = existing.providerIds;
+      }
+      if (locked.has('cast')) item.cast = existing.cast;
+      if (locked.has('artwork')) {
+        item.poster = existing.poster;
+        item.backdrop = existing.backdrop;
+        item.logo = existing.logo;
+        item.posterCandidates = existing.posterCandidates;
+        item.backdropCandidates = existing.backdropCandidates;
+        item.logoCandidates = existing.logoCandidates;
+      }
+      if (locked.has('ratings')) {
+        item.rating = existing.rating;
+        item.providerRatings = existing.providerRatings;
+        item.contentRatings = existing.contentRatings;
+      }
+      if (locked.has('episodes')) {
+        const existingSeasons = new Map((existing.seasons || []).map((season) => [season.number, season]));
+        const scannedSeasons = item.seasons?.length ? item.seasons : existing.seasons || [];
+        item.seasons = scannedSeasons.map((season) => {
+          const selected = existingSeasons.get(season.number);
+          return selected ? { ...season, title: selected.title || season.title } : season;
+        });
+        const existingEpisodes = new Map((existing.episodes || []).map((episode) => (
+          [`${episode.season}-${episode.number}`, episode]
+        )));
+        const scannedEpisodes = item.episodes?.length ? item.episodes : existing.episodes || [];
+        item.episodes = scannedEpisodes.map((episode) => (
+          existingEpisodes.get(`${episode.season}-${episode.number}`) || episode
+        ));
+      }
+      if (locked.has('streaming-providers')) {
+        item.streamingProviders = existing.streamingProviders;
+        item.originPlatform = existing.originPlatform;
+      }
     }
   }
 }
@@ -1359,19 +1414,39 @@ let reconcileSkipAnalysisAfterScan: (previous: LibraryData, next: LibraryData) =
 function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
   const previous = loadLibrary();
-  preserveLockedMetadata(previous, data);
-  if (!saveLibrary(data)) return false;
+  if (!saveLibraryScanCheckpoint(data, scanVersion)) return false;
   advanceLibraryMutationVersion();
-  cleanupOrphanedAutomaticSegments();
   warmSkipSegmentsAfterScan(data);
   reconcileSkipAnalysisAfterScan(previous, data);
+  if (scanCommits.get(data)?.backgroundMetadataRefresh) {
+    void refreshIncompleteMetadataQueue(loadLibrary()).then(() => refreshDisplayMetadataQueue(loadLibrary()))
+      .catch((error) => console.warn('[metadata] Background refresh after scan failed:', error));
+  }
   return true;
 }
 
 function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
-  preserveLockedMetadata(loadLibrary(), data);
-  return saveLibrary(data);
+  const commit = scanCommits.get(data);
+  if (!commit || !isCurrentScanCommit(data, scanVersion, getDesktopActiveProfileId())) return false;
+  const previous = loadLibrary();
+  preserveLockedMetadata(previous, data);
+  const durablePrevious = stripInlineArtworkFromLibrary(previous, true);
+  const durableNext = stripInlineArtworkFromLibrary(data);
+  const persistenceStarted = performance.now();
+  const delta = planScanDelta(durablePrevious, durableNext, commit.roots);
+  const cache = Object.fromEntries(commit.roots.filter((root) => durableNext.scanCache?.[root]
+    && JSON.stringify(durableNext.scanCache[root]) !== JSON.stringify(previous.scanCache?.[root]))
+    .flatMap((root) => { const entry = durableNext.scanCache?.[root]; return entry ? [[root, entry] as const] : []; }));
+  try {
+    const rowsChanged = saveLibraryScanDeltaToDatabase(delta.changed, delta.removed, cache, commit.aliases, delta.removedFilePaths);
+    cachedLibrary = delta.published;
+    console.info('[scanner] persistence', JSON.stringify({ durationMs: performance.now() - persistenceStarted, rowsChanged, changedItems: delta.changed.length, removedItems: delta.removed.length, cacheWrites: Object.keys(cache).length }));
+    return true;
+  } catch (error) {
+    console.error('Scan checkpoint could not be saved:', error);
+    throw error;
+  }
 }
 
 const {
@@ -1407,6 +1482,7 @@ const {
   fetchTVDBMetadataCandidates,
   fetchTVMetadata,
   fetchTVMetadataCandidates,
+  fetchTVMetadataById,
   getMetadataApiKey,
   getMetadataRefreshState,
   loadLibrary,
@@ -2231,11 +2307,13 @@ async function startBackgroundServices(): Promise<void> {
       stopAllLibVlcPlayback();
     },
     closeMediaServer: async () => {
+      for (const scan of activeScans) scan.abort();
       const localServerToClose = getMediaServer();
       const lanServerToClose = getLanMediaServer();
       setMediaServer(null);
       setLanMediaServer(null);
       await Promise.all([
+        stopScannerProcesses(),
         closeServerForUpdateInstall(localServerToClose, getMediaServerSockets()),
         closeServerForUpdateInstall(lanServerToClose, getLanMediaServerSockets()),
         stopUnifiedDesktopServer(),
@@ -2253,6 +2331,7 @@ async function startBackgroundServices(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  startMemoryMetrics();
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');
   applyAppIcon();
@@ -2338,7 +2417,18 @@ app.on('activate', () => {
   presentPrimaryWindow();
 });
 
-app.on('before-quit', () => {
+let scannerQuitPending = false;
+app.on('before-quit', (event) => {
+  for (const scan of activeScans) scan.abort();
+  if (hasScannerProcesses()) {
+    event.preventDefault();
+    isAppShuttingDown = true;
+    if (!scannerQuitPending) {
+      scannerQuitPending = true;
+      void stopScannerProcesses().finally(() => app.quit());
+    }
+    return;
+  }
   releaseAllMediaSessions();
   isAppShuttingDown = true;
   flushPairedDeviceTouches();

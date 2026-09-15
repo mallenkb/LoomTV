@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { smallerTmdbArtwork } from '../shared/artworkRenditions';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1536,6 +1537,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
 
+        // Resolve and authorize the capability before selecting a fixed provider
+        // rendition. The client cannot substitute an upstream host or path.
+        sourceUrl = smallerTmdbArtwork(sourceUrl, reqUrl.searchParams.get('width'));
         const sendArtwork = (cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>) => {
           if (!canWriteResponse(res)) return;
           if (cachedArtwork.cachePath) {

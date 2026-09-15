@@ -1,9 +1,10 @@
+import { readScanDirectory, scanFileSize, scanFilenameHints } from './scanning/inventory.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isImageFileName, isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
 import { detectLibraryFolderKind } from './libraryFolders.ts';
 import { createMediaItemId } from './libraryItemHelpers.ts';
-import { isExcludedLibraryAuxiliaryDirectory, isSeasonDirectoryName } from './libraryScanFiles.ts';
+import { indexScanSubtitles, isExcludedLibraryAuxiliaryDirectory, isSeasonDirectoryName } from './libraryScanFiles.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import {
   getBoundedLibraryProbe,
@@ -11,7 +12,6 @@ import {
   processWithConcurrencyInOrder,
   runBoundedLibraryItemTask,
 } from './libraryScanConcurrency.ts';
-import { cleanMediaTitle } from './metadata/helpers.ts';
 import type { EpisodeFile, MediaItem } from './metadata/types.ts';
 import {
   createSubtitleRecords,
@@ -89,7 +89,7 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
   );
 
   async function subtitleFilesInDirectory(folderPath: string): Promise<string[]> {
-    return (await fs.promises.readdir(folderPath, { withFileTypes: true }))
+    return (await readScanDirectory(folderPath))
       .filter((entry) => !entry.isDirectory())
       .map((entry) => entry.name)
       .filter(isSubtitleFileName);
@@ -98,8 +98,8 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
   async function buildImageItems(folderPath: string, imageFiles: string[]): Promise<MediaItem[]> {
     return Promise.all(imageFiles.map(async (imageFile) => {
       const fullPath = path.join(folderPath, imageFile);
-      const parsedImage = cleanMediaTitle(imageFile);
-      const stats = await fs.promises.stat(fullPath);
+      const parsedImage = scanFilenameHints(fullPath, imageFile);
+      const fileSize = await scanFileSize(fullPath);
       return {
         id: createMediaItemId(fullPath),
         type: 'movie',
@@ -113,7 +113,7 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
         genres: [],
         cast: [],
         filePath: fullPath,
-        fileSize: stats.size,
+        fileSize,
       };
     }));
   }
@@ -125,15 +125,14 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
     ctx: ScanContext,
   ): Promise<MediaItem[]> {
     const items: MediaItem[] = [];
+    const subtitlesForVideo = indexScanSubtitles(folderPath, subtitleFiles);
     await processWithConcurrencyInOrder(
       videoFiles,
       LIBRARY_ITEM_CONCURRENCY,
       async (videoFile): Promise<MediaItem | null> => {
         const fullPath = path.join(folderPath, videoFile);
-        const parsedVideo = cleanMediaTitle(videoFile);
-        const matchingSubtitles = subtitleFiles.filter((subtitle) =>
-          path.basename(subtitle, path.extname(subtitle)).startsWith(path.basename(videoFile, path.extname(videoFile))),
-        );
+        const parsedVideo = scanFilenameHints(fullPath, videoFile);
+        const matchingSubtitles = subtitlesForVideo(videoFile);
         const forcedType = ctx.folderKind === 'movies'
           ? 'movie'
           : ctx.folderKind === 'anime'
@@ -162,7 +161,7 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
   }
 
 async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promise<MediaItem | null> {
-  const dirEntries = await fs.promises.readdir(folderPath, { withFileTypes: true });
+  const dirEntries = await readScanDirectory(folderPath);
 
   const folderName = path.basename(folderPath);
   const videoFiles = dirEntries
@@ -183,7 +182,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
 
   if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length === 0) return null;
 
-  const parsedFolder = cleanMediaTitle(folderName);
+  const parsedFolder = scanFilenameHints(folderPath, folderName);
   const subtitles = createSubtitleRecords(folderPath, subtitleFiles);
   const id = createMediaItemId(folderPath);
   const representativeProbe = videoFiles[0] ? await probeMediaFile(path.join(folderPath, videoFiles[0])) : undefined;
@@ -258,16 +257,17 @@ async function scanFolder(
   folderPath: string,
   ctx: ScanContext,
   onItems?: (items: MediaItem[]) => void | Promise<void>,
+  collectResults = true,
 ): Promise<MediaItem[]> {
   const items: MediaItem[] = [];
 
   const addItems = async (nextItems: MediaItem[]) => {
-    items.push(...nextItems);
+    if (collectResults) items.push(...nextItems);
     if (nextItems.length > 0) await onItems?.(nextItems);
   };
 
   try {
-    const rootEntries = await fs.promises.readdir(folderPath, { withFileTypes: true });
+    const rootEntries = await readScanDirectory(folderPath);
 
     const rootVideoFiles = rootEntries
       .filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name))
@@ -278,6 +278,7 @@ async function scanFolder(
           .filter((entry) => !entry.isDirectory() && isImageFileName(entry.name))
           .map((entry) => entry.name);
     const rootSubtitleFiles = await subtitleFilesInDirectory(folderPath);
+    const subtitlesForVideo = indexScanSubtitles(folderPath, rootSubtitleFiles);
 
     await processWithConcurrencyInOrder(
         rootVideoFiles,
@@ -285,11 +286,8 @@ async function scanFolder(
         async (videoFile): Promise<MediaItem | null> => {
           const fullVideoPath = path.join(folderPath, videoFile);
 
-          const baseName = path.basename(videoFile, path.extname(videoFile));
-          const matchingSubtitles = rootSubtitleFiles.filter((subtitle) =>
-            path.basename(subtitle, path.extname(subtitle)).startsWith(baseName),
-          );
-          const parsedVideo = cleanMediaTitle(videoFile);
+          const matchingSubtitles = subtitlesForVideo(videoFile);
+          const parsedVideo = scanFilenameHints(fullVideoPath, videoFile);
           const looseFileProbe = ctx.folderKind ? undefined : await probeMediaFile(fullVideoPath);
           const recognizedLooseEpisode = !ctx.folderKind
             && shouldTreatAsTV(videoFile, [videoFile], false, looseFileProbe);
@@ -332,7 +330,7 @@ async function scanFolder(
         LIBRARY_ITEM_CONCURRENCY,
         async (entry): Promise<MediaItem[]> => {
           const fullPath = path.join(folderPath, entry.name);
-          const dirEntries = await fs.promises.readdir(fullPath, { withFileTypes: true });
+          const dirEntries = await readScanDirectory(fullPath);
           const videoFiles = dirEntries
             .filter((directoryEntry) => !directoryEntry.isDirectory())
             .map((directoryEntry) => directoryEntry.name)
@@ -352,7 +350,7 @@ async function scanFolder(
           if (videoFiles.length === 0 && subDirs.length > 0 && !hasSeasonDirs) {
             const nestedEpisodeFiles = await scanEpisodeFiles(fullPath);
             if (ctx.folderKind !== 'movies' && nestedEpisodeFiles.length > 0) {
-              const parsedFolder = cleanMediaTitle(entry.name);
+              const parsedFolder = scanFilenameHints(fullPath, entry.name);
               const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
               if (!await shouldSplitContainerFolder(fullPath, entry.name, subDirs)) {
                 const tvItem = await buildTVItemFromFolder({
@@ -371,7 +369,7 @@ async function scanFolder(
                 return tvItem ? [tvItem] : [];
               }
             }
-            return scanFolder(fullPath, ctx);
+            return scanFolder(fullPath, ctx, collectResults ? undefined : onItems, collectResults);
           }
 
           const isTV = ctx.folderKind === 'tv'
@@ -382,7 +380,7 @@ async function scanFolder(
               hasSeasonDirs,
               videoFiles[0] ? await probeMediaFile(path.join(fullPath, videoFiles[0])) : undefined,
             ));
-          const parsedFolder = cleanMediaTitle(entry.name);
+          const parsedFolder = scanFilenameHints(fullPath, entry.name);
           const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
 
           if (isTV) {

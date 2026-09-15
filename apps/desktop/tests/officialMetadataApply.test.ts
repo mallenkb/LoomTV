@@ -87,6 +87,7 @@ function createHarness(item: MediaItem, omdbResponse: Record<string, unknown> | 
     fetchTMDBTVMetadataCandidates: empty,
     fetchTVMetadata: none,
     fetchTVMetadataCandidates: empty,
+    fetchTVMetadataById: async () => null,
     artworkDeliveryUrl: (source?: string | null) => source || '',
     artworkDeliveryUrls: (sources?: string[]) => sources || [],
     orderedArtworkCandidates: (...urls: Array<string | null | undefined>) => [

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { durableArtworkSource } from './artworkSources.ts';
 
 const MAX_CACHED_CANDIDATES_PER_KIND = 2;
 const CUSTOM_ARTWORK_PROTOCOL = 'loomtv-custom-artwork:';
@@ -63,19 +64,31 @@ function isCacheableArtworkSource(source: string): boolean {
 
 export function collectArtworkSourcesForCache(data: ArtworkCacheLibrary): string[] {
   const sources = new Set<string>();
-  const items = [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])];
+  function* items() {
+    yield* data.movies || [];
+    yield* data.tvShows || [];
+    yield* data.animeShows || [];
+  }
   const add = (source?: string) => {
+    source = durableArtworkSource(source);
     if (source && isCacheableArtworkSource(source)) sources.add(source);
   };
   const addCandidates = (candidates?: string[]) => {
-    (candidates || []).slice(0, MAX_CACHED_CANDIDATES_PER_KIND).forEach(add);
+    const selected = new Set<string>();
+    for (const raw of candidates || []) {
+      const source = durableArtworkSource(raw);
+      if (!source || selected.has(source)) continue;
+      selected.add(source);
+      add(source);
+      if (selected.size === MAX_CACHED_CANDIDATES_PER_KIND) break;
+    }
   };
 
   // Cache title-level artwork for the entire library before starting cast and
   // episode images. The window opens while this queue runs, so interleaving a
   // long series' episode stills used to leave later titles waiting on their
   // poster provider even though their metadata was already in SQLite.
-  for (const item of items) {
+  for (const item of items()) {
     add(item.poster);
     add(item.backdrop);
     add(item.logo);
@@ -84,7 +97,7 @@ export function collectArtworkSourcesForCache(data: ArtworkCacheLibrary): string
     addCandidates(item.logoCandidates);
   }
 
-  for (const item of items) {
+  for (const item of items()) {
     for (const credit of item.cast || []) {
       add(credit.image);
       add(credit.characterImage);

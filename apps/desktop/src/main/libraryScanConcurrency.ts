@@ -1,3 +1,6 @@
+import { AsyncResource } from 'node:async_hooks';
+import { measureScanWork } from './scanning/scanMetrics.ts';
+import { verifyDiscoveredFile } from './scanning/inventory.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 
 export const LIBRARY_ITEM_CONCURRENCY = 2;
@@ -20,9 +23,10 @@ function createConcurrencyLimiter(concurrency: number) {
   };
 
   return <Result>(task: () => Promise<Result>): Promise<Result> => new Promise((resolve, reject) => {
+    const boundTask = AsyncResource.bind(task);
     pending.push(() => {
       void Promise.resolve()
-        .then(task)
+        .then(boundTask)
         .then(resolve, reject)
         .finally(() => {
           active -= 1;
@@ -47,7 +51,12 @@ export function getBoundedLibraryProbe(probe: AsyncMediaFileProbe): AsyncMediaFi
   if (existing) return existing;
 
   const schedule = createConcurrencyLimiter(LIBRARY_PROBE_CONCURRENCY);
-  const boundedProbe: AsyncMediaFileProbe = (filePath) => schedule(() => probe(filePath));
+  const boundedProbe: AsyncMediaFileProbe = (filePath) => schedule(async () => {
+    await verifyDiscoveredFile(filePath);
+    const result = await measureScanWork('probe', () => probe(filePath));
+    await verifyDiscoveredFile(filePath);
+    return result;
+  });
   sharedProbeLimiters.set(probe, boundedProbe);
   return boundedProbe;
 }

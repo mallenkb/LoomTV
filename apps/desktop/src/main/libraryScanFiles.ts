@@ -1,3 +1,4 @@
+import { readScanDirectory, scanInventory } from './scanning/inventory.ts';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,6 +7,8 @@ import {
   isMacSidecarFile,
   isSubtitleFileName,
   isVideoFileName,
+  subtitleMatchesVideo,
+  subtitleAssociationKeys,
 } from './fileClassification.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import { createSubtitleRecords, parseEpisodeFileName } from './scanClassification.ts';
@@ -18,6 +21,21 @@ import {
 
 export type MediaFileProbe = (filePath: string) => ProbeMediaFileResult;
 export type AsyncMediaFileProbe = (filePath: string) => Promise<ProbeMediaFileResult>;
+
+/** Join worker-provided subtitle keys once per directory, then use exact lookups. */
+export function indexScanSubtitles(directory: string, subtitles: string[]) {
+  const index = new Map<string, string[]>();
+  const inventory = scanInventory.getStore();
+  for (const subtitle of subtitles) {
+    const keys = inventory?.get(path.join(directory, subtitle))?.hints?.subtitleKeys ?? subtitleAssociationKeys(subtitle);
+    for (const key of keys) {
+      const names = index.get(key) || [];
+      names.push(subtitle);
+      index.set(key, names);
+    }
+  }
+  return (video: string) => index.get(path.basename(video, path.extname(video)).toLowerCase()) || [];
+}
 const EMPTY_MEDIA_FILE_PROBE: MediaFileProbe = () => ({});
 
 const SKIPPED_EPISODE_DIRECTORIES = new Set([
@@ -63,12 +81,11 @@ function seasonTitle(number: number, originalName?: string): string {
 }
 
 function matchingSubtitleFilesForVideo(directory: string, videoFileName: string): string[] {
-  const baseName = path.basename(videoFileName, path.extname(videoFileName)).toLowerCase();
   try {
     return fs.readdirSync(directory, { withFileTypes: true })
       .filter((entry) => !entry.isDirectory() && isSubtitleFileName(entry.name))
       .map((entry) => entry.name)
-      .filter((fileName) => path.basename(fileName, path.extname(fileName)).toLowerCase().startsWith(baseName));
+      .filter((fileName) => subtitleMatchesVideo(fileName, videoFileName));
   } catch {
     return [];
   }
@@ -142,7 +159,7 @@ export async function getLibraryFolderSignatureAsync(
 
     let entries: fs.Dirent[];
     try {
-      entries = (await fs.promises.readdir(current, { withFileTypes: true }))
+      entries = (await readScanDirectory(current))
         .sort((left, right) => left.name.localeCompare(right.name));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -268,58 +285,67 @@ export function extractSeasons(
   return seasons.sort((left, right) => left.number - right.number);
 }
 
-async function matchingSubtitleFilesForVideoAsync(directory: string, videoFileName: string): Promise<string[]> {
-  const baseName = path.basename(videoFileName, path.extname(videoFileName)).toLowerCase();
-  return (await fs.promises.readdir(directory, { withFileTypes: true }))
-    .filter((entry) => !entry.isDirectory() && isSubtitleFileName(entry.name))
-    .map((entry) => entry.name)
-    .filter((fileName) => path.basename(fileName, path.extname(fileName)).toLowerCase().startsWith(baseName));
-}
-
 export async function scanEpisodeFilesAsync(
   folderPath: string,
   probe: AsyncMediaFileProbe,
 ): Promise<EpisodeFile[]> {
-  type EpisodeCandidate = { directory: string; fileName: string; fullPath: string };
-  const candidates: EpisodeCandidate[] = [];
+  type EpisodeCandidate = { directory: string; fileName: string; fullPath: string; subtitles: string[] };
+  let candidates: EpisodeCandidate[] = [];
+  const files: EpisodeFile[] = [];
+
+  const flush = async (): Promise<void> => {
+    if (!candidates.length) return;
+    const batch = candidates;
+    candidates = [];
+    const results = await mapWithConcurrency(
+      batch,
+      LIBRARY_PROBE_CONCURRENCY,
+      async ({ directory, fileName, fullPath, subtitles }): Promise<EpisodeFile | null> => {
+        const mediaProbe = await probe(fullPath);
+        if (!mediaProbe.localMetadata?.videoCodec) return null;
+        const folderSeason = seasonFromRelativePath(folderPath, directory);
+        const hint = scanInventory.getStore()?.get(fullPath)?.hints;
+        const parsed = hint?.episode !== undefined
+          ? { episode: hint.episode, season: hint.season ?? mediaProbe.season ?? folderSeason ?? 1 }
+          : parseEpisodeFileName(fileName, mediaProbe.season ?? folderSeason ?? 1);
+        if (!parsed) return null;
+        const season = folderSeason === 0
+          ? 0
+          : mediaProbe.season ?? parsed.season ?? folderSeason ?? 1;
+        return {
+          season,
+          episode: mediaProbe.episode ?? parsed.episode,
+          filePath: fullPath,
+          title: mediaProbe.embeddedTitle,
+          subtitles: createSubtitleRecords(directory, subtitles),
+          localMetadata: mediaProbe.localMetadata,
+        };
+      },
+    );
+    for (const file of results) if (file) files.push(file);
+  };
 
   const collectVideoFiles = async (directory: string): Promise<void> => {
-    for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+    const entries = await readScanDirectory(directory);
+    const subtitles = entries.filter((entry) => !entry.isDirectory() && isSubtitleFileName(entry.name)).map((entry) => entry.name);
+    const matchingSubtitles = indexScanSubtitles(directory, subtitles);
+    for (const entry of entries) {
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         if (!SKIPPED_EPISODE_DIRECTORIES.has(entry.name.toLowerCase())) await collectVideoFiles(fullPath);
         continue;
       }
       if (!isVideoFileName(entry.name)) continue;
-      candidates.push({ directory, fileName: entry.name, fullPath });
+      candidates.push({ directory, fileName: entry.name, fullPath, subtitles: matchingSubtitles(entry.name) });
+      // Retain only the output and one batch of pending probes/subtitle matches.
+      if (candidates.length >= 128) await flush();
     }
   };
 
   await collectVideoFiles(folderPath);
-  const files = await mapWithConcurrency(
-    candidates,
-    LIBRARY_PROBE_CONCURRENCY,
-    async ({ directory, fileName, fullPath }): Promise<EpisodeFile | null> => {
-      const mediaProbe = await probe(fullPath);
-      if (!mediaProbe.localMetadata?.videoCodec) return null;
-      const folderSeason = seasonFromRelativePath(folderPath, directory);
-      const parsed = parseEpisodeFileName(fileName, mediaProbe.season ?? folderSeason ?? 1);
-      if (!parsed) return null;
-      const season = folderSeason === 0
-        ? 0
-        : mediaProbe.season ?? parsed.season ?? folderSeason ?? 1;
-      return {
-        season,
-        episode: mediaProbe.episode ?? parsed.episode,
-        filePath: fullPath,
-        title: mediaProbe.embeddedTitle,
-        subtitles: createSubtitleRecords(directory, await matchingSubtitleFilesForVideoAsync(directory, fileName)),
-        localMetadata: mediaProbe.localMetadata,
-      };
-    },
-  );
+  await flush();
 
-  return files.filter((file): file is EpisodeFile => file !== null).sort((left, right) => left.season !== right.season
+  return files.sort((left, right) => left.season !== right.season
     ? left.season - right.season
     : left.episode - right.episode);
 }
@@ -331,7 +357,7 @@ export async function extractSeasonsAsync(
   knownEpisodeFiles?: EpisodeFile[],
 ): Promise<Array<{ number: number; title: string; episodeCount: number }>> {
   const seasons: Array<{ number: number; title: string; episodeCount: number }> = [];
-  const entries = await fs.promises.readdir(folderPath, { withFileTypes: true });
+  const entries = await readScanDirectory(folderPath);
   const directories = entries.filter((entry) => entry.isDirectory());
   const videoFiles = entries.filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name));
 
@@ -348,7 +374,7 @@ export async function extractSeasonsAsync(
           && !path.isAbsolute(relativePath);
       }).length;
       const episodeCount = (knownEpisodeCount ?? (await scanEpisodeFilesAsync(directoryPath, probe)).length)
-        || (await fs.promises.readdir(directoryPath)).filter(isVideoFileName).length;
+        || (await readScanDirectory(directoryPath)).map((entry) => entry.name).filter(isVideoFileName).length;
       seasons.push({ number, title: seasonTitle(number, directory.name), episodeCount });
     }
   } else {

@@ -134,3 +134,27 @@ test('compact indexes expose mixed-folder membership without leaking host paths'
   assert.equal(lan.others?.[0].playbackReferences[0].progressKey, 'resource:show.s01e01.mkv');
   assert.equal(JSON.stringify(lan.others).includes('/library/'), false);
 });
+
+test('checkpoint artwork normalization reuses durable records while snapshots remain independent', () => {
+  const durable = stripInlineArtworkFromLibrary(library());
+  assert.equal(stripInlineArtworkFromLibrary(durable, true), durable);
+  const snapshot = stripInlineArtworkFromLibrary(durable);
+  assert.deepEqual(snapshot, durable);
+  assert.notEqual(snapshot.tvShows[0], durable.tvShows[0]);
+  assert.notEqual(snapshot.tvShows[0].episodes?.[0], durable.tvShows[0].episodes?.[0]);
+  const second = { ...durable.tvShows[0], id: 'second' };
+  const dirty = { ...durable, tvShows: [durable.tvShows[0], {
+    ...second, poster: 'data:image/png;base64,fixture', posterCandidates: [' poster.jpg ', 'poster.jpg'],
+    episodes: second.episodes?.map((episode) => ({ ...episode, still: 'data:image/png;base64,fixture' })),
+    episodeFiles: second.episodeFiles?.map((file) => ({ ...file, thumbnail: 'data:image/png;base64,fixture' })),
+  }] };
+  const inputSnapshot = structuredClone(dirty);
+  const reused = stripInlineArtworkFromLibrary(dirty, true);
+  assert.deepEqual(reused, stripInlineArtworkFromLibrary(dirty));
+  assert.deepEqual(dirty, inputSnapshot);
+  assert.equal(reused.tvShows[0], durable.tvShows[0]);
+  assert.notEqual(reused.tvShows[1], dirty.tvShows[1]);
+  assert.equal(reused.tvShows[1].cast, dirty.tvShows[1].cast);
+  assert.equal(reused.movies, dirty.movies);
+  assert.deepEqual(stripInlineArtworkFromLibrary(library(), true), stripInlineArtworkFromLibrary(library()));
+});

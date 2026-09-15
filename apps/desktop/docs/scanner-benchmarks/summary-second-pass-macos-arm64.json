@@ -1,0 +1,1743 @@
+{
+  "date": "2026-09-14",
+  "hardware": {
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "cpu": "Apple M5 Pro",
+    "node": "v24.21.0"
+  },
+  "baselineRevision": "cd042e2ace4e2661ecb8cf65273e120adca8caf1",
+  "method": "Five fresh-process repetitions per group. No forced garbage collection. Local fixtures and controlled immediate probe/provider responses. Memory is process peak RSS, with child peaks added for Rust. Paired comparison and projection results have different scopes; percentages must not be added or treated as whole-app memory changes.",
+  "pipeline": [
+    {
+      "count": 1000,
+      "phase": "first",
+      "engine": "baseline",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 17.85241699999999,
+          "min": 17.647750000000002,
+          "max": 19.24891600000001
+        },
+        "endToEndMs": {
+          "median": 60.07604199999999,
+          "min": 59.621624999999995,
+          "max": 61.15879100000001
+        },
+        "persistenceMs": {
+          "median": 2.797832999999997,
+          "min": 2.6632080000000258,
+          "max": 2.869249999999994
+        },
+        "rowsChanged": {
+          "median": 502,
+          "min": 502,
+          "max": 502
+        },
+        "eventLoopP95Ms": {
+          "median": 11.042815,
+          "min": 11.034623,
+          "max": 11.223039
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 140984320,
+          "min": 139329536,
+          "max": 152535040
+        },
+        "parentPeakRssBytes": {
+          "median": 140984320,
+          "min": 139329536,
+          "max": 152535040
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        },
+        "probes": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        },
+        "items": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        }
+      }
+    },
+    {
+      "count": 1000,
+      "phase": "repeat",
+      "engine": "baseline",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 10.506292000000002,
+          "min": 10.39224999999999,
+          "max": 11.054000000000002
+        },
+        "endToEndMs": {
+          "median": 13.411417,
+          "min": 13.288875000000019,
+          "max": 14.041459000000003
+        },
+        "persistenceMs": {
+          "median": 2.9257499999999936,
+          "min": 2.8398329999999987,
+          "max": 2.9390000000000214
+        },
+        "rowsChanged": {
+          "median": 1004,
+          "min": 1004,
+          "max": 1004
+        },
+        "eventLoopP95Ms": {
+          "median": 11.042815,
+          "min": 10.043391,
+          "max": 11.051007
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 141246464,
+          "min": 139804672,
+          "max": 152977408
+        },
+        "parentPeakRssBytes": {
+          "median": 141246464,
+          "min": 139804672,
+          "max": 152977408
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "items": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        }
+      }
+    },
+    {
+      "count": 1000,
+      "phase": "first",
+      "engine": "typescript",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 22.09204100000001,
+          "min": 21.16654099999998,
+          "max": 22.669124999999994
+        },
+        "endToEndMs": {
+          "median": 35.06920800000002,
+          "min": 33.93262499999999,
+          "max": 35.545666999999995
+        },
+        "persistenceMs": {
+          "median": 4.841499999999996,
+          "min": 4.737707999999998,
+          "max": 4.903166999999996
+        },
+        "rowsChanged": {
+          "median": 501,
+          "min": 501,
+          "max": 501
+        },
+        "eventLoopP95Ms": {
+          "median": 15.663103,
+          "min": 15.294463,
+          "max": 16.031743
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 141524992,
+          "min": 141295616,
+          "max": 149241856
+        },
+        "parentPeakRssBytes": {
+          "median": 141524992,
+          "min": 141295616,
+          "max": 149241856
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        },
+        "probes": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        },
+        "directories": {
+          "median": 6,
+          "min": 6,
+          "max": 6
+        },
+        "stats": {
+          "median": 1001,
+          "min": 1001,
+          "max": 1001
+        },
+        "items": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        }
+      }
+    },
+    {
+      "count": 1000,
+      "phase": "repeat",
+      "engine": "typescript",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 12.252708999999982,
+          "min": 11.727541000000002,
+          "max": 12.373166999999995
+        },
+        "endToEndMs": {
+          "median": 12.595167000000004,
+          "min": 12.076249999999987,
+          "max": 12.725374999999985
+        },
+        "persistenceMs": {
+          "median": 0.06979099999998084,
+          "min": 0.062291000000016084,
+          "max": 0.07512499999998568
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 11.042815,
+          "min": 11.034623,
+          "max": 11.141119
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 144080896,
+          "min": 143278080,
+          "max": 144867328
+        },
+        "parentPeakRssBytes": {
+          "median": 144080896,
+          "min": 143278080,
+          "max": 144867328
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 6,
+          "min": 6,
+          "max": 6
+        },
+        "stats": {
+          "median": 1001,
+          "min": 1001,
+          "max": 1001
+        },
+        "items": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        }
+      }
+    },
+    {
+      "count": 1000,
+      "phase": "first",
+      "engine": "rust",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 25.247875000000008,
+          "min": 24.64733299999999,
+          "max": 31.702500000000015
+        },
+        "endToEndMs": {
+          "median": 36.25129199999999,
+          "min": 35.41158299999999,
+          "max": 42.504041
+        },
+        "persistenceMs": {
+          "median": 4.82920900000002,
+          "min": 4.640332999999998,
+          "max": 5.069125000000014
+        },
+        "rowsChanged": {
+          "median": 501,
+          "min": 501,
+          "max": 501
+        },
+        "eventLoopP95Ms": {
+          "median": 17.743871,
+          "min": 17.629183,
+          "max": 18.857983
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 147832832,
+          "min": 147390464,
+          "max": 147963904
+        },
+        "parentPeakRssBytes": {
+          "median": 141361152,
+          "min": 140771328,
+          "max": 141393920
+        },
+        "childPeakRssBytes": {
+          "median": 6569984,
+          "min": 6406144,
+          "max": 6619136
+        },
+        "providerCalls": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        },
+        "probes": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        },
+        "directories": {
+          "median": 6,
+          "min": 6,
+          "max": 6
+        },
+        "stats": {
+          "median": 1001,
+          "min": 1001,
+          "max": 1001
+        },
+        "items": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        }
+      }
+    },
+    {
+      "count": 1000,
+      "phase": "repeat",
+      "engine": "rust",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 15.208958000000024,
+          "min": 14.933000000000021,
+          "max": 15.243207999999981
+        },
+        "endToEndMs": {
+          "median": 15.553917000000013,
+          "min": 15.228209000000021,
+          "max": 15.590791999999993
+        },
+        "persistenceMs": {
+          "median": 0.06720800000002214,
+          "min": 0.06137499999999818,
+          "max": 0.08095800000000963
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 11.419647,
+          "min": 11.386879,
+          "max": 11.460607
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 149438464,
+          "min": 149356544,
+          "max": 150798336
+        },
+        "parentPeakRssBytes": {
+          "median": 142917632,
+          "min": 142802944,
+          "max": 144179200
+        },
+        "childPeakRssBytes": {
+          "median": 6553600,
+          "min": 6455296,
+          "max": 6619136
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 6,
+          "min": 6,
+          "max": 6
+        },
+        "stats": {
+          "median": 1001,
+          "min": 1001,
+          "max": 1001
+        },
+        "items": {
+          "median": 500,
+          "min": 500,
+          "max": 500
+        }
+      }
+    },
+    {
+      "count": 10000,
+      "phase": "first",
+      "engine": "baseline",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 109.80075,
+          "min": 109.427625,
+          "max": 110.751875
+        },
+        "endToEndMs": {
+          "median": 515.665917,
+          "min": 496.131959,
+          "max": 518.5589580000001
+        },
+        "persistenceMs": {
+          "median": 25.832750000000033,
+          "min": 25.79570799999999,
+          "max": 26.046958000000018
+        },
+        "rowsChanged": {
+          "median": 5002,
+          "min": 5002,
+          "max": 5002
+        },
+        "eventLoopP95Ms": {
+          "median": 10.190847,
+          "min": 10.125311,
+          "max": 10.199039
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 166756352,
+          "min": 166559744,
+          "max": 168017920
+        },
+        "parentPeakRssBytes": {
+          "median": 166756352,
+          "min": 166559744,
+          "max": 168017920
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        },
+        "probes": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        },
+        "items": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        }
+      }
+    },
+    {
+      "count": 10000,
+      "phase": "repeat",
+      "engine": "baseline",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 100.47133399999996,
+          "min": 99.22416699999997,
+          "max": 101.55545800000004
+        },
+        "endToEndMs": {
+          "median": 128.75683400000003,
+          "min": 127.87324999999998,
+          "max": 130.93058299999996
+        },
+        "persistenceMs": {
+          "median": 28.575375000000008,
+          "min": 28.214040999999952,
+          "max": 29.295833000000016
+        },
+        "rowsChanged": {
+          "median": 10004,
+          "min": 10004,
+          "max": 10004
+        },
+        "eventLoopP95Ms": {
+          "median": 10.174463,
+          "min": 10.166271,
+          "max": 10.289151
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 174129152,
+          "min": 170704896,
+          "max": 174981120
+        },
+        "parentPeakRssBytes": {
+          "median": 174129152,
+          "min": 170704896,
+          "max": 174981120
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "items": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        }
+      }
+    },
+    {
+      "count": 10000,
+      "phase": "first",
+      "engine": "typescript",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 123.19837500000001,
+          "min": 122.0585,
+          "max": 124.78937499999999
+        },
+        "endToEndMs": {
+          "median": 239.320333,
+          "min": 236.79558299999997,
+          "max": 240.622459
+        },
+        "persistenceMs": {
+          "median": 34.18758299999996,
+          "min": 34.001374999999996,
+          "max": 34.37045899999998
+        },
+        "rowsChanged": {
+          "median": 5001,
+          "min": 5001,
+          "max": 5001
+        },
+        "eventLoopP95Ms": {
+          "median": 11.059199,
+          "min": 11.059199,
+          "max": 11.067391
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 169000960,
+          "min": 168247296,
+          "max": 169459712
+        },
+        "parentPeakRssBytes": {
+          "median": 169000960,
+          "min": 168247296,
+          "max": 169459712
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        },
+        "probes": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        },
+        "directories": {
+          "median": 51,
+          "min": 51,
+          "max": 51
+        },
+        "stats": {
+          "median": 10001,
+          "min": 10001,
+          "max": 10001
+        },
+        "items": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        }
+      }
+    },
+    {
+      "count": 10000,
+      "phase": "repeat",
+      "engine": "typescript",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 103.53408300000001,
+          "min": 102.204834,
+          "max": 107.22283300000004
+        },
+        "endToEndMs": {
+          "median": 103.90125,
+          "min": 102.56179199999997,
+          "max": 107.62645800000001
+        },
+        "persistenceMs": {
+          "median": 0.06858299999998962,
+          "min": 0.06808300000000145,
+          "max": 0.07833399999998392
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 11.108351,
+          "min": 11.051007,
+          "max": 11.329535
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 170868736,
+          "min": 170655744,
+          "max": 171016192
+        },
+        "parentPeakRssBytes": {
+          "median": 170868736,
+          "min": 170655744,
+          "max": 171016192
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 51,
+          "min": 51,
+          "max": 51
+        },
+        "stats": {
+          "median": 10001,
+          "min": 10001,
+          "max": 10001
+        },
+        "items": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        }
+      }
+    },
+    {
+      "count": 10000,
+      "phase": "first",
+      "engine": "rust",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 126.20970799999999,
+          "min": 123.61200000000001,
+          "max": 143.41475000000003
+        },
+        "endToEndMs": {
+          "median": 233.59616599999998,
+          "min": 231.16870799999998,
+          "max": 252.82545799999997
+        },
+        "persistenceMs": {
+          "median": 34.017584,
+          "min": 33.603207999999995,
+          "max": 34.210083
+        },
+        "rowsChanged": {
+          "median": 5001,
+          "min": 5001,
+          "max": 5001
+        },
+        "eventLoopP95Ms": {
+          "median": 11.984895,
+          "min": 11.059199,
+          "max": 16.572415
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 175325184,
+          "min": 174817280,
+          "max": 175751168
+        },
+        "parentPeakRssBytes": {
+          "median": 167985152,
+          "min": 167477248,
+          "max": 168280064
+        },
+        "childPeakRssBytes": {
+          "median": 7340032,
+          "min": 7323648,
+          "max": 7471104
+        },
+        "providerCalls": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        },
+        "probes": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        },
+        "directories": {
+          "median": 51,
+          "min": 51,
+          "max": 51
+        },
+        "stats": {
+          "median": 10001,
+          "min": 10001,
+          "max": 10001
+        },
+        "items": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        }
+      }
+    },
+    {
+      "count": 10000,
+      "phase": "repeat",
+      "engine": "rust",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 105.24233399999997,
+          "min": 104.551625,
+          "max": 110.15120800000005
+        },
+        "endToEndMs": {
+          "median": 105.65891699999997,
+          "min": 104.94062500000001,
+          "max": 110.56095800000003
+        },
+        "persistenceMs": {
+          "median": 0.06779099999999971,
+          "min": 0.06179200000002538,
+          "max": 0.08029099999998834
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 11.739135,
+          "min": 11.362303,
+          "max": 12.615679
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 179126272,
+          "min": 178864128,
+          "max": 179142656
+        },
+        "parentPeakRssBytes": {
+          "median": 171753472,
+          "min": 171507712,
+          "max": 171819008
+        },
+        "childPeakRssBytes": {
+          "median": 7356416,
+          "min": 7307264,
+          "max": 7389184
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 51,
+          "min": 51,
+          "max": 51
+        },
+        "stats": {
+          "median": 10001,
+          "min": 10001,
+          "max": 10001
+        },
+        "items": {
+          "median": 5000,
+          "min": 5000,
+          "max": 5000
+        }
+      }
+    },
+    {
+      "count": 50000,
+      "phase": "first",
+      "engine": "baseline",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 517.314583,
+          "min": 513.7760830000001,
+          "max": 526.58375
+        },
+        "endToEndMs": {
+          "median": 2529.680166,
+          "min": 2514.448041,
+          "max": 2544.481833
+        },
+        "persistenceMs": {
+          "median": 126.839833,
+          "min": 125.10525000000007,
+          "max": 134.289084
+        },
+        "rowsChanged": {
+          "median": 25002,
+          "min": 25002,
+          "max": 25002
+        },
+        "eventLoopP95Ms": {
+          "median": 10.158079,
+          "min": 10.141695,
+          "max": 10.174463
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 307150848,
+          "min": 301416448,
+          "max": 308543488
+        },
+        "parentPeakRssBytes": {
+          "median": 307150848,
+          "min": 301416448,
+          "max": 308543488
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "probes": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "count": 50000,
+      "phase": "repeat",
+      "engine": "baseline",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 502.46137499999986,
+          "min": 491.60233400000016,
+          "max": 521.3675830000002
+        },
+        "endToEndMs": {
+          "median": 655.2751670000002,
+          "min": 648.7899590000002,
+          "max": 685.59625
+        },
+        "persistenceMs": {
+          "median": 155.1625829999998,
+          "min": 152.69504099999995,
+          "max": 164.09204100000034
+        },
+        "rowsChanged": {
+          "median": 50004,
+          "min": 50004,
+          "max": 50004
+        },
+        "eventLoopP95Ms": {
+          "median": 10.027007,
+          "min": 10.010623,
+          "max": 10.076159
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 332070912,
+          "min": 331563008,
+          "max": 334135296
+        },
+        "parentPeakRssBytes": {
+          "median": 332070912,
+          "min": 331563008,
+          "max": 334135296
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "count": 50000,
+      "phase": "first",
+      "engine": "typescript",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 565.9562080000001,
+          "min": 547.211917,
+          "max": 578.1632079999999
+        },
+        "endToEndMs": {
+          "median": 1137.6856249999998,
+          "min": 1113.147958,
+          "max": 1155.565583
+        },
+        "persistenceMs": {
+          "median": 176.84954199999993,
+          "min": 175.80258300000014,
+          "max": 181.0384590000001
+        },
+        "rowsChanged": {
+          "median": 25001,
+          "min": 25001,
+          "max": 25001
+        },
+        "eventLoopP95Ms": {
+          "median": 10.502143,
+          "min": 10.428415,
+          "max": 11.059199
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 240926720,
+          "min": 240091136,
+          "max": 318455808
+        },
+        "parentPeakRssBytes": {
+          "median": 240926720,
+          "min": 240091136,
+          "max": 318455808
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "probes": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "count": 50000,
+      "phase": "repeat",
+      "engine": "typescript",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 549.0347909999998,
+          "min": 529.374,
+          "max": 603.6884169999998
+        },
+        "endToEndMs": {
+          "median": 549.6546249999999,
+          "min": 530.031,
+          "max": 606.0427499999998
+        },
+        "persistenceMs": {
+          "median": 0.07979199999999764,
+          "min": 0.07174999999983811,
+          "max": 0.08658399999990252
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 11.067391,
+          "min": 10.403839,
+          "max": 11.386879
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 242909184,
+          "min": 241025024,
+          "max": 318636032
+        },
+        "parentPeakRssBytes": {
+          "median": 242909184,
+          "min": 241025024,
+          "max": 318636032
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "count": 50000,
+      "phase": "first",
+      "engine": "rust",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 532.364542,
+          "min": 526.851667,
+          "max": 545.459
+        },
+        "endToEndMs": {
+          "median": 1051.823042,
+          "min": 1046.707334,
+          "max": 1061.9704160000001
+        },
+        "persistenceMs": {
+          "median": 172.357167,
+          "min": 172.30783300000007,
+          "max": 175.93270800000005
+        },
+        "rowsChanged": {
+          "median": 25001,
+          "min": 25001,
+          "max": 25001
+        },
+        "eventLoopP95Ms": {
+          "median": 11.083775,
+          "min": 11.042815,
+          "max": 11.214847
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 247922688,
+          "min": 246841344,
+          "max": 248659968
+        },
+        "parentPeakRssBytes": {
+          "median": 240254976,
+          "min": 239255552,
+          "max": 240992256
+        },
+        "childPeakRssBytes": {
+          "median": 7667712,
+          "min": 7585792,
+          "max": 7766016
+        },
+        "providerCalls": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "probes": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "count": 50000,
+      "phase": "repeat",
+      "engine": "rust",
+      "samples": 5,
+      "metrics": {
+        "discoveryMs": {
+          "median": 514.786834,
+          "min": 504.47233400000005,
+          "max": 537.3229160000001
+        },
+        "endToEndMs": {
+          "median": 515.5082500000001,
+          "min": 508.1187090000001,
+          "max": 538.058875
+        },
+        "persistenceMs": {
+          "median": 0.06920799999988958,
+          "min": 0.06741600000009385,
+          "max": 0.08141700000010132
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 11.059199,
+          "min": 11.010047,
+          "max": 11.198463
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 247988224,
+          "min": 247889920,
+          "max": 248201216
+        },
+        "parentPeakRssBytes": {
+          "median": 240304128,
+          "min": 240123904,
+          "max": 240549888
+        },
+        "childPeakRssBytes": {
+          "median": 7684096,
+          "min": 7553024,
+          "max": 7798784
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    }
+  ],
+  "pairedComparison": [
+    {
+      "phase": "first",
+      "variant": "previous",
+      "samples": 5,
+      "metrics": {
+        "count": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "discoveryMs": {
+          "median": 774.771041,
+          "min": 739.147417,
+          "max": 812.49425
+        },
+        "endToEndMs": {
+          "median": 1328.136208,
+          "min": 1266.259709,
+          "max": 1385.921959
+        },
+        "persistenceMs": {
+          "median": 195.10695800000008,
+          "min": 187.15633300000013,
+          "max": 206.36154199999987
+        },
+        "rowsChanged": {
+          "median": 25001,
+          "min": 25001,
+          "max": 25001
+        },
+        "eventLoopP95Ms": {
+          "median": 10.682367,
+          "min": 10.510335,
+          "max": 11.059199
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 238239744,
+          "min": 236470272,
+          "max": 239140864
+        },
+        "parentPeakRssBytes": {
+          "median": 238239744,
+          "min": 236470272,
+          "max": 239140864
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "probes": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "phase": "repeat",
+      "variant": "previous",
+      "samples": 5,
+      "metrics": {
+        "count": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "discoveryMs": {
+          "median": 729.115,
+          "min": 691.8232499999997,
+          "max": 774.3500829999998
+        },
+        "endToEndMs": {
+          "median": 730.118166,
+          "min": 692.778583,
+          "max": 779.2338749999999
+        },
+        "persistenceMs": {
+          "median": 0.09387500000002547,
+          "min": 0.08379100000001927,
+          "max": 0.12012499999991633
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 10.600447,
+          "min": 10.485759,
+          "max": 11.190271
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 239550464,
+          "min": 234536960,
+          "max": 240861184
+        },
+        "parentPeakRssBytes": {
+          "median": 239550464,
+          "min": 234536960,
+          "max": 240861184
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "phase": "first",
+      "variant": "current",
+      "samples": 5,
+      "metrics": {
+        "count": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "discoveryMs": {
+          "median": 587.1956250000001,
+          "min": 582.502416,
+          "max": 598.093125
+        },
+        "endToEndMs": {
+          "median": 1203.946375,
+          "min": 1175.266166,
+          "max": 1217.705792
+        },
+        "persistenceMs": {
+          "median": 192.09691700000008,
+          "min": 184.88295799999992,
+          "max": 197.63479099999995
+        },
+        "rowsChanged": {
+          "median": 25001,
+          "min": 25001,
+          "max": 25001
+        },
+        "eventLoopP95Ms": {
+          "median": 11.018239,
+          "min": 10.502143,
+          "max": 11.067391
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 238731264,
+          "min": 237895680,
+          "max": 239140864
+        },
+        "parentPeakRssBytes": {
+          "median": 238731264,
+          "min": 237895680,
+          "max": 239140864
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "probes": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    },
+    {
+      "phase": "repeat",
+      "variant": "current",
+      "samples": 5,
+      "metrics": {
+        "count": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "discoveryMs": {
+          "median": 554.3595,
+          "min": 538.61725,
+          "max": 571.495833
+        },
+        "endToEndMs": {
+          "median": 555.1320410000001,
+          "min": 539.4174170000001,
+          "max": 574.052083
+        },
+        "persistenceMs": {
+          "median": 0.09850000000005821,
+          "min": 0.08554199999980483,
+          "max": 0.15483399999993708
+        },
+        "rowsChanged": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "eventLoopP95Ms": {
+          "median": 10.756095,
+          "min": 10.428415,
+          "max": 11.059199
+        },
+        "combinedPeakUpperBoundBytes": {
+          "median": 241238016,
+          "min": 237125632,
+          "max": 245432320
+        },
+        "parentPeakRssBytes": {
+          "median": 241238016,
+          "min": 237125632,
+          "max": 245432320
+        },
+        "childPeakRssBytes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "providerCalls": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "probes": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "directories": {
+          "median": 251,
+          "min": 251,
+          "max": 251
+        },
+        "stats": {
+          "median": 50001,
+          "min": 50001,
+          "max": 50001
+        },
+        "items": {
+          "median": 25000,
+          "min": 25000,
+          "max": 25000
+        }
+      }
+    }
+  ],
+  "projection": [
+    {
+      "mode": "previous",
+      "samples": 5,
+      "metrics": {
+        "count": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "normalizationMs": {
+          "median": 43.509834000000005,
+          "min": 37.15279199999999,
+          "max": 56.46425000000001
+        },
+        "peakRssBytes": {
+          "median": 264503296,
+          "min": 263831552,
+          "max": 264978432
+        },
+        "previousItems": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "nextItems": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "reusedPreviousItems": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        }
+      }
+    },
+    {
+      "mode": "current",
+      "samples": 5,
+      "metrics": {
+        "count": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "normalizationMs": {
+          "median": 30.596500000000006,
+          "min": 29.047957999999994,
+          "max": 35.136
+        },
+        "peakRssBytes": {
+          "median": 225034240,
+          "min": 219185152,
+          "max": 225886208
+        },
+        "previousItems": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "nextItems": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        },
+        "reusedPreviousItems": {
+          "median": 50000,
+          "min": 50000,
+          "max": 50000
+        }
+      }
+    }
+  ],
+  "pipeline50000Comparison": {
+    "first": {
+      "typescript": {
+        "endToEndMs": {
+          "previous": 2529.680166,
+          "current": 1137.6856249999998,
+          "decreasePercent": 55.02650333860428
+        },
+        "combinedPeakUpperBoundBytes": {
+          "previous": 307150848,
+          "current": 240926720,
+          "decreasePercent": 21.560783058622714
+        }
+      },
+      "rust": {
+        "endToEndMs": {
+          "previous": 2529.680166,
+          "current": 1051.823042,
+          "decreasePercent": 58.420710406913955
+        },
+        "combinedPeakUpperBoundBytes": {
+          "previous": 307150848,
+          "current": 247922688,
+          "decreasePercent": 19.283085293646984
+        }
+      }
+    },
+    "repeat": {
+      "typescript": {
+        "endToEndMs": {
+          "previous": 655.2751670000002,
+          "current": 549.6546249999999,
+          "decreasePercent": 16.118502168112883
+        },
+        "combinedPeakUpperBoundBytes": {
+          "previous": 332070912,
+          "current": 242909184,
+          "decreasePercent": 26.850207223209
+        }
+      },
+      "rust": {
+        "endToEndMs": {
+          "previous": 655.2751670000002,
+          "current": 515.5082500000001,
+          "decreasePercent": 21.32950003887452
+        },
+        "combinedPeakUpperBoundBytes": {
+          "previous": 332070912,
+          "current": 247988224,
+          "decreasePercent": 25.320702585356226
+        }
+      }
+    }
+  },
+  "paired50000Comparison": {
+    "first": {
+      "endToEndMs": {
+        "previous": 1328.136208,
+        "current": 1203.946375,
+        "decreasePercent": 9.350684986370005
+      },
+      "combinedPeakUpperBoundBytes": {
+        "previous": 238239744,
+        "current": 238731264,
+        "decreasePercent": -0.20631318341242005
+      }
+    },
+    "repeat": {
+      "endToEndMs": {
+        "previous": 730.118166,
+        "current": 555.1320410000001,
+        "decreasePercent": 23.966822515685752
+      },
+      "combinedPeakUpperBoundBytes": {
+        "previous": 239550464,
+        "current": 241238016,
+        "decreasePercent": -0.7044661787839409
+      }
+    }
+  },
+  "projection50000Comparison": {
+    "normalizationMs": {
+      "previous": 43.509834000000005,
+      "current": 30.596500000000006,
+      "decreasePercent": 29.679115760358908
+    },
+    "peakRssBytes": {
+      "previous": 264503296,
+      "current": 225034240,
+      "decreasePercent": 14.92195242814668
+    }
+  },
+  "decision": "Keep TypeScript as default. Repeat-scan slowdown is resolved on the measured fixtures. The paired scan benchmark shows similar peak RSS; the separate committed-catalog normalization benchmark shows lower peak RSS. External drives, provider-bound and interactive Electron scans remain unverified."
+}

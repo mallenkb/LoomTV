@@ -36,40 +36,68 @@ export type LibraryProjectionDependencies = {
   libraryFolderStatusesFor: (groups: LibraryFolderGroups) => LibraryFolderStatus[];
 };
 
-export function stripInlineArtworkFromItem(item: MediaItem): MediaItem {
-  return {
-    ...item,
-    poster: durableArtworkSource(item.poster),
-    backdrop: durableArtworkSource(item.backdrop),
-    logo: durableArtworkSource(item.logo),
-    posterCandidates: durableArtworkSources(item.posterCandidates),
-    backdropCandidates: durableArtworkSources(item.backdropCandidates),
-    logoCandidates: durableArtworkSources(item.logoCandidates),
-    cast: item.cast.map((credit) => ({
-      ...credit,
-      image: durableArtworkSource(credit.image),
-      characterImage: durableArtworkSource(credit.characterImage),
-      voiceActorImage: durableArtworkSource(credit.voiceActorImage),
-    })),
-    episodes: item.episodes?.map((episode) => ({
-      ...episode,
-      still: durableArtworkSource(episode.still),
-    })),
-    episodeFiles: item.episodeFiles?.map((episodeFile) => ({
-      ...episodeFile,
-      ...(episodeFile.still ? { still: durableArtworkSource(episodeFile.still) } : {}),
-      ...(episodeFile.thumbnail ? { thumbnail: durableArtworkSource(episodeFile.thumbnail) } : {}),
-    })),
-  };
+function mapArtworkRecords<T>(items: T[], project: (item: T) => T, reuseUnchanged: boolean): T[] {
+  if (!reuseUnchanged) return items.map(project);
+  let changed: T[] | undefined;
+  for (let index = 0; index < items.length; index++) {
+    const result = project(items[index]);
+    if (result !== items[index]) {
+      changed ||= items.slice();
+      changed[index] = result;
+    }
+  }
+  return changed || items;
 }
 
-export function stripInlineArtworkFromLibrary(data: LibraryData): LibraryData {
-  return {
-    ...data,
-    movies: (data.movies || []).map(stripInlineArtworkFromItem),
-    tvShows: (data.tvShows || []).map(stripInlineArtworkFromItem),
-    animeShows: (data.animeShows || []).map(stripInlineArtworkFromItem),
-  };
+function projectArtworkSources(sources: string[] | undefined, reuseUnchanged: boolean): string[] {
+  if (reuseUnchanged && sources?.length === 0) return sources;
+  const normalized = durableArtworkSources(sources);
+  return reuseUnchanged && sources && normalized.length === sources.length
+    && normalized.every((source, index) => source === sources[index]) ? sources : normalized;
+}
+
+export function stripInlineArtworkFromItem(item: MediaItem, reuseUnchanged = false): MediaItem {
+  const poster = durableArtworkSource(item.poster);
+  const backdrop = durableArtworkSource(item.backdrop);
+  const logo = durableArtworkSource(item.logo);
+  const posterCandidates = projectArtworkSources(item.posterCandidates, reuseUnchanged);
+  const backdropCandidates = projectArtworkSources(item.backdropCandidates, reuseUnchanged);
+  const logoCandidates = projectArtworkSources(item.logoCandidates, reuseUnchanged);
+  const cast = mapArtworkRecords(item.cast, (credit) => {
+    const image = durableArtworkSource(credit.image);
+    const characterImage = durableArtworkSource(credit.characterImage);
+    const voiceActorImage = durableArtworkSource(credit.voiceActorImage);
+    return reuseUnchanged && image === credit.image && characterImage === credit.characterImage && voiceActorImage === credit.voiceActorImage
+      ? credit : { ...credit, image, characterImage, voiceActorImage };
+  }, reuseUnchanged);
+  const episodes = item.episodes && mapArtworkRecords(item.episodes, (episode) => {
+    const still = durableArtworkSource(episode.still);
+    return reuseUnchanged && still === episode.still ? episode : { ...episode, still };
+  }, reuseUnchanged);
+  const episodeFiles = item.episodeFiles && mapArtworkRecords(item.episodeFiles, (file) => {
+    const still = file.still ? durableArtworkSource(file.still) : file.still;
+    const thumbnail = file.thumbnail ? durableArtworkSource(file.thumbnail) : file.thumbnail;
+    return reuseUnchanged && still === file.still && thumbnail === file.thumbnail ? file : {
+      ...file,
+      ...(file.still ? { still } : {}),
+      ...(file.thumbnail ? { thumbnail } : {}),
+    };
+  }, reuseUnchanged);
+  if (reuseUnchanged && poster === item.poster && backdrop === item.backdrop && logo === item.logo
+    && posterCandidates === item.posterCandidates && backdropCandidates === item.backdropCandidates
+    && logoCandidates === item.logoCandidates && cast === item.cast && episodes === item.episodes && episodeFiles === item.episodeFiles
+    && Object.hasOwn(item, 'episodes') && Object.hasOwn(item, 'episodeFiles')) return item;
+  return { ...item, poster, backdrop, logo, posterCandidates, backdropCandidates, logoCandidates, cast, episodes, episodeFiles };
+}
+
+/** Reuse is for synchronous reads of committed state; queued snapshots still copy. */
+export function stripInlineArtworkFromLibrary(data: LibraryData, reuseUnchanged = false): LibraryData {
+  const project = (item: MediaItem) => stripInlineArtworkFromItem(item, reuseUnchanged);
+  const movies = mapArtworkRecords(data.movies || [], project, reuseUnchanged);
+  const tvShows = mapArtworkRecords(data.tvShows || [], project, reuseUnchanged);
+  const animeShows = mapArtworkRecords(data.animeShows || [], project, reuseUnchanged);
+  if (reuseUnchanged && movies === data.movies && tvShows === data.tvShows && animeShows === data.animeShows) return data;
+  return { ...data, movies, tvShows, animeShows };
 }
 
 function normalizedPathPrefix(value: string | undefined): string {

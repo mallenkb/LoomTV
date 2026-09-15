@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { stripInlineArtworkFromLibrary } from '../src/main/libraryProjections.ts';
+import type { LibraryData } from '../src/main/appContracts.ts';
 import {
   cachedArtworkResponseHeaders,
   collectArtworkSourcesForCache,
@@ -7,6 +9,25 @@ import {
   customArtworkReference,
   parseCustomArtworkReference,
 } from '../src/main/artworkCache.ts';
+
+test('URL-only artwork snapshots preserve normalization and remain independent of later catalog edits', () => {
+  const library: LibraryData = {
+    movies: [{ id: 'movie', type: 'movie', title: 'Movie', filePath: '/Movie.mp4', year: 2026, rating: 7,
+      summary: '', genres: [], poster: ' https://images.example/poster.jpg ', backdrop: 'data:image/png;base64,abc',
+      posterCandidates: ['data:image/png;base64,abc', ' https://images.example/alt.jpg ', 'https://images.example/alt.jpg', 'https://images.example/second.jpg'],
+      cast: [{ name: 'Actor', character: 'Lead', image: ' https://images.example/cast.jpg ' }],
+      episodes: [{ season: 1, number: 1, title: 'Episode', summary: '', airDate: '', rating: 0, still: ' https://images.example/still.jpg ' }],
+    }], tvShows: [], animeShows: [], libraryFolders: [],
+  };
+  const expected = collectArtworkSourcesForCache(stripInlineArtworkFromLibrary(library));
+  const sources = collectArtworkSourcesForCache(library);
+  assert.deepEqual(sources, expected);
+  assert.ok(sources.includes('https://images.example/second.jpg'));
+  library.movies[0].poster = 'https://images.example/new.jpg';
+  library.movies[0].cast[0].image = '';
+  assert.deepEqual(sources, expected);
+  assert.ok(sources.every((source) => typeof source === 'string'));
+});
 
 test('artwork cache keeps bounded title fallbacks and every local episode still', () => {
   const sources = collectArtworkSourcesForCache({

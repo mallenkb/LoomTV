@@ -28,7 +28,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
   private lastPauseCommand: boolean | null = null;
   private destroyed = false;
 
-  constructor(private readonly listener: PlaybackEngineStateListener) {
+  constructor(private listener: PlaybackEngineStateListener | undefined) {
     this.lease = new NativeSessionLease<MpvStartOptions, PlaybackEngineState>(
       {
         start: (source, options) => desktopApi.mpv.start(source, options),
@@ -64,7 +64,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
   private emitState(state: PlaybackEngineState): void {
     if (this.destroyed || !this.sessionId) return;
     this.lastState = state;
-    this.listener(state);
+    this.listener?.(state);
   }
 
   private async command(command: PlaybackCommand): Promise<void> {
@@ -144,6 +144,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+    this.listener = undefined;
     this.cancelSeek();
     this.lastPauseCommand = null;
     this.lastState = null;

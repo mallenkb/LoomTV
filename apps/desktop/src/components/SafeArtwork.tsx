@@ -93,7 +93,7 @@ export default function SafeArtwork({
   return (
     <div ref={artworkRef} className={`relative ${naturalSize ? 'overflow-visible bg-transparent' : 'overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)]'} ${className}`}>
       {naturalSize ? <div className="absolute inset-0">{fallback}</div> : fallback}
-      {placeholderSrc && !sourceLoaded && (
+      {shouldRenderImage && placeholderSrc && !sourceLoaded && (
         <img
           src={placeholderSrc}
           alt=""

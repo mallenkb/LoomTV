@@ -231,8 +231,8 @@ export function createDatabaseArtworkRepository(
     return request;
   }
 
-  async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
-    const sources = collectArtworkSourcesForCache(data);
+  async function cacheLibraryArtwork(data: LibraryData | string[]): Promise<void> {
+    const sources = Array.isArray(data) ? data : collectArtworkSourcesForCache(data);
 
     const cacheDir = deps.cacheDirectory;
     fs.mkdirSync(cacheDir, { recursive: true });

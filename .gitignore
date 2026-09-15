@@ -114,3 +114,6 @@ pnpm-store/
 /loomtv-*.html
 apps/desktop/resources/libvlc/
 apps/desktop-tauri/src-tauri/resources/libvlc/
+
+# Electron scanner resources are built from native/scanner.
+apps/desktop/resources/scanner/

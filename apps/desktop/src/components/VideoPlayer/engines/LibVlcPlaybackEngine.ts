@@ -42,7 +42,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   private lastPauseCommand: boolean | null = null;
   private destroyed = false;
 
-  constructor(private readonly listener: PlaybackEngineStateListener) {
+  constructor(private listener: PlaybackEngineStateListener | undefined) {
     this.lease = new NativeSessionLease<PlaybackStartOptions, LibVlcPlaybackState>(
       {
         start: async (source, options) => {
@@ -113,7 +113,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     }
     if (state.status === 'ready') this.beginMetadataProbe();
     const tracks = this.effectiveTracks();
-    this.listener({
+    this.listener?.({
       ...state,
       sessionId: this.sessionId,
       ...(tracks.length > 0 ? { tracks } : {}),
@@ -316,6 +316,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+    this.listener = undefined;
     this.cancelMetadataProbe();
     this.cancelSeek();
     this.lastPauseCommand = null;

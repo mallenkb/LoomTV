@@ -120,7 +120,7 @@ function prunePackagedFfmpegResources(outputPath: string, platform: string): voi
 }
 
 function nativeRuntimeFileName(engine: 'libvlc' | 'mpv', platform: string): string {
-  if (engine === 'mpv') return platform === 'win32' ? 'mpv.exe' : 'mpv';
+  if (engine === 'mpv') return platform === 'darwin' ? 'libmpv.dylib' : platform === 'win32' ? 'mpv-2.dll' : 'libmpv.so';
   if (platform === 'win32') return 'libvlc.dll';
   if (platform === 'darwin') return 'libvlc.dylib';
   return 'libvlc.so';
@@ -180,6 +180,8 @@ function prunePackagedNativeResources(outputPath: string, platform: string, arch
     if (!fs.existsSync(engineRoot)) continue;
     for (const entry of fs.readdirSync(engineRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      // The in-process MPV library and bridge use mpv/lib on every target.
+      if (engine === 'mpv' && entry.name === 'lib') continue;
       const platformRoot = path.join(engineRoot, entry.name);
       if (entry.name !== platform) {
         fs.rmSync(platformRoot, { recursive: true, force: true });
@@ -190,6 +192,16 @@ function prunePackagedNativeResources(outputPath: string, platform: string, arch
           fs.rmSync(path.join(platformRoot, architecture.name), { recursive: true, force: true });
         }
       }
+    }
+  }
+}
+
+function prunePackagedScannerResources(outputPath: string, platform: string, arch: string): void {
+  const scannerRoot = path.join(resourcesPath(outputPath, platform), 'scanner');
+  const matchingTarget = `${platform}-${arch}`;
+  for (const entry of fs.readdirSync(scannerRoot, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name !== matchingTarget) {
+      fs.rmSync(path.join(scannerRoot, entry.name), { recursive: true, force: true });
     }
   }
 }
@@ -282,10 +294,15 @@ function assertPackagedNativeRuntimes(outputPath: string, platform: string, arch
   const target = `${platform}/${arch}`;
   const missing: string[] = [];
   for (const engine of nativeEnginesForPlatform(platform)) {
-    const runtimeRoot = path.join(resourcesPath(outputPath, platform), engine, platform, arch);
+    const runtimeRoot = engine === 'mpv'
+      ? path.join(resourcesPath(outputPath, platform), 'mpv', 'lib')
+      : path.join(resourcesPath(outputPath, platform), engine, platform, arch);
     const expectedName = nativeRuntimeFileName(engine, platform);
     if (!fs.existsSync(runtimeRoot) || !containsFile(runtimeRoot, expectedName)) {
-      missing.push(`${engine}/${platform}/${arch}/${expectedName}`);
+      missing.push(engine === 'mpv' ? `mpv/lib/${expectedName}` : `${engine}/${platform}/${arch}/${expectedName}`);
+    }
+    if (engine === 'mpv' && (!fs.existsSync(runtimeRoot) || !containsFile(runtimeRoot, platform === 'darwin' ? 'libloomtv_mpv_bridge.dylib' : platform === 'win32' ? 'loomtv_mpv_bridge.dll' : 'loomtv_mpv_bridge.so'))) {
+      missing.push('mpv/lib/native bridge');
     }
   }
   if (missing.length > 0) {
@@ -376,10 +393,14 @@ function copyDirectRuntimeModule(moduleName: string, targetNodeModules: string):
 
 const config: ForgeConfig = {
   hooks: {
+    prePackage: async (_config, platform, arch) => {
+      execFileSync(process.execPath, [path.resolve('scripts/build-scanner.cjs'), platform, arch], { stdio: 'inherit' });
+    },
     postPackage: async (_config, packageResult) => {
       for (const outputPath of packageResult.outputPaths) {
         prunePackagedFfmpegResources(outputPath, packageResult.platform);
         prunePackagedNativeResources(outputPath, packageResult.platform, packageResult.arch);
+        prunePackagedScannerResources(outputPath, packageResult.platform, packageResult.arch);
         preservePackagedLibVlcPluginTimestamps(outputPath, packageResult.platform, packageResult.arch);
         if (packageResult.platform === 'darwin') {
           resignPackagedMacApp(outputPath);
@@ -403,6 +424,7 @@ const config: ForgeConfig = {
     icon: 'resources/icon',
     executableName: 'LoomTV',
     extraResource: [
+      'resources/scanner',
       'resources/ffmpeg',
       'resources/fpcalc',
       'resources/icon.png',

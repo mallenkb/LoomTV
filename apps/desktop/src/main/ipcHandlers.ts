@@ -497,6 +497,7 @@ function createScanProgressPublisher<TLibraryData>(
   let pendingSnapshot: LibraryScanProgress<TLibraryData> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastSentAt = 0;
+  let lastSnapshot: LibraryScanProgress<TLibraryData> | null = null;
 
   const clearTimer = () => {
     if (timer) clearTimeout(timer);
@@ -518,6 +519,7 @@ function createScanProgressPublisher<TLibraryData>(
   };
 
   const publish = (snapshot: LibraryScanProgress<TLibraryData>) => {
+    lastSnapshot = snapshot;
     pendingSnapshot = snapshot;
     if (snapshot.isComplete) {
       flush();
@@ -539,7 +541,7 @@ function createScanProgressPublisher<TLibraryData>(
     pendingSnapshot = null;
   };
 
-  return { publish, flush, cancel };
+  return { publish, flush, cancel, complete: () => { if (lastSnapshot) publish({ ...lastSnapshot, isComplete: true }); flush(); } };
 }
 
 export function registerIpcHandlers<
@@ -639,11 +641,12 @@ export function registerIpcHandlers<
           mode,
           onProgress: progressPublisher.publish,
           onCheckpoint: (snapshot) => {
-            deps.saveLibraryScanCheckpoint(snapshot, scanVersion);
+            if (!deps.saveLibraryScanCheckpoint(snapshot, scanVersion)) throw new Error('Library changed during scanning.');
           },
         });
         progressPublisher.flush();
         if (deps.saveLibraryFromScan(scanned, scanVersion)) {
+          progressPublisher.complete();
           await deps.cacheArtworkNow(scanned);
         }
         return deps.libraryIndexForRenderer();
@@ -678,11 +681,12 @@ export function registerIpcHandlers<
             mode: 'quick',
             onProgress: progressPublisher.publish,
             onCheckpoint: (snapshot) => {
-              deps.saveLibraryScanCheckpoint(snapshot, scanVersion);
+              if (!deps.saveLibraryScanCheckpoint(snapshot, scanVersion)) throw new Error('Library changed during scanning.');
             },
           });
           progressPublisher.flush();
           if (deps.saveLibraryFromScan(scanned, scanVersion)) {
+          progressPublisher.complete();
             await deps.cacheArtworkNow(scanned);
           }
           return deps.libraryIndexForRenderer();
@@ -711,10 +715,10 @@ export function registerIpcHandlers<
         const scanned = await deps.scanLibrary(scanData, {
           mode: 'quick',
           onProgress: progressPublisher.publish,
-          onCheckpoint: (snapshot) => { deps.saveLibraryScanCheckpoint(snapshot, scanVersion); },
+          onCheckpoint: (snapshot) => { if (!deps.saveLibraryScanCheckpoint(snapshot, scanVersion)) throw new Error('Library changed during scanning.'); },
         });
         progressPublisher.flush();
-        if (deps.saveLibraryFromScan(scanned, scanVersion)) await deps.cacheArtworkNow(scanned);
+        if (deps.saveLibraryFromScan(scanned, scanVersion)) { progressPublisher.complete(); await deps.cacheArtworkNow(scanned); }
         return deps.libraryIndexForRenderer();
       } finally {
         progressPublisher.cancel();
@@ -766,11 +770,12 @@ export function registerIpcHandlers<
           mode: 'quick',
           onProgress: progressPublisher.publish,
           onCheckpoint: (snapshot) => {
-            deps.saveLibraryScanCheckpoint(snapshot, scanVersion);
+            if (!deps.saveLibraryScanCheckpoint(snapshot, scanVersion)) throw new Error('Library changed during scanning.');
           },
         });
         progressPublisher.flush();
         if (deps.saveLibraryFromScan(scanned, scanVersion)) {
+          progressPublisher.complete();
           await deps.cacheArtworkNow(scanned);
         }
         return deps.libraryIndexForRenderer();

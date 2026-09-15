@@ -215,7 +215,7 @@ async function fetchTVArtworkById(showId: number): Promise<TVMazeArtwork> {
   }
 }
 
-async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
+export async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
   const detailRes = await safeFetch(
     `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
     {},

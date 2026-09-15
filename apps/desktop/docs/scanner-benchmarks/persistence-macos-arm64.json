@@ -1,0 +1,212 @@
+[
+  {
+    "count": 1000,
+    "mode": "replacement",
+    "repetition": 0,
+    "milliseconds": 6.964249999999993,
+    "changes": 2002
+  },
+  {
+    "count": 1000,
+    "mode": "replacement",
+    "repetition": 1,
+    "milliseconds": 6.294916999999998,
+    "changes": 2002
+  },
+  {
+    "count": 1000,
+    "mode": "replacement",
+    "repetition": 2,
+    "milliseconds": 6.175749999999994,
+    "changes": 2002
+  },
+  {
+    "count": 1000,
+    "mode": "replacement",
+    "repetition": 3,
+    "milliseconds": 6.399167000000006,
+    "changes": 2002
+  },
+  {
+    "count": 1000,
+    "mode": "replacement",
+    "repetition": 4,
+    "milliseconds": 5.815832999999998,
+    "changes": 2002
+  },
+  {
+    "count": 1000,
+    "mode": "delta",
+    "repetition": 0,
+    "milliseconds": 9.20304200000001,
+    "changes": 0
+  },
+  {
+    "count": 1000,
+    "mode": "delta",
+    "repetition": 1,
+    "milliseconds": 5.148875000000004,
+    "changes": 0
+  },
+  {
+    "count": 1000,
+    "mode": "delta",
+    "repetition": 2,
+    "milliseconds": 4.800834000000037,
+    "changes": 0
+  },
+  {
+    "count": 1000,
+    "mode": "delta",
+    "repetition": 3,
+    "milliseconds": 4.607124999999996,
+    "changes": 0
+  },
+  {
+    "count": 1000,
+    "mode": "delta",
+    "repetition": 4,
+    "milliseconds": 5.056291999999985,
+    "changes": 0
+  },
+  {
+    "count": 10000,
+    "mode": "replacement",
+    "repetition": 0,
+    "milliseconds": 62.23725000000002,
+    "changes": 20002
+  },
+  {
+    "count": 10000,
+    "mode": "replacement",
+    "repetition": 1,
+    "milliseconds": 55.169250000000034,
+    "changes": 20002
+  },
+  {
+    "count": 10000,
+    "mode": "replacement",
+    "repetition": 2,
+    "milliseconds": 62.46070800000001,
+    "changes": 20002
+  },
+  {
+    "count": 10000,
+    "mode": "replacement",
+    "repetition": 3,
+    "milliseconds": 69.00366600000007,
+    "changes": 20002
+  },
+  {
+    "count": 10000,
+    "mode": "replacement",
+    "repetition": 4,
+    "milliseconds": 80.02379199999996,
+    "changes": 20002
+  },
+  {
+    "count": 10000,
+    "mode": "delta",
+    "repetition": 0,
+    "milliseconds": 54.63404199999991,
+    "changes": 0
+  },
+  {
+    "count": 10000,
+    "mode": "delta",
+    "repetition": 1,
+    "milliseconds": 49.163584000000014,
+    "changes": 0
+  },
+  {
+    "count": 10000,
+    "mode": "delta",
+    "repetition": 2,
+    "milliseconds": 44.810959000000025,
+    "changes": 0
+  },
+  {
+    "count": 10000,
+    "mode": "delta",
+    "repetition": 3,
+    "milliseconds": 45.92995799999994,
+    "changes": 0
+  },
+  {
+    "count": 10000,
+    "mode": "delta",
+    "repetition": 4,
+    "milliseconds": 52.41791699999999,
+    "changes": 0
+  },
+  {
+    "count": 50000,
+    "mode": "replacement",
+    "repetition": 0,
+    "milliseconds": 872.5046669999997,
+    "changes": 100002
+  },
+  {
+    "count": 50000,
+    "mode": "replacement",
+    "repetition": 1,
+    "milliseconds": 820.43975,
+    "changes": 100002
+  },
+  {
+    "count": 50000,
+    "mode": "replacement",
+    "repetition": 2,
+    "milliseconds": 1023.331541,
+    "changes": 100002
+  },
+  {
+    "count": 50000,
+    "mode": "replacement",
+    "repetition": 3,
+    "milliseconds": 954.9197920000001,
+    "changes": 100002
+  },
+  {
+    "count": 50000,
+    "mode": "replacement",
+    "repetition": 4,
+    "milliseconds": 841.4425000000001,
+    "changes": 100002
+  },
+  {
+    "count": 50000,
+    "mode": "delta",
+    "repetition": 0,
+    "milliseconds": 251.10508299999947,
+    "changes": 0
+  },
+  {
+    "count": 50000,
+    "mode": "delta",
+    "repetition": 1,
+    "milliseconds": 249.4939999999997,
+    "changes": 0
+  },
+  {
+    "count": 50000,
+    "mode": "delta",
+    "repetition": 2,
+    "milliseconds": 255.1443330000002,
+    "changes": 0
+  },
+  {
+    "count": 50000,
+    "mode": "delta",
+    "repetition": 3,
+    "milliseconds": 252.73504199999934,
+    "changes": 0
+  },
+  {
+    "count": 50000,
+    "mode": "delta",
+    "repetition": 4,
+    "milliseconds": 239.61300000000028,
+    "changes": 0
+  }
+]

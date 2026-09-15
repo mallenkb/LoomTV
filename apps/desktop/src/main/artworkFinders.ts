@@ -1,3 +1,4 @@
+import { scanInventory } from './scanning/inventory.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isImageFileName, normalizedArtworkBaseName } from './fileClassification';
@@ -14,7 +15,7 @@ export function createArtworkFinders(deps: ArtworkFindersDeps) {
   function findLocalArtworkFile(folderPath: string, preferredBaseNames: string[]): string {
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(folderPath, { withFileTypes: true });
+      entries = scanInventory.getStore()?.entries(folderPath) || fs.readdirSync(folderPath, { withFileTypes: true });
     } catch {
       return '';
     }

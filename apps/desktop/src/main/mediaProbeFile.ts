@@ -1,3 +1,5 @@
+import { scanMetrics } from './scanning/scanMetrics.ts';
+import { scanInventory } from './scanning/inventory.ts';
 import fs from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
 import { findFFprobe } from './mediaBinaries';
@@ -224,15 +226,22 @@ export async function probeMediaFileAsync(filePath: string): Promise<ProbeMediaF
   const identity = await mediaProbeCacheIdentityAsync(filePath);
   const cacheKey = identity?.key || null;
   const cached = getCachedProbeResult(cacheKey);
-  if (cached !== undefined) return cached;
+  const metrics = scanMetrics.getStore();
+  if (cached !== undefined) { if (metrics) metrics.probeCacheHits++; return cached; }
 
   const ffprobePath = findFFprobe();
-  if (!ffprobePath) return {};
+  if (!ffprobePath) {
+    if (scanInventory.getStore()) throw new Error('The media probe executable is unavailable.');
+    return {};
+  }
 
   try {
+    if (metrics) metrics.probeExecutions++;
     const raw = await execFileUtf8(ffprobePath, ffprobeArguments(filePath));
     return probeMediaFileFromOutput(filePath, raw, identity);
   } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { killed?: boolean };
+    if (scanInventory.getStore() && (failure.killed || ['ENOENT', 'EACCES', 'EMFILE'].includes(failure.code || ''))) throw error;
     console.error('ffprobe error for', filePath, error);
     return cacheProbeResult(cacheKey, {});
   }
