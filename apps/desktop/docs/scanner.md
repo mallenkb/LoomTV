@@ -1,6 +1,6 @@
 # Electron scanner
 
-Status: the scanner and both memory/performance follow-ups are implemented locally. The latest Electron main bundle builds successfully. TypeScript remains the default for full discovery. Eligible unchanged quick scans use a compatible bundled Rust worker for a signature check. Full Rust discovery is available for explicit use and benchmarking. Changes remain uncommitted. No release was pushed.
+Status: the scanner and memory/performance follow-ups are implemented for Electron. TypeScript remains the default for full discovery. Eligible unchanged quick scans use a compatible bundled Rust worker for a signature check. Full Rust discovery is available for explicit use and benchmarking.
 
 ## Scope
 

@@ -5,6 +5,7 @@ import {
   Archive as ArchivePhosphorIcon,
 } from '@phosphor-icons/react';
 import { motion } from 'motion/react';
+import AnimatedDownloadIcon from '@/components/AnimatedDownloadIcon';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { normalizeOtherFolderIcon, otherFolderIconPair, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
 import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
@@ -797,7 +798,11 @@ export default function Sidebar() {
                 />
               )}
               <span className="relative z-10 flex flex-col items-center leading-none">
-                <UpdateIcon className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse', updateState?.status === 'installing' && 'animate-spin')} aria-hidden="true" />
+                {updateState?.status === 'downloading' ? (
+                  <AnimatedDownloadIcon className="h-4 w-4" isDownloading size={16} />
+                ) : (
+                  <UpdateIcon className={cn('h-4 w-4', updateState?.status === 'installing' && 'animate-spin')} aria-hidden="true" />
+                )}
                 {updateState?.status === 'downloaded' && (
                   <span className="mt-1 text-[9px] font-semibold">Update</span>
                 )}
@@ -994,7 +999,11 @@ export default function Sidebar() {
                   aria-hidden="true"
                 />
               )}
-              <UpdateIcon className={cn('relative z-10 h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse', updateState?.status === 'installing' && 'animate-spin')} aria-hidden="true" />
+              {updateState?.status === 'downloading' ? (
+                <AnimatedDownloadIcon className="relative z-10 h-4 w-4" isDownloading size={16} />
+              ) : (
+                <UpdateIcon className={cn('relative z-10 h-4 w-4', updateState?.status === 'installing' && 'animate-spin')} aria-hidden="true" />
+              )}
               <span className="relative z-10">{updateButtonLabel}</span>
             </button>
           )}

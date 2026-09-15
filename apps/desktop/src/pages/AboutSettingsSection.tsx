@@ -1,4 +1,5 @@
 import { CheckCircle, Download, ExternalLink, RefreshCw } from 'lucide-react';
+import AnimatedDownloadIcon from '@/components/AnimatedDownloadIcon';
 import LoomLoader from '@/components/LoomLoader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { APP_VERSION, desktopApi, type UpdateState } from '@/lib/desktopApi';
@@ -129,7 +130,7 @@ export default function AboutSettingsSection({
                   {isUpdateChecking ? (
                     <RefreshCw className="h-4 w-4 animate-spin" />
                   ) : isUpdateDownloading ? (
-                    <Download className="h-4 w-4 animate-pulse" />
+                    <AnimatedDownloadIcon className="h-4 w-4" isDownloading size={16} />
                   ) : updateState?.status === 'installing' ? (
                     <LoomLoader
                       style={theme.loaderStyle}
