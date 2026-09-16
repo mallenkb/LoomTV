@@ -3,7 +3,6 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
-  safeStorage,
   shell,
 } from 'electron';
 import fs from 'node:fs';
@@ -24,6 +23,7 @@ import { advertiseLanService, unadvertiseLanService } from './main/lanDiscovery'
 import { loadOrCreateLanTlsIdentity, type LanTlsIdentity } from './main/lanTlsIdentity';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { getTrayIconPath, getWindowIconPath } from './main/windowManager';
+import { decryptLocalSecret, encryptLocalSecret, localSecretStorage } from './main/localSecretStorage';
 import {
   buildUpdateMenu,
   clearUpdateQuitFallback,
@@ -131,26 +131,28 @@ function protectedSecretPath(name: string): string {
 function readProtectedSecret(name: string): string | null {
   const target = protectedSecretPath(name);
   if (!fs.existsSync(target)) return null;
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-protected credential storage is unavailable. Loom will not expose or replace the saved startup credential.');
+  if (!localSecretStorage.isEncryptionAvailable()) {
+    throw new Error('Local credential storage is unavailable. Loom will not expose or replace the saved startup credential.');
   }
   const value = JSON.parse(fs.readFileSync(target, 'utf8')) as ProtectedSecret;
   if (value.version !== 1 || typeof value.encrypted !== 'string' || !value.encrypted) {
     throw new Error('The protected Loom startup credential is malformed.');
   }
-  return safeStorage.decryptString(Buffer.from(value.encrypted, 'base64'));
+  const recovered = decryptLocalSecret(Buffer.from(value.encrypted, 'base64'));
+  if (recovered.needsMigration) writeProtectedSecret(name, recovered.plaintext);
+  return recovered.plaintext;
 }
 
 function writeProtectedSecret(name: string, secret: string): string {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-protected credential storage is required before Loom can migrate this installation safely.');
+  if (!localSecretStorage.isEncryptionAvailable()) {
+    throw new Error('Local credential storage is required before Loom can migrate this installation safely.');
   }
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
   const target = protectedSecretPath(name);
   const temporary = `${target}.${process.pid}.tmp`;
   const envelope: ProtectedSecret = {
     version: 1,
-    encrypted: safeStorage.encryptString(secret).toString('base64'),
+    encrypted: encryptLocalSecret(secret).toString('base64'),
   };
   fs.writeFileSync(temporary, JSON.stringify(envelope), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   fs.renameSync(temporary, target);

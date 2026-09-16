@@ -19,6 +19,7 @@ export interface SecureSettingsCodec {
   isEncryptionAvailable(): boolean;
   encrypt(value: string): string;
   decrypt(value: string): string;
+  isCurrentCiphertext?(value: string): boolean;
 }
 
 export class SecureSettingsUnavailableError extends Error {
@@ -163,7 +164,8 @@ export function readSecureSettings(stored: SettingsData, codec: SecureSettingsCo
     assertValidSettingsSecrets(settings);
     return {
       settings,
-      needsMigration: Object.keys(legacySecrets).length > 0,
+      needsMigration: Object.keys(legacySecrets).length > 0
+        || codec.isCurrentCiphertext?.(String((envelope as { encrypted?: unknown }).encrypted || '')) === false,
     };
   }
 

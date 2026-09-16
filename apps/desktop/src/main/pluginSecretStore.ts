@@ -163,6 +163,21 @@ export class PluginSecretStore {
     return expected.length === actual.length && timingSafeEqual(expected, actual);
   }
 
+  migrateCiphertexts(isCurrent: (value: string) => boolean): void {
+    const rows = this.database.prepare('SELECT * FROM plugin_secrets').all() as SecretRow[];
+    const update = this.database.prepare('UPDATE plugin_secrets SET ciphertext = ?, integrity_mac = ? WHERE ref = ?');
+    this.database.transaction(() => {
+      for (const row of rows) {
+        if (isCurrent(row.ciphertext)) continue;
+        if (!validMac(this.macKey, row)) {
+          throw new PluginSecretStoreError('PLUGIN_SECRET_INTEGRITY_FAILED', 'The saved add-on configuration failed its integrity check.');
+        }
+        const migrated = { ...row, ciphertext: this.codec.encrypt(this.codec.decrypt(row.ciphertext)) };
+        update.run(migrated.ciphertext, macFor(this.macKey, migrated), row.ref);
+      }
+    })();
+  }
+
   put(addonIdentity: string, fieldIdentity: string, rawValue: unknown): PluginSecretReference {
     const addon = addonId(addonIdentity);
     const field = fieldKey(fieldIdentity);

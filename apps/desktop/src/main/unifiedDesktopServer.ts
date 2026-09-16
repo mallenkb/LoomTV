@@ -1,4 +1,4 @@
-import { app, dialog, safeStorage, shell } from 'electron';
+import { app, dialog, shell } from 'electron';
 import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import https from 'node:https';
@@ -15,6 +15,7 @@ import {
 import { findFFmpeg, findFFprobe } from './mediaBinaries.ts';
 import { getLocalNetworkAddresses } from './networkInfo.ts';
 import { loadOrCreateLanTlsIdentity, type LanTlsIdentity } from './lanTlsIdentity.ts';
+import { decryptLocalSecret, encryptLocalSecret, localSecretStorage } from './localSecretStorage.ts';
 
 type ProtectedSecret = { version: 1; encrypted: string };
 type ApiEnvelope<T> = { ok?: boolean; data?: T; error?: { message?: string } };
@@ -70,26 +71,28 @@ function bootstrapSecretPath(dataDir: string): string {
 function readProtectedBootstrapSecret(dataDir: string): string | null {
   const target = bootstrapSecretPath(dataDir);
   if (!fs.existsSync(target)) return null;
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-protected credential storage is unavailable. LoomTV cannot read its private server setup credential.');
+  if (!localSecretStorage.isEncryptionAvailable()) {
+    throw new Error('Local credential storage is unavailable. LoomTV cannot read its private server setup credential.');
   }
   const value = JSON.parse(fs.readFileSync(target, 'utf8')) as ProtectedSecret;
   if (value.version !== 1 || typeof value.encrypted !== 'string' || !value.encrypted) {
     throw new Error('The protected LoomTV server setup credential is malformed.');
   }
-  return safeStorage.decryptString(Buffer.from(value.encrypted, 'base64'));
+  const recovered = decryptLocalSecret(Buffer.from(value.encrypted, 'base64'));
+  if (recovered.needsMigration) writeProtectedBootstrapSecret(dataDir, recovered.plaintext);
+  return recovered.plaintext;
 }
 
 function writeProtectedBootstrapSecret(dataDir: string, secret: string): void {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('OS-protected credential storage is required for the unified desktop test.');
+  if (!localSecretStorage.isEncryptionAvailable()) {
+    throw new Error('Local credential storage is required for the unified desktop server.');
   }
   fs.mkdirSync(dataDir, { recursive: true });
   const target = bootstrapSecretPath(dataDir);
   const temporary = `${target}.${process.pid}.tmp`;
   const value: ProtectedSecret = {
     version: 1,
-    encrypted: safeStorage.encryptString(secret).toString('base64'),
+    encrypted: encryptLocalSecret(secret).toString('base64'),
   };
   fs.writeFileSync(temporary, JSON.stringify(value), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   fs.renameSync(temporary, target);

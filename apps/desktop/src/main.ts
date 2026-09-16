@@ -205,6 +205,7 @@ import {
   requeueWaitingSegmentAnalysisJobs,
   resetAutomaticAnalysisData,
   loadMetadataOfflineModeFromDatabase,
+  migrateLegacyCredentialStorage,
 } from './main/database';
 import {
   broadcastProfilesChanged,
@@ -2336,6 +2337,16 @@ app.whenReady().then(async () => {
   recordPlaybackDiagnostic('desktop.ready');
   applyAppIcon();
   prepareDesktopProfileStartup();
+  try {
+    migrateLegacyCredentialStorage();
+  } catch (error) {
+    console.warn('Saved settings migration will retry on the next launch:', describeErrorForLog(error));
+  }
+  try {
+    remoteLibraryClient.migrateLegacyCredentialStorage();
+  } catch (error) {
+    console.warn('Saved pairing migration will retry on the next launch:', describeErrorForLog(error));
+  }
 
   // ── loomtv:// media protocol handlers ───────────────────────────────────────
   // Translates loomtv://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>

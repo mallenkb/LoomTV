@@ -1,9 +1,10 @@
-import { app, dialog, nativeImage, safeStorage } from 'electron';
+import { app, dialog, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch.ts';
+import { decryptLocalSecret, encryptLocalSecret, isLocalSecretCiphertext, localSecretStorage } from './localSecretStorage.ts';
 import {
   artworkNegativeCacheAllows,
   rememberArtworkFailure,
@@ -189,14 +190,14 @@ function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
 }
 
 const secureSettingsCodec: SecureSettingsCodec = {
-  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable()
-    && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
-  encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
+  isEncryptionAvailable: localSecretStorage.isEncryptionAvailable,
+  encrypt: (value) => encryptLocalSecret(value).toString('base64'),
   decrypt: (value) => {
     const bytes = Buffer.from(value, 'base64');
     if (!bytes.length || bytes.toString('base64') !== value) throw new Error('Invalid encrypted settings encoding.');
-    return safeStorage.decryptString(bytes);
+    return decryptLocalSecret(bytes).plaintext;
   },
+  isCurrentCiphertext: (value) => isLocalSecretCiphertext(Buffer.from(value, 'base64')),
 };
 
 // A plain file copy of an open WAL database misses recent writes, so the
@@ -236,30 +237,36 @@ function getSegmentRepository(): ReturnType<typeof createDatabaseSegmentsReposit
 
 function getPluginSecretStore(): PluginSecretStore {
   if (pluginSecretStore) return pluginSecretStore;
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('The operating system secret store is unavailable.');
+  if (!localSecretStorage.isEncryptionAvailable()) {
+    throw new Error('The local secret store is unavailable.');
   }
   const database = getDb();
   const row = database.prepare('SELECT ciphertext FROM plugin_secret_store_keys WHERE id = 1').get() as { ciphertext?: string } | undefined;
   let macKey: Buffer;
   if (!row?.ciphertext) {
     macKey = randomBytes(32);
-    const protectedKey = safeStorage.encryptString(macKey.toString('base64')).toString('base64');
+    const protectedKey = encryptLocalSecret(macKey.toString('base64')).toString('base64');
     database.prepare('INSERT OR REPLACE INTO plugin_secret_store_keys (id, ciphertext, created_at) VALUES (1, ?, ?)')
       .run(protectedKey, Date.now());
   } else {
     try {
-      macKey = Buffer.from(safeStorage.decryptString(Buffer.from(row.ciphertext, 'base64')), 'base64');
+      const recovered = decryptLocalSecret(Buffer.from(row.ciphertext, 'base64'));
+      macKey = Buffer.from(recovered.plaintext, 'base64');
+      if (recovered.needsMigration) {
+        database.prepare('UPDATE plugin_secret_store_keys SET ciphertext = ? WHERE id = 1')
+          .run(encryptLocalSecret(recovered.plaintext).toString('base64'));
+      }
     } catch (error) {
-      throw new Error('The operating system secret store could not recover the LoomTV key.', { cause: error });
+      throw new Error('LoomTV could not recover its saved secret-store key.', { cause: error });
     }
     if (macKey.length < 32) throw new Error('The recovered LoomTV secret-store key is invalid.');
   }
   const codec: SecretCodec = {
-    encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
-    decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+    encrypt: (value) => encryptLocalSecret(value).toString('base64'),
+    decrypt: (value) => decryptLocalSecret(Buffer.from(value, 'base64')).plaintext,
   };
   pluginSecretStore = new PluginSecretStore(database, codec, macKey);
+  pluginSecretStore.migrateCiphertexts((value) => isLocalSecretCiphertext(Buffer.from(value, 'base64')));
   return pluginSecretStore;
 }
 
@@ -462,6 +469,11 @@ function secureSettingsPersistence() {
 
 export function loadSettingsFromDatabase(): SettingsData | null {
   return secureSettingsPersistence().load();
+}
+
+export function migrateLegacyCredentialStorage(): void {
+  secureSettingsPersistence().load();
+  getPluginSecretStore();
 }
 
 export function loadMetadataOfflineModeFromDatabase(): boolean | null {

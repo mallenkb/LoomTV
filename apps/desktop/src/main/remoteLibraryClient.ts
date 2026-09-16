@@ -1,4 +1,4 @@
-import { app, safeStorage } from 'electron';
+import { app } from 'electron';
 import { X509Certificate, createHash, timingSafeEqual } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import fs from 'node:fs';
@@ -17,6 +17,7 @@ import type {
 import { lanLibraryPayloadSchema, lanMediaItemSchema } from '@loom-media-server/lan-protocol';
 import { z } from 'zod';
 import { parseRequiredJson } from './runtimeValidation.ts';
+import { decryptLocalSecret, encryptLocalSecret, localSecretStorage } from './localSecretStorage.ts';
 
 const SESSION_VERSION = 2;
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -377,8 +378,8 @@ export function createRemoteLibraryClient() {
     sessionLoadFailure = '';
     const target = sessionFilePath();
     if (!fs.existsSync(target)) return session;
-    if (!safeStorage.isEncryptionAvailable()) {
-      sessionLoadFailure = 'Secure credential storage is unavailable. Pair this laptop again after enabling the system keychain.';
+    if (!localSecretStorage.isEncryptionAvailable()) {
+      sessionLoadFailure = 'Local credential storage is unavailable. Pair this laptop again after checking the LoomTV data folder.';
       return session;
     }
     try {
@@ -387,9 +388,10 @@ export function createRemoteLibraryClient() {
         sessionLoadFailure = 'The saved pairing uses an unsupported security format. Pair this laptop again.';
         return session;
       }
-      const decrypted = safeStorage.decryptString(Buffer.from(envelope.encrypted, 'base64'));
-      const parsed = parseRequiredJson(decrypted, remoteSecretSessionSchema, 'Saved pairing');
+      const decrypted = decryptLocalSecret(Buffer.from(envelope.encrypted, 'base64'));
+      const parsed = parseRequiredJson(decrypted.plaintext, remoteSecretSessionSchema, 'Saved pairing');
       session = parsed;
+      if (decrypted.needsMigration) persistSession(parsed);
     } catch {
       session = null;
       sessionLoadFailure = 'The saved pairing could not be unlocked. Pair this laptop again.';
@@ -398,13 +400,13 @@ export function createRemoteLibraryClient() {
   };
 
   const persistSession = (next: RemoteSecretSession): void => {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('Secure credential storage is unavailable on this computer.');
+    if (!localSecretStorage.isEncryptionAvailable()) {
+      throw new Error('Local credential storage is unavailable on this computer.');
     }
     const target = sessionFilePath();
     const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
     const backup = `${target}.bak`;
-    const encrypted = safeStorage.encryptString(JSON.stringify(next)).toString('base64');
+    const encrypted = encryptLocalSecret(JSON.stringify(next)).toString('base64');
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(temporary, JSON.stringify({ version: SESSION_VERSION, encrypted }), { encoding: 'utf8', mode: 0o600 });
     try {
@@ -501,13 +503,17 @@ export function createRemoteLibraryClient() {
   };
 
   return {
+    migrateLegacyCredentialStorage(): void {
+      loadSession();
+    },
+
     async connect(
       baseUrl: string,
       code: string,
       device: { name: string },
       expectedFingerprint?: string,
     ): Promise<RemoteLibraryConnection> {
-      if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this computer.');
+      if (!localSecretStorage.isEncryptionAvailable()) throw new Error('Local credential storage is unavailable on this computer.');
       const normalizedBaseUrl = await normalizeLanBaseUrl(baseUrl);
       const normalizedCode = String(code || '').trim();
       if (!/^\d{6}$/.test(normalizedCode)) throw new Error('Enter the 6-digit pairing PIN.');
