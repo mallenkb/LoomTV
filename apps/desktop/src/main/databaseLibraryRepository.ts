@@ -19,6 +19,11 @@ import { createDatabaseSegmentsRepository } from './databaseSegmentsRepository.t
 type SeasonEntry = { number: number; title: string; episodeCount: number };
 
 const stringArraySchema = z.array(z.string());
+const subtitleArraySchema = z.array(lanSubtitleRecordSchema);
+const castArraySchema = z.array(lanCastMemberSchema);
+const optionalLocalMetadataSchema = lanLocalMediaDetailsSchema.optional();
+const optionalStreamingProvidersSchema = z.array(lanStreamingProviderSchema).optional();
+const optionalOriginPlatformSchema = lanOriginPlatformSchema.optional();
 const providerIdsSchema = z.object({
   tmdbId: z.string().optional(),
   imdbId: z.string().optional(),
@@ -137,11 +142,12 @@ function durableArtworkSources(sources?: string[]): string[] {
   return Array.from(new Set((sources || []).map(durableArtworkSource).filter(Boolean)));
 }
 
-function applyDurableState(
+// Only used for newly decoded database records owned by loadLibrary.
+function finalizeLoadedItem(
   item: MediaItem,
   custom: Map<string, Map<string, string>>,
 ): MediaItem {
-  const next = { ...item };
+  const next = item;
   const itemCustom = custom.get(item.id);
 
   next.poster = durableArtworkSource(next.poster);
@@ -150,16 +156,13 @@ function applyDurableState(
   next.posterCandidates = durableArtworkSources(next.posterCandidates);
   next.backdropCandidates = durableArtworkSources(next.backdropCandidates);
   next.logoCandidates = durableArtworkSources(next.logoCandidates);
-  next.cast = next.cast.map((credit) => ({
-    ...credit,
-    image: durableArtworkSource(credit.image),
-    characterImage: durableArtworkSource(credit.characterImage),
-    voiceActorImage: durableArtworkSource(credit.voiceActorImage),
-  }));
-  next.episodes = (next.episodes || []).map((episode) => ({
-    ...episode,
-    still: durableArtworkSource(episode.still),
-  }));
+  for (const credit of next.cast) {
+    credit.image = durableArtworkSource(credit.image);
+    credit.characterImage = durableArtworkSource(credit.characterImage);
+    credit.voiceActorImage = durableArtworkSource(credit.voiceActorImage);
+  }
+  next.episodes ??= [];
+  for (const episode of next.episodes) episode.still = durableArtworkSource(episode.still);
 
   delete next.lastPlayed;
 
@@ -209,10 +212,12 @@ export function loadLibrary(
 
   const folderRows = parseDatabaseRows(database.prepare('SELECT path, kind FROM library_folders ORDER BY added_at ASC').all(), folderRowSchema, 'library folder');
   const folderGroups = folderGroupsFromRows(folderRows);
-  const rows = parseDatabaseRows(database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').all(), mediaItemRowSchema, 'media item');
 
+  // Validate rows as they arrive so raw and validated copies of entire tables
+  // do not coexist with the assembled library.
   const seasonsByMedia = new Map<string, SeasonEntry[]>();
-  for (const row of parseDatabaseRows(database.prepare('SELECT * FROM seasons ORDER BY number ASC').all(), seasonRowSchema, 'season')) {
+  for (const raw of database.prepare('SELECT * FROM seasons ORDER BY number ASC').iterate()) {
+    const row = parseDatabaseRow(raw, seasonRowSchema, 'season');
     appendToMap(seasonsByMedia, row.media_id, {
       number: row.number,
       title: row.title,
@@ -221,7 +226,8 @@ export function loadLibrary(
   }
 
   const episodesByMedia = new Map<string, EpisodeMeta[]>();
-  for (const row of parseDatabaseRows(database.prepare('SELECT * FROM episodes ORDER BY season ASC, number ASC').all(), episodeRowSchema, 'episode')) {
+  for (const raw of database.prepare('SELECT * FROM episodes ORDER BY season ASC, number ASC').iterate()) {
+    const row = parseDatabaseRow(raw, episodeRowSchema, 'episode');
     appendToMap(episodesByMedia, row.media_id, {
       season: row.season,
       number: row.number,
@@ -230,12 +236,13 @@ export function loadLibrary(
       still: row.still,
       rating: row.rating,
       airDate: row.air_date,
-      localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
+      localMetadata: parseStoredJson(row.local_metadata_json, optionalLocalMetadataSchema, undefined),
     });
   }
 
   const episodeFilesByMedia = new Map<string, EpisodeFile[]>();
-  for (const row of parseDatabaseRows(database.prepare('SELECT * FROM episode_files ORDER BY season ASC, episode ASC').all(), episodeFileRowSchema, 'episode file')) {
+  for (const raw of database.prepare('SELECT * FROM episode_files ORDER BY season ASC, episode ASC').iterate()) {
+    const row = parseDatabaseRow(raw, episodeFileRowSchema, 'episode file');
     appendToMap(episodeFilesByMedia, row.media_id, {
       season: row.season,
       episode: row.episode,
@@ -243,8 +250,8 @@ export function loadLibrary(
       title: row.title || undefined,
       thumbnail: row.thumbnail ? durableArtworkSource(row.thumbnail) : undefined,
       still: row.still ? durableArtworkSource(row.still) : undefined,
-      subtitles: parseStoredJson(row.subtitles_json, z.array(lanSubtitleRecordSchema), []),
-      localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
+      subtitles: parseStoredJson(row.subtitles_json, subtitleArraySchema, []),
+      localMetadata: parseStoredJson(row.local_metadata_json, optionalLocalMetadataSchema, undefined),
     });
   }
 
@@ -272,8 +279,9 @@ export function loadLibrary(
     scanCache,
   };
 
-  for (const row of rows) {
-    const item = applyDurableState({
+  for (const raw of database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').iterate()) {
+    const row = parseDatabaseRow(raw, mediaItemRowSchema, 'media item');
+    const item = finalizeLoadedItem({
       id: row.id,
       type: mediaTypeSchema.parse(row.type),
       format: row.format || undefined,
@@ -294,19 +302,24 @@ export function loadLibrary(
       episodeCount: row.episode_count ?? undefined,
       providerRatings: parseStoredJson(row.provider_ratings_json, lanProviderRatingsSchema, {}),
       contentRatings: parseStoredJson(row.content_ratings_json, contentRatingsSchema, {}),
-      streamingProviders: parseStoredJson(row.streaming_providers_json, z.array(lanStreamingProviderSchema).optional(), undefined),
-      originPlatform: parseStoredJson(row.origin_platform_json, lanOriginPlatformSchema.optional(), undefined),
+      streamingProviders: parseStoredJson(row.streaming_providers_json, optionalStreamingProvidersSchema, undefined),
+      originPlatform: parseStoredJson(row.origin_platform_json, optionalOriginPlatformSchema, undefined),
       genres: parseStoredJson(row.genres_json, stringArraySchema, []),
-      cast: parseStoredJson(row.cast_json, z.array(lanCastMemberSchema), []),
+      cast: parseStoredJson(row.cast_json, castArraySchema, []),
       filePath: row.file_path,
       fileSize: row.file_size || undefined,
-      subtitles: parseStoredJson(row.subtitles_json, z.array(lanSubtitleRecordSchema), []),
-      localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
+      subtitles: parseStoredJson(row.subtitles_json, subtitleArraySchema, []),
+      localMetadata: parseStoredJson(row.local_metadata_json, optionalLocalMetadataSchema, undefined),
       providerIds: parseStoredJson(row.provider_ids_json, providerIdsSchema.optional(), undefined),
       seasons: seasonsByMedia.get(row.id) || undefined,
       episodes: episodesByMedia.get(row.id) || undefined,
       episodeFiles: episodeFilesByMedia.get(row.id) || undefined,
     }, custom);
+
+    // The assembled item now owns these records; drop the staging references.
+    seasonsByMedia.delete(row.id);
+    episodesByMedia.delete(row.id);
+    episodeFilesByMedia.delete(row.id);
 
     if (item.type === 'movie') data.movies.push(item);
     else if (item.type === 'anime') data.animeShows.push(item);
