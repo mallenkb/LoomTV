@@ -50,6 +50,23 @@ const artworkCacheEntryRowSchema = z.object({
 });
 const artworkCachePathRowSchema = artworkCacheEntryRowSchema.pick({ source_url: true, cache_path: true });
 
+function hashArtworkFile(filePath: string): { byteLength: number; contentHash: string } {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(fs.fstatSync(fd).size, 256 * 1024)));
+    const hash = createHash('sha256');
+    let byteLength = 0;
+    let read: number;
+    while ((read = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+      hash.update(buffer.subarray(0, read));
+      byteLength += read;
+    }
+    return { byteLength, contentHash: hash.digest('hex') };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function createDatabaseArtworkRepository(
   database: BetterSqlite3.Database,
   deps: ArtworkRepositoryDependencies,
@@ -96,12 +113,8 @@ export function createDatabaseArtworkRepository(
 
   function getCustomArtworkMap(): Map<string, Map<string, string>> {
     const result = new Map<string, Map<string, string>>();
-    const rows = parseDatabaseRows(
-      database.prepare('SELECT media_id, target, data_url FROM custom_artwork').all(),
-      customArtworkMapRowSchema,
-      'custom artwork map',
-    );
-    for (const row of rows) {
+    for (const raw of database.prepare('SELECT media_id, target, data_url FROM custom_artwork').iterate()) {
+      const row = parseDatabaseRow(raw, customArtworkMapRowSchema, 'custom artwork map');
       let targetMap = result.get(row.media_id);
       if (!targetMap) {
         targetMap = new Map();
@@ -120,26 +133,27 @@ export function createDatabaseArtworkRepository(
     );
     if (!row) return null;
     const cachePath = row.cache_path || undefined;
-    let bytes: Buffer;
-    if (cachePath && fs.existsSync(cachePath)) {
-      bytes = fs.readFileSync(cachePath);
-    } else if (row.data_url) {
-      const encoded = row.data_url.includes(',') ? row.data_url.slice(row.data_url.indexOf(',') + 1) : '';
-      if (!encoded) return null;
-      bytes = Buffer.from(encoded, 'base64');
-    } else {
-      return null;
-    }
-
     try {
       // Artwork is normalized before insertion by the bounded worker. Cache
       // reads verify the immutable bytes without decoding again on Electron's
       // main thread. Legacy/unverifiable rows fail closed and are refetched.
-      const contentHash = createHash('sha256').update(bytes).digest('hex');
+      let byteLength: number;
+      let contentHash: string;
+      if (cachePath && fs.existsSync(cachePath)) {
+        ({ byteLength, contentHash } = hashArtworkFile(cachePath));
+      } else if (row.data_url) {
+        const encoded = row.data_url.includes(',') ? row.data_url.slice(row.data_url.indexOf(',') + 1) : '';
+        if (!encoded) return null;
+        const bytes = Buffer.from(encoded, 'base64');
+        byteLength = bytes.byteLength;
+        contentHash = createHash('sha256').update(bytes).digest('hex');
+      } else {
+        return null;
+      }
       const normalizedMimeType = row.mime_type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
       if (
         (row.mime_type !== 'image/png' && row.mime_type !== 'image/jpeg')
-        || row.byte_length !== bytes.byteLength
+        || row.byte_length !== byteLength
         || !/^[a-f0-9]{64}$/.test(row.content_hash || '')
         || row.content_hash !== contentHash
       ) throw new Error('Cached artwork integrity check failed.');
@@ -148,9 +162,9 @@ export function createDatabaseArtworkRepository(
           database.prepare("UPDATE artwork_cache SET data_url = '' WHERE source_url = ?")
             .run(sourceUrl);
         }
-        return { cachePath, mimeType: normalizedMimeType, byteLength: bytes.byteLength, contentHash };
+        return { cachePath, mimeType: normalizedMimeType, byteLength, contentHash };
       }
-      return { dataUrl: row.data_url, mimeType: normalizedMimeType, byteLength: bytes.byteLength, contentHash };
+      return { dataUrl: row.data_url, mimeType: normalizedMimeType, byteLength, contentHash };
     } catch {
       if (cachePath) {
         try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch { /* best effort */ }
