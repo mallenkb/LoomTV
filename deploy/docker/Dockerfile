@@ -25,9 +25,11 @@ COPY packages/lan-protocol/package.json packages/lan-protocol/package.json
 COPY packages/media-core/package.json packages/media-core/package.json
 COPY packages/runtime-paths/package.json packages/runtime-paths/package.json
 COPY packages/transcode-capabilities/package.json packages/transcode-capabilities/package.json
+COPY packages/video-contracts/package.json packages/video-contracts/package.json
 COPY packages/media-core/src packages/media-core/src
 COPY packages/runtime-paths/src packages/runtime-paths/src
 COPY packages/transcode-capabilities/src packages/transcode-capabilities/src
+COPY packages/video-contracts/src packages/video-contracts/src
 
 RUN pnpm install --filter ./apps/server... --prod --frozen-lockfile
 RUN pnpm --config.inject-workspace-packages=true --filter ./apps/server deploy --prod /opt/loomtv

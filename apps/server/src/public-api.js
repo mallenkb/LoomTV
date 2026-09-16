@@ -707,6 +707,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         method: request.method || 'GET',
         headers: { Accept: 'application/json', ...request.headers },
         body: request.body,
+        redirect: 'error',
         signal: controller.signal,
       });
       if (response.status === 401 || response.status === 403) {
@@ -1520,6 +1521,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         else {
           const body = await readJsonBody(req);
           const mode = optionalString(body.mode, 'mode', 32);
+          if (mode && !['quick','metadata','full'].includes(mode)) throw requestError(400, 'invalid_request', 'Library scan mode is invalid.');
           const rootId = optionalString(body.rootId, 'rootId', 128);
           writeData(res, 202, await service.startLibraryScan({ mode, rootId }, principal));
         }

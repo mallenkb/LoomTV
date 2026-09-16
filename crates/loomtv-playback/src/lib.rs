@@ -183,11 +183,18 @@ impl WarmRuntime {
         if version.is_null() || !CStr::from_ptr(version).to_bytes().starts_with(b"3.") {
             return Err("This adapter requires the bundled LibVLC 3 ABI.".into());
         }
-        // LibVLC uses its plugin path during initialization. This process owns one engine.
-        let previous_plugin_path = std::env::var_os("VLC_PLUGIN_PATH");
-        if let Some(plugins) = plugins {
-            std::env::set_var("VLC_PLUGIN_PATH", plugins);
-        }
+        let instance = Self::create_instance(&library, plugins)?;
+        Ok(Self {
+            library,
+            _core_library: core_library,
+            instance,
+        })
+    }
+
+    unsafe fn create_instance(
+        library: &Library,
+        plugins: Option<&std::path::Path>,
+    ) -> Result<*mut c_void, String> {
         let mut arguments = vec!["--no-plugins-cache"];
         if std::env::var("LOOMTV_DEBUG_LIBVLC").as_deref() == Ok("1") {
             arguments.extend(["--no-quiet", "--verbose=2"]);
@@ -205,20 +212,23 @@ impl WarmRuntime {
                 b"libvlc_new\0",
             )
             .map_err(|_| "The LibVLC instance API is unavailable.")?;
+        let previous_plugin_path = plugins.map(|plugins| {
+            let previous = std::env::var_os("VLC_PLUGIN_PATH");
+            std::env::set_var("VLC_PLUGIN_PATH", plugins);
+            previous
+        });
         let instance = new(pointers.len() as c_int, pointers.as_ptr());
         if let Some(previous) = previous_plugin_path {
-            std::env::set_var("VLC_PLUGIN_PATH", previous);
-        } else {
-            std::env::remove_var("VLC_PLUGIN_PATH");
+            if let Some(previous) = previous {
+                std::env::set_var("VLC_PLUGIN_PATH", previous);
+            } else {
+                std::env::remove_var("VLC_PLUGIN_PATH");
+            }
         }
         if instance.is_null() {
             return Err("LibVLC initialization failed.".into());
         }
-        Ok(Self {
-            library,
-            _core_library: core_library,
-            instance,
-        })
+        Ok(instance)
     }
 }
 impl Drop for WarmRuntime {
@@ -759,5 +769,46 @@ impl Player {
 impl Drop for Player {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_instance_api_does_not_change_plugin_environment() {
+        let library: Library = libloading::os::unix::Library::this().into();
+        let before = std::env::var_os("VLC_PLUGIN_PATH");
+        let result = unsafe {
+            WarmRuntime::create_instance(&library, Some(std::path::Path::new("/unused/plugins")))
+        };
+        assert_eq!(
+            result.unwrap_err(),
+            "The LibVLC instance API is unavailable."
+        );
+        assert_eq!(std::env::var_os("VLC_PLUGIN_PATH"), before);
+    }
+
+    #[tokio::test]
+    async fn failed_start_never_creates_an_active_session() {
+        let service = PlaybackService::new(None, None, Arc::new(|_| {})).unwrap();
+        assert_eq!(service.availability().await.unwrap()["available"], false);
+        assert!(service
+            .start("fixture.mkv".into(), json!({}), 1)
+            .await
+            .is_err());
+        assert!(service
+            .command("stale".into(), json!({"type":"seek","position":1}))
+            .await
+            .is_err());
+        assert_eq!(service.stop(None).await.unwrap(), false);
+        assert_eq!(service.stop(None).await.unwrap(), false);
+        assert_eq!(service.shutdown().await.unwrap(), true);
+        assert!(service
+            .command("stale".into(), json!({"type":"set-paused","paused":false}))
+            .await
+            .is_err());
     }
 }

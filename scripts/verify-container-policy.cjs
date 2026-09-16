@@ -136,6 +136,16 @@ function validateCompose(source, label = 'deploy/docker/compose.yaml') {
   if (!Array.isArray(service.security_opt) || !service.security_opt.includes('no-new-privileges:true')) {
     failures.push(`${label}: loomtv service must enable no-new-privileges`);
   }
+  if (String(service.environment?.REQUIRE_SECURE_TRANSPORT) !== 'true') {
+    failures.push(`${label}: loomtv must require secure transport`);
+  }
+  if (!/^\$\{TRUSTED_PROXIES:\?[^}]+\}$/.test(String(service.environment?.TRUSTED_PROXIES ?? ''))) {
+    failures.push(`${label}: loomtv must require an explicit trusted proxy allowlist`);
+  }
+  if (!Array.isArray(service.ports) || service.ports.length !== 1
+    || service.ports[0] !== '127.0.0.1:${LOOMTV_PORT:-3847}:3847') {
+    failures.push(`${label}: loomtv must publish only on host loopback`);
+  }
   const mediaReadOnly = Array.isArray(service.volumes) && service.volumes.some((volume) => (
     (typeof volume === 'string' && volume.endsWith(':/media:ro'))
     || (volume && typeof volume === 'object' && volume.target === '/media' && volume.read_only === true)

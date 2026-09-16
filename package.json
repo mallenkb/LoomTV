@@ -2,12 +2,6 @@
   "name": "loom-media-server-workspace",
   "private": true,
   "packageManager": "pnpm@11.20.0",
-  "overrides": {
-    "builder-util-runtime": "9.7.0",
-    "string-width": "4.2.3",
-    "@expo/cli>wrap-ansi>string-width": "4.2.3",
-    "wrap-ansi@7.0.0>string-width": "4.2.3"
-  },
   "scripts": {
     "audit:prod": "node scripts/audit-production.cjs",
     "container:verify": "node scripts/verify-container-policy.cjs",
@@ -16,7 +10,7 @@
     "mobile:verify-release-config": "node scripts/verify-mobile-release-config.cjs",
     "release:verify-identity": "node scripts/verify-release-identity.cjs",
     "release:evidence": "node scripts/release-evidence.cjs",
-    "test:release-safety": "node --test scripts/release-identity.test.cjs scripts/release-evidence.test.cjs scripts/verify-workflow-policy.test.cjs",
+    "test:release-safety": "node --test scripts/release-identity.test.cjs scripts/release-evidence.test.cjs scripts/verify-workflow-policy.test.cjs scripts/verify-release-attestations.test.cjs",
     "verify:workflow-policy": "node scripts/verify-workflow-policy.cjs",
     "test:workflow-policy": "node --test scripts/verify-workflow-policy.test.cjs",
     "verify:test-workspaces": "node scripts/verify-test-workspaces.cjs",

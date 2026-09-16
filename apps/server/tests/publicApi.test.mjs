@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 import { createHeadlessServer } from '../src/server.js';
@@ -111,6 +112,57 @@ test('shared setup uses the trusted desktop channel and invokes desktop persiste
   assert.equal(finalState.payload.data.required, false);
 });
 
+test('secure proxy deployments keep local health checks available and reject cleartext UI requests', async (t) => {
+  const { server, baseUrl } = await startServer({ host: '0.0.0.0', requireSecureTransport: true, trustedProxies: ['127.0.0.1/32'] });
+  t.after(() => server.stop());
+  for (const method of ['GET', 'HEAD']) {
+    const health = await fetch(`${baseUrl}/healthz`, { method });
+    assert.equal(health.status, 200);
+  }
+  assert.equal((await fetch(`${baseUrl}/app/`)).status, 426);
+  assert.equal((await fetch(`${baseUrl}/api/v1/auth/session`, { method: 'POST' })).status, 426);
+  assert.equal((await fetch(`${baseUrl}/app/`, { headers: { 'X-Forwarded-Proto': 'https' } })).status, 200);
+});
+
+test('metadata validation rejects redirects without replaying provider credentials', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(() => server.stop());
+  const owner = await api(baseUrl)('POST', '/api/v1/auth/owner', {
+    name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET,
+  });
+  assert.equal(owner.status, 201);
+  const authed = api(baseUrl, owner.payload.data.adminToken);
+  let redirected = 0;
+  let status = 307;
+  const redirectServer = http.createServer((req, res) => {
+    req.resume();
+    if (req.url === '/target') { redirected += 1; res.end('{}'); return; }
+    res.writeHead(status, { Location: '/target' });
+    res.end();
+  });
+  await new Promise((resolve) => redirectServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => redirectServer.close(resolve)));
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    if (String(url).startsWith(baseUrl)) return originalFetch(url, options);
+    requests.push({ url: String(url), options });
+    return originalFetch(`http://127.0.0.1:${redirectServer.address().port}/provider`, options);
+  });
+  for (const provider of ['tmdb', 'fanart', 'omdb', 'tvdb']) {
+    for (status of [307, 308]) {
+      const result = await authed('POST', '/api/v1/setup/metadata/test', { provider, apiKey: 'fixture-provider-key' });
+      assert.equal(result.status, 400);
+      assert.equal(result.payload.error.code, 'invalid_request');
+      assert.equal(requests.at(-1).options.redirect, 'error');
+    }
+  }
+  assert.equal(requests.length, 8);
+  assert.equal(requests.at(-1).url, 'https://api4.thetvdb.com/v4/login');
+  assert.equal(requests.at(-1).options.body, JSON.stringify({ apikey: 'fixture-provider-key' }));
+  assert.equal(redirected, 0);
+});
+
 test('public API end-to-end: discovery, onboarding, profiles, and progress', async (t) => {
   const { server, baseUrl } = await startServer();
   t.after(() => server.stop());
@@ -207,6 +259,20 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     const empty = await authed('GET', `/api/v1/profiles/${profileId}/progress`);
     assert.equal(empty.status, 200);
     assert.deepEqual(empty.payload.data.progress, {});
+  });
+
+  await t.test('library scans reject unknown modes without starting a scan', async () => {
+    const authed = api(baseUrl, token);
+    const before = await authed('GET', '/api/v1/library/scan');
+    for (const mode of ['invalid', 'QUICK', 'deep']) {
+      const rejected = await authed('POST', '/api/v1/library/scan', { mode });
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.payload.ok, false);
+      assert.equal(rejected.payload.error.code, 'invalid_request');
+      assert.equal(rejected.payload.error.message, 'Library scan mode is invalid.');
+    }
+    const after = await authed('GET', '/api/v1/library/scan');
+    assert.deepEqual(after.payload.data, before.payload.data);
   });
 
   await t.test('library routes work end to end against a real media folder', async () => {

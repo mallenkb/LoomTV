@@ -14,7 +14,7 @@ The desktop application uses these direct runtime dependencies:
 | Electron Forge | MIT | <https://www.electronforge.io/> |
 | Electron Updater | MIT | <https://github.com/electron-userland/electron-builder> |
 | React and React DOM | MIT | <https://react.dev/> |
-| React Router | MIT | <https://reactrouter.com/> |
+| TanStack Router (`@tanstack/react-router`) | MIT | <https://tanstack.com/router> |
 | Vite | MIT | <https://vite.dev/> |
 | TypeScript | Apache-2.0 | <https://www.typescriptlang.org/> |
 | Tailwind CSS and tailwind-merge | MIT | <https://tailwindcss.com/> and <https://github.com/dcastil/tailwind-merge> |

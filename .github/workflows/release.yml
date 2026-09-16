@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
     outputs:
       release_tag: ${{ steps.release-context.outputs.release_tag }}
       release_sha: ${{ steps.release-target.outputs.release_sha }}
@@ -92,6 +93,33 @@ jobs:
           fi
           echo "release_sha=$tag_commit" >> "$GITHUB_OUTPUT"
           echo "release_tag_oid=$tag_oid" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful validation of release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release-target.outputs.release_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          validation="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow validate.yml \
+            --commit "$RELEASE_SHA" \
+            --event push \
+            --branch main \
+            --limit 1 \
+            --json status,conclusion,event,headBranch,headSha)"
+          if ! jq -e --arg sha "$RELEASE_SHA" '
+            length == 1 and
+            .[0].headSha == $sha and
+            .[0].event == "push" and
+            .[0].headBranch == "main" and
+            .[0].status == "completed" and
+            .[0].conclusion == "success"
+          ' <<< "$validation" >/dev/null; then
+            echo "Latest Validate push run on main for $RELEASE_SHA must be completed and successful." >&2
+            exit 1
+          fi
 
       - name: Verify deterministic tag, package, notes, and updater identity
         env:

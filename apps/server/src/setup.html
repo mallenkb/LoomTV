@@ -378,8 +378,6 @@
       const $ = (id) => document.getElementById(id);
       const params = new URLSearchParams(window.location.search);
       const returnTo = params.get('return') === 'admin' ? 'admin' : 'app';
-      // The key server control already reads, so finishing setup lands there unlocked.
-      const ADMIN_TOKEN_KEY = 'loomtv.adminToken';
 
       const STEP_COPY = {
         account: ['Create your account', 'Set the owner account and server name.'],
@@ -553,7 +551,6 @@
           return;
         }
         state.bearer = result.adminToken || '';
-        if (state.bearer) sessionStorage.setItem(ADMIN_TOKEN_KEY, state.bearer);
       }
 
       /** Any authenticated step can hit an expired session; ask to sign back in. */
@@ -562,7 +559,7 @@
       }
 
       function requireSignIn(nextStep) {
-        if (state.bearer) { state.bearer = ''; sessionStorage.removeItem(ADMIN_TOKEN_KEY); }
+        state.bearer = '';
         state.resuming = true;
         state.pendingStep = nextStep || state.step;
         showStep(state.pendingStep);
@@ -824,7 +821,10 @@
           const result = await api('/setup/complete', { method: 'POST', body: { returnTo } });
           $('readyProgress').dataset.state = 'complete';
           $('readyProgressCopy').textContent = 'Library ready. Opening Loom...';
-          window.location.replace(result.redirect || (returnTo === 'admin' ? '/admin/' : '/app/'));
+          const redirect = typeof result.redirect === 'string' && result.redirect.startsWith('/')
+            && !result.redirect.startsWith('//') && !/[\\\u0000-\u0020\u007f]/.test(result.redirect)
+            ? result.redirect : (returnTo === 'admin' ? '/admin/' : '/app/');
+          window.location.replace(redirect);
         } catch (error) {
           state.finishing = false;
           $('readyProgress').dataset.state = 'error';
@@ -861,16 +861,14 @@
       /** A cookie session survives a refresh; recover its CSRF proof the same way. */
       function readCsrfCookie() {
         const entry = document.cookie.split(';').map((part) => part.trim()).find((part) => part.startsWith('__Host-loomtv_csrf='));
-        return entry ? decodeURIComponent(entry.slice('__Host-loomtv_csrf='.length)) : '';
+        const value = entry ? entry.slice('__Host-loomtv_csrf='.length) : '';
+        try { return decodeURIComponent(value); } catch { return value; }
       }
 
       async function boot() {
-        // Finishing hands the session to whichever surface the user started
-        // from: server control reads a bearer token, the web app rides the
-        // same-origin cookie. Either way nobody signs in twice.
+        try { sessionStorage.removeItem('loomtv.adminToken'); } catch {}
         state.sessionMode = returnTo === 'admin' || window.location.protocol !== 'https:' ? 'bearer' : 'cookie';
         if (state.sessionMode === 'cookie') state.csrf = readCsrfCookie();
-        else state.bearer = sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
         try {
           const status = await api('/setup/state');
           state.status = status;
@@ -879,7 +877,9 @@
           $('browseButton').hidden = !(status.folderBrowse || status.nativeFolderPicker);
           $('railCaption').textContent = status.ownerConfigured ? 'Resuming setup' : 'First-time setup';
           if (!status.ownerConfigured) { showStep('account'); window.setTimeout(() => $('ownerName').focus(), 0); return; }
-          await enterStep(status.step === 'account' ? 'libraries' : status.step);
+          const step = status.step === 'account' ? 'libraries' : status.step;
+          if (state.sessionMode === 'bearer' && !state.bearer) { requireSignIn(step); return; }
+          await enterStep(step);
         } catch (error) {
           $('cardTitle').textContent = 'Loom is not answering';
           $('cardCopy').textContent = 'Setup could not reach this server. Check that it is running, then reload this page.';

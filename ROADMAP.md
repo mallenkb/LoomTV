@@ -78,8 +78,10 @@ Current foundation:
 - Library Settings reports whether mounted folders are available.
 - A scan preserves cached library items and scan-cache entries when a configured root is unavailable at scan start.
 - Progressive scan snapshots retain completed folders during the current process.
-- The headless server persists a JSON catalog, checkpoints background scans, and
-  keeps existing records marked unavailable when a NAS root disconnects.
+- The headless server persists catalog and application state in a canonical SQLite store.
+  Interrupted or failed scans preserve the previous catalog, and disconnected NAS roots
+  retain their records. See [NAS support](docs/nas-support.md) and
+  [canonical migration](docs/canonical-migration.md).
 - The headless admin API can list catalog items and resolve only paths that
   remain inside their configured root.
 
@@ -188,11 +190,7 @@ Expected outcomes:
 
 ## Near-Term Work
 
-- Finish and publish the workspace README updates.
-- Add issue templates for bugs, features, and good first issues.
 - Add a NAS support guide covering mounted SMB/NFS shares, reconnect behavior, scan safety, and known limits.
-- Add focused documentation for LAN sharing and security expectations.
-- Add a mobile client README covering pairing, same-LAN streaming, supported platforms, and known limits.
 - Keep release assets current for macOS, Windows, and Linux.
 - Improve renderer bundle splitting without changing playback behavior. See `docs/future-work.md`.
 

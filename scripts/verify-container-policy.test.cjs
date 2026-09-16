@@ -45,4 +45,28 @@ assert.ok(
   'a hardened sibling service must not mask an unsafe loomtv service',
 );
 
+for (const [find, replacement, expected] of [
+  ['REQUIRE_SECURE_TRANSPORT: "true"', 'REQUIRE_SECURE_TRANSPORT: "false"', 'require secure transport'],
+  ['${TRUSTED_PROXIES:?Set TRUSTED_PROXIES to the exact TLS proxy peer IP or CIDR seen by the container}', '0.0.0.0/0', 'explicit trusted proxy allowlist'],
+  ['127.0.0.1:${LOOMTV_PORT:-3847}:3847', '${LOOMTV_PORT:-3847}:3847', 'only on host loopback'],
+]) {
+  assert.ok(sources.compose.includes(find));
+  assert.ok(validateCompose(sources.compose.replace(find, replacement)).some((failure) => failure.includes(expected)));
+}
+
+for (const directory of ['video-contracts', 'media-core', 'runtime-paths', 'transcode-capabilities']) {
+  for (const entry of ['package.json', 'src']) {
+    assert.ok(sources.dockerfile.includes(`COPY packages/${directory}/${entry} packages/${directory}/${entry}`));
+  }
+}
+
+const workflow = require('yaml').parse(fs.readFileSync(path.join(workspaceRoot, '.github/workflows/validate.yml'), 'utf8'));
+const containerSteps = workflow.jobs.container.steps;
+assert.ok(containerSteps.some((step) => step.run?.includes('docker build --file deploy/docker/Dockerfile')));
+const smoke = containerSteps.find((step) => step.run?.includes('docker run'))?.run;
+assert.ok(smoke?.includes('--env HOST=127.0.0.1'));
+assert.ok(smoke?.includes('.State.Health.Status'));
+assert.ok(smoke?.includes('docker rm --force loomtv-ci'));
+assert.ok(smoke?.trim().endsWith('exit 1'));
+
 console.log(`Container policy rejected ${fixtures.length} focused negative fixtures.`);

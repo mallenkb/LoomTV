@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, autoUpdater as electronAutoUpdater } from 'electron';
+import { app, BrowserWindow, Menu, dialog, shell, autoUpdater as electronAutoUpdater } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
@@ -18,6 +18,12 @@ import { z } from 'zod';
 
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
+const UPDATE_RELEASE_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`;
+class LegacyMacUpdateError extends Error {
+  constructor() {
+    super('This legacy ad-hoc installation has no trusted publisher identity. Download a Developer ID-signed LoomTV release from the official releases page and install it manually once to enable verified automatic updates.');
+  }
+}
 const execFileAsync = promisify(execFile);
 const githubReleaseSchema = z.object({
   tag_name: z.string().optional(),
@@ -149,14 +155,15 @@ function updateFailureMessage(error: unknown, stage: UpdateFailureStage): string
   const rawMessage = error instanceof Error ? error.message : String(error);
   console.error(`[updates] ${stage} failed:`, error);
 
-  if (/ENOTEMPTY|directory not empty|loomtv-update-install/i.test(rawMessage)) {
-    return 'Loom couldn’t prepare the downloaded update. Please try again.';
-  }
-  if (/code.?sign|signature|publisher|checksum|sha512/i.test(rawMessage)) {
+  if (error instanceof LegacyMacUpdateError) return error.message;
+  if (/code.?sign|signature|publisher|bundle identifier|checksum|sha512/i.test(rawMessage)) {
     return 'The downloaded update could not be verified and was not installed.';
   }
   if (/EACCES|EPERM|permission denied|not permitted/i.test(rawMessage)) {
     return 'Loom does not have permission to install the update. Reinstall it from an administrator account.';
+  }
+  if (/ENOTEMPTY|directory not empty|loomtv-update-install/i.test(rawMessage)) {
+    return 'Loom couldn’t prepare the downloaded update. Please try again.';
   }
   if (stage === 'install') return 'Loom couldn’t install the update. Please try again.';
   if (stage === 'download') return 'Loom couldn’t download the update. Check your connection and try again.';
@@ -343,9 +350,15 @@ async function getMacAppPublisherIdentity(appPath: string, label: string): Promi
   };
 }
 
-async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
+async function getTrustedMacPublisher(runningAppPath: string): Promise<MacAppPublisherIdentity> {
   await verifyMacAppSignature(runningAppPath, 'Installed LoomTV app');
-  const runningIdentity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
+  const identity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
+  if (identity.adHoc || !identity.teamIdentifier) throw new LegacyMacUpdateError();
+  return identity;
+}
+
+async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
+  const runningIdentity = await getTrustedMacPublisher(runningAppPath);
 
   await verifyMacAppSignature(sourceAppPath, 'Downloaded update app');
   const sourceIdentity = await getMacAppPublisherIdentity(sourceAppPath, 'Downloaded update app');
@@ -356,25 +369,16 @@ async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: stri
     );
   }
 
-  if (runningIdentity.teamIdentifier) {
-    if (sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier) {
-      throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
-    }
-    return;
+  if (sourceIdentity.adHoc || sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier) {
+    throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
   }
 
-  // Older LoomTV releases were distributed with a consistent ad-hoc
-  // signature. They have no TeamIdentifier to compare, so preserve the
-  // bundle-id + signed-archive trust boundary until a Developer ID build is
-  // installed. Never allow an ad-hoc update to replace a Developer ID build.
-  if (!runningIdentity.adHoc || (!sourceIdentity.adHoc && !sourceIdentity.teamIdentifier)) {
-    throw new Error('Downloaded update signing type does not match this LoomTV installation.');
+  const requirement = `=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = ${JSON.stringify(runningIdentity.teamIdentifier)} and identifier ${JSON.stringify(runningIdentity.bundleIdentifier)}`;
+  try {
+    await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R', requirement, sourceAppPath]);
+  } catch (error) {
+    throw new Error(`Downloaded update failed Developer ID publisher verification: ${describeSubprocessError(error)}`, { cause: error });
   }
-  console.warn(
-    sourceIdentity.teamIdentifier
-      ? '[updates] Migrating a legacy ad-hoc-signed LoomTV build to a Developer ID release.'
-      : '[updates] Installing an update over a legacy ad-hoc-signed LoomTV build.',
-  );
 }
 
 async function removeUpdateHelperDirectory(helperDir: string): Promise<void> {
@@ -415,19 +419,20 @@ async function waitForChildToSpawn(child: ReturnType<typeof spawn>): Promise<voi
   });
 }
 
-async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<void> {
+async function prepareMacUpdateWithoutSquirrel(updateFilePath: string): Promise<() => Promise<void>> {
   if (process.platform !== 'darwin') {
     throw new Error('The custom macOS updater was invoked on a non-macOS platform.');
   }
 
   await verifyMacUpdateZip(updateFilePath);
 
-  const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
-  const helperPath = path.join(helperDir, 'install-update.sh');
   const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
   if (!runningAppPath.endsWith('.app')) {
     throw new Error(`Could not resolve the running macOS app bundle from ${app.getPath('exe')}.`);
   }
+
+  const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
+  const helperPath = path.join(helperDir, 'install-update.sh');
 
   // Replace the bundle that was actually launched so a legacy installation is
   // updated in place instead of leaving the user's Dock icon behind.
@@ -514,25 +519,30 @@ rm -rf "$BACKUP_APP" "$SOURCE_APP"
 echo "Finished LoomTV macOS update install at $(date)"
 `;
 
-  let child: ReturnType<typeof spawn>;
   try {
     await fs.promises.writeFile(helperPath, script, { mode: 0o755 });
-    child = spawn('/bin/sh', [helperPath], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    await waitForChildToSpawn(child);
   } catch (error) {
     await removeUpdateHelperDirectory(helperDir);
     throw error;
   }
-  child.unref();
 
-  // app.quit() can emit before-quit yet remain alive because of a lingering
-  // Electron/Node handle. The installer cannot replace the bundle until this
-  // PID exits, so force the already-drained process down after a short grace.
-  setTimeout(() => app.exit(0), 5000);
-  app.quit();
+  return async () => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn('/bin/sh', [helperPath], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      await waitForChildToSpawn(child);
+    } catch (error) {
+      await removeUpdateHelperDirectory(helperDir);
+      throw error;
+    }
+    child.unref();
+
+    setTimeout(() => app.exit(0), 5000);
+    app.quit();
+  };
 }
 
 function refreshUpdateMenu() {
@@ -566,6 +576,16 @@ export function buildUpdateMenu() {
       label: 'Check for Updates...',
       click: () => {
         void handleManualUpdateCheck();
+      },
+    },
+    {
+      id: 'loomtv-download-release',
+      label: 'Download Latest Release...',
+      click: () => {
+        void shell.openExternal(UPDATE_RELEASE_URL).catch((error: unknown) => {
+          console.error('[updates] Could not open the releases page:', error);
+          showUpdateDialog('Download LoomTV', `Open ${UPDATE_RELEASE_URL} in your browser to download the latest release.`, 'warning');
+        });
       },
     },
     {
@@ -725,6 +745,24 @@ export async function installDownloadedUpdate() {
 
   setUpdateState({ status: 'installing', message: 'Installing update and restarting Loom...' });
 
+  let installMacUpdate: (() => Promise<void>) | undefined;
+  if (process.platform === 'darwin') {
+    try {
+      const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
+      await getTrustedMacPublisher(runningAppPath);
+      if (!downloadedUpdateFilePath) throw new Error('The downloaded update archive is missing; its publisher cannot be verified.');
+      installMacUpdate = await prepareMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
+    } catch (error) {
+      updateInstallStarted = false;
+      return setUpdateState({
+        status: 'error',
+        releaseUrl: UPDATE_RELEASE_URL,
+        message: updateFailureMessage(error, 'install'),
+        checkedAt: new Date().toISOString(),
+      });
+    }
+  }
+
   // Drain playback/server work before quitAndInstall. Active HTTP streams can
   // keep the process alive after every window has closed, which leaves the
   // downloaded installer waiting for LoomTV to exit.
@@ -743,9 +781,9 @@ export async function installDownloadedUpdate() {
     }
   }
 
-  if (process.platform === 'darwin' && downloadedUpdateFilePath) {
+  if (installMacUpdate) {
     try {
-      await installMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
+      await installMacUpdate();
     } catch (error) {
       updateInstallStarted = false;
       setUpdateState({

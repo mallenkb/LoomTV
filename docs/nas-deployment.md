@@ -60,13 +60,22 @@ sudo mount -t cifs //nas.example/media /srv/loomtv/media \
 sudo mount -t nfs4 nas.example:/volume1/media /srv/loomtv/media -o ro
 ```
 
-Copy `deploy/docker/compose.yaml` to a deployment directory, then create a
-`.env` beside it:
+Use `deploy/docker/compose.yaml` from the checkout so its relative build context
+still resolves. Create a `.env` beside it and run the Compose commands in that
+directory. Configure a TLS reverse proxy before opening the UI. The CLI does
+not expose direct TLS options.
+
+The container binds `0.0.0.0` internally. Startup requires both secure transport
+and an explicit trusted-proxy allowlist. Compose sets
+`REQUIRE_SECURE_TRANSPORT=true` and refuses an unset or empty `TRUSTED_PROXIES`.
+Replace the placeholder below with the verified proxy peer address before
+starting the service:
 
 ```dotenv
 PUID=1000
 PGID=1000
 LOOMTV_PORT=3847
+TRUSTED_PROXIES=REPLACE_WITH_VERIFIED_PROXY_PEER_IP
 LOOMTV_CONFIG_DIR=/srv/loomtv/config
 LOOMTV_CACHE_DIR=/srv/loomtv/cache
 LOOMTV_MEDIA_DIR=/srv/loomtv/media
@@ -82,10 +91,65 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --follow loomtv
 curl --fail http://127.0.0.1:3847/healthz
-# Open the viewer client or control plane from a trusted browser:
-# http://127.0.0.1:3847/app/
-# http://127.0.0.1:3847/admin/
 ```
+
+Only the health check uses direct HTTP. Open `/app/` or `/admin/` through the
+proxy's HTTPS origin with a certificate trusted by the browser. Direct HTTP
+requests to `/app/`, `/admin/`, credential submission, protected APIs, and media
+are rejected with HTTP 426. Public discovery and setup bootstrap routes remain
+exceptions, but cannot complete an authenticated HTTP session. A successful
+health check does not prove the proxy is configured correctly.
+
+### TLS reverse proxy and trusted peers
+
+The published port binds to host loopback only:
+`127.0.0.1:${LOOMTV_PORT:-3847}:3847`. A reverse proxy running on the NAS host
+can reach that port. Keep the backend private and terminate TLS at the proxy.
+A VPN does not replace TLS for this configuration.
+
+`TRUSTED_PROXIES` must name the TCP peer LoomTV actually sees, not the browser,
+public hostname, or NAS LAN address by assumption. Use exact IPv4 `/32` or
+IPv6 `/128` entries, separated by commas if needed. Do not trust `0.0.0.0/0`,
+`::/0`, an entire LAN, or the whole shared Docker subnet.
+
+For a host proxy connecting through Docker's published port, Docker may present
+the bridge gateway as the source rather than `127.0.0.1`. Inspect the deployment
+network, then verify the source of a test connection inside the container's
+network namespace using the host's packet-inspection tools. Capture only packet
+headers and do not send credentials during this check. For example, only if
+the observed source is `172.30.0.1`, set `TRUSTED_PROXIES=172.30.0.1/32`.
+Do not copy that example address without verifying it. Keep the network address
+stable and recheck it after network recreation. Trusting a NAT gateway also
+trusts other local processes that can connect through it; restrict host access.
+
+For a containerized proxy, attach it and LoomTV to a dedicated Docker network,
+assign the proxy a stable address, and trust only that address. The upstream is
+`http://loomtv:3847`, not the proxy container's own loopback. Do not attach
+untrusted containers to that network. Neither topology requires publishing the
+backend on the LAN.
+
+In an Nginx TLS server block on the host, use a location like this. The enclosing
+server must listen with TLS and configure its certificate and private key:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3847;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header Forwarded "";
+}
+```
+
+Replace client-supplied forwarding headers, never append an unverified
+`X-Forwarded-Proto`. LoomTV accepts only a single `https` value from the trusted
+immediate peer. The example assumes one proxy; additional proxies require
+explicit trust at every hop and verified forwarding-header handling. Reject or
+redirect HTTP at the proxy before forwarding requests to LoomTV. First-time
+setup should come from a LAN browser over HTTPS; remote-access policy remains
+separate and is not enabled by trusting a proxy.
+
+### Registry deployment
 
 For a registry deployment, remove `build:` and replace `image:` with either an
 explicit publisher release version or, preferably, the verified multi-platform
@@ -99,8 +163,8 @@ docker buildx imagetools inspect registry.example/owner/loomtv:1.0.111
 ```
 
 The placeholder above is documentation, not a usable digest. Do not publish
-port 3847 directly to the public Internet; use a VPN or a carefully configured
-reverse proxy after authentication and remote-access policy are in place.
+port 3847 directly to the public Internet or LAN. Keep the TLS proxy and exact
+trusted-peer configuration described above for registry deployments too.
 
 ### Permissions
 
@@ -199,11 +263,14 @@ deploy:
 After the device is mounted, inspect the actual capability report rather than
 assuming that an FFmpeg build advertising an encoder can use it:
 
+Set `LOOMTV_HTTPS_ORIGIN` to your proxy's HTTPS origin. Both endpoints require
+an authorized admin token:
+
 ```sh
-curl --fail http://127.0.0.1:3847/api/transcoder/capabilities | jq .
-# Force one-frame encoder probes for every advertised backend/codec:
 curl --fail -H "Authorization: Bearer $LOOMTV_ADMIN_TOKEN" \
-  http://127.0.0.1:3847/api/transcoder/self-test | jq .
+  "$LOOMTV_HTTPS_ORIGIN/api/transcoder/capabilities" | jq .
+curl --fail -H "Authorization: Bearer $LOOMTV_ADMIN_TOKEN" \
+  "$LOOMTV_HTTPS_ORIGIN/api/transcoder/self-test" | jq .
 ```
 
 The report distinguishes compiled encoders from a one-frame device probe and
@@ -253,8 +320,18 @@ sudo chmod 0640 /etc/loomtv/loomtv.env
 ```
 
 Install the server release under `/opt/loomtv` and ensure `node` is available
-at `/usr/bin/node`. Mount SMB/NFS at `/srv/loomtv-media`, then install and
-start the unit:
+at `/usr/bin/node`. Configure the TLS reverse proxy as above. For a proxy on the
+same host connecting to `127.0.0.1`, set these values in
+`/etc/loomtv/loomtv.env` before starting the unit:
+
+```dotenv
+HOST=127.0.0.1
+REQUIRE_SECURE_TRANSPORT=true
+TRUSTED_PROXIES=127.0.0.1/32
+```
+
+Use `::1/128` instead if the proxy's actual upstream peer is IPv6 loopback.
+Mount SMB/NFS at `/srv/loomtv-media`, then install and start the unit:
 
 ```sh
 sudo cp deploy/systemd/loomtv.service /etc/systemd/system/loomtv.service
