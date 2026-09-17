@@ -179,7 +179,7 @@ function updaterFixture({
     exports: module.exports,
     Error,
     process: { platform: 'darwin', arch: 'arm64', pid: 1234, resourcesPath: '/resources', env: {} },
-    console: { error: (...args: unknown[]) => { errors.push(args); }, warn: () => undefined },
+    console: { error: (...args: unknown[]) => { errors.push(args); }, warn: () => undefined, info: () => undefined },
     setTimeout: (callback: () => void) => {
       const timer = { callback, unref: () => undefined };
       timers.push(timer.callback);

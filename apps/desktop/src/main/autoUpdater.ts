@@ -851,8 +851,6 @@ export async function installDownloadedUpdate() {
   let installMacUpdate: PreparedMacUpdate | undefined;
   if (process.platform === 'darwin') {
     try {
-      const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-      await getTrustedMacPublisher(runningAppPath);
       if (!downloadedUpdateFilePath) throw new Error('The downloaded update archive is missing; its publisher cannot be verified.');
       installMacUpdate = await prepareMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
     } catch (error) {
