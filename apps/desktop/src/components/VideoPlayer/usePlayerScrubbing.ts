@@ -2,8 +2,6 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackEngine } from './engines/PlaybackEngine';
 
-const NATIVE_SCRUB_PREVIEW_INTERVAL_MS = 80;
-
 type PlaybackSnapshotUpdater = (
   position: number,
   duration: number,
@@ -32,55 +30,56 @@ export function usePlayerScrubbing({
   updatePlaybackSnapshot,
 }: PlayerScrubbingInput) {
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const previewRafRef = useRef<number | null>(null);
   const listenerCleanupRef = useRef<(() => void) | null>(null);
   const hudHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const nativeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nativeSeekRafRef = useRef<number | null>(null);
   const pendingNativeSeekRef = useRef<number | null>(null);
-  const lastNativeSeekAtRef = useRef(0);
+  const nativePreviewStartedRef = useRef(false);
 
   const cancelNativePreview = useCallback(() => {
-    if (nativeSeekTimerRef.current) {
-      clearTimeout(nativeSeekTimerRef.current);
-      nativeSeekTimerRef.current = null;
+    if (nativeSeekRafRef.current !== null) {
+      cancelAnimationFrame(nativeSeekRafRef.current);
+      nativeSeekRafRef.current = null;
     }
     pendingNativeSeekRef.current = null;
+    nativePreviewStartedRef.current = false;
   }, []);
 
   const flushNativePreview = useCallback(() => {
-    nativeSeekTimerRef.current = null;
+    nativeSeekRafRef.current = null;
     const target = pendingNativeSeekRef.current;
-    const engine = playbackEngineRef.current;
-    if (!isScrubbingRef.current || target === null || !engine) {
-      pendingNativeSeekRef.current = null;
-      return;
-    }
     pendingNativeSeekRef.current = null;
-    lastNativeSeekAtRef.current = performance.now();
-    void engine.seek(target);
+    const engine = playbackEngineRef.current;
+    if (!isScrubbingRef.current || target === null || !engine) return;
+    void engine.seek(target).catch((error) => {
+      console.warn('[player] Native scrub preview seek failed:', error);
+    });
   }, [isScrubbingRef, playbackEngineRef]);
 
   const requestNativePreview = useCallback((target: number) => {
-    if (!playbackEngineRef.current) return;
-    pendingNativeSeekRef.current = target;
-    if (nativeSeekTimerRef.current) return;
-    const elapsed = performance.now() - lastNativeSeekAtRef.current;
-    const delay = Math.max(0, NATIVE_SCRUB_PREVIEW_INTERVAL_MS - elapsed);
-    if (delay === 0) {
-      flushNativePreview();
+    const engine = playbackEngineRef.current;
+    if (!engine) return;
+
+    // Pointer down gets one immediate native seek. Continuous drag updates are
+    // then collapsed to the newest target and sent at most once per display
+    // frame. The final pointer-up seek bypasses this scheduler entirely.
+    if (!nativePreviewStartedRef.current) {
+      nativePreviewStartedRef.current = true;
+      void engine.seek(target).catch((error) => {
+        console.warn('[player] Initial native scrub seek failed:', error);
+      });
       return;
     }
-    nativeSeekTimerRef.current = setTimeout(flushNativePreview, delay);
+
+    pendingNativeSeekRef.current = target;
+    if (nativeSeekRafRef.current !== null) return;
+    nativeSeekRafRef.current = requestAnimationFrame(flushNativePreview);
   }, [flushNativePreview, playbackEngineRef]);
 
   const resetScrubbing = useCallback(() => {
     isScrubbingRef.current = false;
     setIsScrubbing(false);
     cancelNativePreview();
-    if (previewRafRef.current !== null) {
-      cancelAnimationFrame(previewRafRef.current);
-      previewRafRef.current = null;
-    }
     if (hudHideTimerRef.current) {
       clearTimeout(hudHideTimerRef.current);
       hudHideTimerRef.current = null;
@@ -107,23 +106,28 @@ export function usePlayerScrubbing({
     isScrubbingRef.current = true;
     setIsScrubbing(true);
     bar.dataset.scrubbing = 'true';
+    cancelNativePreview();
     if (hudHideTimerRef.current) {
       clearTimeout(hudHideTimerRef.current);
       hudHideTimerRef.current = null;
     }
     if (scrubTimeHudRef.current) scrubTimeHudRef.current.style.opacity = '1';
 
-    const previewFromClientX = (clientX: number) => {
+    const positionFromClientX = (clientX: number) => {
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      pendingPosition = ratio * duration;
-      requestNativePreview(pendingPosition);
-      if (previewRafRef.current !== null) return;
-      previewRafRef.current = requestAnimationFrame(() => {
-        previewRafRef.current = null;
-        updatePlaybackSnapshot(pendingPosition, duration, { forceReact: false });
-      });
+      return ratio * duration;
     };
 
+    const previewFromClientX = (clientX: number) => {
+      pendingPosition = positionFromClientX(clientX);
+      // syncPlaybackUi writes the scrubber/thumb/HUD directly, so pointer
+      // feedback is immediate and does not wait for React or an animation frame.
+      updatePlaybackSnapshot(pendingPosition, duration, { forceReact: false });
+      requestNativePreview(pendingPosition);
+    };
+
+    // First visual update and first native seek both happen in this pointer-down
+    // task. No debounce, timeout, or animation-frame delay is inserted here.
     previewFromClientX(event.clientX);
     const handleMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId === pointerId) previewFromClientX(moveEvent.clientX);
@@ -131,12 +135,10 @@ export function usePlayerScrubbing({
     let removeListeners = () => undefined;
     const finish = (finishEvent: PointerEvent, updateFromPointer: boolean) => {
       if (finishEvent.pointerId !== pointerId) return;
-      if (updateFromPointer) previewFromClientX(finishEvent.clientX);
+      if (updateFromPointer) pendingPosition = positionFromClientX(finishEvent.clientX);
+
+      // Never let a queued drag preview land after the exact final target.
       cancelNativePreview();
-      if (previewRafRef.current !== null) {
-        cancelAnimationFrame(previewRafRef.current);
-        previewRafRef.current = null;
-      }
       updatePlaybackSnapshot(pendingPosition, duration, { forceReact: true });
       seekTo(pendingPosition);
       isScrubbingRef.current = false;
