@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.172](docs/releases/v1.0.172.md)
+
+Hardens desktop updates, release verification, and large-library memory handling.
+
 ### [1.0.171](docs/releases/v1.0.171.md)
 
 Updates Electron credential storage and migration handling.
