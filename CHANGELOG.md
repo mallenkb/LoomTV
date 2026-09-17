@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.174](docs/releases/v1.0.174.md)
+
+Fixes the macOS update migration path for legacy ad-hoc installations.
+
 ### [1.0.173](docs/releases/v1.0.173.md)
 
 Improves native desktop playback responsiveness and reduces playback-related memory pressure.
