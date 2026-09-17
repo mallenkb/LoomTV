@@ -1,3 +1,4 @@
+# One-time branch workflow used to prepare release metadata; removed before merge.
 name: Prepare LoomTV 1.0.174 metadata
 
 on:
