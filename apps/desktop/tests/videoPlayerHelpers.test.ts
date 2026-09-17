@@ -9,6 +9,7 @@ import {
   initialStreamOffset,
   isTimeBuffered,
   playbackProgressForExit,
+  preferMpvForLocalPlayback,
   resolveEngineTrackId,
   resolveInitialPlaybackPosition,
   transcodeSeekRestartOptions,
@@ -65,6 +66,13 @@ globalThis.localStorage = {
     return storage.size;
   },
 } as Storage;
+
+test('macOS prefers the lower-memory libmpv path for local playback', () => {
+  assert.equal(preferMpvForLocalPlayback('MacIntel'), true);
+  assert.equal(preferMpvForLocalPlayback('macOS'), true);
+  assert.equal(preferMpvForLocalPlayback('Win32'), false);
+  assert.equal(preferMpvForLocalPlayback('Linux x86_64'), false);
+});
 
 test('only text entry keeps keys from universal player shortcuts', () => {
   assert.equal(isEditableShortcutTarget(new MockInputElement() as unknown as EventTarget), true);
