@@ -86,7 +86,10 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   private reflectSeek(position: number): void {
     if (!this.lastState) return;
-    this.emitState({ ...this.lastState, position });
+    // Match LibVLC's native seek contract. The shared player seek guard keeps
+    // the scrubber pinned to the optimistic target until the engine confirms
+    // the landing, so this changes backend state without changing the UI feel.
+    this.emitState({ ...this.lastState, status: 'loading', position });
   }
 
   private sendSeek(position: number): Promise<void> {
