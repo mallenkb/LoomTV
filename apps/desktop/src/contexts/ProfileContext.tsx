@@ -1,3 +1,4 @@
+import { replaceEqualDeep } from '@tanstack/react-query';
 import { invalidateDesktopData, setQueryProfile } from '@/lib/queryClient';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -94,13 +95,20 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [ownerSessionAuthorized, setOwnerSessionAuthorized] = useState(false);
   const [generation, setGeneration] = useState(0);
   const generationRef = useRef(0);
+  const profilesRef = useRef<ProfileSummary[]>([]);
   const activeStateRef = useRef<ActiveProfileState>(EMPTY_ACTIVE_STATE);
   const watchedMutationRef = useRef(new Map<string, number>());
   const mountedRef = useRef(true);
+  const personalWriteRevision = useRef(0);
+  const pendingPersonalWrites = useRef(0);
 
   const hydratePersonalState = useCallback(async (profileId: string | null) => {
     const hydrationGeneration = ++generationRef.current;
     setGeneration(hydrationGeneration);
+    const writeRevision = personalWriteRevision.current;
+    const hadPendingWrites = pendingPersonalWrites.current > 0;
+    setPreferences({});
+    setLists([]);
     watchedMutationRef.current.clear();
     setListOverrides({});
     setWatchedOverrides({});
@@ -116,10 +124,15 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       desktopApi.getProfilePreferences(),
       desktopApi.getProfileLists(),
     ]);
-    if (!mountedRef.current || hydrationGeneration !== generationRef.current) return;
-    setPreferences(nextPreferences);
-    setLists(nextLists);
+    if (!mountedRef.current || hydrationGeneration !== generationRef.current
+      || hadPendingWrites || pendingPersonalWrites.current > 0 || writeRevision !== personalWriteRevision.current) return;
+    setPreferences(current => replaceEqualDeep(current, nextPreferences));
+    setLists(current => replaceEqualDeep(current, nextLists));
   }, []);
+
+  useEffect(() => {
+    profilesRef.current = profiles;
+  }, [profiles]);
 
   useEffect(() => {
     activeStateRef.current = activeState;
@@ -134,8 +147,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
           desktopApi.getActiveProfileState(),
         ]);
         if (!mountedRef.current) return;
-        setProfiles(nextProfiles);
-        setActiveState(nextActiveState);
+        setProfiles(current => replaceEqualDeep(current, nextProfiles));
+        setActiveState(current => replaceEqualDeep(current, nextActiveState));
         setLoadError(null);
         const active = nextProfiles.find((profile) => profile.id === nextActiveState.profileId);
         const mayEnter = Boolean(active && nextActiveState.automaticSignIn);
@@ -157,26 +170,26 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     const unsubscribeActive = desktopApi.onActiveProfileChanged((state) => {
       if (mountedRef.current) setActiveState(state);
     });
-    // Remote hosts have no push channel for profile edits, so poll while the
-    // window is visible. Comparing the incoming payload against the last one we
-    // applied avoids both a redundant re-render and re-serializing the current
-    // list every tick.
-    let lastRemoteProfilesSignature = '';
+    let disposed = false;
     let refreshPending = false;
     const refreshBrowserHostState = async () => {
-      if (refreshPending || document.visibilityState !== 'visible') return;
+      if (disposed || refreshPending || document.visibilityState !== 'visible') return;
+      const refreshGeneration = generationRef.current;
+      const previousState = activeStateRef.current;
       refreshPending = true;
       try {
         const [nextProfiles, nextActiveState] = await Promise.all([
           desktopApi.listProfiles(),
           desktopApi.getActiveProfileState(),
         ]);
-        if (!mountedRef.current) return;
-        invalidateDesktopData(['getProfilePreferences', 'getProfileLists']);
+        if (disposed || !mountedRef.current || refreshGeneration !== generationRef.current || previousState !== activeStateRef.current) return;
+        const stableProfiles = replaceEqualDeep(profilesRef.current, nextProfiles);
+        const stableActiveState = replaceEqualDeep(activeStateRef.current, nextActiveState);
         const previousProfileId = activeStateRef.current.profileId;
-        activeStateRef.current = nextActiveState;
-        setProfiles(nextProfiles);
-        setActiveState(nextActiveState);
+        profilesRef.current = stableProfiles;
+        activeStateRef.current = stableActiveState;
+        setProfiles(stableProfiles);
+        setActiveState(stableActiveState);
         if (nextActiveState.profileId !== previousProfileId) {
           const active = nextProfiles.find((profile) => profile.id === nextActiveState.profileId);
           setSelectedThisSession(Boolean(active));
@@ -184,52 +197,40 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
           await hydratePersonalState(nextActiveState.profileId);
           return;
         }
+        invalidateDesktopData(['getProfilePreferences', 'getProfileLists', 'getProgress']);
         if (!nextActiveState.profileId) return;
         const hydrationGeneration = generationRef.current;
+        const writeRevision = personalWriteRevision.current;
+        const hadPendingWrites = pendingPersonalWrites.current > 0;
         const [nextPreferences, nextLists] = await Promise.all([
           desktopApi.getProfilePreferences(),
           desktopApi.getProfileLists(),
           refreshProgressFromDatabase(),
         ]);
-        if (!mountedRef.current || hydrationGeneration !== generationRef.current) return;
-        setPreferences(nextPreferences);
-        setLists(nextLists);
+        if (disposed || !mountedRef.current || hydrationGeneration !== generationRef.current
+          || hadPendingWrites || pendingPersonalWrites.current > 0 || writeRevision !== personalWriteRevision.current) return;
+        setPreferences(current => replaceEqualDeep(current, nextPreferences));
+        setLists(current => replaceEqualDeep(current, nextLists));
       } catch {
         // Preserve the last host snapshot until the next visible refresh.
       } finally {
         refreshPending = false;
       }
     };
-    const refreshLocal = !desktopApi.isRemoteLibraryMode();
-    const handleBrowserFocus = () => {
-      if (refreshLocal) void refreshBrowserHostState();
-    };
-    if (refreshLocal) {
-      window.addEventListener('focus', handleBrowserFocus);
-      document.addEventListener('visibilitychange', handleBrowserFocus);
-    }
+    const handleBrowserFocus = () => { void refreshBrowserHostState(); };
+    window.addEventListener('focus', handleBrowserFocus);
+    document.addEventListener('visibilitychange', handleBrowserFocus);
     const remoteProfileRefresh = desktopApi.isRemoteLibraryMode()
-      ? window.setInterval(() => {
-          if (document.visibilityState !== 'visible') return;
-          void desktopApi.listProfiles().then((nextProfiles) => {
-            if (!mountedRef.current) return;
-            const signature = JSON.stringify(nextProfiles);
-            if (signature === lastRemoteProfilesSignature) return;
-            lastRemoteProfilesSignature = signature;
-            setProfiles(nextProfiles);
-          }).catch(() => undefined);
-        }, 5_000)
-      : refreshLocal
-        ? window.setInterval(() => void refreshBrowserHostState(), 5_000)
-        : null;
+      ? window.setInterval(handleBrowserFocus, 30_000)
+      : null;
     return () => {
+      disposed = true;
       mountedRef.current = false;
+      generationRef.current += 1;
       unsubscribeProfiles();
       unsubscribeActive();
-      if (refreshLocal) {
-        window.removeEventListener('focus', handleBrowserFocus);
-        document.removeEventListener('visibilitychange', handleBrowserFocus);
-      }
+      window.removeEventListener('focus', handleBrowserFocus);
+      document.removeEventListener('visibilitychange', handleBrowserFocus);
       if (remoteProfileRefresh !== null) window.clearInterval(remoteProfileRefresh);
     };
   }, [hydratePersonalState]);
@@ -271,7 +272,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }, [hydratePersonalState, prepareForSwitch]);
 
   const refreshProfiles = useCallback((nextProfiles: ProfileSummary[]) => {
-    setProfiles(nextProfiles);
+    setProfiles(current => replaceEqualDeep(current, nextProfiles));
     setActiveState((current) => current.profileId && nextProfiles.some((profile) => profile.id === current.profileId)
       ? current
       : EMPTY_ACTIVE_STATE);
@@ -327,20 +328,31 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const savePreferences = useCallback(async (patch: ProfilePreferences) => {
     const expectedProfileId = activeState.profileId || undefined;
     const writeGeneration = generationRef.current;
-    const saved = await desktopApi.saveProfilePreferences(patch, expectedProfileId);
-    if (writeGeneration === generationRef.current) setPreferences(saved);
+    personalWriteRevision.current += 1;
+    pendingPersonalWrites.current += 1;
+    try {
+      const saved = await desktopApi.saveProfilePreferences(patch, expectedProfileId);
+      if (mountedRef.current && writeGeneration === generationRef.current) setPreferences(saved);
+    } finally {
+      pendingPersonalWrites.current -= 1;
+      personalWriteRevision.current += 1;
+    }
   }, [activeState.profileId]);
 
   const setListEntry = useCallback(async (mediaId: string, kind: ProfileListKind, present: boolean) => {
     const expectedProfileId = activeState.profileId || undefined;
     const writeGeneration = generationRef.current;
     const revision = ++listRevision.current;
+    personalWriteRevision.current += 1;
+    pendingPersonalWrites.current += 1;
     const key = `${kind}:${mediaId}`;
     setListOverrides(current => ({ ...current, [key]: { entry: { mediaId, kind, createdAt: Date.now() }, present, revision } }));
     try {
       const saved = await desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
       if (writeGeneration === generationRef.current) setLists(saved);
     } finally {
+      pendingPersonalWrites.current -= 1;
+      personalWriteRevision.current += 1;
       if (writeGeneration === generationRef.current) setListOverrides(current => {
         if (current[key]?.revision !== revision) return current;
         const next = { ...current };
@@ -368,6 +380,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     const previousPresent = watchedKeys.has(mediaId);
     const mutationId = (watchedMutationRef.current.get(mediaId) || 0) + 1;
     watchedMutationRef.current.set(mediaId, mutationId);
+    personalWriteRevision.current += 1;
+    pendingPersonalWrites.current += 1;
 
     // Keep the icon and My List responsive while the profile store persists.
     setWatchedOverrides((current) => ({ ...current, [mediaId]: present }));
@@ -390,6 +404,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       watchedMutationRef.current.delete(mediaId);
       setWatchedOverrides((current) => ({ ...current, [mediaId]: previousPresent }));
       console.error('Failed to update watched state:', error);
+    } finally {
+      pendingPersonalWrites.current -= 1;
+      personalWriteRevision.current += 1;
     }
   }, [activeState.profileId, watchedKeys]);
 

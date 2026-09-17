@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
     outputs:
       release_tag: ${{ steps.release-context.outputs.release_tag }}
       release_sha: ${{ steps.release-target.outputs.release_sha }}
@@ -92,6 +93,33 @@ jobs:
           fi
           echo "release_sha=$tag_commit" >> "$GITHUB_OUTPUT"
           echo "release_tag_oid=$tag_oid" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful validation of release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release-target.outputs.release_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          validation="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow validate.yml \
+            --commit "$RELEASE_SHA" \
+            --event push \
+            --branch main \
+            --limit 1 \
+            --json status,conclusion,event,headBranch,headSha)"
+          if ! jq -e --arg sha "$RELEASE_SHA" '
+            length == 1 and
+            .[0].headSha == $sha and
+            .[0].event == "push" and
+            .[0].headBranch == "main" and
+            .[0].status == "completed" and
+            .[0].conclusion == "success"
+          ' <<< "$validation" >/dev/null; then
+            echo "Latest Validate push run on main for $RELEASE_SHA must be completed and successful." >&2
+            exit 1
+          fi
 
       - name: Verify deterministic tag, package, notes, and updater identity
         env:
@@ -262,11 +290,43 @@ jobs:
             !apps/desktop/out/builder/**/builder-debug.yml
           if-no-files-found: error
 
+  resolve-artifacts:
+    name: Resolve exact artifacts from this release run
+    needs:
+      - prepare
+      - make
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      macos_id: ${{ steps.artifacts.outputs.macos_id }}
+      macos_name: ${{ steps.artifacts.outputs.macos_name }}
+      windows_id: ${{ steps.artifacts.outputs.windows_id }}
+      windows_name: ${{ steps.artifacts.outputs.windows_name }}
+      linux_id: ${{ steps.artifacts.outputs.linux_id }}
+      linux_name: ${{ steps.artifacts.outputs.linux_name }}
+    steps:
+      - name: Check out verified release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Resolve latest platform artifacts within this run
+        id: artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: node scripts/resolve-release-artifact.cjs
+
   attest-macos:
     name: Attest macOS artifacts with trusted builder
     needs:
       - prepare
       - make
+      - resolve-artifacts
     permissions:
       actions: read
       contents: read
@@ -275,13 +335,15 @@ jobs:
       artifact-metadata: write
     uses: ./.github/workflows/release-attest-macos.yml
     with:
-      artifact-name: loomtv-macos-${{ github.run_attempt }}
+      artifact-id: ${{ needs.resolve-artifacts.outputs.macos_id }}
+      artifact-name: ${{ needs.resolve-artifacts.outputs.macos_name }}
 
   attest-windows:
     name: Attest Windows artifacts with trusted builder
     needs:
       - prepare
       - make
+      - resolve-artifacts
     permissions:
       actions: read
       contents: read
@@ -290,13 +352,15 @@ jobs:
       artifact-metadata: write
     uses: ./.github/workflows/release-attest-windows.yml
     with:
-      artifact-name: loomtv-windows-${{ github.run_attempt }}
+      artifact-id: ${{ needs.resolve-artifacts.outputs.windows_id }}
+      artifact-name: ${{ needs.resolve-artifacts.outputs.windows_name }}
 
   attest-linux:
     name: Attest Linux artifacts with trusted builder
     needs:
       - prepare
       - make
+      - resolve-artifacts
     permissions:
       actions: read
       contents: read
@@ -305,7 +369,8 @@ jobs:
       artifact-metadata: write
     uses: ./.github/workflows/release-attest-linux.yml
     with:
-      artifact-name: loomtv-linux-${{ github.run_attempt }}
+      artifact-id: ${{ needs.resolve-artifacts.outputs.linux_id }}
+      artifact-name: ${{ needs.resolve-artifacts.outputs.linux_name }}
 
   publish-release:
     name: Publish GitHub release
@@ -319,6 +384,7 @@ jobs:
     timeout-minutes: 45
     environment: production-release
     permissions:
+      actions: read
       contents: write
       attestations: read
 
@@ -337,19 +403,28 @@ jobs:
       - name: Download macOS installers
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: loomtv-macos-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.attest-macos.outputs.artifact-id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
           path: release-assets
 
       - name: Download Windows installers
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: loomtv-windows-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.attest-windows.outputs.artifact-id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
           path: release-assets
 
       - name: Download Linux installers
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: loomtv-linux-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.attest-linux.outputs.artifact-id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
           path: release-assets
 
       - name: Initial re-verification of release tag type, object, and peeled commit

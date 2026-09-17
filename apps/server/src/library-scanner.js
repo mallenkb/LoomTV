@@ -12,7 +12,7 @@ const SUBTITLE_FORMATS = Object.freeze({ '.srt': 'subrip', '.vtt': 'webvtt', '.a
  * @typedef {ReturnType<typeof import('@loom-media-server/media-core').parseFfprobeMediaProbe>} MediaProbe
  * @typedef {{ rootId: string, path: string, code: string, message: string }} ScanError
  * @typedef {{ id?: string, state: string, mode?: string, rootId?: string, startedAt?: number, scannedFiles?: number, indexedFiles?: number, completedAt?: number, offlineRoots?: string[], errors?: ScanError[], warning?: string, error?: string }} ScanStatus
- * @typedef {{ id: string, rootId: string, path: string, relativePath: string, type: string, title: string, kind: import('@loom-media-server/video-contracts').CatalogKind, seriesId?: string, year?: number, animeLikely?: boolean, series?: { title: string, season?: number, episode?: number | null }, extension: string, sizeBytes: number, modifiedAtMs: number, available: boolean, indexedAt: number, subtitleSidecars?: Awaited<ReturnType<typeof subtitleSidecarsFor>>, sourceId?: string, localMetadata?: MediaProbe }} ScanMediaRecord
+ * @typedef {{ id: string, rootId: string, path: string, relativePath: string, type: string, title: string, kind: import('@loom-media-server/video-contracts').CatalogKind, seriesId?: string, year?: number, animeLikely?: boolean, series?: { title: string, season?: number, episode?: number | null }, extension: string, sizeBytes: number, modifiedAtMs: number, available: boolean, indexedAt: number, subtitleSidecars?: import('./server-admin-types.js').Media['subtitleSidecars'], sourceId?: string, localMetadata?: MediaProbe }} ScanMediaRecord
  * @typedef {{ catalog: ScanMediaRecord[], roots: ScanRoot[], scan?: ScanStatus | null }} ScannerState
  */
 
@@ -151,8 +151,8 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { sign
   }
 }
 
-/** @param {{ loadState: () => Promise<ScannerState>, saveState: (state: ScannerState) => Promise<unknown>, appendLog: (level: string, message: string, details: Record<string, string | number>) => Promise<unknown>, probeMedia?: ((filePath: string, options: { sourceId: string, signal: AbortSignal }) => Promise<MediaProbe | null>) | null }} options */
-export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, probeMedia = null }) {
+/** @param {{ loadState: () => Promise<ScannerState>, saveState: (state: ScannerState) => Promise<unknown>, appendLog: (level: string, message: string, details: Record<string, string | number>) => Promise<unknown>, probeMedia?: ((filePath: string, options: { sourceId: string, signal: AbortSignal }) => Promise<MediaProbe | null>) | null, resolveIdentity?: ((locator: string, alias: string) => { mediaId: string, sourceId?: string, seriesId?: string } | null) | null }} options */
+export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, probeMedia = null, resolveIdentity = null }) {
   /** @type {{ controller: AbortController, promise: Promise<ScanStatus | null | undefined> } | null} */
   let activeScan = null;
 
@@ -203,10 +203,16 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
         rootReal,
         async (filePath, stats, subtitleSidecars) => {
           throwIfAborted(signal);
+          const alias = createMediaItemId(filePath);
+          const identity = resolveIdentity?.(filePath, alias);
           const record = mediaRecord(root, filePath, stats, subtitleSidecars);
-          record.sourceId = `${record.id}:primary`;
+          record.id = identity?.mediaId || record.id;
+          record.sourceId = identity?.sourceId || `${alias}:primary`;
           const previous = existingById.get(record.id);
-          const sameFileIdentity = previous?.sizeBytes === record.sizeBytes
+          if (identity?.seriesId || previous?.seriesId) record.seriesId = identity?.seriesId || previous?.seriesId;
+          const sameFileIdentity = previous?.sourceId === record.sourceId
+            && previous?.path === record.path
+            && previous?.sizeBytes === record.sizeBytes
             && previous?.modifiedAtMs === record.modifiedAtMs;
           const unchangedProbe = mode === 'quick'
             && sameFileIdentity
@@ -270,8 +276,15 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
     /** @param {ScanMediaRecord} record */
     const mergeRecord = (record) => {
       const previous = mode === 'quick' ? existingById.get(record.id) : null;
-      return previous && previous.sizeBytes === record.sizeBytes && previous.modifiedAtMs === record.modifiedAtMs
-        ? { ...previous, available: true, indexedAt: record.indexedAt }
+      return previous && previous.sourceId === record.sourceId && previous.path === record.path
+        && previous.sizeBytes === record.sizeBytes && previous.modifiedAtMs === record.modifiedAtMs
+        ? {
+          ...previous,
+          available: true,
+          indexedAt: record.indexedAt,
+          localMetadata: record.localMetadata,
+          subtitleSidecars: record.subtitleSidecars || [],
+        }
         : record;
     };
     const selectedRootIds = new Set(roots.map((root) => root.id));

@@ -11,7 +11,7 @@ import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
-import { useModalLayer } from '@/components/ui/dialog';
+import { isTopmostModalContent, useModalLayer } from '@/components/ui/dialog';
 import { useLibrary, type LocalMediaDetails } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import {
@@ -3443,14 +3443,20 @@ export default function VideoPlayer({
   }, runMediaSessionCommand);
 
   useEffect(() => {
+    const ownsShortcut = (event: KeyboardEvent) => (
+      !event.defaultPrevented && !event.isComposing
+      && isTopmostModalContent(containerRef.current)
+      && !isEditableShortcutTarget(event.target) && !isPlayerControlTarget(event.target)
+      && !isEditableShortcutTarget(document.activeElement) && !isPlayerControlTarget(document.activeElement)
+    );
     const isPlaybackSpace = (event: KeyboardEvent) => (
-      (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar')
+      ownsShortcut(event)
+      && (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar')
       && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing
       && !isEditableShortcutTarget(event.target)
     );
     const onKey = (e: KeyboardEvent) => {
-      // Outside text entry, capture Space before a panel, slider, or button
-      // handles the gesture.
+      if (e.key === 'Escape' || !ownsShortcut(e)) return;
       if (isPlaybackSpace(e)) {
         e.preventDefault();
         e.stopImmediatePropagation();

@@ -159,7 +159,7 @@ export const lanMediaItemSchema = z.object({
   seasonCount: nonNegativeNumber.optional(),
   episodeCount: nonNegativeNumber.optional(),
   genres: z.array(z.string()),
-  cast: z.array(lanCastMemberSchema),
+  cast: z.array(lanCastMemberSchema).default([]),
   filePath: z.string(),
   fileSize: nonNegativeNumber.optional(),
   lastPlayed: nonNegativeNumber.optional(),
@@ -332,6 +332,10 @@ export const lanProfileListEntrySchema = z.object({
 const selectionRevisionSchema = nonNegativeNumber.int().optional();
 
 export const lanPlaybackCapabilitiesSchema = z.object({
+  contractVersion: z.literal(1).optional(),
+  streamingProtocols: z.array(z.enum(['http', 'hls'])).optional(),
+  subtitleModes: z.array(z.enum(['text', 'bitmap', 'burn-in', 'external'])).optional(),
+  hdrFormats: z.array(z.enum(['hdr10', 'hdr10-plus', 'hlg', 'dolby-vision'])).optional(),
   containers: z.array(z.string()).optional(),
   videoCodecs: z.array(z.string()).optional(),
   audioCodecs: z.array(z.string()).optional(),
@@ -399,11 +403,14 @@ export const lanArtworkApplyRequestSchema = lanArtworkCandidatesRequestSchema.ex
   candidate: z.object({ id: nonEmptyString.max(512) }),
   target: z.enum(['all', 'poster', 'cover', 'episodes']).optional(),
 });
-export const lanProgressSaveRequestSchema = z.object({
-  selectionRevision: selectionRevisionSchema,
-  mediaId: nonEmptyString.max(512),
+export const lanProgressSavePayloadSchema = z.object({
   position: nonNegativeNumber,
   duration: nonNegativeNumber,
+  watched: z.boolean().optional(),
+});
+export const lanProgressSaveRequestSchema = lanProgressSavePayloadSchema.extend({
+  selectionRevision: selectionRevisionSchema,
+  mediaId: nonEmptyString.max(512),
 });
 export const lanTrackPreferenceSchema = z.object({
   enabled: z.boolean(),

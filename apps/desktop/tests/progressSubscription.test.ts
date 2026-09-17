@@ -103,3 +103,28 @@ test('progress refresh event filtering prevents duplicate internal publications'
   assert.deepEqual([refreshes, updates], [2, 2]);
   unsubscribe();
 });
+
+test('zero refresh interval keeps event updates without starting an idle timer', () => {
+  const eventTarget = new FakeEventTarget();
+  let timers = 0;
+  let updates = 0;
+  const subscription = createProgressRefreshSubscription({
+    eventTarget: eventTarget as unknown as ProgressRefreshEventTarget,
+    onRefresh: () => undefined,
+    setInterval: () => {
+      timers += 1;
+      return 12;
+    },
+    clearInterval: () => undefined,
+    intervalMs: 0,
+  });
+
+  const unsubscribe = subscription.subscribe(() => {
+    updates += 1;
+  });
+  assert.equal(timers, 0);
+  eventTarget.dispatch('focus');
+  assert.equal(updates, 1);
+  unsubscribe();
+  assert.equal(eventTarget.removeCalls, 3);
+});

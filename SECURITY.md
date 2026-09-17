@@ -16,7 +16,9 @@ Security fixes target the latest public release and the current `main` branch.
 
 Please do not open a public GitHub issue for a suspected vulnerability.
 
-Send a private report to the maintainer through GitHub contact options or another private channel available on the maintainer profile. Include:
+Use GitHub's private vulnerability reporting as the primary channel when available. Open this repository's Security tab and look for "Report a vulnerability". Availability has not been verified. If the button is missing, use a private contact method listed on the maintainer's GitHub profile. If none is listed, open a public issue asking only how to establish private contact, without vulnerability details, logs, or proof-of-concept material.
+
+Include in the private report:
 
 - A clear description of the issue
 - Steps to reproduce
@@ -38,6 +40,24 @@ Useful security reports include, but are not limited to:
 - Update flow issues that could affect integrity or user trust
 - Malicious media, subtitle, artwork, or metadata inputs causing code execution, data exposure, or persistent compromise
 - Bundled FFmpeg/FFprobe handling that creates unnecessary risk
+
+## Playback URL capabilities
+
+Server-issued playback URLs can contain a `token` query parameter. Treat the full URL as a bearer credential: someone who obtains it may replay the permitted media requests while the capability remains valid. Binding a capability to an account, device, profile, and source limits its authority; it does not prove that the requester is the original device.
+
+Use HTTPS outside isolated local development. Do not log full playback URLs in application, player, reverse-proxy, access, or analytics logs. Strip query strings before recording request paths and redact tokens from screenshots, diagnostics, and bug reports. Never put account or device credentials into playback URLs or share token-bearing playlists publicly.
+
+The server sets `Referrer-Policy: no-referrer`. Preserve that header through reverse proxies and use the same policy in custom browser clients. This reduces referrer leakage, but does not prevent a proxy, player, browser history, or diagnostic tool from retaining a URL it receives.
+
+Capabilities expire and renewal rotates their tokens, but expiry does not make a leaked URL harmless before its deadline. Use the server's returned expiry fields rather than hard-coded client TTLs. See [playback capability lifetimes](docs/hosted-api.md#capability-lifetimes-and-handling) for the implemented idle limits, absolute caps, and rotation overlap.
+
+## macOS update trust
+
+Automatic updates require a Developer ID-signed installation. The downloaded app must match the installed bundle identifier and signing team and pass Apple's Developer ID certificate requirement. Legacy ad-hoc installations cannot establish that publisher identity and must be upgraded manually using the updater menu's "Download Latest Release..." action. Install a Developer ID-signed release when available before using automatic updates.
+
+## Setup session lifetime
+
+Setup keeps bearer credentials in memory, not browser storage. Reloading setup requires signing in again. Completing setup in bearer mode also requires another sign-in at the destination page, including Server Control. HTTPS cookie-mode setup for the hosted app retains its session across navigation. This change does not remove the legacy Server Control page's own session-storage authentication.
 
 ## Non-Security Issues
 

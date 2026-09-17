@@ -1,3 +1,4 @@
+import { replaceEqualDeep } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import { createProgressRefreshSubscription } from '@/lib/progressSubscription';
@@ -26,6 +27,8 @@ let hydrated = false;
 let progressRefreshRevision = 0;
 let activeProfileId: string | null = null;
 let profileGeneration = 0;
+let writeRevision = 0;
+let refreshGeneration = 0;
 const pendingWrites = new Set<Promise<void>>();
 let dispatchingInternalProgressEvent = false;
 let progressRefreshSubscription: ReturnType<typeof createProgressRefreshSubscription> | null = null;
@@ -72,8 +75,11 @@ function getProgressRefreshSubscription() {
       onRefresh: () => {
         progressRefreshRevision += 1;
       },
-      setInterval: (callback, delayMs) => window.setInterval(callback, delayMs),
+      setInterval: (callback, delayMs) => window.setInterval(() => {
+        if (!document.hidden) callback();
+      }, delayMs),
       clearInterval: (timerId) => window.clearInterval(timerId),
+      intervalMs: 0,
       shouldRefreshEvent: () => !dispatchingInternalProgressEvent,
     });
   }
@@ -130,6 +136,7 @@ export async function hydrateProgressFromDatabase(): Promise<void> {
     localStorage.removeItem(PROGRESS_KEY);
     writeLocalProgress();
   } catch {
+    if (generation !== profileGeneration) return;
     progressCache = readLocalProgress();
     writeLocalProgress();
   }
@@ -142,14 +149,21 @@ export async function refreshProgressFromDatabase(): Promise<void> {
     return;
   }
   const generation = profileGeneration;
+  const revision = writeRevision;
+  const refresh = ++refreshGeneration;
+  const hadPendingWrites = pendingWrites.size > 0;
   try {
     const remote = await desktopApi.getProgress();
-    if (generation !== profileGeneration) return;
+    if (generation !== profileGeneration || refresh !== refreshGeneration
+      || hadPendingWrites || pendingWrites.size > 0 || revision !== writeRevision) return;
     const databaseProgress = remote && !('position' in remote)
       ? remote as Record<string, StoredProgress>
       : {};
-    progressCache = mergeProgress(databaseProgress, progressCache);
-    writeLocalProgress();
+    const next = replaceEqualDeep(progressCache, mergeProgress(databaseProgress, progressCache));
+    if (next !== progressCache) {
+      progressCache = next;
+      writeLocalProgress();
+    }
   } catch {
     // Keep the last responsive snapshot while the host is temporarily busy.
   }
@@ -225,6 +239,7 @@ export function isWatched(filePath: string, duration?: number): boolean {
 export async function saveProgress(filePath: string, position: number, duration: number): Promise<void> {
   const local = normalizeProgress({ position, duration, updatedAt: Date.now() });
   if (!local || local.position <= 10 || local.duration <= 0) return;
+  writeRevision += 1;
   progressCache = { ...progressCache, [filePath]: local };
   writeLocalProgress();
   const generation = profileGeneration;
@@ -265,6 +280,7 @@ export async function resetProgress(filePaths: readonly string[]): Promise<void>
       updatedAt: Date.now(),
       watched: false,
     };
+    writeRevision += 1;
     progressCache = { ...progressCache, [filePath]: reset };
     writeLocalProgress();
 

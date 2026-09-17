@@ -108,8 +108,10 @@ async function restoreFromPlan(actions, suffix) {
   const restored = [];
   const skipped = [];
   const staged = [];
+  const databases = actions.filter((action) => ['desktop-sqlite', 'client-sqlite'].includes(action.artifact.kind));
+  const databaseParts = new Set(databases.flatMap((action) => SIDECAR_SUFFIXES.map((part) => `${action.destination}${part}`)));
   for (const action of actions) {
-    if (action.intact) {
+    if (action.intact && !databaseParts.has(action.destination)) {
       skipped.push({ kind: action.artifact.kind, reason: 'destination_verified' });
       continue;
     }
@@ -126,7 +128,15 @@ async function restoreFromPlan(actions, suffix) {
     }
     staged.push({ ...action, temporary });
   }
-  for (const action of staged) {
+  for (const destination of databaseParts) {
+    if (await pathExists(destination)) {
+      await fs.rename(destination, `${destination}.pre-rollback-${suffix}`);
+    }
+  }
+  const activationOrder = [...staged].sort((left, right) =>
+    Number(databases.some((action) => action.destination === left.destination))
+    - Number(databases.some((action) => action.destination === right.destination)));
+  for (const action of activationOrder) {
     if (await pathExists(action.destination)) {
       await fs.rename(action.destination, `${action.destination}.pre-rollback-${suffix}`);
     }

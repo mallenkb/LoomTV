@@ -41,6 +41,10 @@ function getFocusable(content: HTMLElement): HTMLElement[] {
   ));
 }
 
+export function isTopmostModalContent(content: HTMLElement | null): boolean {
+  return Boolean(content && modalLayers[modalLayers.length - 1]?.content === content);
+}
+
 function isTopmost(id: string): boolean {
   return modalLayers[modalLayers.length - 1]?.id === id;
 }

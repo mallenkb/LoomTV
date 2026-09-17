@@ -33,6 +33,7 @@ const DATABASE_NAME = 'loomtv-mobile-cache.db';
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let attemptSequence = 0;
 const mutations = new Map<string, Promise<unknown>>();
+const hostGenerations = new Map<string, number>();
 
 function serializeDownload<T>(key: string, operation: () => Promise<T>): Promise<T> {
   const pending = (mutations.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
@@ -120,13 +121,30 @@ type SaveDownloadInput = {
   title: string;
   capability: MobileDownloadCapability;
   contentUrl: string;
+  isCurrent?: () => boolean;
 };
 
 export function saveMobileDownload(input: SaveDownloadInput): Promise<MobileDownload> {
-  return serializeDownload(JSON.stringify([input.hostDeviceId, input.profileId, input.capability.mediaId]), () => commitMobileDownload(input));
+  const generation = hostGenerations.get(input.hostDeviceId) || 0;
+  const isCurrent = () => generation === (hostGenerations.get(input.hostDeviceId) || 0) && (input.isCurrent?.() ?? true);
+  return serializeDownload(input.hostDeviceId, () => commitMobileDownload({ ...input, isCurrent }));
+}
+
+export function clearMobileDownloads(hostDeviceId: string): Promise<void> {
+  hostGenerations.set(hostDeviceId, (hostGenerations.get(hostDeviceId) || 0) + 1);
+  return serializeDownload(hostDeviceId, async () => {
+    const db = await database();
+    const rows = await db.getAllAsync<DownloadRow>('SELECT * FROM mobile_downloads WHERE host_device_id=?', hostDeviceId);
+    for (const row of rows) {
+      const file = new File(row.uri);
+      if (file.exists) file.delete();
+      await db.runAsync('DELETE FROM mobile_downloads WHERE host_device_id=? AND uri=?', hostDeviceId, row.uri);
+    }
+  });
 }
 
 async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDownload> {
+  if (input.isCurrent?.() === false) throw new Error('The download was cancelled.');
   const db = await database();
   const previous = await db.getFirstAsync<{ uri: string }>(
     'SELECT uri FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=?',
@@ -149,6 +167,7 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
     if (input.capability.sizeBytes > 0 && file.size !== input.capability.sizeBytes) {
       throw new Error('The downloaded file is incomplete. Please retry.');
     }
+    if (input.isCurrent?.() === false) throw new Error('The download was cancelled.');
     const createdAt = Date.now();
     const sizeBytes = Number(file.size || input.capability.sizeBytes || 0);
     await db.runAsync(
@@ -188,7 +207,7 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
 }
 
 export async function removeMobileDownload(download: MobileDownload): Promise<void> {
-  return serializeDownload(JSON.stringify([download.hostDeviceId, download.profileId, download.mediaId]), async () => {
+  return serializeDownload(download.hostDeviceId, async () => {
     const db = await database();
     // A stale remove must not delete metadata for a replacement download.
     const file = new File(download.uri);

@@ -678,12 +678,13 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         const mediaKey = String(mediaId).slice(0, 128);
         const positionSeconds = safeNumber(input.position);
         const durationSeconds = safeNumber(input.duration);
+        const index = state.progress.findIndex((item) => item.profileId === profileId && item.mediaId === mediaKey);
         const next = {
           profileId, mediaId: mediaKey, positionSeconds, durationSeconds,
-          watched: input.watched === true || (durationSeconds > 0 && positionSeconds / durationSeconds >= 0.9),
+          watched: typeof input.watched === 'boolean' ? input.watched
+            : state.progress[index]?.watched === true || (durationSeconds > 0 && positionSeconds / durationSeconds >= 0.9),
           updatedAt: Date.now(),
         };
-        const index = state.progress.findIndex((item) => item.profileId === profileId && item.mediaId === mediaKey);
         if (index >= 0) state.progress[index] = next; else state.progress.push(next);
         const recent = state.progress.filter((item) => item.profileId === profileId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_PROGRESS);
         state.progress = state.progress.filter((item) => item.profileId !== profileId).concat(recent);

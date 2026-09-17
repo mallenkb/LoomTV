@@ -62,6 +62,108 @@ jobs:
       - name: Test
         run: corepack pnpm test
 
+  rust:
+    name: Test and audit Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install repository Rust toolchain
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import tomllib
+          with open("rust-toolchain.toml", "rb") as file:
+              toolchain = tomllib.load(file)["toolchain"]
+          command = ["rustup", "toolchain", "install", toolchain["channel"], "--profile", toolchain.get("profile", "minimal")]
+          for component in toolchain.get("components", []):
+              command.extend(["--component", component])
+          for target in toolchain.get("targets", []):
+              command.extend(["--target", target])
+          subprocess.run(command, check=True)
+          PY
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            . -> target
+            apps/desktop/native/scanner -> target
+
+      - name: Install Linux Rust dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libdbus-1-dev libgtk-3-dev libxdo-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Test core crate
+        working-directory: crates/loomtv-core
+        run: cargo test --locked -p loomtv-core
+
+      - name: Test playback crate
+        working-directory: crates/loomtv-playback
+        run: cargo test --locked -p loomtv-playback
+
+      - name: Test Tauri host crate
+        working-directory: apps/desktop-tauri/src-tauri
+        run: cargo test --locked -p loomtv-desktop-tauri
+
+      - name: Test scanner workspace
+        working-directory: apps/desktop/native/scanner
+        run: cargo test --locked -p loom-scanner
+
+      - name: Install Cargo audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Audit both Rust workspaces
+        shell: bash
+        run: |
+          audit_status=0
+          cargo audit --file Cargo.lock || audit_status=1
+          cargo audit --file apps/desktop/native/scanner/Cargo.lock || audit_status=1
+          exit "$audit_status"
+
+  container:
+    name: Build and smoke test headless container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build headless image
+        run: docker build --file deploy/docker/Dockerfile --tag loomtv-ci .
+
+      - name: Verify container health and non-root runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs loomtv-ci; docker rm --force loomtv-ci' EXIT
+          docker run --detach --name loomtv-ci --cap-drop ALL --security-opt no-new-privileges:true --env HOST=127.0.0.1 --health-interval 2s --health-start-period 2s --health-retries 10 loomtv-ci
+          for attempt in {1..30}; do
+            status=$(docker inspect --format '{{.State.Health.Status}}' loomtv-ci)
+            if [ "$status" = healthy ]; then
+              test "$(docker exec loomtv-ci id -u)" != 0
+              test "$(docker exec loomtv-ci id -g)" != 0
+              exit 0
+            fi
+            if [ "$status" = unhealthy ] || [ "$(docker inspect --format '{{.State.Running}}' loomtv-ci)" != true ]; then
+              exit 1
+            fi
+            sleep 2
+          done
+          exit 1
+
   supply-chain:
     name: Audit dependencies and generate SBOM
     runs-on: ubuntu-latest

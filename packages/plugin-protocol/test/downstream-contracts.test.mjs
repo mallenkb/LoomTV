@@ -9,6 +9,8 @@ import {
   createHostOnlyAuthorizationContext,
   createHostPlaybackTicket,
   createPlaybackProxyPlan,
+  createPluginSearchNamespace,
+  namespacePluginCatalogItem,
   parseWirePlaybackTicketRequest,
   parseWireSearchRequest,
   verifyWirePlaybackTicketRequest,
@@ -40,6 +42,7 @@ import {
 import {
   PLUGIN_SIGNING_TEST_VECTORS,
   bytesToHex,
+  canonicalizeJcs,
   decodeEd25519PublicKey,
   decodeEd25519Signature,
   domainSeparatedSignedBytes,
@@ -124,6 +127,43 @@ function hostAuthorizationContext() {
     }],
   });
 }
+
+test('catalog item namespaces pick only namespace fields and retain strict validation', () => {
+  const input = { addonId: 'addon.example', catalogType: 'movie', catalogId: 'popular', type: 'movie', providerId: 'tt123' };
+  const item = namespacePluginCatalogItem(input);
+  assert.equal(item.namespaceKey, createPluginSearchNamespace({ addonId: input.addonId, catalogType: input.catalogType, catalogId: input.catalogId }).namespaceKey);
+  assert.equal(item.itemKey, namespacePluginCatalogItem({ ...input, catalogId: 'search' }).itemKey);
+  assert.notEqual(item.itemKey, namespacePluginCatalogItem({ ...input, addonId: 'other.example' }).itemKey);
+  assert.equal(item.providerId, 'tt123');
+  assert.equal(Object.isFrozen(item), true);
+  assert.throws(() => createPluginSearchNamespace(input), /Unknown fields/);
+  assert.throws(() => namespacePluginCatalogItem({ ...input, unexpected: true }), /Unknown fields/);
+  assert.throws(() => namespacePluginCatalogItem({ ...input, providerId: '' }));
+});
+
+test('JCS sorts numeric-looking keys recursively without changing array order', () => {
+  const value = { 2: 'two', 10: 'ten', nested: [{ 2: false, 10: null }, 3, 1], '01': -0 };
+  const expected = '{"01":0,"10":"ten","2":"two","nested":[{"10":null,"2":false},3,1]}';
+  assert.equal(canonicalizeJcs(value), expected);
+  assert.equal(new TextDecoder().decode(domainSeparatedSignedBytes('catalog', value)), `LoomTV-Plugin-Signature/v1\u0000catalog\u0000${expected}`);
+  assert.equal(canonicalizeJcs(JSON.parse('{"__proto__":{"2":2,"10":10}}')), '{"__proto__":{"10":10,"2":2}}');
+  assert.equal(canonicalizeJcs({ '\u20ac': 1, '\r': 2, '\ufb33': 3, '1': 4, '\ud83d\ude00': 5, '\u0080': 6, '\u00f6': 7 }), '{"\\r":2,"1":4,"\u0080":6,"\u00f6":7,"\u20ac":1,"\ud83d\ude00":5,"\ufb33":3}');
+  assert.equal(canonicalizeJcs(JSON.parse('[333333333.33333329, 1e30, 4.50, 2e-3, 1e-27, -0]')), '[333333333.3333333,1e+30,4.5,0.002,1e-27,0]');
+});
+
+test('JCS retains JSON value constraints and rejects trailing lone surrogates', () => {
+  for (const value of [NaN, Infinity, undefined, 1n, new Date(), { a: undefined }, [undefined], Array(1), { [Symbol('key')]: 1 }, '\ud800', '\udc00', { ['bad\ud800']: 1 }]) {
+    assert.throws(() => canonicalizeJcs(value));
+  }
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.throws(() => canonicalizeJcs(cyclic), hasIssueCode('CYCLIC_VALUE'));
+  const extraArray = [1];
+  extraArray.extra = 2;
+  assert.throws(() => canonicalizeJcs(extraArray), hasIssueCode('INVALID_ARRAY'));
+  const shared = { 10: 10, 2: 2 };
+  assert.equal(canonicalizeJcs([shared, shared]), '[{"10":10,"2":2},{"10":10,"2":2}]');
+});
 
 test('wire search DTOs round-trip without host claims', () => {
   const wire = parseWireSearchRequest({

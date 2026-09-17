@@ -163,7 +163,7 @@ export function playbackPlanForMedia(
 export function ffprobeMediaArguments(filePath: string): string[];
 export function parseFfprobeMediaProbe(
   raw: string | Buffer | Record<string, unknown>,
-  options?: { sourceId?: string; probedAt?: number },
+  options?: { sourceId?: string; probedAt?: number; filePath?: string },
 ): MediaProbe;
 export function normalizeProfileType(value: unknown, fallback?: ProfileType): ProfileType;
 

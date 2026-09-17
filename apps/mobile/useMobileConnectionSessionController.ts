@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import type {
@@ -44,6 +44,15 @@ export function useMobileConnectionSessionController({
   const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
 
+  const sessionGenerationRef = useRef(0);
+  const sessionIdentity = JSON.stringify([connection?.hostDeviceId, activeProfile?.id, connection?.selectionRevision]);
+  const sessionIdentityRef = useRef(sessionIdentity);
+  sessionIdentityRef.current = sessionIdentity;
+  const captureSession = useCallback(() => {
+    const generation = sessionGenerationRef.current;
+    const identity = sessionIdentityRef.current;
+    return () => generation === sessionGenerationRef.current && identity === sessionIdentityRef.current;
+  }, []);
   const profileHydrationGenerationRef = useRef(0);
   const reconnectingSavedConnectionRef = useRef(false);
   const savedReconnectCompletionRef = useRef<Promise<void> | null>(null);
@@ -93,6 +102,8 @@ export function useMobileConnectionSessionController({
   });
 
   return {
+    sessionGenerationRef,
+    captureSession,
     activeProfile,
     appState,
     appStateRef,

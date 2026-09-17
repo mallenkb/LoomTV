@@ -136,7 +136,7 @@ function Player({ playback, client, onClose, onError }: {
       if (Math.abs(currentTime - lastSaved) < 15) return;
       lastSaved = currentTime;
       const duration = playback.durationSeconds || (Number.isFinite(player.duration) ? sourceOffset + player.duration : 0);
-      void client.saveProgress(playback.item.id, sourceOffset + currentTime, duration, false).catch(() => undefined);
+      void client.saveProgress(playback.item.id, sourceOffset + currentTime, duration).catch(() => undefined);
     });
     const ended = player.addListener('playToEnd', () => {
       const duration = playback.durationSeconds || sourceOffset + player.currentTime;
@@ -170,7 +170,7 @@ function Player({ playback, client, onClose, onError }: {
       <VideoView accessibilityLabel={`Playing ${playback.item.title}`} contentFit="contain" nativeControls player={player} style={styles.video} />
       <View style={styles.playerClose}><TvButton label="Back to details" onPress={() => {
         const duration = playback.durationSeconds || (Number.isFinite(player.duration) ? sourceOffset + player.duration : 0);
-        void client.saveProgress(playback.item.id, sourceOffset + player.currentTime, duration, false).catch(() => undefined);
+        void client.saveProgress(playback.item.id, sourceOffset + player.currentTime, duration).catch(() => undefined);
         onClose();
       }} preferred /></View>
     </View>
@@ -223,6 +223,7 @@ function TvApp() {
   }, [items, myListIds, query, screen]);
 
   const restoreSavedConnection = useCallback(async (saved: SavedConnection) => {
+    const generation = ++pairingGeneration.current;
     setBusy(true);
     setError('');
     try {
@@ -230,6 +231,7 @@ function TvApp() {
       const restored = new CanonicalTvClient(saved.baseUrl, saved.credential, proxyBaseUrl);
       await restored.discover();
       const restoredProfiles = await restored.profiles();
+      if (generation !== pairingGeneration.current) return;
       setBaseUrl(saved.baseUrl);
       setClient(restored);
       setProfiles(restoredProfiles.profiles);
@@ -496,12 +498,24 @@ function TvApp() {
   }
 
   async function signOut() {
-    pairingGeneration.current += 1;
-    await client?.signOut().catch(() => undefined);
-    await SecureStore.deleteItemAsync(CONNECTION_KEY);
-    await stopTvSecureTransport();
+    const generation = ++pairingGeneration.current;
+    const previousClient = client;
     setClient(null); setProfiles([]); setItems([]); setListEntries([]); setDetail(null); setParentSeries(null);
     setPlayback(null); setSavedConnectionRetry(null); setError(''); setScreen('connect');
+    setPlaybackTracks([]); setAudioTrackId(undefined); setSubtitleTrackId(undefined);
+    setPendingTrust(null); setPin(''); setInvitationId(''); setInvitationSecret(''); setQuery(''); setBusy(false);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = await Promise.allSettled([
+      SecureStore.deleteItemAsync(CONNECTION_KEY),
+      Promise.race([
+        previousClient?.signOut(),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Remote sign-out timed out.')), 5000); }),
+      ]).finally(() => { if (timer) clearTimeout(timer); }),
+    ]);
+    await stopTvSecureTransport().catch(() => undefined);
+    if (generation === pairingGeneration.current && cleanup.some((result) => result.status === 'rejected')) {
+      setError('Signed out locally. Server or saved-credential cleanup failed; retry before closing the app.');
+    }
   }
 
   const browseScreen: TvLibraryScreen = screen === 'my-list' ? 'my-list' : 'library';

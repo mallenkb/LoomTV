@@ -5,16 +5,19 @@ import test from 'node:test';
 const appSource = fs.readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 
 test('mandatory profile transitions tear down every media surface and native playback', () => {
-  const start = appSource.indexOf('const enterProfilePicker');
+  const start = appSource.indexOf('const resetMediaSessionForProfileChange');
   const end = appSource.indexOf('const detailItemCacheRef', start);
-  const transition = appSource.slice(start, end);
+  const teardown = appSource.slice(start, end);
 
-  assert.match(transition, /mandatoryPlayerTeardownRef\.current\(\)/);
-  assert.match(transition, /setDetailItem\(null\)/);
-  assert.match(transition, /setPosterCandidateSheet\(null\)/);
-  assert.match(transition, /setMiniPlayerTarget\(null\)/);
-  assert.match(transition, /setPlayTarget\(null\)/);
-  assert.match(transition, /setPlaybackUrl\(null\)/);
+  assert.match(teardown, /mandatoryPlayerTeardownRef\.current\(\)/);
+  assert.match(teardown, /setDetailItem\(null\)/);
+  assert.match(teardown, /setPosterCandidateSheet\(null\)/);
+  assert.match(teardown, /setMiniPlayerTarget\(null\)/);
+  assert.match(teardown, /setPlayTarget\(null\)/);
+  assert.match(teardown, /setPlaybackUrl\(null\)/);
+  const transition = appSource.slice(appSource.indexOf('const enterProfilePicker'), end);
+  assert.match(transition, /resetMediaSessionForProfileChange\(\)/);
+  assert.match(transition, /mode !== 'voluntary'/);
 });
 
 test('the mandatory profile gate excludes detail, poster, mini-player, and player layers', () => {

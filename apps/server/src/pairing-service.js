@@ -7,7 +7,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from 'node:crypto';
-import { AUTH_PERMISSIONS, hasPermission, isLocalNetworkAddress, isOwnerPrincipal } from './auth-policy.js';
+import { AUTH_PERMISSIONS, canAccessRoot, canResetCredentials, hasPermission, isLocalNetworkAddress, isOwnerPrincipal } from './auth-policy.js';
 
 const REQUEST_TTL_MS = 5 * 60 * 1000;
 const CREDENTIAL_TTL_MS = 365 * 24 * 60 * 60 * 1000;
@@ -203,15 +203,30 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
 
     /** @param {string} requestId @param {{ accountId?: unknown, permissions?: unknown, approved?: unknown }} input @param {import('./server-admin-types.js').PolicyPrincipal | null} approver */
     async approve(requestId, input, approver) {
+      if (!hasPermission(approver, 'devices.manage')) {
+        throw pairingError(403, 'permission_denied', 'Device management permission is required.');
+      }
       const record = store.readPairingRequest(String(requestId || ''));
       if (!record) throw pairingError(404, 'not_found', 'Pairing request was not found.');
       const accountId = String(input?.accountId || approver?.id || '').trim();
       const account = await getAccount?.(accountId);
       if (!account) throw pairingError(404, 'account_not_found', 'The target account is unavailable or disabled.');
+      if (!isOwnerPrincipal(approver)
+        && (!hasPermission(approver, 'users.manage') || isOwnerPrincipal(account) || !canResetCredentials(approver, account))) {
+        throw pairingError(403, 'permission_denied', 'You cannot manage the target account.');
+      }
+      if (!isOwnerPrincipal(approver) && approver?.rootIds !== null
+        && (account.rootIds === null || !Array.isArray(account.rootIds)
+          || account.rootIds.some((rootId) => !canAccessRoot(approver, rootId)))) {
+        throw pairingError(403, 'permission_denied', 'The target account exceeds your library scope.');
+      }
       const requested = normalizePermissions(record.requestedPermissions);
       const permissions = normalizePermissions(input?.permissions, requested);
       if (permissions.some((permission) => !requested.includes(permission))) {
         throw pairingError(400, 'invalid_request', 'Approval cannot add permissions the device did not request.');
+      }
+      if (permissions.some((permission) => !hasPermission(approver, permission))) {
+        throw pairingError(403, 'permission_denied', 'You cannot approve permissions you do not have yourself.');
       }
       if (!isOwnerPrincipal(account) && permissions.some((permission) => !hasPermission(account, permission))) {
         throw pairingError(403, 'permission_denied', 'The target account does not have every approved device permission.');

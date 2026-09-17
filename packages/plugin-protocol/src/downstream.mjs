@@ -526,7 +526,11 @@ export function createPluginSearchNamespace(input) {
 
 export function namespacePluginCatalogItem(input) {
   strictRecord(input, new Set(['addonId', 'catalogType', 'catalogId', 'type', 'providerId']), PluginDownstreamContractError, 'A plugin catalog item namespace');
-  const namespace = createPluginSearchNamespace(input);
+  const namespace = createPluginSearchNamespace({
+    addonId: input.addonId,
+    catalogType: input.catalogType,
+    catalogId: input.catalogId,
+  });
   const type = readText(input.type, '$.type', PluginDownstreamContractError, { maxLength: 512 });
   const providerId = readText(input.providerId, '$.providerId', PluginDownstreamContractError, { maxLength: 512 });
   const itemKey = canonicalPluginItemKey(createPluginItemIdentity({ addonId: namespace.addonId, type, providerId }));

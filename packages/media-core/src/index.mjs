@@ -82,15 +82,25 @@ function normalizedList(value, fallback) {
   const result = [...new Set(values
     .map((entry) => String(entry || '').trim().toLowerCase())
     .filter(Boolean))];
-  return result.length ? result : [...fallback];
+  return Array.isArray(value) || typeof value === 'string' ? result : [...fallback];
 }
 
-function normalizeContainer(value) {
-  const container = String(value || '').trim().toLowerCase();
-  if (container.includes('matroska')) return 'mkv';
-  if (container.includes('quicktime') || container === 'm4v') return 'mp4';
-  if (container.includes('mpegts')) return 'ts';
-  return container.replace(/^\./, '') || 'unknown';
+function normalizeContainer(value, filePath = '', majorBrand = '') {
+  const formats = String(value || '').trim().toLowerCase().replace(/^\./, '').split(',').map((entry) => entry.trim());
+  const extension = path.extname(String(filePath).split(/[?#]/)[0]).slice(1).toLowerCase();
+  const brand = String(majorBrand || '').trim().toLowerCase();
+  if (formats.includes('mov') && formats.includes('mp4')) {
+    if (brand === 'qt') return 'mov';
+    if (/^(isom|iso[2-9]|mp4[12]|avc1|m4v|m4a|dash|msnv)$/.test(brand)) return 'mp4';
+    if (['mp4', 'm4v', 'mov', '3gp', '3g2', 'mj2'].includes(extension)) return extension === 'm4v' ? 'mp4' : extension;
+    return 'mov';
+  }
+  if (formats.includes('matroska')) return formats.includes('webm') && extension === 'webm' ? 'webm' : 'mkv';
+  const container = formats[0];
+  if (container === 'quicktime') return 'mov';
+  if (container === 'm4v') return 'mp4';
+  if (container === 'mpegts') return 'ts';
+  return container || 'unknown';
 }
 
 function normalizeCodec(value) {
@@ -120,7 +130,7 @@ export function normalizeClientPlaybackCapabilities(input = {}) {
     .filter((entry) => ['hdr10', 'hdr10-plus', 'hlg', 'dolby-vision'].includes(entry));
   return {
     contractVersion: 1,
-    containers: normalizedList(input.containers, DEFAULT_CLIENT_CONTAINERS).map(normalizeContainer),
+    containers: normalizedList(input.containers, DEFAULT_CLIENT_CONTAINERS).map((container) => normalizeContainer(container)),
     videoCodecs: normalizedList(input.videoCodecs, DEFAULT_CLIENT_VIDEO_CODECS).map(normalizeCodec),
     audioCodecs: normalizedList(input.audioCodecs, DEFAULT_CLIENT_AUDIO_CODECS).map(normalizeCodec),
     streamingProtocols,
@@ -139,7 +149,7 @@ function mediaFacts(media = {}) {
   const metadata = media.localMetadata || media.metadata || media;
   const filePath = media.path || media.filePath || '';
   const extension = path.extname(String(filePath)).replace(/^\./, '').toLowerCase();
-  const container = normalizeContainer(metadata.container || media.container || extension);
+  const container = normalizeContainer(metadata.container || media.container || extension, filePath);
   const videoCodec = normalizeCodec(metadata.videoCodec || media.videoCodec);
   const audioCodec = normalizeCodec(metadata.audioCodec || media.audioCodec);
   const width = boundedInteger(metadata.width || media.width, 0, 0, 16_384);
@@ -235,7 +245,8 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
   const selectedSubtitleKind = subtitle ? subtitleKind(normalizeCodec(subtitle.codec)) : null;
   const subtitleSupported = !subtitle || capabilities.subtitleModes.includes(selectedSubtitleKind)
     || (selectedSubtitleKind === 'text' && capabilities.subtitleModes.includes('external'));
-  const sourceDirectCompatible = containerSupported && videoSupported && audioSupported
+  const httpSupported = capabilities.streamingProtocols.includes('http');
+  const sourceDirectCompatible = httpSupported && containerSupported && videoSupported && audioSupported
     && sizeSupported && bitrateSupported && hdrSupported && subtitleSupported;
   // The canonical HLS writer currently emits one multiplexed A/V rendition.
   // A selected subtitle therefore has to be burned whenever delivery is not
@@ -247,6 +258,7 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
 
   const codec = 'h264';
   const reasons = [];
+  if (!httpSupported) reasons.push('HTTP transport');
   if (!containerSupported) reasons.push(`${facts.container || 'unknown'} container`);
   if (!videoSupported) reasons.push(`${facts.videoCodec || 'unknown'} video`);
   if (!audioSupported) reasons.push(`${facts.audioCodec || 'unknown'} audio`);
@@ -263,6 +275,9 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
   );
   if (mode !== 'direct' && !capabilities.videoCodecs.includes('h264')) throw playbackUnavailable(
     'playback_codec_unsupported', 'The canonical MPEG-TS HLS rendition requires H.264 support.', 422,
+  );
+  if (mode !== 'direct' && audio && !capabilities.audioCodecs.includes('aac')) throw playbackUnavailable(
+    'playback_codec_unsupported', 'The canonical MPEG-TS HLS audio rendition requires AAC support.', 422,
   );
   const reasonCode = direct ? 'direct_compatible'
     : remux ? (audioSupported ? 'remux_container' : 'remux_audio')
@@ -324,7 +339,7 @@ export function ffprobeMediaArguments(filePath) {
   return ['-v', 'error', '-show_format', '-show_streams', '-show_chapters', '-of', 'json', filePath];
 }
 
-export function parseFfprobeMediaProbe(raw, { sourceId = 'primary', probedAt = Date.now() } = {}) {
+export function parseFfprobeMediaProbe(raw, { sourceId = 'primary', probedAt = Date.now(), filePath } = {}) {
   const parsed = typeof raw === 'string' || Buffer.isBuffer(raw) ? JSON.parse(String(raw)) : raw;
   if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.streams)) throw playbackUnavailable('media_probe_invalid', 'FFprobe returned an invalid media document.', 422);
   const tracks = parsed.streams.slice(0, 256).flatMap((stream, ordinal) => {
@@ -358,7 +373,7 @@ export function parseFfprobeMediaProbe(raw, { sourceId = 'primary', probedAt = D
   const hdrFormat = hdrFormatForStream(videoStream, transfer, primaries, pixelFormat);
   return {
     sourceId,
-    container: normalizeContainer(String(parsed.format?.format_name || '').split(',')[0]),
+    container: normalizeContainer(parsed.format?.format_name, filePath || parsed.format?.filename, parsed.format?.tags?.major_brand),
     ...(Number.isFinite(durationSeconds) && durationSeconds >= 0 ? { durationSeconds } : {}),
     ...(Number.isFinite(bitrateKbps) && bitrateKbps >= 0 ? { bitrateKbps: Math.round(bitrateKbps) } : {}),
     ...(video?.width ? { width: video.width } : {}), ...(video?.height ? { height: video.height } : {}),

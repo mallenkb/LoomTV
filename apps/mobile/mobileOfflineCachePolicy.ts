@@ -39,3 +39,20 @@ export function activeMobileProgressPaths(library: ProgressLibrary): Set<string>
   }
   return paths;
 }
+
+export type OfflineProgressEntry = {
+  position: number;
+  duration: number;
+  watched: boolean;
+  updatedAt: number;
+};
+
+export function mergeOfflineProgressEntry(
+  local: OfflineProgressEntry | undefined,
+  remote: OfflineProgressEntry | undefined,
+): OfflineProgressEntry | undefined {
+  if (!local) return remote;
+  if (remote === undefined) return local;
+  if ((remote.updatedAt || 0) > (local.updatedAt || 0) && !local.watched) return remote;
+  return local;
+}

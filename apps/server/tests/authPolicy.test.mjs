@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createPairingService } from '../src/pairing-service.js';
 import {
   AUTH_PERMISSIONS,
   MAX_DEVICE_IDS,
@@ -76,6 +77,53 @@ test('canResetCredentials contains delegated resets within role, permission, and
     rootIds: ['root-1', 'root-2'],
   }), false, 'a peer with broader library-root scope is denied');
   assert.equal(canResetCredentials({ ...manager, permissions: ['account.password'] }, subordinate), false, 'delegated resets require users.manage');
+});
+
+test('pairing approval requires device management and authority over the target account', async (t) => {
+  const manager = {
+    id: 'manager', type: 'user', role: 'user',
+    permissions: ['devices.manage', 'users.manage', 'stream'], rootIds: ['root-1'],
+  };
+  const target = { id: 'viewer', type: 'user', role: 'viewer', permissions: ['stream'], rootIds: ['root-1'] };
+  const owner = { id: 'owner', type: 'owner', role: 'owner', permissions: ['*'], rootIds: null };
+  for (const [name, actor, account, approved] of [
+    ['no approver', null, target, false],
+    ['missing devices.manage', { ...manager, permissions: ['users.manage', 'stream'] }, target, false],
+    ['missing users.manage', { ...manager, permissions: ['devices.manage', 'stream'] }, target, false],
+    ['self still requires explicit management', { ...target, permissions: ['devices.manage', 'stream'] }, target, false],
+    ['owner target', manager, owner, false],
+    ['higher role', manager, { ...target, role: 'admin' }, false],
+    ['broader target permissions', manager, { ...target, permissions: ['stream', 'downloads'] }, false],
+    ['different roots', manager, { ...target, rootIds: ['root-2'] }, false],
+    ['unrestricted target', manager, { ...target, rootIds: null }, false],
+    ['device permission ceiling', { ...owner, devicePermissions: ['devices.manage'] }, target, false],
+    ['scoped manager', manager, target, true],
+    ['owner', owner, target, true],
+    ['self manager', manager, manager, true],
+  ]) {
+    await t.test(name, async () => {
+      let writes = 0;
+      const service = createPairingService({
+        clock: () => 1_000,
+        getAccount: async () => account,
+        store: {
+          readPairingRequest: () => ({ id: 'request-1', name: 'TV', kind: 'tv', requestedPermissions: ['stream'] }),
+          approvePairingRequest: (input) => {
+            writes += 1;
+            return { deviceId: 'device-1', accountId: input.accountId, permissions: input.permissions, createdAt: input.approvedAt };
+          },
+        },
+      });
+      const approve = () => service.approve('request-1', { accountId: account.id, permissions: ['stream'] }, actor);
+      if (approved) {
+        assert.equal((await approve()).status, 'approved');
+        assert.equal(writes, 1);
+      } else {
+        await assert.rejects(approve, { status: 403, code: 'permission_denied' });
+        assert.equal(writes, 0);
+      }
+    });
+  }
 });
 
 test('normalizeDeviceIds caps the allow-list length and trims entries', () => {

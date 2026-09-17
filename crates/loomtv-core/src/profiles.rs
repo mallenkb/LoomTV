@@ -85,10 +85,17 @@ impl Store {
         Ok(id)
     }
     pub(crate) fn bump_selection(&mut self) -> Result<()> {
-        self.revision = self.db.query_row(
+        let tx = self.db.transaction()?;
+        let revision: i64 = tx.query_row(
             "INSERT INTO device_profile_selection_revisions VALUES ('desktop-primary',1) ON CONFLICT(device_id) DO UPDATE SET revision=revision+1 RETURNING revision",
             [], |row| row.get(0),
         )?;
+        tx.execute(
+            "UPDATE device_profile_selections SET selection_revision=? WHERE device_id='desktop-primary'",
+            [revision],
+        )?;
+        tx.commit()?;
+        self.revision = revision;
         Ok(())
     }
     pub fn profiles(&self) -> Result<Value> {

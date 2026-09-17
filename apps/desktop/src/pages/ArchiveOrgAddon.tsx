@@ -1,5 +1,5 @@
 import { useParams } from '@tanstack/react-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Play, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 import SafeArtwork from '@/components/SafeArtwork';
@@ -148,28 +148,42 @@ export default function ArchiveOrgAddon({ onPlay }: ArchiveOrgAddonProps) {
   const [playingId, setPlayingId] = useState('');
   const [error, setError] = useState('');
 
+  const loadGeneration = useRef(0);
+  const loadController = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const isCurrent = () => generation === loadGeneration.current && !controller.signal.aborted;
     setLoading(true);
     setError('');
     try {
       const installed = await requireEnabledArchivePlugin(addonId);
-      const response = await fetch(archiveSearchUrl(query, page), { headers: { Accept: 'application/json' } });
+      if (!isCurrent()) return;
+      const response = await fetch(archiveSearchUrl(query, page), { signal: controller.signal, headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(`Archive.org returned ${response.status}.`);
       const payload = archiveSearchSchema.parse(await response.json());
+      if (!isCurrent()) return;
       setAddon(installed);
       setItems(payload.response.docs);
       setTotal(payload.response.numFound);
     } catch (loadError) {
+      if (!isCurrent()) return;
       setItems([]);
       setTotal(0);
       setError(loadError instanceof Error ? loadError.message : 'Archive.org could not be loaded.');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [addonId, page, query]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadGeneration.current += 1;
+      loadController.current?.abort();
+    };
   }, [load]);
 
   useEffect(() => {

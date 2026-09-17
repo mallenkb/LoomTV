@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { desktopApi, type LibraryPayload, type ManagedMediaSegment, type MediaSegmentType, type SkipAnalysisSettings } from '@/lib/desktopApi';
 
@@ -40,12 +40,42 @@ export default function SkipTimestampManager({
   const excludedKey = `${selectedMediaId}:${selectedSeason}`;
   const seasonExcluded = settings.exclusions.seasons.includes(excludedKey);
 
-  const refresh = async (mediaId = selectedMediaId, season = selectedSeason, episode = selectedEpisode) => {
-    if (!mediaId) { setSegments([]); return; }
-    setSegments(await desktopApi.getManagedMediaSegments({ mediaId, season, episode }));
-  };
+  const selection = useMemo(() => ({ mediaId: selectedMediaId, season: selectedSeason, episode: selectedEpisode }), [selectedMediaId, selectedSeason, selectedEpisode]);
+  const activeSelection = useRef<typeof selection | null>(selection);
+  const markerGeneration = useRef(0);
+  const previewGeneration = useRef(0);
+  useLayoutEffect(() => {
+    activeSelection.current = selection;
+    setSegments([]);
+    setPreview(null);
+    void desktopApi.setPlaybackActivity(PREVIEW_LEASE_KEY, false);
+    return () => {
+      activeSelection.current = null;
+      markerGeneration.current += 1;
+      previewGeneration.current += 1;
+    };
+  }, [selection]);
+  const refresh = useCallback(async () => {
+    if (activeSelection.current !== selection) return;
+    const generation = ++markerGeneration.current;
+    if (!selection.mediaId) { setSegments([]); return; }
+    try {
+      const next = await desktopApi.getManagedMediaSegments(selection);
+      if (activeSelection.current === selection && generation === markerGeneration.current) setSegments(next);
+    } catch {
+      if (activeSelection.current === selection && generation === markerGeneration.current) setSegments([]);
+    }
+  }, [selection]);
 
-  useEffect(() => { void desktopApi.getLibrary().then((value) => { setLibrary(value); setSelectedMediaId(value.movies[0]?.id || value.tvShows[0]?.id || value.animeShows?.[0]?.id || ''); }); }, []);
+  useEffect(() => {
+    let disposed = false;
+    void desktopApi.getLibrary().then((value) => {
+      if (disposed) return;
+      setLibrary(value);
+      setSelectedMediaId(value.movies[0]?.id || value.tvShows[0]?.id || value.animeShows?.[0]?.id || '');
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
   useEffect(() => () => { void desktopApi.setPlaybackActivity(PREVIEW_LEASE_KEY, false); }, []);
   useEffect(() => {
     const nextSeason = seasons.includes(selectedSeason) ? selectedSeason : (seasons[0] ?? 0);
@@ -58,8 +88,8 @@ export default function SkipTimestampManager({
   useEffect(() => {
     if (!selectedMediaId) return;
     setForm((current) => ({ ...current, candidateId: undefined, mediaId: selectedMediaId, season: String(selectedSeason), episode: String(selectedEpisode) }));
-    void desktopApi.getManagedMediaSegments({ mediaId: selectedMediaId, season: selectedSeason, episode: selectedEpisode }).then(setSegments);
-  }, [selectedEpisode, selectedMediaId, selectedSeason]);
+    void refresh();
+  }, [selectedEpisode, selectedMediaId, selectedSeason, refresh]);
 
   const updateCandidate = async (id: string, patch: { status?: ManagedMediaSegment['status']; type?: MediaSegmentType }) => {
     await desktopApi.updateManagedMediaSegment(id, patch);
@@ -81,13 +111,14 @@ export default function SkipTimestampManager({
       type: form.type, startMs: Math.round((Number(form.start) || 0) * 1000),
       endMs: form.end.trim() ? Math.round(Number(form.end) * 1000) : null,
     });
-    setForm((current) => ({ ...current, candidateId: undefined }));
+    if (activeSelection.current !== selection) return;
+    setForm((current) => current === form ? { ...current, candidateId: undefined } : current);
     await refresh();
   };
   const filePathForForm = () => {
     const item = items.find((candidate) => candidate.id === form.mediaId.trim());
     if (!item) return '';
-    if (item.filePath) return item.filePath;
+    if (item.type === 'movie') return item.filePath || '';
     return item.episodeFiles?.find((episode) => episode.season === (Number(form.season) || 0) && episode.episode === (Number(form.episode) || 0))?.filePath || '';
   };
   const previewForm = async () => {
@@ -95,8 +126,13 @@ export default function SkipTimestampManager({
     if (!filePath) return;
     const start = Math.max(0, Number(form.start) || 0);
     const end = form.end.trim() ? Math.max(start + 1, Number(form.end) || start + 1) : start + 90;
-    const stream = await desktopApi.getStreamUrl(filePath);
-    setPreview({ url: stream.url, start, end });
+    const generation = ++previewGeneration.current;
+    try {
+      const stream = await desktopApi.getStreamUrl(filePath);
+      if (activeSelection.current === selection && generation === previewGeneration.current) setPreview({ url: stream.url, start, end });
+    } catch {
+      if (activeSelection.current === selection && generation === previewGeneration.current) setPreview(null);
+    }
   };
   const rescanSeason = async () => {
     const saved = await onSaveSettings();

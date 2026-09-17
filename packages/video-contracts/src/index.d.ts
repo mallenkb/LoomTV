@@ -16,6 +16,13 @@ export const CANONICAL_API_VERSION: '1';
 export const CANONICAL_API_PREFIX: '/api/v1';
 export const CANONICAL_API_VERSION_HEADER: 'X-LoomTV-API-Version';
 
+export type ProgressSavePayload = {
+  position: number;
+  duration: number;
+  watched?: boolean;
+};
+export function parseProgressSavePayload(input: unknown): ProgressSavePayload;
+
 export type AccountRole = 'owner' | 'admin' | 'user' | 'viewer';
 export type ProfileKind = 'adult' | 'child' | 'guest';
 export type AccountPermission =

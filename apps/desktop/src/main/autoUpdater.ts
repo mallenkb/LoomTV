@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, autoUpdater as electronAutoUpdater } from 'electron';
+import { app, BrowserWindow, Menu, dialog, shell, autoUpdater as electronAutoUpdater } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
@@ -18,6 +18,12 @@ import { z } from 'zod';
 
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
+const UPDATE_RELEASE_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`;
+class LegacyMacUpdateError extends Error {
+  constructor() {
+    super('This legacy ad-hoc installation has no trusted publisher identity. Download a Developer ID-signed LoomTV release from the official releases page and install it manually once to enable verified automatic updates.');
+  }
+}
 const execFileAsync = promisify(execFile);
 const githubReleaseSchema = z.object({
   tag_name: z.string().optional(),
@@ -149,14 +155,15 @@ function updateFailureMessage(error: unknown, stage: UpdateFailureStage): string
   const rawMessage = error instanceof Error ? error.message : String(error);
   console.error(`[updates] ${stage} failed:`, error);
 
-  if (/ENOTEMPTY|directory not empty|loomtv-update-install/i.test(rawMessage)) {
-    return 'Loom couldn’t prepare the downloaded update. Please try again.';
-  }
-  if (/code.?sign|signature|publisher|checksum|sha512/i.test(rawMessage)) {
+  if (error instanceof LegacyMacUpdateError) return error.message;
+  if (/code.?sign|signature|publisher|bundle identifier|checksum|sha512/i.test(rawMessage)) {
     return 'The downloaded update could not be verified and was not installed.';
   }
   if (/EACCES|EPERM|permission denied|not permitted/i.test(rawMessage)) {
     return 'Loom does not have permission to install the update. Reinstall it from an administrator account.';
+  }
+  if (/ENOTEMPTY|directory not empty|loomtv-update-install/i.test(rawMessage)) {
+    return 'Loom couldn’t prepare the downloaded update. Please try again.';
   }
   if (stage === 'install') return 'Loom couldn’t install the update. Please try again.';
   if (stage === 'download') return 'Loom couldn’t download the update. Check your connection and try again.';
@@ -343,9 +350,15 @@ async function getMacAppPublisherIdentity(appPath: string, label: string): Promi
   };
 }
 
-async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
+async function getTrustedMacPublisher(runningAppPath: string): Promise<MacAppPublisherIdentity> {
   await verifyMacAppSignature(runningAppPath, 'Installed LoomTV app');
-  const runningIdentity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
+  const identity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
+  if (identity.adHoc || !identity.teamIdentifier) throw new LegacyMacUpdateError();
+  return identity;
+}
+
+async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
+  const runningIdentity = await getTrustedMacPublisher(runningAppPath);
 
   await verifyMacAppSignature(sourceAppPath, 'Downloaded update app');
   const sourceIdentity = await getMacAppPublisherIdentity(sourceAppPath, 'Downloaded update app');
@@ -356,25 +369,16 @@ async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: stri
     );
   }
 
-  if (runningIdentity.teamIdentifier) {
-    if (sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier) {
-      throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
-    }
-    return;
+  if (sourceIdentity.adHoc || sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier) {
+    throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
   }
 
-  // Older LoomTV releases were distributed with a consistent ad-hoc
-  // signature. They have no TeamIdentifier to compare, so preserve the
-  // bundle-id + signed-archive trust boundary until a Developer ID build is
-  // installed. Never allow an ad-hoc update to replace a Developer ID build.
-  if (!runningIdentity.adHoc || (!sourceIdentity.adHoc && !sourceIdentity.teamIdentifier)) {
-    throw new Error('Downloaded update signing type does not match this LoomTV installation.');
+  const requirement = `=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = ${JSON.stringify(runningIdentity.teamIdentifier)} and identifier ${JSON.stringify(runningIdentity.bundleIdentifier)}`;
+  try {
+    await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R', requirement, sourceAppPath]);
+  } catch (error) {
+    throw new Error(`Downloaded update failed Developer ID publisher verification: ${describeSubprocessError(error)}`, { cause: error });
   }
-  console.warn(
-    sourceIdentity.teamIdentifier
-      ? '[updates] Migrating a legacy ad-hoc-signed LoomTV build to a Developer ID release.'
-      : '[updates] Installing an update over a legacy ad-hoc-signed LoomTV build.',
-  );
 }
 
 async function removeUpdateHelperDirectory(helperDir: string): Promise<void> {
@@ -408,31 +412,27 @@ async function extractMacUpdate(updateFilePath: string, extractDir: string): Pro
   return appBundles[0];
 }
 
-async function waitForChildToSpawn(child: ReturnType<typeof spawn>): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    child.once('spawn', resolve);
-    child.once('error', reject);
-  });
-}
+type PreparedMacUpdate = { commit: () => Promise<void>; cancel: () => Promise<void> };
 
-async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<void> {
+async function prepareMacUpdateWithoutSquirrel(updateFilePath: string): Promise<PreparedMacUpdate> {
   if (process.platform !== 'darwin') {
     throw new Error('The custom macOS updater was invoked on a non-macOS platform.');
   }
 
   await verifyMacUpdateZip(updateFilePath);
 
-  const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
-  const helperPath = path.join(helperDir, 'install-update.sh');
   const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
   if (!runningAppPath.endsWith('.app')) {
     throw new Error(`Could not resolve the running macOS app bundle from ${app.getPath('exe')}.`);
   }
 
+  const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
+  const helperPath = path.join(helperDir, 'install-update.sh');
+
   // Replace the bundle that was actually launched so a legacy installation is
   // updated in place instead of leaving the user's Dock icon behind.
   const targetAppPath = runningAppPath;
-  const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
+  const backupAppPath = path.join(path.dirname(targetAppPath), `.${path.basename(targetAppPath)}.${path.basename(helperDir)}.previous`);
   const extractDir = path.join(helperDir, 'extracted');
   const logPath = path.join(helperDir, 'install.log');
   const parentPid = String(process.pid);
@@ -453,6 +453,7 @@ async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
   const script = `#!/bin/sh
 set -eu
 LOG=${shellQuote(logPath)}
+exec 3>&1
 exec >> "$LOG" 2>&1
 echo "Starting LoomTV macOS update install at $(date)"
 PARENT_PID=${shellQuote(parentPid)}
@@ -460,27 +461,40 @@ SOURCE_APP=${shellQuote(sourceAppPath)}
 TARGET_APP=${shellQuote(targetAppPath)}
 BACKUP_APP=${shellQuote(backupAppPath)}
 
+PHASE=waiting
+restore_previous_app() {
+  STATUS=$?
+  trap - EXIT HUP INT TERM
+  if [ "$PHASE" = replacing ] && [ -d "$BACKUP_APP" ]; then
+    rm -rf "$TARGET_APP"
+    /bin/mv "$BACKUP_APP" "$TARGET_APP" || exit 1
+    /usr/bin/open -n "$TARGET_APP" || true
+  elif [ "$PHASE" = replacing ] && [ -d "$TARGET_APP" ]; then
+    /usr/bin/open -n "$TARGET_APP" || true
+  fi
+  exit "$STATUS"
+}
+trap restore_previous_app EXIT
+trap 'exit 1' HUP INT TERM
+
+[ ! -e "$BACKUP_APP" ]
+[ -d "$TARGET_APP" ]
+[ -w "$(dirname "$TARGET_APP")" ]
+printf 'READY\\n' >&3
+IFS= read -r DECISION || exit 1
+[ "$DECISION" = COMMIT ] || exit 1
+PHASE=authorized
+printf 'COMMITTED\\n' >&3
+exec 3>&-
 while kill -0 "$PARENT_PID" >/dev/null 2>&1; do
   sleep 0.25
 done
 
-rm -rf "$BACKUP_APP"
-if [ -d "$TARGET_APP" ]; then
-  /bin/mv "$TARGET_APP" "$BACKUP_APP"
-fi
-
-restore_previous_app() {
-  echo "Restoring previous app bundle"
-  rm -rf "$TARGET_APP"
-  if [ -d "$BACKUP_APP" ]; then
-    /bin/mv "$BACKUP_APP" "$TARGET_APP"
-    /usr/bin/open -n "$TARGET_APP" || true
-  fi
-}
+PHASE=replacing
+/bin/mv "$TARGET_APP" "$BACKUP_APP"
 
 if ! /usr/bin/ditto "$SOURCE_APP" "$TARGET_APP"; then
   echo "Failed to copy updated app, restoring previous app"
-  restore_previous_app
   exit 1
 fi
 
@@ -488,7 +502,6 @@ fi
 
 if ! /usr/bin/open -n "$TARGET_APP"; then
   echo "Failed to relaunch updated app"
-  restore_previous_app
   exit 1
 fi
 
@@ -506,33 +519,92 @@ done
 
 if [ "$LAUNCHED" -ne 1 ]; then
   echo "Updated app did not stay running after relaunch"
-  restore_previous_app
   exit 1
 fi
 
+PHASE=complete
 rm -rf "$BACKUP_APP" "$SOURCE_APP"
 echo "Finished LoomTV macOS update install at $(date)"
 `;
 
-  let child: ReturnType<typeof spawn>;
   try {
     await fs.promises.writeFile(helperPath, script, { mode: 0o755 });
-    child = spawn('/bin/sh', [helperPath], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    await waitForChildToSpawn(child);
   } catch (error) {
     await removeUpdateHelperDirectory(helperDir);
     throw error;
   }
-  child.unref();
 
-  // app.quit() can emit before-quit yet remain alive because of a lingering
-  // Electron/Node handle. The installer cannot replace the bundle until this
-  // PID exits, so force the already-drained process down after a short grace.
-  setTimeout(() => app.exit(0), 5000);
-  app.quit();
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn('/bin/sh', [helperPath], {
+      detached: true,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+  } catch (error) {
+    await removeUpdateHelperDirectory(helperDir);
+    throw error;
+  }
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  let failure: Error | undefined;
+  let cancelled = false;
+  let committed = false;
+  let received = '';
+  let notify = () => undefined;
+  const fail = (error: Error) => {
+    failure = error;
+    notify();
+    if (committed && !cancelled) recoverUpdateInstall(error);
+  };
+  child.on('error', fail);
+  child.stdin?.on('error', fail);
+  child.once('exit', () => fail(new Error('The update helper exited before app shutdown.')));
+  child.stdout?.on('data', (chunk: Buffer) => {
+    received += chunk.toString();
+    notify();
+  });
+  const waitFor = (line: string): Promise<void> => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      notify = () => undefined;
+      reject(new Error('The update helper handshake timed out.'));
+    }, 10_000);
+    notify = () => {
+      if (!failure && !received.split('\n').includes(line)) return;
+      clearTimeout(timer);
+      notify = () => undefined;
+      if (failure) reject(failure);
+      else resolve();
+    };
+    notify();
+  });
+  const cancel = async () => {
+    cancelled = true;
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.kill();
+    await closed;
+    await removeUpdateHelperDirectory(helperDir);
+  };
+  try {
+    await waitFor('READY');
+  } catch (error) {
+    await cancel();
+    throw error;
+  }
+  return {
+    cancel,
+    commit: async () => {
+      if (failure) throw failure;
+      const acknowledgement = waitFor('COMMITTED');
+      child.stdin?.end('COMMIT\n');
+      await acknowledgement;
+      if (failure) throw failure;
+      committed = true;
+      child.unref();
+      child.stdout?.destroy();
+      updateQuitFallbackTimer = setTimeout(() => app.exit(0), 5000);
+      app.quit();
+    },
+  };
 }
 
 function refreshUpdateMenu() {
@@ -566,6 +638,16 @@ export function buildUpdateMenu() {
       label: 'Check for Updates...',
       click: () => {
         void handleManualUpdateCheck();
+      },
+    },
+    {
+      id: 'loomtv-download-release',
+      label: 'Download Latest Release...',
+      click: () => {
+        void shell.openExternal(UPDATE_RELEASE_URL).catch((error: unknown) => {
+          console.error('[updates] Could not open the releases page:', error);
+          showUpdateDialog('Download LoomTV', `Open ${UPDATE_RELEASE_URL} in your browser to download the latest release.`, 'warning');
+        });
       },
     },
     {
@@ -718,12 +800,52 @@ async function handleManualUpdateCheck() {
   }
 }
 
+let installCleanupStarted = false;
+let installRecoveryStarted = false;
+
+function recoverUpdateInstall(error: unknown): void {
+  if (installRecoveryStarted) return;
+  installRecoveryStarted = true;
+  clearUpdateQuitFallback();
+  updateInstallStarted = false;
+  reportUpdateFailure(error, 'install');
+  app.relaunch();
+  app.exit(0);
+}
+
+function reportUpdateFailure(error: unknown, stage: UpdateFailureStage): UpdateState {
+  if (updateState.status === 'error') return updateState;
+  return setUpdateState({
+    status: 'error',
+    message: updateFailureMessage(error, stage),
+    checkedAt: new Date().toISOString(),
+  });
+}
+
 export async function installDownloadedUpdate() {
   if (updateInstallStarted) return updateState;
   if (updateState.status !== 'downloaded') return updateState;
   updateInstallStarted = true;
 
   setUpdateState({ status: 'installing', message: 'Installing update and restarting Loom...' });
+
+  let installMacUpdate: PreparedMacUpdate | undefined;
+  if (process.platform === 'darwin') {
+    try {
+      const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
+      await getTrustedMacPublisher(runningAppPath);
+      if (!downloadedUpdateFilePath) throw new Error('The downloaded update archive is missing; its publisher cannot be verified.');
+      installMacUpdate = await prepareMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
+    } catch (error) {
+      updateInstallStarted = false;
+      return setUpdateState({
+        status: 'error',
+        releaseUrl: UPDATE_RELEASE_URL,
+        message: updateFailureMessage(error, 'install'),
+        checkedAt: new Date().toISOString(),
+      });
+    }
+  }
 
   // Drain playback/server work before quitAndInstall. Active HTTP streams can
   // keep the process alive after every window has closed, which leaves the
@@ -735,6 +857,7 @@ export async function installDownloadedUpdate() {
     ['media server', () => deps.closeMediaServer()],
     ['update timer', () => stopUpdateCheckTimer()],
   ];
+  installCleanupStarted = true;
   for (const [label, cleanup] of cleanupSteps) {
     try {
       await cleanup();
@@ -743,16 +866,12 @@ export async function installDownloadedUpdate() {
     }
   }
 
-  if (process.platform === 'darwin' && downloadedUpdateFilePath) {
+  if (installMacUpdate) {
     try {
-      await installMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
+      await installMacUpdate.commit();
     } catch (error) {
-      updateInstallStarted = false;
-      setUpdateState({
-        status: 'error',
-        message: updateFailureMessage(error, 'install'),
-        checkedAt: new Date().toISOString(),
-      });
+      await installMacUpdate.cancel();
+      recoverUpdateInstall(error);
     }
     return updateState;
   }
@@ -770,13 +889,7 @@ export async function installDownloadedUpdate() {
       scheduleUpdateQuitFallback();
       autoUpdater.quitAndInstall(true, true);
     } catch (error) {
-      clearUpdateQuitFallback();
-      updateInstallStarted = false;
-      setUpdateState({
-        status: 'error',
-        message: updateFailureMessage(error, 'install'),
-        checkedAt: new Date().toISOString(),
-      });
+      recoverUpdateInstall(error);
     }
   }, 250);
 
@@ -864,15 +977,11 @@ function configureAutoUpdater() {
       : updateState.status === 'available' || updateState.status === 'downloading'
         ? 'download'
         : 'check';
-    if (failureStage === 'install') {
-      updateInstallStarted = false;
-      clearUpdateQuitFallback();
+    if (failureStage === 'install' && installCleanupStarted) {
+      recoverUpdateInstall(error);
+      return;
     }
-    setUpdateState({
-      status: 'error',
-      message: updateFailureMessage(error, failureStage),
-      checkedAt: new Date().toISOString(),
-    });
+    reportUpdateFailure(error, failureStage);
   });
 
 }
@@ -900,15 +1009,13 @@ export async function checkForUpdates(): Promise<UpdateState> {
   updateCheckInFlight = true;
   setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
   updateCheckPromise = autoUpdater.checkForUpdates()
-    .then(() => updateState)
-    .catch((error) => {
-      setUpdateState({
-        status: 'error',
-        message: updateFailureMessage(error, 'check'),
-        checkedAt: new Date().toISOString(),
+    .then((result) => {
+      void result?.downloadPromise?.catch((error: unknown) => {
+        reportUpdateFailure(error, 'download');
       });
       return updateState;
     })
+    .catch((error) => reportUpdateFailure(error, 'check'))
     .finally(() => {
       updateCheckInFlight = false;
       updateCheckPromise = null;

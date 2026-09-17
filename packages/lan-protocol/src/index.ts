@@ -124,6 +124,10 @@ export type LanStreamOptions = {
 };
 
 export type LanPlaybackCapabilities = {
+  contractVersion?: 1;
+  streamingProtocols?: Array<'http' | 'hls'>;
+  subtitleModes?: Array<'text' | 'bitmap' | 'burn-in' | 'external'>;
+  hdrFormats?: Array<'hdr10' | 'hdr10-plus' | 'hlg' | 'dolby-vision'>;
   containers?: string[];
   videoCodecs?: string[];
   audioCodecs?: string[];

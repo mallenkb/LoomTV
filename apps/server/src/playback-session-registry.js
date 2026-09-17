@@ -283,6 +283,12 @@ export function createPlaybackSessionRegistry(options = {}) {
     return { ...snapshot(entry), token: entry.token };
   }
 
+  /** @param {string | null | undefined} token @param {SessionExpectation} expected */
+  function authorizeCapability(token, expected = {}, currentTime = now()) {
+    if (!token || sessions.has(token) || !tokenToId.has(token)) return null;
+    return authorize(token, expected, currentTime);
+  }
+
   /** @param {string | null | undefined} identifier @param {number} currentTime @param {{ activate?: boolean, idleTimeoutMs?: number }} touchOptions */
   function touch(identifier, currentTime = now(), touchOptions = {}) {
     const entry = resolve(identifier, currentTime);
@@ -300,7 +306,7 @@ export function createPlaybackSessionRegistry(options = {}) {
   }
 
   /** @param {string | null | undefined} identifier @param {SessionExpectation} expected */
-  function renew(identifier, expected = {}, currentTime = now()) {
+  function renew(identifier, expected = {}, currentTime = now(), absoluteExpiresAt = Infinity) {
     ensureOpen();
     const entry = resolve(identifier, currentTime);
     // A rotated capability may remain valid for media requests during its
@@ -311,6 +317,13 @@ export function createPlaybackSessionRegistry(options = {}) {
     if (!entry || !matches(entry, expected) || expire(entry, currentTime)) {
       if (entry && expire(entry, currentTime)) revokeEntry(entry, 'expired', currentTime);
       return null;
+    }
+    if (Number.isFinite(absoluteExpiresAt)) {
+      if (absoluteExpiresAt <= currentTime) {
+        revokeEntry(entry, 'expired', currentTime);
+        return null;
+      }
+      entry.absoluteExpiresAt = Math.min(entry.absoluteExpiresAt, absoluteExpiresAt);
     }
     const previousToken = entry.token;
     let nextToken = randomBytes(24).toString('base64url');
@@ -439,6 +452,7 @@ export function createPlaybackSessionRegistry(options = {}) {
   return {
     create,
     authorize,
+    authorizeCapability,
     touch,
     renew,
     retry: create,

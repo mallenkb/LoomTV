@@ -1,0 +1,727 @@
+{
+  "root": 33334,
+  "started": "2026-09-15T16:05:14.585Z",
+  "note": "macOS top MEM footprint and interval CPU, second top sample each time. Running app and descendants only. Rounded OS display values; not ps RSS. CPU can exceed 100% across cores. Simulation runs separately and may compete for CPU.",
+  "samples": [
+    {
+      "timestamp": "2026-09-15T16:05:17.836Z",
+      "elapsedMs": 3252,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 76.8,
+          "footprintBytes": 2081423360,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.1,
+          "footprintBytes": 406847488,
+          "threads": 54
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:05:24.048Z",
+      "elapsedMs": 9463,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 78.9,
+          "footprintBytes": 2212495360,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.1,
+          "footprintBytes": 406847488,
+          "threads": 54
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:05:30.293Z",
+      "elapsedMs": 15708,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 75.1,
+          "footprintBytes": 2246049792,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.2,
+          "footprintBytes": 406847488,
+          "threads": 54
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:05:36.455Z",
+      "elapsedMs": 21870,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 74.4,
+          "footprintBytes": 2388656128,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.2,
+          "footprintBytes": 409993216,
+          "threads": 54
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:05:43.208Z",
+      "elapsedMs": 28623,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 64.9,
+          "footprintBytes": 2416967680,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.3,
+          "footprintBytes": 391118848,
+          "threads": 55
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:05:50.074Z",
+      "elapsedMs": 35489,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 58.4,
+          "footprintBytes": 2585788416,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.3,
+          "footprintBytes": 391118848,
+          "threads": 55
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:05:56.550Z",
+      "elapsedMs": 41965,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 71.9,
+          "footprintBytes": 2612002816,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.4,
+          "footprintBytes": 392167424,
+          "threads": 55
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:02.860Z",
+      "elapsedMs": 48275,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 71.7,
+          "footprintBytes": 2669674496,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.5,
+          "footprintBytes": 440401920,
+          "threads": 55
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:09.132Z",
+      "elapsedMs": 54547,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 74.5,
+          "footprintBytes": 2828009472,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 3.1,
+          "footprintBytes": 409993216,
+          "threads": 55
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:15.358Z",
+      "elapsedMs": 60773,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 68.5,
+          "footprintBytes": 2865758208,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.2,
+          "footprintBytes": 407896064,
+          "threads": 55
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:21.861Z",
+      "elapsedMs": 67276,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 71,
+          "footprintBytes": 2886729728,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1,
+          "footprintBytes": 407896064,
+          "threads": 54
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:28.035Z",
+      "elapsedMs": 73450,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 82.5,
+          "footprintBytes": 2959081472,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.3,
+          "footprintBytes": 409993216,
+          "threads": 53
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:34.265Z",
+      "elapsedMs": 79680,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 79.7,
+          "footprintBytes": 3069181952,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.3,
+          "footprintBytes": 407896064,
+          "threads": 53
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:40.462Z",
+      "elapsedMs": 85877,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 82.2,
+          "footprintBytes": 3134193664,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.3,
+          "footprintBytes": 408944640,
+          "threads": 54
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-15T16:06:46.655Z",
+      "elapsedMs": 92070,
+      "processes": [
+        {
+          "pid": 33380,
+          "name": "Electron Helper (Renderer)",
+          "cpuPercent": 81.9,
+          "footprintBytes": 3213885440,
+          "threads": 27
+        },
+        {
+          "pid": 33334,
+          "name": "Electron",
+          "cpuPercent": 1.2,
+          "footprintBytes": 392167424,
+          "threads": 54
+        },
+        {
+          "pid": 33336,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 123731968,
+          "threads": 17
+        },
+        {
+          "pid": 33337,
+          "name": "Electron Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 14680064,
+          "threads": 25
+        },
+        {
+          "pid": 33576,
+          "name": "loomtv-electron",
+          "cpuPercent": 0,
+          "footprintBytes": 8994816,
+          "threads": 1
+        },
+        {
+          "pid": 33384,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1572864,
+          "threads": 2
+        }
+      ]
+    }
+  ]
+}

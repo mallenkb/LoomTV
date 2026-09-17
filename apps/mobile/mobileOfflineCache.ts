@@ -6,7 +6,7 @@ import type {
   MobileProfileListEntry,
   StoredProgress,
 } from './mobileDomain';
-import { activeMobileProgressPaths, sameMobileCatalogIdentity } from './mobileOfflineCachePolicy';
+import { activeMobileProgressPaths, mergeOfflineProgressEntry, sameMobileCatalogIdentity } from './mobileOfflineCachePolicy';
 import { reportNonFatal } from './mobileDiagnostics';
 
 const MOBILE_OFFLINE_DATABASE_NAME = 'loomtv-mobile-cache.db';
@@ -47,6 +47,8 @@ type SnapshotIdentity = {
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let saveQueue: Promise<void> = Promise.resolve();
+const cacheGenerationByHost = new Map<string, number>();
+export const mobileOfflineCacheGeneration = (hostDeviceId: string): number => cacheGenerationByHost.get(hostDeviceId) || 0;
 const snapshotIdentityByHost = new Map<string, SnapshotIdentity>();
 const encodedProgressByHost = new Map<string, Map<string, string>>();
 
@@ -234,10 +236,10 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
   encodedProgressByHost.set(snapshot.hostDeviceId, nextProgress);
 }
 
-export function saveMobileOfflineSnapshot(snapshot: PersistedSnapshotInput): Promise<void> {
+export function saveMobileOfflineSnapshot(snapshot: PersistedSnapshotInput, generation = mobileOfflineCacheGeneration(snapshot.hostDeviceId)): Promise<void> {
   saveQueue = saveQueue
     .catch((error) => reportNonFatal('offline-cache.previous-save', error))
-    .then(() => saveSnapshotNow(snapshot));
+    .then(() => generation === mobileOfflineCacheGeneration(snapshot.hostDeviceId) ? saveSnapshotNow(snapshot) : undefined);
   return saveQueue;
 }
 
@@ -267,8 +269,12 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
       try {
         const value = JSON.parse(row.payload);
         if (!isRecord(value)) continue;
-        progress[row.media_path] = value as StoredProgress;
-        encodedProgress.set(row.media_path, row.payload);
+        const mediaPath = row.media_path;
+        progress[mediaPath] = mergeOfflineProgressEntry(
+          progress[mediaPath],
+          value as StoredProgress,
+        ) || value as StoredProgress;
+        encodedProgress.set(mediaPath, JSON.stringify(progress[mediaPath]));
       } catch {
         // Ignore one corrupt progress row instead of discarding the catalog.
         reportNonFatal('offline-cache.corrupt-progress-row', new Error('A cached progress row could not be decoded.'));
@@ -282,18 +288,17 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
   }
 }
 
-export async function clearMobileOfflineSnapshot(hostDeviceId: string): Promise<void> {
-  if (!hostDeviceId) return;
-  snapshotIdentityByHost.delete(hostDeviceId);
-  encodedProgressByHost.delete(hostDeviceId);
-  try {
+export function clearMobileOfflineSnapshot(hostDeviceId: string): Promise<void> {
+  if (!hostDeviceId) return Promise.resolve();
+  cacheGenerationByHost.set(hostDeviceId, mobileOfflineCacheGeneration(hostDeviceId) + 1);
+  saveQueue = saveQueue.catch(() => undefined).then(async () => {
+    snapshotIdentityByHost.delete(hostDeviceId);
+    encodedProgressByHost.delete(hostDeviceId);
     const database = await openMobileOfflineDatabase();
     await database.withTransactionAsync(async () => {
       await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE host_device_id = ?', hostDeviceId);
       await database.runAsync('DELETE FROM mobile_offline_progress WHERE host_device_id = ?', hostDeviceId);
     });
-  } catch (error) {
-    // Cache cleanup must never block sign-out or a revoked-session response.
-    reportNonFatal('offline-cache.clear', error);
-  }
+  });
+  return saveQueue.catch((error) => reportNonFatal('offline-cache.clear', error));
 }

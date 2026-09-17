@@ -19,9 +19,11 @@ import { z } from 'zod';
 
 const finiteTimestamp = z.number().finite().nonnegative();
 
-export const mobileLibrarySchema = lanLibraryPayloadSchema(lanMediaItemSchema);
+const mobileMediaItemSchema = lanMediaItemSchema.extend({ year: lanLibraryCardSchema.shape.year });
+
+export const mobileLibrarySchema = lanLibraryPayloadSchema(mobileMediaItemSchema);
 export const mobileLibraryIndexSchema = lanLibraryIndexSchema(lanLibraryCardSchema);
-export const mobileLibraryItemDetailsSchema = lanLibraryItemDetailsSchema(lanMediaItemSchema);
+export const mobileLibraryItemDetailsSchema = lanLibraryItemDetailsSchema(mobileMediaItemSchema);
 export const mobilePairResponseSchema = lanPairResponseSchema(mobileLibrarySchema);
 export const mobilePairApprovalRequestSchema = lanPairApprovalRequestSchema;
 export const mobileErrorPayloadSchema = lanErrorPayloadSchema.refine(

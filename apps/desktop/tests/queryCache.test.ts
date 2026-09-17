@@ -134,6 +134,31 @@ test('remote server and selection changes do not reuse local or prior remote res
   assert.equal(await cachedDesktopRead('detail', ['same'], async () => 'remote-two'), 'remote-two');
 });
 
+test('profile and remote scope changes preserve serialized mutation execution', { timeout: 2_000 }, async () => {
+  let release!: () => void;
+  const completed: string[] = [];
+  const cache = queryClient.getMutationCache();
+  const first = cache.build(queryClient, {
+    scope: { id: 'personal-writes' },
+    mutationFn: async () => { await new Promise<void>(resolve => { release = resolve; }); completed.push('first'); },
+  });
+  const second = cache.build(queryClient, {
+    scope: { id: 'personal-writes' },
+    mutationFn: async () => { completed.push('second'); },
+  });
+  const writes = [first.execute(undefined), second.execute(undefined)];
+  await nextTurn();
+  assert.equal(second.state.isPaused, true);
+  setQueryProfile('next');
+  queryScope();
+  scope.mode = 'remote';
+  scope.session = { baseUrl: 'https://example.test', deviceId: 'device', selectionRevision: 3 };
+  queryScope();
+  release();
+  await Promise.all(writes);
+  assert.deepEqual(completed, ['first', 'second']);
+});
+
 test('targeted invalidation preserves unrelated cached families', async () => {
   await cachedDesktopRead('detail', [1], async () => 'detail');
   await cachedDesktopRead('getProfileLists', [], async () => 'lists');

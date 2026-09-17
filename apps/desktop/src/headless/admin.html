@@ -266,8 +266,9 @@
     .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; grid-column: 1 / -1; margin-top: 4px; }
     .notice { display: none; margin: 0 auto 16px; max-width: 1180px; padding: 12px 14px; border: 1px solid rgba(239,127,127,.24); border-radius: var(--radius-control); background: rgba(239,127,127,.09); color: var(--negative); font-size: var(--fs-small); }
     .notice.show { display: block; }
-    .modal-backdrop { display: none; position: fixed; z-index: 20; inset: 0; place-items: center; padding: 20px; background: rgba(0,0,0,.70); backdrop-filter: blur(8px); }
-    .modal-backdrop.show { display: grid; }
+    .modal-backdrop { display: none; position: fixed; inset: 0; place-items: center; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 20px; border: 0; color: inherit; background: transparent; }
+    .modal-backdrop[open] { display: grid; }
+    .modal-backdrop::backdrop { background: rgba(0,0,0,.70); backdrop-filter: blur(8px); }
     .modal { width: min(480px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; padding: 24px; border: 1px solid var(--loom-panel-border); border-radius: var(--radius); background: var(--loom-panel); box-shadow: 0 24px 60px rgba(0,0,0,.45); }
     .modal h2 { margin: 0 0 6px; font-size: 18px; letter-spacing: -.02em; }
     .modal > p { margin: 0 0 20px; color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
@@ -436,7 +437,7 @@
     </main>
   </div>
 
-  <div class="modal-backdrop" id="passwordModal" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+  <dialog class="modal-backdrop" id="passwordModal" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
     <div class="modal">
       <h2 id="passwordTitle">Change admin password</h2>
       <p>This changes your web admin password only. Your desktop profile is unchanged.</p>
@@ -448,8 +449,8 @@
         <div class="form-actions"><button class="button subtle" id="cancelPasswordButton" type="button">Cancel</button><button class="button primary" id="savePasswordButton" type="submit">Save password</button></div>
       </form>
     </div>
-  </div>
-  <div class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+  </dialog>
+  <dialog class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
     <div class="modal">
       <h2 id="authTitle">Unlock server control</h2>
       <p id="authCopy">Use your Loom account password to open server control. Sign out when you are done.</p>
@@ -477,13 +478,13 @@
         </div>
       </form>
     </div>
-  </div>
-  <div class="modal-backdrop" id="rootModal" role="dialog" aria-modal="true" aria-labelledby="rootTitle">
+  </dialog>
+  <dialog class="modal-backdrop" id="rootModal" role="dialog" aria-modal="true" aria-labelledby="rootTitle">
     <div class="modal"><h2 id="rootTitle">Add a library folder</h2><p id="rootCopy">Add a local folder or a NAS share mounted where the Loom Media Server can read it.</p><form id="rootForm"><div class="form-grid"><div class="field full"><label for="rootPath">Server-mounted path</label><div class="path-control"><input id="rootPath" type="text" required placeholder="/media/Movies" aria-describedby="rootPathHint"><button class="button subtle" id="browseRootButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-open"></use></svg>Browse</button></div><p class="field-hint" id="rootPathHint">Use the server path, not the host path. For Docker, map a host folder to <code>/media/Movies</code> first, then choose it here.</p></div><div class="path-picker" id="rootPicker" hidden><div class="path-picker-head"><div><strong>Mounted folders</strong><p id="rootPickerPath">/media</p></div><button class="button subtle" id="closePickerButton" type="button">Close</button></div><div class="path-picker-toolbar"><button class="button subtle" id="rootPickerUpButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-up"></use></svg>Up</button><button class="button primary" id="rootPickerUseButton" type="button">Use this folder</button></div><div class="path-picker-list" id="rootPickerList" role="listbox" aria-label="Mounted folders"></div><p class="field-hint">Finder/Explorer cannot expose a host path to a browser. This list shows folders visible inside Loom Media Server, including Docker and NAS mounts.</p></div><div class="field full"><label for="rootKind">Library type</label><select id="rootKind"><option value="movies">Movies</option><option value="tvShows">TV shows</option><option value="anime">Anime</option><option value="others">Other video</option></select></div><div class="form-actions"><button class="button subtle" id="closeRootButton" type="button">Cancel</button><button class="button primary" type="submit"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#plus"></use></svg>Add folder</button></div></div></form></div>
-  </div>
-  <div class="modal-backdrop" id="userModal" role="dialog" aria-modal="true" aria-labelledby="userTitle">
+  </dialog>
+  <dialog class="modal-backdrop" id="userModal" role="dialog" aria-modal="true" aria-labelledby="userTitle">
     <div class="modal"><h2 id="userTitle">Add user</h2><p id="userCopy">Create a scoped account for someone who uses this server.</p><form id="userForm"><div class="form-grid"><div class="field"><label for="userName">Account name</label><input id="userName" type="text" required maxlength="80" autocomplete="username" placeholder="Alex"></div><div class="field"><label for="userRole">Role</label><select id="userRole"><option value="viewer">Viewer</option><option value="user">User</option><option value="admin">Administrator</option></select></div><div class="field full"><label for="userPassword">Password</label><input id="userPassword" type="password" required minlength="8" maxlength="256" autocomplete="new-password" placeholder="At least 8 characters"></div><div class="field full"><label>Permissions</label><div class="permission-grid" id="userPermissions"></div></div><div class="field full"><label>Library roots</label><div class="user-root-list" id="userRoots"></div><p class="field-hint">Leave every root unchecked to grant access to all current and future roots.</p></div><div class="field"><label for="userDeviceIds">Allowed device IDs (optional)</label><input id="userDeviceIds" type="text" maxlength="2048" placeholder="living-room, tablet"><p class="field-hint">Comma-separated IDs. Leave blank to allow any device.</p></div><div class="field"><label for="userMaxSessions">Concurrent sessions (optional)</label><input id="userMaxSessions" type="number" min="1" max="32" inputmode="numeric" placeholder="Unlimited"><p class="field-hint">Limit simultaneous sign-ins for this account.</p></div><div class="field full"><label class="permission-option"><input id="userDisabled" type="checkbox"><span>Disable this account and revoke its active sessions</span></label></div><div class="form-actions"><button class="button subtle" id="closeUserButton" type="button">Cancel</button><button class="button primary" type="submit" id="userSubmit">Create user</button></div></div></form></div>
-  </div>
+  </dialog>
   <div class="toast" id="toast" role="status"></div>
 
   <script>
@@ -753,7 +754,7 @@
         $('userRoots').innerHTML = rootsForUserForm(user);
         $('userDeviceIds').value = user?.deviceIds?.join(', ') || '';
         $('userMaxSessions').value = user?.maxSessions ?? '';
-        $('userModal').classList.add('show');
+        $('userModal').showModal();
         $('userName').focus();
       }
       function rootsForUserForm(user) {
@@ -762,7 +763,7 @@
         const assigned = user?.rootIds === null || !user ? null : new Set(user.rootIds || []);
         return roots.map((root) => `<label class="user-root-option"><input type="checkbox" name="userRoot" value="${escapeHtml(root.id)}"${assigned === null || assigned.has(root.id) ? ' checked' : ''}><span>${escapeHtml(root.path)}</span></label>`).join('');
       }
-      function closeUser() { state.userEditing = null; $('userModal').classList.remove('show'); }
+      function closeUser() { state.userEditing = null; $('userModal').close(); }
       function selectedUserPermissions() { return [...document.querySelectorAll('input[name="userPermission"]:checked')].map((input) => input.value); }
       function selectedUserRoots() { return [...document.querySelectorAll('input[name="userRoot"]:checked')].map((input) => input.value); }
       async function refreshScan() { try { renderScan(await request('/library/scan')); } catch (err) { error(err.message); } }
@@ -807,7 +808,7 @@
       function openAuth(firstRun) {
         const name = $('ownerName');
         const password = $('ownerPassword');
-        $('authModal').classList.add('show');
+        $('authModal').showModal();
         $('ownerNameField').style.display = 'grid';
         name.required = firstRun;
         name.placeholder = firstRun ? 'Your name' : 'Leave blank for the owner account';
@@ -825,9 +826,9 @@
         updateAuthSubmitState();
         (firstRun ? name : password).focus();
       }
-      function closeAuth() { $('authModal').classList.remove('show'); }
-      function openRoot(kind) { $('rootModal').classList.add('show'); closeRootPicker(); if (kind) $('rootKind').value = kind; $('rootPath').focus(); }
-      function closeRoot() { closeRootPicker(); $('rootModal').classList.remove('show'); }
+      function closeAuth() { $('authModal').close(); }
+      function openRoot(kind) { $('rootModal').showModal(); closeRootPicker(); if (kind) $('rootKind').value = kind; $('rootPath').focus(); }
+      function closeRoot() { closeRootPicker(); $('rootModal').close(); }
       const PAGES = {
         overview: ['Overview', 'Server status, library folders, and active playback.'],
         library: ['Library folders', 'Add local folders or OS-mounted NAS shares. Unavailable folders stay saved until you reconnect or remove them.'],
@@ -870,15 +871,17 @@
       $('refreshButton').addEventListener('click', loadBootstrap);
       $('authButton').addEventListener('click', () => { void signOutAdmin(); });
       const closePassword = () => {
-        $('passwordModal').classList.remove('show');
+        $('passwordModal').close();
         $('passwordForm').reset();
         show('passwordError', false);
-        $('changePasswordButton').focus();
       };
       $('changePasswordButton').addEventListener('click', () => {
-        $('passwordModal').classList.add('show');
+        $('passwordModal').showModal();
         $('currentAdminPassword').focus();
       });
+      for (const [id, close] of [['passwordModal', closePassword], ['authModal', closeAuth], ['rootModal', closeRoot], ['userModal', closeUser]]) {
+        $(id).addEventListener('cancel', (event) => { event.preventDefault(); close(); });
+      }
       $('cancelPasswordButton').addEventListener('click', closePassword);
       $('passwordForm').addEventListener('submit', async (event) => {
         event.preventDefault();

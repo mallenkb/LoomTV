@@ -15,7 +15,8 @@ type ActiveTransport = {
 
 const nativeTransport = requireOptionalNativeModule<SecureTransportNativeModule>('LoomTvSecureTransport');
 let activeTransport: ActiveTransport | null = null;
-let pendingConfiguration: Promise<ActiveTransport> | null = null;
+let transportQueue: Promise<unknown> = Promise.resolve();
+let transportGeneration = 0;
 
 function normalizedFingerprint(value: string): string {
   const normalized = value.replace(/[^0-9a-f]/gi, '').toLowerCase();
@@ -55,23 +56,17 @@ export async function configureSecureLanTransport(
   if (activeTransport?.remoteOrigin === remoteOrigin && activeTransport.certFingerprint === fingerprint) {
     return activeTransport;
   }
-  if (pendingConfiguration) await pendingConfiguration;
-  if (activeTransport?.remoteOrigin === remoteOrigin && activeTransport.certFingerprint === fingerprint) {
+  const generation = transportGeneration;
+  const pending = transportQueue.catch(() => undefined).then(async () => {
+    if (generation !== transportGeneration) throw new Error('Secure transport configuration was superseded.');
+    const transport = requireTransport();
+    const proxyBaseUrl = await transport.start(remoteOrigin, fingerprint);
+    if (generation !== transportGeneration) throw new Error('Secure transport configuration was superseded.');
+    activeTransport = { remoteOrigin, proxyBaseUrl: normalizeLoopbackProxyBaseUrl(proxyBaseUrl), certFingerprint: fingerprint };
     return activeTransport;
-  }
-
-  const transport = requireTransport();
-  pendingConfiguration = transport.start(remoteOrigin, fingerprint).then((proxyBaseUrl) => {
-    activeTransport = {
-      remoteOrigin,
-      proxyBaseUrl: normalizeLoopbackProxyBaseUrl(proxyBaseUrl),
-      certFingerprint: fingerprint,
-    };
-    return activeTransport;
-  }).finally(() => {
-    pendingConfiguration = null;
   });
-  return pendingConfiguration;
+  transportQueue = pending;
+  return pending;
 }
 
 export function secureLanUrl(value: string): string {
@@ -81,6 +76,8 @@ export function secureLanUrl(value: string): string {
 
 export async function stopSecureLanTransport(): Promise<void> {
   activeTransport = null;
-  pendingConfiguration = null;
-  if (nativeTransport) await nativeTransport.stop();
+  transportGeneration += 1;
+  const pending = transportQueue.catch(() => undefined).then(() => nativeTransport?.stop());
+  transportQueue = pending;
+  await pending;
 }

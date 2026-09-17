@@ -16,6 +16,7 @@ Requirements:
 
 - Node.js
 - pnpm via Corepack
+- Rust via rustup for desktop tests. The pinned Rust 1.98.0 toolchain is selected automatically from `rust-toolchain.toml`.
 - A desktop environment supported by Electron
 
 Install dependencies from the repository root:

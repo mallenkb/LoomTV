@@ -1023,6 +1023,8 @@ function AppRoot() {
   }, [splashOpacity, splashScale]);
 
   const {
+    sessionGenerationRef,
+    captureSession,
     activeProfile,
     appState,
     appStateRef,
@@ -1151,6 +1153,7 @@ function AppRoot() {
   const [posterCandidateSheet, setPosterCandidateSheet] = useState<PosterCandidateSheetState | null>(null);
   const [applyingPosterCandidateId, setApplyingPosterCandidateId] = useState('');
   const {
+    clearHostDownloads,
     downloads: mobileDownloads,
     downloadingMediaId,
     downloadPlayTarget,
@@ -1163,33 +1166,39 @@ function AppRoot() {
     isServerOffline,
   });
 
+  const resetMediaSessionForProfileChange = (): void => {
+    sessionGenerationRef.current += 1;
+    mobileLanClient.cancelActiveRequests();
+    clearCapturedMobileFocus();
+    mandatoryPlayerTeardownRef.current();
+    activeCatalogIdentityRef.current = 'profile:none:-1';
+    detailItemCacheRef.current.clear();
+    detailItemRequestsRef.current.clear();
+    lastDetailByKindRef.current.clear();
+    setDetailItem(null);
+    setPosterCandidateSheet(null);
+    setApplyingPosterCandidateId('');
+    setMiniPlayerTarget(null);
+    playerReturnItemRef.current = null;
+    closingPlayerRef.current = false;
+    setPlayTarget(null);
+    setPlaybackUrl(null);
+    setPlaybackFailure(null);
+    setIsPreparingStream(false);
+    setStreamOptions({});
+    shouldAutoplayRef.current = false;
+    userPausedRef.current = false;
+    pendingSeekRef.current = 0;
+    autoAdvancedEpisodeRef.current = null;
+  };
+
   const enterProfilePicker = (mode: MobileProfilePickerMode, nextConnection?: Connection, selectionRevision?: number): void => {
     profileHydrationGenerationRef.current += 1;
     setProfilePinTarget(null);
     setProfilePin('');
     setProfileError('');
     if (mode !== 'voluntary') {
-      clearCapturedMobileFocus();
-      mandatoryPlayerTeardownRef.current();
-      activeCatalogIdentityRef.current = 'profile:none:-1';
-      detailItemCacheRef.current.clear();
-      detailItemRequestsRef.current.clear();
-      lastDetailByKindRef.current.clear();
-      setDetailItem(null);
-      setPosterCandidateSheet(null);
-      setApplyingPosterCandidateId('');
-      setMiniPlayerTarget(null);
-      playerReturnItemRef.current = null;
-      closingPlayerRef.current = false;
-      setPlayTarget(null);
-      setPlaybackUrl(null);
-      setPlaybackFailure(null);
-      setIsPreparingStream(false);
-      setStreamOptions({});
-      shouldAutoplayRef.current = false;
-      userPausedRef.current = false;
-      pendingSeekRef.current = 0;
-      autoAdvancedEpisodeRef.current = null;
+      resetMediaSessionForProfileChange();
       setActiveProfile(null);
       setAutomaticProfileSignIn(false);
       setProfileLists([]);
@@ -1355,14 +1364,7 @@ function AppRoot() {
     const timer = setTimeout(() => {
       void refreshSavedCredentials(savedConnection).catch(async (nextError) => {
         if (isCredentialAuthorizationFailure(nextError)) {
-          invalidateCredentialRefresh();
-          await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-          await clearMobileOfflineSnapshot(savedConnection.hostDeviceId);
-          setSavedConnection(null);
-          setConnection(null);
-          void stopSecureLanTransport();
-          setOfflineSnapshotSavedAt(null);
-          setIsServerOffline(false);
+          clearAuthorizedSession(savedConnection.hostDeviceId);
           setError('Your secure session expired. Pair with the LoomTV server again.');
           return;
         }
@@ -1566,6 +1568,7 @@ function AppRoot() {
   ) => {
     if (!connection) return;
     if (isServerOffline) throw new Error('Reconnect to the LoomTV server before changing My List.');
+    const isCurrent = captureSession();
     let response = await mobileLanClient.setProfileList(
       connection.baseUrl,
       connection.deviceToken,
@@ -1576,6 +1579,7 @@ function AppRoot() {
     );
     if (!response.ok) throw new Error('The profile list could not be updated.');
     let nextLists = await readJsonResponse(response, mobileProfileListSchema, 'Profile list update');
+    if (!isCurrent()) return;
     if (kind === 'watchlist' && !present) {
       response = await mobileLanClient.setProfileList(
         connection.baseUrl,
@@ -1588,8 +1592,8 @@ function AppRoot() {
       if (!response.ok) throw new Error('The profile list could not be updated.');
       nextLists = await readJsonResponse(response, mobileProfileListSchema, 'Profile list update');
     }
-    setProfileLists(nextLists);
-  }, [connection, isServerOffline, setProfileLists]);
+    if (isCurrent()) setProfileLists(nextLists);
+  }, [captureSession, connection, isServerOffline, setProfileLists]);
 
   const playHomeItem = useCallback((item: MediaItem) => {
     if (isServerOffline) {
@@ -1897,6 +1901,7 @@ function AppRoot() {
   const closePlayer = useCallback(async () => {
     if (closingPlayerRef.current) return;
     closingPlayerRef.current = true;
+    const isCurrent = captureSession();
 
     // Keep the player mounted until Expo confirms the portrait lock. This
     // prevents the library from being revealed in a stale landscape layout.
@@ -1930,6 +1935,7 @@ function AppRoot() {
       if (windowSizeRef.current.height >= windowSizeRef.current.width) break;
     }
 
+    if (!isCurrent()) return;
     try {
       setPlayTarget(null);
       setPlaybackUrl(null);
@@ -1956,7 +1962,7 @@ function AppRoot() {
     } finally {
       closingPlayerRef.current = false;
     }
-  }, [activeKind, appliedOrientationLockRef, catalogCacheKeyFor, closingPlayerRef, desiredOrientationLockRef, detailItem?.id, itemsById, lastDetailByKindRef, orientationLockQueueRef, playerReturnItemRef, playTarget, playbackFailure, player, setDetailItem, setMiniPlayerTarget, setPlayTarget, setPlaybackFailure, setPlaybackUrl, setStreamOptions, syncPlaybackProgress, windowSizeRef]);
+  }, [captureSession, activeKind, appliedOrientationLockRef, catalogCacheKeyFor, closingPlayerRef, desiredOrientationLockRef, detailItem?.id, itemsById, lastDetailByKindRef, orientationLockQueueRef, playerReturnItemRef, playTarget, playbackFailure, player, setDetailItem, setMiniPlayerTarget, setPlayTarget, setPlaybackFailure, setPlaybackUrl, setStreamOptions, syncPlaybackProgress, windowSizeRef]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -2137,7 +2143,8 @@ function AppRoot() {
     }
     const payload = await readJsonResponse(response, mobileProfileSelectionSchema, 'Profile selection');
     if (selectionGeneration !== profileHydrationGenerationRef.current) return;
-    await hydrateSelectedProfile(nextConnection, payload.profile, payload.active, selectionGeneration);
+    enterProfilePicker('profile-required', nextConnection, payload.active.selectionRevision);
+    await hydrateSelectedProfile(nextConnection, payload.profile, payload.active, profileHydrationGenerationRef.current);
   }
 
   async function initializeProfiles(nextConnection: Connection): Promise<boolean> {
@@ -2252,12 +2259,7 @@ function AppRoot() {
         catalog = await requestMobileCatalog(baseConnection);
       }
       if (catalog.status === 'unauthorized') {
-        invalidateCredentialRefresh();
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        await clearMobileOfflineSnapshot(saved.hostDeviceId);
-        setSavedConnection(null);
-        setOfflineSnapshotSavedAt(null);
-        setIsServerOffline(false);
+        clearAuthorizedSession(saved.hostDeviceId);
         setError('This device is no longer authorized. Select the server and approve pairing again.');
         return true;
       }
@@ -2287,13 +2289,7 @@ function AppRoot() {
       return true;
     } catch (nextError) {
       if (isCredentialAuthorizationFailure(nextError)) {
-        invalidateCredentialRefresh();
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        await clearMobileOfflineSnapshot(saved.hostDeviceId);
-        setSavedConnection(null);
-        setConnection(null);
-        void stopSecureLanTransport();
-        setOfflineSnapshotSavedAt(null);
+        clearAuthorizedSession(saved.hostDeviceId);
         setError('Your secure session expired. Select the server and approve pairing again.');
         setIsServerOffline(false);
         return true;
@@ -2481,14 +2477,7 @@ function AppRoot() {
         return;
       }
       if (result.status === 'unauthorized') {
-        invalidateCredentialRefresh();
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        await clearMobileOfflineSnapshot(connection.hostDeviceId);
-        setSavedConnection(null);
-        setConnection(null);
-        void stopSecureLanTransport();
-        setOfflineSnapshotSavedAt(null);
-        setIsServerOffline(false);
+        clearAuthorizedSession(connection.hostDeviceId);
         setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
@@ -2514,14 +2503,7 @@ function AppRoot() {
       setOfflineSnapshotSavedAt(null);
     } catch (nextError) {
       if (isCredentialAuthorizationFailure(nextError)) {
-        invalidateCredentialRefresh();
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        await clearMobileOfflineSnapshot(connection.hostDeviceId);
-        setSavedConnection(null);
-        setConnection(null);
-        void stopSecureLanTransport();
-        setOfflineSnapshotSavedAt(null);
-        setIsServerOffline(false);
+        clearAuthorizedSession(connection.hostDeviceId);
         setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
@@ -2558,14 +2540,7 @@ function AppRoot() {
         return;
       }
       if (result.status === 'unauthorized') {
-        invalidateCredentialRefresh();
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        await clearMobileOfflineSnapshot(connection.hostDeviceId);
-        setSavedConnection(null);
-        setConnection(null);
-        void stopSecureLanTransport();
-        setOfflineSnapshotSavedAt(null);
-        setIsServerOffline(false);
+        clearAuthorizedSession(connection.hostDeviceId);
         setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
@@ -2593,14 +2568,7 @@ function AppRoot() {
       setError('');
     } catch (nextError) {
       if (isCredentialAuthorizationFailure(nextError)) {
-        invalidateCredentialRefresh();
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        await clearMobileOfflineSnapshot(connection.hostDeviceId);
-        setSavedConnection(null);
-        setConnection(null);
-        void stopSecureLanTransport();
-        setOfflineSnapshotSavedAt(null);
-        setIsServerOffline(false);
+        clearAuthorizedSession(connection.hostDeviceId);
         setError(MOBILE_REPAIR_MESSAGE);
         return;
       }
@@ -2687,15 +2655,23 @@ function AppRoot() {
     setStreamOptions({});
   }
 
-  function disconnectFromDesktop(): void {
-    const hostDeviceId = connection?.hostDeviceId;
-    profileHydrationGenerationRef.current += 1;
+  function clearAuthorizedSession(hostDeviceId: string): void {
+    enterProfilePicker('lock');
     invalidateCredentialRefresh();
-    void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-    if (hostDeviceId) void clearMobileOfflineSnapshot(hostDeviceId);
+    setProfiles([]);
     setSavedConnection(null);
     setConnection(null);
-    void stopSecureLanTransport();
+    setProfilePickerMode(null);
+    setOfflineSnapshotSavedAt(null);
+    setIsServerOffline(false);
+    void stopSecureLanTransport().catch((error) => reportNonFatal('transport.stop', error));
+    void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY).catch((error) => reportNonFatal('connection.clear', error));
+    void clearMobileOfflineSnapshot(hostDeviceId);
+    void clearHostDownloads(hostDeviceId).catch((error) => reportNonFatal('downloads.clear', error));
+  }
+  function disconnectFromDesktop(): void {
+    const hostDeviceId = connection?.hostDeviceId || savedConnection?.hostDeviceId || '';
+    clearAuthorizedSession(hostDeviceId);
     setBaseUrl('');
     setShareCode('');
     setDetailItem(null);

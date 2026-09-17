@@ -581,6 +581,36 @@ test('rollback replaces a damaged desktop source and keeps the damaged copy', as
   assert.ok(siblings.some((name) => name.startsWith('loomtv.sqlite.pre-rollback-')));
 });
 
+test('rollback removes stray destination sidecars even when the main database is intact', async () => {
+  for (const damaged of [false, true]) {
+    const install = await buildDesktopInstall({ libraryAccess: [] });
+    const dataDir = await scratch('rollback-stray-wal');
+    const original = await fs.readFile(install.databasePath);
+    const migration = await runCanonicalMigration(migrationOptions(install, dataDir));
+    const manifestPath = path.join(dataDir, 'work', 'backups', `canonical-cutover-${migration.migrationId}`, 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    assert.equal(manifest.artifacts.some((artifact) => /sqlite-(wal|shm)$/.test(artifact.kind)), false);
+    if (damaged) await fs.writeFile(install.databasePath, 'damaged');
+    await fs.writeFile(`${install.databasePath}-wal`, 'stray destination WAL');
+    await fs.writeFile(`${install.databasePath}-shm`, 'stray destination SHM');
+
+    const result = await rollbackCanonicalMigration({
+      dataDir, confirmServerStopped: true, restoreSources: true, desktopDatabase: install.databasePath,
+    });
+
+    assert.equal(result.rolledBack, true);
+    assert.deepEqual(await fs.readFile(install.databasePath), original);
+    for (const suffix of ['-wal', '-shm']) {
+      await assert.rejects(fs.access(`${install.databasePath}${suffix}`), { code: 'ENOENT' });
+      const siblings = await fs.readdir(path.dirname(install.databasePath));
+      const saved = siblings.find((name) => name.startsWith(`${path.basename(install.databasePath)}${suffix}.pre-rollback-`));
+      assert.ok(saved);
+      assert.equal(await fs.readFile(path.join(path.dirname(install.databasePath), saved), 'utf8'),
+        suffix === '-wal' ? 'stray destination WAL' : 'stray destination SHM');
+    }
+  }
+});
+
 test('rollback requires an explicit confirmation that every server is stopped', async () => {
   const dataDir = await scratch('data');
   const error = await rollbackCanonicalMigration({ dataDir }).then(() => null, (thrown) => thrown);

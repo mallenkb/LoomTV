@@ -8,7 +8,7 @@ After=network-online.target
 Type=simple
 User=loomtv
 Group=loomtv
-EnvironmentFile=-/etc/loomtv/loomtv.env
+EnvironmentFile=/etc/loomtv/loomtv.env
 WorkingDirectory=/opt/loomtv
 
 # The release layout intentionally mirrors the container layout.  Keep the

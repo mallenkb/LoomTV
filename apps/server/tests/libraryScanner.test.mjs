@@ -116,6 +116,32 @@ test('quick rescans keep enriched fields on unchanged files; full rescans rebuil
   assert.equal(state.catalog[0].plot, undefined, 'full scan must rebuild records from disk');
 });
 
+test('a quick scan retains a newly acquired probe on an unchanged enriched record', async (t) => {
+  const rootPath = await makeLibrary(['stable.mkv']);
+  t.after(() => fs.rm(rootPath, { recursive: true, force: true }));
+  const { scanner, state } = makeHarness({ roots: [{ id: 'root-1', path: rootPath }] });
+  await scanner.start({ mode: 'quick' });
+  await waitForScan(state);
+  state.catalog[0].title = 'Enriched title';
+  let calls = 0;
+  const probingScanner = createHeadlessLibraryScanner({
+    loadState: async () => state,
+    saveState: async () => undefined,
+    appendLog: async () => undefined,
+    probeMedia: async (_path, { sourceId }) => {
+      calls += 1;
+      return { sourceId, container: 'matroska', tracks: [], chapters: [], hdr: false, probedAt: 1, adapterGaps: [] };
+    },
+  });
+  await probingScanner.start({ mode: 'quick' });
+  await waitForScan(state);
+  assert.equal(state.catalog[0].localMetadata.container, 'matroska');
+  assert.equal(state.catalog[0].title, 'Enriched title');
+  await probingScanner.start({ mode: 'quick' });
+  await waitForScan(state);
+  assert.equal(calls, 1);
+});
+
 test('a metadata scan refreshes classification and discloses missing online providers', async () => {
   const rootPath = await makeLibrary(['Show/Season 1/Show.S01E02.mkv']);
   const { scanner, state } = makeHarness({ roots: [{ id: 'root-1', path: rootPath }] });

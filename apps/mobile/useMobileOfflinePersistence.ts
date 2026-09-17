@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 
 import type { Connection, MobileProfile, MobileProfileListEntry, StoredProgress } from './mobileDomain';
 import { reportNonFatal } from './mobileDiagnostics';
-import { clearMobileOfflineSnapshot, saveMobileOfflineSnapshot } from './mobileOfflineCache';
+import { clearMobileOfflineSnapshot, mobileOfflineCacheGeneration, saveMobileOfflineSnapshot } from './mobileOfflineCache';
 
 export function useMobileOfflinePersistence({
   activeProfile,
@@ -31,7 +31,7 @@ export function useMobileOfflinePersistence({
       void clearMobileOfflineSnapshot(connection.hostDeviceId);
       return undefined;
     }
-    if (isServerOffline) return undefined;
+    const generation = mobileOfflineCacheGeneration(connection.hostDeviceId);
     const timer = setTimeout(() => {
       void saveMobileOfflineSnapshot({
         hostDeviceId: connection.hostDeviceId,
@@ -45,7 +45,7 @@ export function useMobileOfflinePersistence({
         selectionRevision: connection.selectionRevision,
         progress,
         profileLists,
-      }).catch((error) => reportNonFatal('offline-cache.save', error));
+      }, generation).catch((error) => reportNonFatal('offline-cache.save', error));
     }, 500);
     return () => clearTimeout(timer);
   }, [activeProfile, automaticProfileSignIn, connection, isServerOffline, profileLists, profiles, progress, showProfilePicker]);

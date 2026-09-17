@@ -129,6 +129,38 @@ test('skipSmokeTest trusts compiled encoders without executing a frame probe', (
   assert.equal(fixture.calls.some((args) => args.includes('-frames:v')), false);
 });
 
+test('Windows QSV uses an implicit GPU and verifies each compiled encoder', () => {
+  for (const smokeSucceeds of [true, false]) {
+    const calls = [];
+    const result = probeTranscodeCapabilities(process.execPath, {
+      platform: 'win32',
+      environment: {},
+      commandRunner: (_command, args, options) => {
+        calls.push([...args]);
+        assert.equal(options.windowsHide, true);
+        if (args.includes('-encoders')) return 'h264_qsv hevc_qsv libx264 h264_vaapi';
+        if (args.includes('-hwaccels')) return 'qsv vaapi';
+        if (args.includes('-frames:v') && !smokeSucceeds) throw new Error('No Intel GPU');
+        return '';
+      },
+    });
+    const qsv = result.backends.find(({ id }) => id === 'qsv');
+    assert.equal(qsv.device, 'windows-gpu');
+    assert.equal(qsv.platformSupported, true);
+    assert.equal(qsv.available, smokeSucceeds);
+    assert.equal(qsv.codecs.h264.verified, smokeSucceeds);
+    assert.equal(qsv.codecs.hevc.verified, smokeSucceeds);
+    assert.equal(qsv.codecs.av1.compiled, false);
+    assert.equal(result.recommendedBackend, smokeSucceeds ? 'qsv' : 'software');
+    assert.equal(result.backends.find(({ id }) => id === 'vaapi').device, null);
+    assert.deepEqual(calls.filter((args) => args.includes('-frames:v')), ['h264_qsv', 'hevc_qsv'].map((encoder) => [
+      '-hide_banner', '-loglevel', 'error', '-init_hw_device', 'qsv=hw',
+      '-f', 'lavfi', '-i', 'color=c=black:s=128x128:r=1', '-frames:v', '1',
+      '-vf', 'format=nv12,hwupload', '-an', '-c:v', encoder, '-f', 'null', '-',
+    ]));
+  }
+});
+
 test('backendEncoder returns null for absent capability data', () => {
   assert.equal(backendEncoder(null, 'nvenc'), null);
   assert.equal(backendEncoder({ backends: [] }, 'nvenc'), null);

@@ -18,7 +18,6 @@ blockExoticSubdeps: false
 # 24 hour delay before pnpm accepts newly published package versions.
 minimumReleaseAge: 1440
 nodeLinker: hoisted
-resolution-mode: highest
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.3
   vite-plus: 0.2.3

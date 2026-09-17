@@ -71,8 +71,10 @@ export function createTranscodeCacheQuota(options = {}) {
     violations: [],
   };
 
-  function reservedBytes() {
-    return [...reservations.values()].reduce((sum, reservation) => sum + reservation.bytes, 0);
+  function reservedBytes(sessionBytes = lastStatus.sessionBytes) {
+    return [...reservations.values()].reduce((sum, reservation) => (
+      sum + Math.max(0, reservation.bytes - (sessionBytes.get(reservation.id) || 0))
+    ), 0);
   }
 
   async function scanFiles() {
@@ -125,9 +127,9 @@ export function createTranscodeCacheQuota(options = {}) {
   /** @param {QuotaStatus} status */
   function violationsFor(status) {
     const violations = [];
-    if (status.totalBytes + status.reservedBytes >= maxTotalBytes) violations.push('total_bytes');
+    if (status.totalBytes + status.reservedBytes > maxTotalBytes) violations.push('total_bytes');
     if (status.freeBytes === null && minFreeBytes > 0) violations.push('free_space_unknown');
-    if (status.freeBytes !== null && status.freeBytes < minFreeBytes) violations.push('free_space');
+    if (status.freeBytes !== null && status.freeBytes < minFreeBytes + status.reservedBytes) violations.push('free_space');
     for (const bytes of status.sessionBytes.values()) {
       if (bytes > maxSessionBytes) {
         violations.push('session_bytes');
@@ -140,6 +142,9 @@ export function createTranscodeCacheQuota(options = {}) {
   function currentStatus() {
     const current = { ...lastStatus, reservedBytes: reservedBytes() };
     current.violations = violationsFor(current);
+    if (current.state === 'within-quota' || current.state === 'over-quota') {
+      current.state = current.violations.length ? 'over-quota' : 'within-quota';
+    }
     return current;
   }
 
@@ -150,7 +155,7 @@ export function createTranscodeCacheQuota(options = {}) {
           const next = {
             ...lastStatus,
             ...scan,
-            reservedBytes: reservedBytes(),
+            reservedBytes: reservedBytes(scan.sessionBytes),
           };
           next.violations = violationsFor(next);
           next.state = next.violations.length ? 'over-quota' : 'within-quota';
@@ -172,15 +177,16 @@ export function createTranscodeCacheQuota(options = {}) {
   }
 
   async function checkAdmission() {
-    const current = { ...(await status()), reservedBytes: reservedBytes() };
+    await status();
+    const current = currentStatus();
     if (current.state === 'unavailable') throw quotaError(503, 'transcode_cache_unavailable', 'The transcode cache is unavailable.');
     if (current.freeBytes === null && minFreeBytes > 0) {
       throw quotaError(503, 'transcode_cache_free_space_unknown', 'The server could not verify free cache space.');
     }
-    if (current.totalBytes + current.reservedBytes >= maxTotalBytes) {
+    if (current.totalBytes + current.reservedBytes > maxTotalBytes) {
       throw quotaError(507, 'transcode_cache_quota', 'The transcode cache has reached its total byte quota.');
     }
-    if (current.freeBytes !== null && current.freeBytes < minFreeBytes) {
+    if (current.freeBytes !== null && current.freeBytes < minFreeBytes + current.reservedBytes) {
       throw quotaError(507, 'transcode_cache_free_space', 'The server does not have enough free cache space.');
     }
     return current;
@@ -190,15 +196,18 @@ export function createTranscodeCacheQuota(options = {}) {
   async function reserve(id, principalId, bytes = maxSessionBytes) {
     if (reservations.has(id)) return reservations.get(id);
     const reservationBytes = boundedBytes(bytes, maxSessionBytes);
-    const current = { ...(await status()), reservedBytes: reservedBytes() };
+    await status();
+    if (reservations.has(id)) return reservations.get(id);
+    const current = currentStatus();
+    const unwrittenBytes = Math.max(0, reservationBytes - (current.sessionBytes.get(id) || 0));
     if (current.state === 'unavailable') throw quotaError(503, 'transcode_cache_unavailable', 'The transcode cache is unavailable.');
     if (current.freeBytes === null && minFreeBytes > 0) {
       throw quotaError(503, 'transcode_cache_free_space_unknown', 'The server could not verify free cache space.');
     }
-    if (current.totalBytes + current.reservedBytes + reservationBytes > maxTotalBytes) {
+    if (current.totalBytes + current.reservedBytes + unwrittenBytes > maxTotalBytes) {
       throw quotaError(507, 'transcode_cache_quota', 'The transcode cache cannot reserve space for this transcode.');
     }
-    if (current.freeBytes !== null && current.freeBytes < minFreeBytes + reservationBytes) {
+    if (current.freeBytes !== null && current.freeBytes < minFreeBytes + current.reservedBytes + unwrittenBytes) {
       throw quotaError(507, 'transcode_cache_free_space', 'The server does not have enough free cache space.');
     }
     const reservation = { id, principalId, bytes: reservationBytes, createdAt: now() };
@@ -212,7 +221,7 @@ export function createTranscodeCacheQuota(options = {}) {
     const reservation = reservations.get(id);
     if (!reservation) return false;
     reservations.delete(id);
-    lastStatus = { ...lastStatus, reservedBytes: Math.max(0, lastStatus.reservedBytes - reservation.bytes) };
+    lastStatus = { ...lastStatus, reservedBytes: reservedBytes() };
     return true;
   }
 
