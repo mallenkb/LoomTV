@@ -1,0 +1,71 @@
+name: Prepare LoomTV 1.0.174 metadata
+
+on:
+  push:
+    branches:
+      - codex/fix-legacy-mac-updater-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: codex/fix-legacy-mac-updater-bootstrap
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Prepare 1.0.174 metadata
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          package_path = Path('apps/desktop/package.json')
+          package = json.loads(package_path.read_text())
+          if package.get('version') != '1.0.173':
+              raise SystemExit(f"Expected desktop version 1.0.173, found {package.get('version')}")
+          package['version'] = '1.0.174'
+          package_path.write_text(json.dumps(package, indent=2) + '\n')
+
+          changelog_path = Path('CHANGELOG.md')
+          changelog = changelog_path.read_text()
+          anchor = '## Recent releases\n\n'
+          if anchor not in changelog:
+              raise SystemExit('CHANGELOG recent releases anchor is missing')
+          entry = '### [1.0.174](docs/releases/v1.0.174.md)\n\nRestores verified automatic macOS updates for legacy ad-hoc LoomTV installations.\n\n'
+          if '### [1.0.174]' not in changelog:
+              changelog = changelog.replace(anchor, anchor + entry, 1)
+          changelog_path.write_text(changelog)
+
+          notes = Path('docs/releases/v1.0.174.md')
+          if notes.exists():
+              raise SystemExit('1.0.174 release notes already exist')
+          notes.write_text('''# LoomTV 1.0.174 release notes
+
+LoomTV 1.0.174 fixes the macOS update migration path for legacy ad-hoc installations.
+
+## Highlights
+
+- Allows a legacy ad-hoc LoomTV installation to upgrade in place to a verified Developer ID-signed release.
+- Keeps already signed installations pinned to their existing Apple Team ID.
+- Requires the updater SHA-512 check, the exact LoomTV bundle identifier, a valid Developer ID Application signature, and Gatekeeper/notarization approval before a legacy bootstrap can install.
+- Preserves the existing rollback-safe macOS replacement flow and service shutdown behavior.
+''')
+          PY
+          git diff --check
+          git diff -- apps/desktop/package.json CHANGELOG.md docs/releases/v1.0.174.md
+      - name: Commit release metadata
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/package.json CHANGELOG.md docs/releases/v1.0.174.md
+          git commit -m "Release Electron desktop app 1.0.174"
+          git push origin HEAD:codex/fix-legacy-mac-updater-bootstrap
