@@ -2,17 +2,17 @@ import { app } from 'electron';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LIBVLC_INSTANCE_ARGUMENTS, shouldEagerWarmLibVlc } from './libvlcRuntimeConfig.ts';
+import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 
 /**
- * Optional process-lifetime LibVLC warmup.
+ * Keep one LibVLC instance alive for the lifetime of the desktop process.
  *
- * Local playback prefers libmpv, so LoomTV no longer creates a LibVLC instance
- * just because the desktop process started. By default a LibVLC fallback/IPTV
- * session owns its instance and releases it when that session closes. Set
- * LOOMTV_WARM_LIBVLC=1 only when trading idle memory for a warmer VLC first
- * frame is deliberate.
+ * LibVLC discovers and loads its plugin bank inside libvlc_new(). Doing that
+ * after the user clicks Play puts module discovery directly on the
+ * click-to-first-frame path. Playback sessions borrow this process-lifetime
+ * instance, while media descriptors, media players, audio tracks and subtitle
+ * state remain session-owned and are released normally between videos.
  */
 
 type NativeValue = string | number | bigint | boolean | null | undefined
@@ -52,7 +52,6 @@ function explicitBoolean(value: unknown): boolean | undefined {
 }
 
 function enabled(): boolean {
-  if (!truthy(process.env.LOOMTV_WARM_LIBVLC)) return false;
   if (process.platform !== 'darwin' && process.platform !== 'win32') return false;
   if (truthy(process.env.LOOMTV_DISABLE_EXPERIMENTAL_LIBVLC)) return false;
   if (truthy(process.env.LOOMTV_DISABLE_LIBVLC)) return false;
@@ -262,9 +261,9 @@ export function warmLibVlcRuntime(): boolean {
 }
 
 /**
- * Return the optional shared LibVLC instance only when the playback runtime
- * resolved the same native library. With the default configuration this returns
- * null, so each LibVLC fallback/IPTV session owns and releases its own instance.
+ * Return the process-lifetime LibVLC instance only when the playback runtime
+ * resolved the same native library. A different configured runtime must never
+ * receive a pointer created by another libvlc image.
  */
 export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance | null {
   if (!warmRuntime && !warmupStarted) warmLibVlcRuntime();
@@ -275,7 +274,6 @@ export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance
 export function releaseWarmLibVlcRuntime(): void {
   const loaded = warmRuntime;
   warmRuntime = null;
-  warmupStarted = false;
   if (!loaded) return;
   try {
     loaded.release(loaded.instance);
@@ -288,14 +286,8 @@ function registerWarmup(): void {
   const electronApp = app as (typeof app | undefined);
   if (!electronApp || typeof electronApp.once !== 'function' || typeof electronApp.isReady !== 'function') return;
   if (!enabled()) return;
-  // macOS prefers libmpv because VLC/VideoToolbox can retain a large decoded
-  // IOSurface pool for 4K media. Keep LibVLC lazy there and initialize it only
-  // if libmpv cannot open the source. Windows retains the warm fallback for
-  // its existing click-to-first-frame behavior.
-  if (shouldEagerWarmLibVlc(process.platform)) {
-    if (electronApp.isReady()) warmLibVlcRuntime();
-    else electronApp.once('ready', () => { warmLibVlcRuntime(); });
-  }
+  if (electronApp.isReady()) warmLibVlcRuntime();
+  else electronApp.once('ready', () => { warmLibVlcRuntime(); });
   electronApp.once('will-quit', () => { releaseWarmLibVlcRuntime(); });
 }
 

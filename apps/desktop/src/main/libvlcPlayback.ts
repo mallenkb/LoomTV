@@ -365,8 +365,9 @@ function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
   if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;
   try {
     // Git checkouts and macOS signing do not preserve the mtimes embedded in
-    // VLC's plugins.dat. Session-owned instances scan on demand. Process-lifetime
-    // warmup remains available only through LOOMTV_WARM_LIBVLC=1.
+    // VLC's plugins.dat. Let the one process-wide instance scan its plugins
+    // once during LoomTV's startup splash instead of validating a stale cache
+    // every time the user presses Play.
     return nativeHandle(runtime.api.newInstance(
       LIBVLC_INSTANCE_ARGUMENTS.length,
       LIBVLC_INSTANCE_ARGUMENTS,
@@ -508,10 +509,10 @@ export function libVlcRuntimeSummary(): string {
 
   const candidate = configuredLibraryCandidate();
   if (candidate) {
-    return `[playback] LibVLC fallback — ${candidate.source} runtime detected at ${candidate.path}; initializes on demand unless LOOMTV_WARM_LIBVLC=1`;
+    return `[playback] LibVLC default — ${candidate.source} runtime detected at ${candidate.path}; one process-lifetime instance is warmed at app startup`;
   }
 
-  return '[playback] LibVLC fallback — no bundled or installed runtime file detected; libmpv or Chromium/HLS will handle compatible playback';
+  return '[playback] LibVLC default — no bundled or installed runtime file detected; compatibility playback will be used if startup warmup cannot create the native runtime';
 }
 
 function finite(value: unknown, fallback: number): number {

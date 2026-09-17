@@ -3,7 +3,6 @@ import React, { createContext, useContext, useReducer, useEffect, useRef, ReactN
 import { desktopApi, type LibraryIndexPayload } from '@/lib/desktopApi';
 import { migrateLegacyArtwork } from '@/lib/customArtwork';
 import { hydrateProgressFromDatabase } from '@/lib/progress';
-import { hasActivePlayback } from '@/lib/playbackLifecycle';
 import {
   createLibraryMutationCoordinator,
   type LibraryMutationDomain,
@@ -832,16 +831,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    const runAutoSync = () => {
+    const intervalId = window.setInterval(() => {
       if (activeProfile?.type !== 'owner' || isScanningRef.current || !hasConfiguredFoldersRef.current) return;
-      // A library scan spawns ffprobe processes, downloads artwork, and queues
-      // metadata and skip-analysis work. Never start that behind playback.
-      if (hasActivePlayback()) {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(runAutoSync, 15 * 60 * 1000);
-        return;
-      }
 
       void (async () => {
         isScanningRef.current = true;
@@ -863,13 +854,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           if (pendingMode) void runLibraryScan(pendingMode);
         }
       })();
-    };
-    const intervalId = window.setInterval(runAutoSync, intervalMs);
+    }, intervalMs);
 
-    return () => {
-      window.clearInterval(intervalId);
-      clearTimeout(retryTimer);
-    };
+    return () => window.clearInterval(intervalId);
   }, [activeProfile?.type, applyScanCatalog, beginLibraryMutation, runLibraryScan, state.autoSyncIntervalHours]);
 
   useEffect(() => {
@@ -877,7 +864,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     let pending = false;
     let disposed = false;
     const refreshRemote = async () => {
-      if (pending || disposed || document.hidden || isScanningRef.current || hasActivePlayback()) return;
+      if (pending || disposed || document.hidden || isScanningRef.current) return;
       pending = true;
       try {
         await loadPrimaryCatalog();

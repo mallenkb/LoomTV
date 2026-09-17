@@ -107,26 +107,10 @@ for (const kind of ['libvlc', 'mpv']) {
     await assert.rejects(f.engine.pause()); f.commandOk = true; await f.engine.pause();
     assert.equal(f.commands.filter(c=>c.value.type==='set-paused').length,2); await f.engine.destroy();
   });
-  test(`${kind}: optimistic seek reports loading at the requested position`, async () => {
-    const f = fixture(kind); await start(f);
-    f.emit({ sessionId: 'active', status: 'ready', position: 4 });
-    await f.engine.seek(42);
-    assert.equal(f.states.at(-1).status, 'loading');
-    assert.equal(f.states.at(-1).position, 42);
-    assert.deepEqual(f.commands.at(-1).value, { type: 'seek', position: 42 });
-    await f.engine.destroy();
-  });
-  test(`${kind}: rapid seeks are forwarded immediately without a delayed queue`, async () => {
-    const f = fixture(kind); await start(f);
-    await f.engine.seek(1); await f.engine.seek(2); await f.engine.seek(3);
-    assert.deepEqual(
-      f.commands.filter(c=>c.value.type==='seek').map(c=>c.value.position),
-      [1, 2, 3],
-    );
-    const count = f.commands.length;
-    await new Promise(r=>setTimeout(r,30));
+  test(`${kind}: queued seeks are cancelled on destroy`, async () => {
+    const f = fixture(kind); await start(f); await f.engine.seek(1); await f.engine.seek(2); await f.engine.seek(3);
+    await f.engine.destroy(); const count=f.commands.length; await new Promise(r=>setTimeout(r,30));
     assert.equal(f.commands.length,count);
-    await f.engine.destroy();
   });
   test(`${kind}: destroyed engines cannot forward stale seek commands`, async () => {
     const f = fixture(kind); await start(f); await f.engine.destroy(); await f.engine.seek(100);

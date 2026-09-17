@@ -149,16 +149,10 @@ export function libMpvAvailability(force = false): MpvAvailability {
 }
 
 export function libMpvRuntimeSummary(): string {
-  if (disabled()) {
-    return '[playback] native libmpv unavailable — Native libmpv playback is disabled for this run.';
-  }
-
-  const paths = configuredPaths();
-  if (paths) {
-    return `[playback] native libmpv default — bundled runtime detected at ${paths.libraryPath}; initializes on demand`;
-  }
-
-  return '[playback] native libmpv unavailable — no bundled libmpv runtime detected; Chromium/HLS will handle compatible playback';
+  const availability = libMpvAvailability();
+  return availability.available
+    ? `[playback] native libmpv ready — ${availability.libraryPath}`
+    : `[playback] native libmpv unavailable — ${availability.reason}`;
 }
 
 function commandList(command: MpvCommand): unknown[][] {
