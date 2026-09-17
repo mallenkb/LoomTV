@@ -14,7 +14,6 @@ import type {
 import PlaybackVolumeController from './PlaybackVolumeController';
 import { NativeSessionLease } from './NativeSessionLease';
 
-const SEEK_COALESCE_MS = 16;
 const METADATA_PROBE_FALLBACK_MS = 2500;
 const METADATA_PROBE_AFTER_READY_MS = 250;
 
@@ -36,9 +35,6 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   private metadataProbeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private metadataProbeGeneration = 0;
   private metadataProbeStarted = false;
-  private seekTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingSeekPosition: number | null = null;
-  private lastSeekSentAt = 0;
   private lastPauseCommand: boolean | null = null;
   private destroyed = false;
 
@@ -73,7 +69,6 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   async load(filePath: string, options?: PlaybackStartOptions): Promise<boolean> {
     if (this.destroyed) throw new Error('The native playback engine has been disposed.');
     this.cancelMetadataProbe();
-    this.cancelSeek();
     this.lastState = null;
     this.nativeTracks = [];
     this.probedTracks = [];
@@ -250,38 +245,13 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     this.emitState({ ...this.lastState, status: 'loading', position });
   }
 
-  private sendSeek(position: number): Promise<void> {
-    this.lastSeekSentAt = performance.now();
-    return this.command({ type: 'seek', position });
-  }
-
-  private cancelSeek(): void {
-    if (this.seekTimer) clearTimeout(this.seekTimer);
-    this.seekTimer = null;
-    this.pendingSeekPosition = null;
-    this.lastSeekSentAt = 0;
-  }
-
   play(): Promise<void> { return this.setPaused(false); }
   pause(): Promise<void> { return this.setPaused(true); }
   seek(position: number): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     const target = Math.max(0, Number.isFinite(position) ? position : 0);
     this.reflectSeek(target);
-    const elapsed = performance.now() - this.lastSeekSentAt;
-    if (!this.seekTimer && elapsed >= SEEK_COALESCE_MS) return this.sendSeek(target);
-    this.pendingSeekPosition = target;
-    if (!this.seekTimer) {
-      this.seekTimer = setTimeout(() => {
-        this.seekTimer = null;
-        const pending = this.pendingSeekPosition;
-        this.pendingSeekPosition = null;
-        if (pending !== null && !this.destroyed) {
-          void this.sendSeek(pending).catch((error) => console.error('[playback] Deferred LibVLC seek failed.', error));
-        }
-      }, Math.max(0, SEEK_COALESCE_MS - elapsed));
-    }
-    return Promise.resolve();
+    return this.command({ type: 'seek', position: target });
   }
   setVolume(volume: number): Promise<void> { return this.volumeController.setVolume(volume); }
   setMuted(muted: boolean): Promise<void> { return this.volumeController.setMuted(muted); }
@@ -318,7 +288,6 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     this.destroyed = true;
     this.listener = undefined;
     this.cancelMetadataProbe();
-    this.cancelSeek();
     this.lastPauseCommand = null;
     this.lastState = null;
     this.nativeTracks = [];
