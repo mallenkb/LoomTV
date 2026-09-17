@@ -1,0 +1,103 @@
+{
+  "count": 50000,
+  "platform": "darwin",
+  "arch": "arm64",
+  "results": [
+    {
+      "repetition": 0,
+      "mode": "typescript",
+      "cacheLoadMs": 1185.602416,
+      "startupMs": 0,
+      "samples": [
+        13.539125000000013,
+        8.003000000000156,
+        7.488582999999835,
+        8.009292000000187,
+        7.806291999999985
+      ],
+      "childRssBytes": 0,
+      "parentPeakRssBytes": 719241216,
+      "note": "Catalog read plus Rust transport/validation. Identity artwork delivery; excludes renderer IPC, image decoding, providers and playback. RSS includes host catalog cache. Child RSS sampled after each response, not a peak."
+    },
+    {
+      "repetition": 0,
+      "mode": "rust",
+      "cacheLoadMs": 1035.638917,
+      "startupMs": 8.7962500000001,
+      "samples": [
+        2405.544834,
+        2136.788875,
+        2042.1165839999994,
+        1983.3292500000007,
+        1918.4333339999994
+      ],
+      "childRssBytes": 345948160,
+      "parentPeakRssBytes": 878592000,
+      "note": "Catalog read plus Rust transport/validation. Identity artwork delivery; excludes renderer IPC, image decoding, providers and playback. RSS includes host catalog cache. Child RSS sampled after each response, not a peak."
+    },
+    {
+      "repetition": 1,
+      "mode": "typescript",
+      "cacheLoadMs": 1059.655041,
+      "startupMs": 0,
+      "samples": [
+        16.578457999999955,
+        8.564624999999978,
+        9.082583000000113,
+        8.639458000000104,
+        8.65316699999994
+      ],
+      "childRssBytes": 0,
+      "parentPeakRssBytes": 879034368,
+      "note": "Catalog read plus Rust transport/validation. Identity artwork delivery; excludes renderer IPC, image decoding, providers and playback. RSS includes host catalog cache. Child RSS sampled after each response, not a peak."
+    },
+    {
+      "repetition": 1,
+      "mode": "rust",
+      "cacheLoadMs": 1106.0734579999998,
+      "startupMs": 4.715333999999984,
+      "samples": [
+        1869.7267080000001,
+        1855.1048330000003,
+        2092.7034170000006,
+        1795.5055000000011,
+        1791.4066250000014
+      ],
+      "childRssBytes": 347914240,
+      "parentPeakRssBytes": 891994112,
+      "note": "Catalog read plus Rust transport/validation. Identity artwork delivery; excludes renderer IPC, image decoding, providers and playback. RSS includes host catalog cache. Child RSS sampled after each response, not a peak."
+    },
+    {
+      "repetition": 2,
+      "mode": "typescript",
+      "cacheLoadMs": 961.5419579999999,
+      "startupMs": 0,
+      "samples": [
+        7.439834000000019,
+        8.461667000000034,
+        7.511082999999871,
+        7.794791000000032,
+        7.639208000000053
+      ],
+      "childRssBytes": 0,
+      "parentPeakRssBytes": 873218048,
+      "note": "Catalog read plus Rust transport/validation. Identity artwork delivery; excludes renderer IPC, image decoding, providers and playback. RSS includes host catalog cache. Child RSS sampled after each response, not a peak."
+    },
+    {
+      "repetition": 2,
+      "mode": "rust",
+      "cacheLoadMs": 975.5733329999999,
+      "startupMs": 4.476167000000032,
+      "samples": [
+        1835.7866250000002,
+        1831.070792,
+        1790.0211250000002,
+        1864.2118329999994,
+        2011.5341249999983
+      ],
+      "childRssBytes": 346963968,
+      "parentPeakRssBytes": 928677888,
+      "note": "Catalog read plus Rust transport/validation. Identity artwork delivery; excludes renderer IPC, image decoding, providers and playback. RSS includes host catalog cache. Child RSS sampled after each response, not a peak."
+    }
+  ]
+}

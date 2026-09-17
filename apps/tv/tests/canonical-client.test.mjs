@@ -17,6 +17,23 @@ test('catalog merges canonical series once and derives availability from episode
   assert.deepEqual(shows[0].episodes, [episode]);
 });
 
+test('TV progress writes canonical fields and only explicitly supplied watched state', async (context) => {
+  const requests = [];
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    requests.push({ url, init });
+    return Response.json({ ok: true, data: {} });
+  });
+  const client = new CanonicalTvClient('https://loomtv.local');
+  await client.selectProfile('profile-1');
+  for (const watched of [undefined, true, false]) {
+    await client.saveProgress('movie/1', 61.5, 120, watched);
+    const request = requests.at(-1);
+    assert.equal(request.url, 'https://loomtv.local/api/v1/profiles/profile-1/progress/movie%2F1');
+    assert.equal(request.init.method, 'PUT');
+    assert.deepEqual(JSON.parse(request.init.body), { position: 61.5, duration: 120, ...(watched !== undefined ? { watched } : {}) });
+  }
+});
+
 test('TV client rejects cleartext server addresses', () => {
   assert.throws(() => new CanonicalTvClient('http://192.168.1.8:3848'), /HTTPS/);
 });

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { Readable } from 'node:stream';
+import { spawn } from 'node:child_process';
+import { PassThrough, Readable, Writable } from 'node:stream';
 import type { UpdateState } from '../src/main/autoUpdater.ts';
 import type { ZodType } from 'zod';
 import http from 'node:http';
@@ -36,6 +37,10 @@ function updaterFixture({
   rejectPermission = false,
   rejectHelperWrite = false,
   rejectHelperCleanup = false,
+  rejectSpawn = false,
+  rejectReady = false,
+  rejectCommit = false,
+  rejectQuit = false,
 } = {}) {
   const calls: Array<{ file: string; args: string[] }> = [];
   const cleanups: string[] = [];
@@ -44,6 +49,7 @@ function updaterFixture({
   const states: UpdateState[] = [];
   const errors: unknown[][] = [];
   const timers: Array<() => void> = [];
+  let helperScript = '';
   const archivePath = '/pending/LoomTV.zip';
   const helperDir = '/tmp/loomtv-update-install-fixture';
   const archive = Buffer.from('downloaded update archive fixture');
@@ -69,13 +75,14 @@ function updaterFixture({
     isPackaged: true,
     getVersion: () => '1.0.171',
     getPath: () => '/installed.app/Contents/MacOS/LoomTV',
-    quit: () => { effects.push('quit'); },
+    quit: () => { effects.push('quit'); if (rejectQuit) throw new Error('quit failed'); },
+    relaunch: () => { effects.push('relaunch'); },
     exit: () => { effects.push('exit'); },
   });
   const autoUpdater = Object.assign(new EventEmitter(), {
     autoInstallOnAppQuit: true,
     setFeedURL: () => undefined,
-    checkForUpdates: async () => undefined,
+    checkForUpdates: async (): Promise<{ downloadPromise?: Promise<string[]> } | undefined> => undefined,
     quitAndInstall: () => { effects.push('squirrel'); },
   });
   const module = { exports: {} };
@@ -92,8 +99,27 @@ function updaterFixture({
       execFile,
       spawn: () => {
         effects.push('spawn');
-        const child = Object.assign(new EventEmitter(), { unref: () => undefined });
-        queueMicrotask(() => child.emit('spawn'));
+        assert.deepEqual(cleanups, []);
+        const stdout = new PassThrough();
+        const stdin = new Writable({
+          write(chunk, _encoding, callback) {
+            assert.equal(chunk.toString(), 'COMMIT\n');
+            assert.equal(cleanups.length, 5);
+            effects.push('commit');
+            if (rejectCommit) callback(new Error('commit failed'));
+            else { stdout.write('COMMITTED\n'); callback(); }
+          },
+        });
+        const child = Object.assign(new EventEmitter(), {
+          stdin, stdout, unref: () => undefined, kill: () => {
+            effects.push('cancel'); queueMicrotask(() => child.emit('close'));
+          },
+        });
+        queueMicrotask(() => {
+          if (rejectSpawn) child.emit('error', new Error('spawn failed'));
+          else if (rejectReady) child.emit('exit', 1);
+          else { child.emit('spawn'); stdout.write('READY\n'); }
+        });
         return child;
       },
     },
@@ -115,7 +141,8 @@ function updaterFixture({
         access: async (file: string, mode: number) => {
           if (rejectPermission && mode === fs.constants.W_OK) throw new Error(`EACCES: ${file}`);
         },
-        writeFile: async () => {
+        writeFile: async (_file: string, content: string) => {
+          helperScript = content;
           assert.deepEqual(cleanups, []);
           if (rejectHelperWrite) throw new Error(`EACCES: cannot write ${helperDir}/install-update.sh`);
           effects.push('write-helper');
@@ -148,14 +175,22 @@ function updaterFixture({
     Error,
     process: { platform: 'darwin', arch: 'arm64', pid: 1234, resourcesPath: '/resources', env: {} },
     console: { error: (...args: unknown[]) => { errors.push(args); }, warn: () => undefined },
-    setTimeout: (callback: () => void) => { timers.push(callback); return { unref: () => undefined }; },
-    clearTimeout: () => undefined,
+    setTimeout: (callback: () => void) => {
+      const timer = { callback, unref: () => undefined };
+      timers.push(timer.callback);
+      return timer;
+    },
+    clearTimeout: (timer: { callback?: () => void }) => {
+      const index = timer.callback ? timers.indexOf(timer.callback) : -1;
+      if (index >= 0) timers.splice(index, 1);
+    },
   });
   const api = module.exports as {
     initAutoUpdater: (deps: { getMainWindow: () => null; stopNativePlayback: () => void; closeMediaServer: () => Promise<void> }) => void;
     startUpdateAdapter: () => void;
     installDownloadedUpdate: () => Promise<UpdateState>;
     getUpdateState: () => UpdateState;
+    checkForUpdates: () => Promise<UpdateState>;
     isUpdateInstalling: () => boolean;
     buildUpdateMenu: () => void;
   };
@@ -170,7 +205,54 @@ function updaterFixture({
     assert.equal(api.getUpdateState().status, 'downloaded');
     assert.equal(api.getUpdateState().platform, 'darwin');
   };
-  return { api, calls, opened, cleanups, effects, states, errors, timers, download, autoUpdater, menu: () => menuTemplate };
+  return { api, calls, opened, cleanups, effects, states, errors, timers, download, autoUpdater, menu: () => menuTemplate, script: () => helperScript };
+}
+
+for (const options of [{ rejectSpawn: true }, { rejectReady: true }]) {
+  test(`helper readiness failure leaves running services untouched ${JSON.stringify(options)}`, async () => {
+    const f = updaterFixture(options);
+    f.download();
+    assert.equal((await f.api.installDownloadedUpdate()).status, 'error');
+    assert.deepEqual(f.cleanups, []);
+    assert.ok(f.effects.includes('cancel'));
+    assert.ok(!f.effects.includes('quit'));
+    assert.equal(f.timers.length, 0);
+  });
+}
+
+for (const options of [{ rejectCommit: true }, { rejectQuit: true }]) {
+  test(`failure after service shutdown cancels install and restarts the current app ${JSON.stringify(options)}`, async () => {
+    const f = updaterFixture(options);
+    f.download();
+    await f.api.installDownloadedUpdate();
+    assert.equal(f.cleanups.length, 5);
+    assert.ok(f.effects.includes('cancel'));
+    assert.deepEqual(f.effects.slice(-2), ['relaunch', 'exit']);
+    assert.equal(f.timers.length, 0);
+    assert.equal(f.errors.length, 1);
+  });
+}
+
+for (const eventOrder of ['none', 'before', 'after']) {
+  test(`separate download rejection is handled once with error event ${eventOrder}`, async () => {
+    const f = updaterFixture();
+    let rejectDownload!: (error: Error) => void;
+    const downloadPromise = new Promise<string[]>((_resolve, reject) => { rejectDownload = reject; });
+    f.autoUpdater.checkForUpdates = async () => {
+      f.autoUpdater.emit('update-available');
+      return { downloadPromise };
+    };
+    await f.api.checkForUpdates();
+    const error = new Error('toy download failed');
+    if (eventOrder === 'before') f.autoUpdater.emit('error', error);
+    rejectDownload(error);
+    await new Promise(resolve => setImmediate(resolve));
+    if (eventOrder === 'after') f.autoUpdater.emit('error', error);
+    assert.equal(f.api.getUpdateState().status, 'error');
+    assert.match(f.api.getUpdateState().message ?? '', /download/);
+    assert.equal(f.errors.length, 1);
+    assert.equal(f.states.filter(state => state.status === 'error').length, 1);
+  });
 }
 
 const adHocIdentity = 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=not set\nSignature=adhoc';
@@ -213,12 +295,12 @@ test('verified Developer ID install drains cleanup only after preflight and neve
     && args.some((arg) => arg.includes('subject.OU] = "ABCDE12345"'))
     && args.some((arg) => arg.includes('identifier "com.mallenkb.loommediaserver"'))));
   assert.deepEqual(fixture.cleanups, ['transcodes', 'native playback', 'discovery', 'media server', 'update timer']);
-  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'quit']);
+  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'commit', 'quit']);
   assert.equal(await fixture.api.installDownloadedUpdate(), state);
-  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'quit']);
+  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'commit', 'quit']);
   assert.equal(fixture.timers.length, 1);
   fixture.timers[0]();
-  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'quit', 'exit']);
+  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'commit', 'quit', 'exit']);
 });
 
 for (const [label, options] of [
@@ -278,6 +360,64 @@ test('manual release download remains available from the updater menu', () => {
   download.click();
   assert.deepEqual(fixture.opened, ['https://github.com/mallenkb/LoomTV/releases/latest']);
 });
+
+for (const mode of ['success', 'cancel', 'eof', 'move', 'copy', 'open', 'plist', 'launch']) {
+  test(`shell helper recovers toy bundles on ${mode}`, { timeout: 15000 }, async () => {
+    const f = updaterFixture();
+    f.download();
+    await f.api.installDownloadedUpdate();
+    const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-toy-update-'));
+    const target = path.join(directory, 'installed.app');
+    const source = path.join(directory, 'new.app');
+    const backup = path.join(directory, '.installed.app.previous');
+    const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+    let child: ReturnType<typeof spawn> | undefined;
+    try {
+      await fs.promises.mkdir(target);
+      await fs.promises.mkdir(source);
+      await fs.promises.writeFile(path.join(target, 'marker'), 'old');
+      await fs.promises.writeFile(path.join(source, 'marker'), 'new');
+      const commands: Record<string, string> = {
+        '/bin/mv': mode === 'move' ? 'exit 1' : 'exec /bin/mv "$@"',
+        '/usr/bin/ditto': mode === 'copy'
+          ? 'mkdir -p "$2"; printf partial > "$2/marker"; exit 1'
+          : 'exec /bin/cp -R "$1" "$2"',
+        '/usr/bin/open': mode === 'open' ? 'exit 1' : 'exit 0',
+        '/usr/bin/xattr': 'exit 0',
+        '/usr/libexec/PlistBuddy': mode === 'plist' ? 'exit 1' : 'printf toy',
+        '/usr/bin/pgrep': mode === 'launch' ? 'exit 1' : 'exit 0',
+      };
+      let script = f.script()
+        .replace(/^LOG=.*$/m, `LOG=${quote(path.join(directory, 'install.log'))}`)
+        .replace(/^PARENT_PID=.*$/m, "PARENT_PID='2147483647'")
+        .replace(/^SOURCE_APP=.*$/m, `SOURCE_APP=${quote(source)}`)
+        .replace(/^TARGET_APP=.*$/m, `TARGET_APP=${quote(target)}`)
+        .replace(/^BACKUP_APP=.*$/m, `BACKUP_APP=${quote(backup)}`);
+      for (const [index, [command, body]] of Object.entries(commands).entries()) {
+        const mockPath = path.join(directory, `command-${index}`);
+        await fs.promises.writeFile(mockPath, `#!/bin/sh\n${body}\n`, { mode: 0o700 });
+        script = script.split(command).join(quote(mockPath));
+      }
+      const helper = path.join(directory, 'helper.sh');
+      await fs.promises.writeFile(helper, script);
+      child = spawn('/bin/sh', [helper], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const closed = once(child, 'close');
+      assert.ok(child.stdout && child.stdin);
+      const ready = await once(child.stdout, 'data');
+      assert.match(String(ready[0]), /READY/);
+      assert.equal(await fs.promises.readFile(path.join(target, 'marker'), 'utf8'), 'old');
+      assert.equal(fs.existsSync(backup), false);
+      child.stdin.end(mode === 'cancel' ? 'CANCEL\n' : mode === 'eof' ? '' : 'COMMIT\n');
+      const [code] = await closed;
+      assert.equal(code, mode === 'success' ? 0 : 1);
+      assert.equal(await fs.promises.readFile(path.join(target, 'marker'), 'utf8'), mode === 'success' ? 'new' : 'old');
+      assert.equal(fs.existsSync(backup), false);
+    } finally {
+      child?.kill();
+      await fs.promises.rm(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 test('macOS update helpers use a private unpredictable temporary directory', async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));

@@ -13,6 +13,7 @@ import {
   CANONICAL_API_PREFIX,
   CANONICAL_API_VERSION,
   CANONICAL_API_VERSION_HEADER,
+  parseProgressSavePayload,
 } from '@loom-media-server/video-contracts';
 import { canonicalPublicError, errorDetails } from './public-error.js';
 import { createCastSessionRegistry } from './cast-session-registry.js';
@@ -1034,7 +1035,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         }
         const source = await mediaService.describeDirectCapability(mediaId, principal, profile, planned.plan.sourceId);
         const boundProfile = bindAuthenticationSession({ ...profile, sourceId: source.sourceId, fileId: planned.sourceIdentity.fileId }, principal);
-        const playback = mediaService.issuePlaybackToken(mediaId, principal.id, 'direct', boundProfile);
+        const playback = await mediaService.issuePlaybackToken(mediaId, principal.id, 'direct', boundProfile);
         const created = castSessions.create({
           transport,
           receiverName: optionalString(body.receiverName, 'receiverName', 120) || transport,
@@ -1664,7 +1665,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           if (!media) throw requestError(404, 'media_not_found', 'Media item was not found.');
           await requireSelectedProfile(principal, req, profileId, media);
           if (req.method === 'GET') writeData(res, 200, { progress: await clientState.getProgress(profileId, mediaId, principal.id, false) });
-          else writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, false) });
+          else writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, parseProgressSavePayload(await readJsonBody(req)), principal.id, false) });
           return true;
         }
       }
@@ -1711,7 +1712,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
           } : {}),
         }, principal);
         const directLease = plan.sourceAction === 'direct' && typeof mediaService.issuePlaybackToken === 'function'
-          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct', boundProfileContext)
+          ? await mediaService.issuePlaybackToken(mediaId, principal.id, 'direct', boundProfileContext)
           : null;
         const directToken = directLease?.token || null;
         const transcodePlan = plan.sourceAction === 'transcode'

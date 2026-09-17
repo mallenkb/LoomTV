@@ -1,0 +1,253 @@
+{
+  "root": 42601,
+  "started": "2026-09-16T05:38:32.488Z",
+  "note": "macOS top MEM footprint and interval CPU, second top sample each time. Running app and descendants only. Rounded OS display values; not ps RSS. CPU can exceed 100% across cores. Simulation runs separately and may compete for CPU.",
+  "samples": [
+    {
+      "timestamp": "2026-09-16T05:38:34.562Z",
+      "elapsedMs": 2075,
+      "processes": [
+        {
+          "pid": 42601,
+          "name": "LoomTV",
+          "cpuPercent": 2.2,
+          "footprintBytes": 515899392,
+          "threads": 56
+        },
+        {
+          "pid": 42634,
+          "name": "LoomTV Helper (Renderer)",
+          "cpuPercent": 1.1,
+          "footprintBytes": 126877696,
+          "threads": 27
+        },
+        {
+          "pid": 42618,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 130023424,
+          "threads": 16
+        },
+        {
+          "pid": 42639,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1556480,
+          "threads": 2
+        },
+        {
+          "pid": 42619,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 9241600,
+          "threads": 16
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-16T05:38:39.695Z",
+      "elapsedMs": 7207,
+      "processes": [
+        {
+          "pid": 42601,
+          "name": "LoomTV",
+          "cpuPercent": 2.2,
+          "footprintBytes": 516947968,
+          "threads": 55
+        },
+        {
+          "pid": 42634,
+          "name": "LoomTV Helper (Renderer)",
+          "cpuPercent": 1.2,
+          "footprintBytes": 126877696,
+          "threads": 27
+        },
+        {
+          "pid": 42639,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1556480,
+          "threads": 2
+        },
+        {
+          "pid": 42619,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 9241600,
+          "threads": 16
+        },
+        {
+          "pid": 42618,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 130023424,
+          "threads": 16
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-16T05:38:44.787Z",
+      "elapsedMs": 12299,
+      "processes": [
+        {
+          "pid": 42601,
+          "name": "LoomTV",
+          "cpuPercent": 2.2,
+          "footprintBytes": 515899392,
+          "threads": 55
+        },
+        {
+          "pid": 42634,
+          "name": "LoomTV Helper (Renderer)",
+          "cpuPercent": 1.1,
+          "footprintBytes": 127926272,
+          "threads": 27
+        },
+        {
+          "pid": 42618,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 130023424,
+          "threads": 16
+        },
+        {
+          "pid": 42639,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1556480,
+          "threads": 2
+        },
+        {
+          "pid": 42619,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 9241600,
+          "threads": 16
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-16T05:38:49.888Z",
+      "elapsedMs": 17400,
+      "processes": [
+        {
+          "pid": 42601,
+          "name": "LoomTV",
+          "cpuPercent": 2.2,
+          "footprintBytes": 515899392,
+          "threads": 55
+        },
+        {
+          "pid": 42634,
+          "name": "LoomTV Helper (Renderer)",
+          "cpuPercent": 1.2,
+          "footprintBytes": 127926272,
+          "threads": 27
+        },
+        {
+          "pid": 42618,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 130023424,
+          "threads": 16
+        },
+        {
+          "pid": 42619,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 9241600,
+          "threads": 16
+        },
+        {
+          "pid": 42639,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1556480,
+          "threads": 2
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-16T05:38:55.016Z",
+      "elapsedMs": 22528,
+      "processes": [
+        {
+          "pid": 42601,
+          "name": "LoomTV",
+          "cpuPercent": 2.4,
+          "footprintBytes": 516947968,
+          "threads": 55
+        },
+        {
+          "pid": 42634,
+          "name": "LoomTV Helper (Renderer)",
+          "cpuPercent": 1.2,
+          "footprintBytes": 127926272,
+          "threads": 27
+        },
+        {
+          "pid": 42639,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1556480,
+          "threads": 2
+        },
+        {
+          "pid": 42619,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 9241600,
+          "threads": 16
+        },
+        {
+          "pid": 42618,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 130023424,
+          "threads": 16
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-09-16T05:39:00.221Z",
+      "elapsedMs": 27733,
+      "processes": [
+        {
+          "pid": 42601,
+          "name": "LoomTV",
+          "cpuPercent": 3,
+          "footprintBytes": 615514112,
+          "threads": 56
+        },
+        {
+          "pid": 42634,
+          "name": "LoomTV Helper (Renderer)",
+          "cpuPercent": 1,
+          "footprintBytes": 127926272,
+          "threads": 27
+        },
+        {
+          "pid": 42618,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 130023424,
+          "threads": 16
+        },
+        {
+          "pid": 42639,
+          "name": "dns-sd",
+          "cpuPercent": 0,
+          "footprintBytes": 1556480,
+          "threads": 2
+        },
+        {
+          "pid": 42619,
+          "name": "LoomTV Helper",
+          "cpuPercent": 0,
+          "footprintBytes": 9307136,
+          "threads": 17
+        }
+      ]
+    }
+  ]
+}

@@ -370,10 +370,14 @@ function errorMessage(payload: string, fallback: string): string {
 export function createRemoteLibraryClient() {
   let session: RemoteSecretSession | null | undefined;
   let sessionLoadFailure = '';
+  let pendingMigration: string | null = null;
   let refreshPromise: Promise<RemoteSecretSession> | null = null;
 
   const loadSession = (): RemoteSecretSession | null => {
-    if (session !== undefined) return session;
+    if (session !== undefined) {
+      retryMigration();
+      return session;
+    }
     session = null;
     sessionLoadFailure = '';
     const target = sessionFilePath();
@@ -383,7 +387,8 @@ export function createRemoteLibraryClient() {
       return session;
     }
     try {
-      const envelope = parseRequiredJson(fs.readFileSync(target, 'utf8'), sessionEnvelopeSchema, 'Saved pairing');
+      const saved = fs.readFileSync(target, 'utf8');
+      const envelope = parseRequiredJson(saved, sessionEnvelopeSchema, 'Saved pairing');
       if (envelope.version !== SESSION_VERSION || !envelope.encrypted) {
         sessionLoadFailure = 'The saved pairing uses an unsupported security format. Pair this laptop again.';
         return session;
@@ -391,12 +396,46 @@ export function createRemoteLibraryClient() {
       const decrypted = decryptLocalSecret(Buffer.from(envelope.encrypted, 'base64'));
       const parsed = parseRequiredJson(decrypted.plaintext, remoteSecretSessionSchema, 'Saved pairing');
       session = parsed;
-      if (decrypted.needsMigration) persistSession(parsed);
+      if (decrypted.needsMigration) pendingMigration = saved;
     } catch {
       session = null;
       sessionLoadFailure = 'The saved pairing could not be unlocked. Pair this laptop again.';
     }
+    retryMigration();
     return session;
+  };
+
+  const retryMigration = (): void => {
+    if (!session || pendingMigration === null) return;
+    const target = sessionFilePath();
+    const temporary = `${target}.${process.pid}.${Date.now()}.migration.tmp`;
+    let created = false;
+    try {
+      if (fs.readFileSync(target, 'utf8') !== pendingMigration) {
+        pendingMigration = null;
+        return;
+      }
+      const encrypted = encryptLocalSecret(JSON.stringify(session)).toString('base64');
+      const fd = fs.openSync(temporary, 'wx', 0o600);
+      created = true;
+      try {
+        fs.writeFileSync(fd, JSON.stringify({ version: SESSION_VERSION, encrypted }), 'utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+      if (fs.readFileSync(target, 'utf8') !== pendingMigration) {
+        pendingMigration = null;
+        return;
+      }
+      fs.renameSync(temporary, target);
+      pendingMigration = null;
+    } catch {
+      return;
+    } finally {
+      if (created) {
+        try { fs.unlinkSync(temporary); } catch {}
+      }
+    }
   };
 
   const persistSession = (next: RemoteSecretSession): void => {
@@ -432,6 +471,7 @@ export function createRemoteLibraryClient() {
   const clearSession = (): void => {
     session = null;
     sessionLoadFailure = '';
+    pendingMigration = null;
     destroyPinnedAgents();
     try { fs.unlinkSync(sessionFilePath()); } catch { /* Already cleared. */ }
     try { fs.unlinkSync(`${sessionFilePath()}.bak`); } catch { /* Already cleared. */ }

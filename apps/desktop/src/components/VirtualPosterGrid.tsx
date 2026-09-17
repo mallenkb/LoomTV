@@ -42,8 +42,12 @@ export default function VirtualPosterGrid<T extends { id: string }>({
     };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(root);
-    observer.observe(scroller);
+    let ancestor: HTMLElement | null = root;
+    while (ancestor) {
+      observer.observe(ancestor);
+      if (ancestor === scroller) break;
+      ancestor = ancestor.parentElement;
+    }
     return () => observer.disconnect();
   }, []);
   const layout = virtualGridLayout({ containerWidth: geometry.width, minColumnWidth, maxColumnWidth, rowHeight, gap });

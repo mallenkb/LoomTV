@@ -27,7 +27,8 @@
       ]
     },
     "plugins": [
-      "./plugins/with-tv-launcher.cjs"
+      "./plugins/with-tv-launcher.cjs",
+      "../mobile/plugins/withLoomTvLoopbackTransport.cjs"
     ]
   }
 }

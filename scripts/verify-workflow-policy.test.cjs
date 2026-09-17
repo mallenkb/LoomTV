@@ -353,7 +353,7 @@ test('Rust validation installs the repository toolchain and covers both workspac
     assert.ok(steps.indexOf(step) > dependenciesIndex);
     assert.equal(step['continue-on-error'], undefined);
   }
-  const auditInstallIndex = steps.findIndex((step) => step.run === 'cargo install cargo-audit --locked');
+  const auditInstallIndex = steps.findIndex((step) => step.run === 'cargo install cargo-audit --version 0.22.2 --locked');
   const auditIndex = steps.findIndex((step) => step.name === 'Audit both Rust workspaces');
   assert.ok(auditInstallIndex >= 0 && auditIndex > auditInstallIndex);
   const audit = steps[auditIndex];

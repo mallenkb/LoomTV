@@ -102,6 +102,7 @@ function driRenderNode() {
 }
 
 function deviceForBackend(backend, platform, environment) {
+  if (backend === 'qsv' && platform === 'win32') return 'windows-gpu';
   if (backend === 'vaapi' || backend === 'qsv') {
     if (platform !== 'linux') return null;
     return firstExisting([

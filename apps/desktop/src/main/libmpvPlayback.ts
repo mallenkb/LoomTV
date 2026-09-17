@@ -184,10 +184,11 @@ function commandList(command: MpvCommand): unknown[][] {
 
 class LibMpvSession {
   readonly id = crypto.randomUUID();
-  private readonly engine: NativePointer;
-  private readonly host: NativeViewHost;
+  private engine: NativePointer = null;
+  private host: NativeViewHost | null = null;
   private timer: NodeJS.Timeout | null = null;
-  private readonly eventBuffer = Buffer.allocUnsafe(2 * 1024 * 1024 + 1);
+  private eventBuffer: Buffer | null = Buffer.allocUnsafe(2 * 1024 * 1024 + 1);
+  private readonly onOwnerDestroyed = () => this.stop();
   private request = 0;
   private stopped = false;
   private state: MpvPlaybackState = { sessionId: this.id, status: 'starting' };
@@ -203,17 +204,6 @@ class LibMpvSession {
     options: MpvStartOptions,
     private readonly onStopped: (session: LibMpvSession) => void,
   ) {
-    const error = Buffer.alloc(1024);
-    this.engine = runtime.api.create(runtime.libraryPath, error, error.length) as NativePointer;
-    if (!this.engine) throw new Error(errorText(error, 'libmpv could not create a playback core.'));
-    try {
-      this.host = createNativeViewHost(loadKoffi(), ownerWindow);
-      const attached = Number(runtime.api.attach(this.engine, this.host.drawable, error, error.length));
-      if (attached < 0) throw new Error(errorText(error, 'The libmpv render surface could not attach.'));
-    } catch (cause) {
-      runtime.api.destroy(this.engine);
-      throw cause;
-    }
     this.subtitleSources = new Map((options.subtitleFiles || []).map((file) => [path.resolve(file.path), file.source]));
     this.afterLoad = [
       ['set_property', 'volume', Math.max(0, Math.min(1, options.volume ?? 1)) * 100],
@@ -228,11 +218,22 @@ class LibMpvSession {
       ...(options.subtitleFiles || []).map((file) => ['sub-add', file.path, 'auto']),
     ];
     if (options.subtitleStyle) this.afterLoad.push(...commandList({ type: 'set-subtitle-style', ...options.subtitleStyle }));
-    this.timer = setInterval(() => this.poll(), 16);
-    this.timer.unref?.();
-    this.send(['loadfile', source, 'replace']);
-    this.emit({ status: 'loading' });
-    owner.once('destroyed', () => this.stop());
+    try {
+      const error = Buffer.alloc(1024);
+      this.engine = runtime.api.create(runtime.libraryPath, error, error.length) as NativePointer;
+      if (!this.engine) throw new Error(errorText(error, 'libmpv could not create a playback core.'));
+      this.host = createNativeViewHost(loadKoffi(), ownerWindow);
+      const attached = Number(runtime.api.attach(this.engine, this.host.drawable, error, error.length));
+      if (attached < 0) throw new Error(errorText(error, 'The libmpv render surface could not attach.'));
+      owner.once('destroyed', this.onOwnerDestroyed);
+      this.timer = setInterval(() => this.poll(), 16);
+      this.timer.unref?.();
+      this.send(['loadfile', source, 'replace']);
+      this.emit({ status: 'loading' });
+    } catch (cause) {
+      this.dispose();
+      throw cause;
+    }
   }
 
   private send(command: unknown[]): boolean {
@@ -250,14 +251,17 @@ class LibMpvSession {
   }
 
   private poll(): void {
-    if (this.stopped || !this.engine) return;
+    if (this.stopped || !this.engine || !this.eventBuffer) return;
     const output = this.eventBuffer;
     try {
       const length = Number(this.runtime.api.pollInto(this.engine, output, output.length));
       if (length === 0) return;
       if (length < 0 || length > output.length - 1) throw new Error('libmpv returned an oversized event batch.');
       const messages = JSON.parse(output.subarray(0, length).toString('utf8')) as MpvMessage[];
-      for (const message of messages) this.handle(message);
+      for (const message of messages) {
+        if (this.stopped) break;
+        this.handle(message);
+      }
     } catch (error) {
       this.fail(error instanceof Error ? error.message : 'libmpv returned an invalid event.');
     }
@@ -318,7 +322,11 @@ class LibMpvSession {
 
   private fail(message: string): void {
     console.warn(`[playback] libmpv session failed — ${message}`);
-    this.emit({ status: 'error', paused: true, error: message });
+    try {
+      this.emit({ status: 'error', paused: true, error: message });
+    } finally {
+      this.dispose();
+    }
   }
 
   command(command: MpvCommand): boolean {
@@ -327,36 +335,54 @@ class LibMpvSession {
   }
 
   setViewport(owner: WebContents, viewport: PlaybackViewport): boolean {
-    if (owner !== this.owner || this.stopped) return false;
+    if (owner !== this.owner || this.stopped || !this.host) return false;
     this.host.syncBounds(viewport);
     return true;
   }
 
   syncSurface(owner: WebContents): boolean {
-    if (owner !== this.owner || this.stopped) return false;
+    if (owner !== this.owner || this.stopped || !this.host) return false;
     this.host.syncHierarchy(true);
     this.host.setVisible(!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
     return true;
   }
 
   setFullscreenTransition(owner: WebContents, transitioning: boolean): boolean {
-    if (owner !== this.owner || this.stopped) return false;
+    if (owner !== this.owner || this.stopped || !this.host) return false;
     this.host.setAutoresize(transitioning);
     if (!transitioning) this.host.syncHierarchy(true);
     return true;
   }
 
-  stop(): boolean {
-    if (this.stopped) return false;
-    try { this.send(['stop']); } catch { /* teardown continues */ }
+  private dispose(): void {
+    if (this.stopped) return;
     this.stopped = true;
+    this.owner.removeListener('destroyed', this.onOwnerDestroyed);
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    releaseNativePlaybackDisplaySleep(this.id);
-    this.host.destroy();
-    this.runtime.api.destroy(this.engine);
-    this.emit({ status: 'closed' });
-    this.onStopped(this);
+    this.eventBuffer = null;
+    const engine = this.engine;
+    const host = this.host;
+    this.engine = null;
+    this.host = null;
+    for (const cleanup of [
+      () => releaseNativePlaybackDisplaySleep(this.id),
+      () => { if (engine) this.runtime.api.destroy(engine); },
+      () => host?.destroy(),
+      () => this.onStopped(this),
+    ]) {
+      try { cleanup(); } catch (error) { console.warn('[playback] libmpv cleanup failed', error); }
+    }
+  }
+
+  stop(): boolean {
+    if (this.stopped) return false;
+    try { this.send(['stop']); } catch {}
+    try {
+      this.emit({ status: 'closed' });
+    } finally {
+      this.dispose();
+    }
     return true;
   }
 }

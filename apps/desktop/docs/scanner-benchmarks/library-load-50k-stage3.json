@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-09-16T05:56:47.022Z",
+  "node": "v24.15.0",
+  "fixture": {
+    "videos": 50000,
+    "movies": 10000,
+    "shows": 2000,
+    "episodes": 40000
+  },
+  "note": "Fresh processes, alternating order, warm filesystem cache; RSS includes Node and SQLite. Peak sampled before output serialization. Not whole-app memory.",
+  "runs": [
+    {
+      "variant": "before",
+      "durationMs": 697.034916,
+      "initialRssBytes": 118177792,
+      "peakRssKiB": 567648,
+      "heapAfterLoadBytes": 119931888,
+      "retainedHeapBytes": 67105608,
+      "checksum": "e10b3c708e295a22a5514d145cc4c6f627e968c69b76a43b556df9a55ca92314"
+    },
+    {
+      "variant": "after",
+      "durationMs": 260.932917,
+      "initialRssBytes": 117702656,
+      "peakRssKiB": 373088,
+      "heapAfterLoadBytes": 164124696,
+      "retainedHeapBytes": 66958832,
+      "checksum": "e10b3c708e295a22a5514d145cc4c6f627e968c69b76a43b556df9a55ca92314"
+    },
+    {
+      "variant": "after",
+      "durationMs": 255.25487499999997,
+      "initialRssBytes": 118751232,
+      "peakRssKiB": 373456,
+      "heapAfterLoadBytes": 164261328,
+      "retainedHeapBytes": 66961712,
+      "checksum": "e10b3c708e295a22a5514d145cc4c6f627e968c69b76a43b556df9a55ca92314"
+    },
+    {
+      "variant": "before",
+      "durationMs": 665.477292,
+      "initialRssBytes": 118030336,
+      "peakRssKiB": 558592,
+      "heapAfterLoadBytes": 179582568,
+      "retainedHeapBytes": 62800368,
+      "checksum": "e10b3c708e295a22a5514d145cc4c6f627e968c69b76a43b556df9a55ca92314"
+    },
+    {
+      "variant": "before",
+      "durationMs": 665.956959,
+      "initialRssBytes": 118489088,
+      "peakRssKiB": 568640,
+      "heapAfterLoadBytes": 129370944,
+      "retainedHeapBytes": 67106808,
+      "checksum": "e10b3c708e295a22a5514d145cc4c6f627e968c69b76a43b556df9a55ca92314"
+    },
+    {
+      "variant": "after",
+      "durationMs": 260.61341600000003,
+      "initialRssBytes": 117358592,
+      "peakRssKiB": 374640,
+      "heapAfterLoadBytes": 147631416,
+      "retainedHeapBytes": 66942608,
+      "checksum": "e10b3c708e295a22a5514d145cc4c6f627e968c69b76a43b556df9a55ca92314"
+    }
+  ]
+}

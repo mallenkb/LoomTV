@@ -255,6 +255,12 @@
         <section id="stepAccount" hidden>
           <form id="accountForm">
             <div class="form-grid account-fields">
+              <div class="field" id="bootstrapSecretField" hidden>
+                <label for="bootstrapSecret">Bootstrap secret</label>
+                <input id="bootstrapSecret" type="password" maxlength="1024" autocomplete="off" spellcheck="false" aria-describedby="bootstrapSecretHint" disabled>
+                <p class="field-hint" id="bootstrapSecretHint">Enter the claim secret configured by the server operator. Loom keeps it only in this page until you submit it.</p>
+                <p class="field-error" id="bootstrapSecretError" role="alert"></p>
+              </div>
               <div class="field">
                 <label for="ownerName">Your name</label>
                 <input id="ownerName" type="text" maxlength="80" autocomplete="username" required placeholder="e.g. Alex">
@@ -596,17 +602,27 @@
         if (!name) { showError('Enter the name you want to sign in with.'); $('ownerName').focus(); return; }
         if (password.length < 8) { fieldError('passwordError', 'Use at least 8 characters.'); $('ownerPassword').focus(); return; }
         if (password !== confirmation) { fieldError('passwordError', 'The two passwords do not match.'); $('ownerPasswordConfirm').focus(); return; }
+        const requiresSecret = state.status?.requiresBootstrapSecret === true && !state.status?.ownerConfigured;
+        fieldError('bootstrapSecretError', '');
+        if (requiresSecret && !$('bootstrapSecret').value.trim()) {
+          fieldError('bootstrapSecretError', 'Enter the bootstrap secret provided by the server operator.');
+          $('bootstrapSecret').focus();
+          return;
+        }
         setBusy(true, 'Creating account...');
         try {
-          const result = await api('/setup/owner', {
+          const request = api('/setup/owner', {
             method: 'POST',
             body: {
               name,
               password,
               serverName: $('serverName').value.trim() || undefined,
               sessionMode: state.sessionMode,
+              ...(requiresSecret ? { bootstrapSecret: $('bootstrapSecret').value.trim() } : {}),
             },
           });
+          $('bootstrapSecret').value = '';
+          const result = await request;
           adoptSession(result);
           state.status = { ...state.status, ...result.setup };
           $('ownerPassword').value = '';
@@ -872,6 +888,11 @@
         try {
           const status = await api('/setup/state');
           state.status = status;
+          const requiresSecret = status.requiresBootstrapSecret === true && !status.ownerConfigured;
+          $('bootstrapSecretField').hidden = !requiresSecret;
+          $('bootstrapSecret').disabled = !requiresSecret;
+          $('bootstrapSecret').required = requiresSecret;
+          $('bootstrapSecret').value = '';
           if (!status.required) { window.location.replace(returnTo === 'admin' ? '/admin/' : '/app/'); return; }
           $('serverName').value = status.serverName || '';
           $('browseButton').hidden = !(status.folderBrowse || status.nativeFolderPicker);

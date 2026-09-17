@@ -128,18 +128,51 @@ assign the proxy a stable address, and trust only that address. The upstream is
 untrusted containers to that network. Neither topology requires publishing the
 backend on the LAN.
 
-In an Nginx TLS server block on the host, use a location like this. The enclosing
-server must listen with TLS and configure its certificate and private key:
+For Nginx on the host, put this map and log format in the `http` context.
+Replace `loomtv.example` with your public hostname. This example serves HTTPS
+on port 443 and accepts only its two valid authority spellings:
 
 ```nginx
+map $http_host $loomtv_authority {
+    default "";
+    ~*^loomtv\.example$ loomtv.example;
+    ~*^loomtv\.example:443$ loomtv.example:443;
+}
+log_format loomtv_safe escape=json
+    '{"method":"$request_method","uri":"$uri","status":$status}';
+access_log /var/log/nginx/loomtv-access.log loomtv_safe;
+```
+
+Use these directives in the TLS server block, alongside `listen 443 ssl`,
+`server_name`, and your certificate and private key configuration:
+
+```nginx
+if ($loomtv_authority = "") { return 400; }
+access_log /var/log/nginx/loomtv-access.log loomtv_safe;
+error_log /var/log/nginx/loomtv-error.log crit;
 location / {
     proxy_pass http://127.0.0.1:3847;
-    proxy_set_header Host $host;
+    proxy_set_header Host $loomtv_authority;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header Forwarded "";
 }
 ```
+
+For external HTTPS port 8443, use `listen 8443 ssl` and replace both map
+entries with `~*^loomtv\.example:8443$ loomtv.example:8443;`. The forwarded Host
+must retain the external port for same-origin cookie checks. Do not use `$host`,
+which drops the port, or forward an unchecked `$http_host`. Reject unknown or
+missing authorities in every default listener too. Never redirect using an
+unvalidated Host.
+
+Use `loomtv_safe` for all access logs that can receive LoomTV requests, including
+default servers and any location-level overrides. `$uri` is the normalized path
+without query arguments. Do not log `$request`, `$request_uri`, `$args`, headers,
+or request bodies, and remove inherited combined-format access logs. Nginx error
+logs can include the original request line; keep them at `crit`, restrict access
+and retention, and treat diagnostic logs as potentially containing credentials.
+Run `nginx -t` before reloading the proxy.
 
 Replace client-supplied forwarding headers, never append an unverified
 `X-Forwarded-Proto`. LoomTV accepts only a single `https` value from the trusted
@@ -330,8 +363,10 @@ REQUIRE_SECURE_TRANSPORT=true
 TRUSTED_PROXIES=127.0.0.1/32
 ```
 
-Use `::1/128` instead if the proxy's actual upstream peer is IPv6 loopback.
-Mount SMB/NFS at `/srv/loomtv-media`, then install and start the unit:
+The checked-in environment already uses these secure loopback defaults, and
+the unit refuses to start without the environment file. If using IPv6 loopback,
+change `HOST` to `::1`, `TRUSTED_PROXIES` to `::1/128`, and the proxy upstream to
+`http://[::1]:3847` together. Mount SMB/NFS at `/srv/loomtv-media`, then install and start the unit:
 
 ```sh
 sudo cp deploy/systemd/loomtv.service /etc/systemd/system/loomtv.service

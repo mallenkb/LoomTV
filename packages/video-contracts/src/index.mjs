@@ -3,6 +3,25 @@ export const CANONICAL_API_VERSION = '1';
 export const CANONICAL_API_PREFIX = '/api/v1';
 export const CANONICAL_API_VERSION_HEADER = 'X-LoomTV-API-Version';
 
+export function parseProgressSavePayload(input = {}) {
+  const record = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const position = Reflect.get(record, 'position');
+  const duration = Reflect.get(record, 'duration');
+  const watched = Reflect.get(record, 'watched');
+  if (typeof position !== 'number' || !Number.isFinite(position) || position < 0
+    || typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0
+    || (watched !== undefined && typeof watched !== 'boolean')) {
+    throw Object.assign(new TypeError('Progress requires nonnegative finite position and duration and an optional boolean watched.'), {
+      status: 400, code: 'invalid_request',
+    });
+  }
+  return {
+    position,
+    duration,
+    ...(watched !== undefined ? { watched } : {}),
+  };
+}
+
 export const ACCOUNT_ROLES = Object.freeze(['owner', 'admin', 'user', 'viewer']);
 export const PROFILE_KINDS = Object.freeze(['adult', 'child', 'guest']);
 export const PLAYBACK_PLAN_MODES = Object.freeze(['direct', 'remux', 'transcode']);

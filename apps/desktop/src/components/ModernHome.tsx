@@ -48,6 +48,13 @@ export default function ModernHome() {
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [heroHovered, setHeroHovered] = useState(false);
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
+
+  useEffect(() => {
+    const updateVisibility = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => document.removeEventListener('visibilitychange', updateVisibility);
+  }, []);
   const [libraryActionError, setLibraryActionError] = useState('');
   const prefersReducedMotion = useReducedMotion();
   const searchControlRef = useRef<HTMLDivElement | null>(null);
@@ -165,7 +172,8 @@ export default function ModernHome() {
   // Rotation stops for a reduced-motion preference, and while the pointer or
   // keyboard focus is inside the hero, so the slide never changes out from
   // under someone who is reading or interacting with it.
-  const heroAutoRotates = heroItems.length > 1
+  const heroAutoRotates = pageVisible
+    && heroItems.length > 1
     && !prefersReducedMotion
     && !heroHovered
     && !searchOpen;

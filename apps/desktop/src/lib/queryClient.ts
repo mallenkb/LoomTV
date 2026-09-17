@@ -22,14 +22,14 @@ export function setQueryProfile(next: string | null): void {
   if (next === profileId) return;
   profileId = next;
   generation += 1;
-  queryClient.clear();
+  queryClient.getQueryCache().clear();
 }
 
 export function queryScope(): readonly unknown[] {
   const session = getDesktopLibraryMode() === 'remote' ? getRemoteDesktopSession() : null;
   const scope = [session?.baseUrl || 'local', session?.deviceId || '', session?.selectionRevision || 0, profileId, generation];
   const identity = JSON.stringify(scope);
-  if (lastIdentity && identity !== lastIdentity) queryClient.clear();
+  if (lastIdentity && identity !== lastIdentity) queryClient.getQueryCache().clear();
   lastIdentity = identity;
   return scope;
 }

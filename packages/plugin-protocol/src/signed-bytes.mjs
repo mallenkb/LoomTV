@@ -33,7 +33,7 @@ function hasLoneSurrogate(value) {
     const code = value.charCodeAt(index);
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) return true;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       return true;
@@ -47,12 +47,12 @@ function canonicalValue(value, path, ancestors) {
     if (typeof value === 'string' && hasLoneSurrogate(value)) {
       fail('INVALID_STRING', 'JCS values must not contain lone UTF-16 surrogates.', path);
     }
-    return value;
+    return JSON.stringify(value);
   }
 
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) fail('INVALID_NUMBER', 'JCS values must contain only finite numbers.', path);
-    return Object.is(value, -0) ? 0 : value;
+    return JSON.stringify(value);
   }
 
   if (typeof value !== 'object') {
@@ -68,29 +68,28 @@ function canonicalValue(value, path, ancestors) {
         fail('INVALID_ARRAY', 'JCS arrays must not contain enumerable non-index properties.', `${path}.${key}`);
       }
     }
-    return Array.from({ length: value.length }, (_, index) => {
+    return `[${Array.from({ length: value.length }, (_, index) => {
       if (!(index in value)) fail('UNDEFINED_VALUE', 'JCS arrays must not contain sparse holes.', `${path}[${index}]`);
       const entry = value[index];
       if (entry === undefined) fail('UNDEFINED_VALUE', 'JCS arrays must not contain undefined values.', `${path}[${index}]`);
       return canonicalValue(entry, `${path}[${index}]`, nextAncestors);
-    });
+    }).join(',')}]`;
   }
 
   if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
     fail('INVALID_JSON_VALUE', 'JCS objects must be plain JSON objects.', path);
   }
   if (Object.getOwnPropertySymbols(value).length > 0) fail('INVALID_JSON_VALUE', 'JCS objects must not contain symbol keys.', path);
-  const result = Object.create(null);
-  for (const key of Object.keys(value).sort()) {
+  const entries = Object.keys(value).sort().map((key) => {
     if (hasLoneSurrogate(key)) fail('INVALID_KEY', 'JCS object keys must not contain lone UTF-16 surrogates.', `${path}.${key}`);
     if (value[key] === undefined) fail('UNDEFINED_VALUE', 'JCS objects must not contain undefined values.', `${path}.${key}`);
-    result[key] = canonicalValue(value[key], `${path}.${key}`, nextAncestors);
-  }
-  return result;
+    return `${JSON.stringify(key)}:${canonicalValue(value[key], `${path}.${key}`, nextAncestors)}`;
+  });
+  return `{${entries.join(',')}}`;
 }
 
 export function canonicalizeJcs(value) {
-  return JSON.stringify(canonicalValue(value, '$', new Set()));
+  return canonicalValue(value, '$', new Set());
 }
 
 function utf8(value) {

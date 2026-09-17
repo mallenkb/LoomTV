@@ -620,15 +620,18 @@ function normalizeState(raw) {
   }
   if (Array.isArray(raw.catalog)) {
     state.catalog = records(raw.catalog)
-      .filter((entry) => hasStrings(entry, ['id', 'rootId', 'path']))
+      .filter((entry) => hasStrings(entry, ['id']))
+      .filter((entry) => (typeof entry.rootId === 'string' || entry.rootId == null)
+        && (typeof entry.path === 'string' || entry.path == null))
       .map((entry) => ({
         id: entry.id.slice(0, 128),
-        rootId: entry.rootId.slice(0, 128),
-        path: path.resolve(entry.path),
-        relativePath: typeof entry.relativePath === 'string' ? entry.relativePath.slice(0, 4_096) : path.basename(entry.path),
+        rootId: typeof entry.rootId === 'string' ? entry.rootId.slice(0, 128) : '',
+        path: typeof entry.path === 'string' && entry.path ? path.resolve(entry.path) : '',
+        relativePath: typeof entry.relativePath === 'string' ? entry.relativePath.slice(0, 4_096) : typeof entry.path === 'string' ? path.basename(entry.path) : '',
         type: entry.type === 'tv' || (typeof entry.kind === 'string' && ['series','episode'].includes(entry.kind)) ? 'tv' : 'movie',
-        title: typeof entry.title === 'string' ? entry.title.slice(0, 500) : path.basename(entry.path),
+        title: typeof entry.title === 'string' ? entry.title.slice(0, 500) : typeof entry.path === 'string' ? path.basename(entry.path) : '',
         kind: catalogKind(entry.kind),
+        ...(typeof entry.sourceId === 'string' ? { sourceId: entry.sourceId } : {}),
         ...(safeInteger(entry.year) && entry.year > 1900 && entry.year < 2200 ? { year: entry.year } : {}),
         ...(entry.animeLikely === true ? { animeLikely: true } : {}),
         ...(typeof entry.seriesId === 'string' && entry.seriesId.length <= 128 ? { seriesId: entry.seriesId } : {}),
@@ -643,7 +646,7 @@ function normalizeState(raw) {
             },
           }
           : {}),
-        extension: typeof entry.extension === 'string' ? entry.extension.slice(0, 16) : path.extname(entry.path).slice(1).toLowerCase(),
+        extension: typeof entry.extension === 'string' ? entry.extension.slice(0, 16) : typeof entry.path === 'string' ? path.extname(entry.path).slice(1).toLowerCase() : '',
         sizeBytes: Number.isFinite(entry.sizeBytes) ? Number(entry.sizeBytes) : undefined,
         modifiedAtMs: Number.isFinite(entry.modifiedAtMs) ? Number(entry.modifiedAtMs) : undefined,
         ...(isRecord(entry.localMetadata) && !Array.isArray(entry.localMetadata)
@@ -682,7 +685,8 @@ function normalizeState(raw) {
         }) } : {}),
         legacyIds: Array.isArray(entry.legacyIds) ? entry.legacyIds
           .filter((legacyId) => typeof legacyId === 'string' && legacyId.length <= 512).slice(0, 512) : [],
-        available: entry.available !== false,
+        available: entry.available !== false && typeof entry.path === 'string' && !!entry.path
+          && typeof entry.rootId === 'string' && !!entry.rootId,
         indexedAt: Number(entry.indexedAt) || Date.now(),
         createdAt: Number(entry.createdAt) || Number(entry.indexedAt) || Date.now(),
         updatedAt: Number(entry.updatedAt) || Number(entry.indexedAt) || Date.now(),
@@ -729,7 +733,7 @@ export function createHeadlessAdminService(options) {
   const getClientState = options.getClientState || (async () => null);
   const replaceClientState = options.replaceClientState || (async () => undefined);
   const replaceAllState = typeof options.replaceAllState === 'function' ? options.replaceAllState : null;
-  const stateStore = options.stateStore || null;
+  const stateStore = /** @type {(import('./server-admin-types.js').AdminStore & Partial<Pick<ReturnType<typeof import('./canonical-state-store.js').createCanonicalStateStore>, 'resolveScanIdentity' | 'deleteMediaSource'>>) | null} */ (options.stateStore || null);
   const onCanonicalRestore = typeof options.onCanonicalRestore === 'function'
     ? options.onCanonicalRestore
     : null;
@@ -1005,7 +1009,12 @@ export function createHeadlessAdminService(options) {
           available: item.available,
           indexedAt: item.indexedAt,
           ...(item.sourceId ? { sourceId: item.sourceId } : {}),
+          ...(item.localMetadata && Array.isArray(item.localMetadata.tracks)
+            ? { localMetadata: /** @type {import('./library-scanner.js').MediaProbe} */ (item.localMetadata) } : {}),
+          ...(item.subtitleSidecars ? { subtitleSidecars: item.subtitleSidecars } : {}),
           ...(item.seriesId ? { seriesId: item.seriesId } : {}),
+          ...(item.seasonNumber !== undefined ? { seasonNumber: item.seasonNumber } : {}),
+          ...(item.episodeNumber !== undefined ? { episodeNumber: item.episodeNumber } : {}),
           ...(item.year !== undefined ? { year: item.year } : {}),
           ...(item.animeLikely !== undefined ? { animeLikely: item.animeLikely } : {}),
           ...(item.series ? { series: item.series } : {}),
@@ -1023,7 +1032,7 @@ export function createHeadlessAdminService(options) {
         });
       }
       const existingCatalog = new Map(state.catalog.map((item) => [item.id, item]));
-      state.catalog = scannerState.catalog.map((item) => {
+      const catalog = scannerState.catalog.map((item) => {
         const existing = existingCatalog.get(item.id);
         const preserveEnrichment = existing && (
           scannerState.scan?.state !== 'completed'
@@ -1040,13 +1049,15 @@ export function createHeadlessAdminService(options) {
           modifiedAtMs: item.modifiedAtMs < 0 ? existing.modifiedAtMs : item.modifiedAtMs,
         };
       });
-      state.roots = state.roots.map((root) => {
+      const roots = state.roots.map((root) => {
         const scannedRoot = scannerRoots.get(root.id);
         return scannedRoot?.lastScanAt === undefined ? root : { ...root, lastScanAt: scannedRoot.lastScanAt };
       });
-      if (scannerState.scan) state.scan = scannerState.scan;
-      await saveState(state);
+      const scan = scannerState.scan || state.scan;
+      await saveState({ ...state, catalog, roots, scan });
+      Object.assign(state, { catalog, roots, scan });
     },
+    resolveIdentity: stateStore?.resolveScanIdentity ? (locator, alias) => stateStore.resolveScanIdentity?.(locator, alias) || null : null,
     appendLog,
     probeMedia: typeof options.probeMedia === 'function' ? options.probeMedia : null,
   });
@@ -1220,9 +1231,11 @@ export function createHeadlessAdminService(options) {
   async function issueToken(state, principal, deviceId = null) {
     enforceSessionPolicy(state, principal, deviceId);
     const token = randomBytes(32).toString('base64url');
+    const previousSessions = state.sessions;
     state.sessions = state.sessions
       .filter((entry) => entry.expiresAt > Date.now())
       .slice(-(MAX_SESSIONS - 1));
+    const removed = previousSessions.filter((entry) => !state.sessions.includes(entry));
     const session = {
       id: randomUUID(),
       tokenHash: hashToken(token),
@@ -1236,6 +1249,7 @@ export function createHeadlessAdminService(options) {
     };
     state.sessions.push(session);
     await saveState(state);
+    await Promise.all(removed.map((entry) => notifyAuthenticationSessionRevoked(entry.id, 'auth_session_expired')));
     return { adminToken: token, expiresAt: session.expiresAt, user: principalView(principal) };
   }
 
@@ -1269,8 +1283,11 @@ export function createHeadlessAdminService(options) {
     const active = state.sessions.filter((entry) => !entry.revokedAt && entry.expiresAt > now && principalForUserId(state, entry.userId));
     const session = active.find((entry) => timingSafeStringEqual(entry.tokenHash, hashToken(token)));
     if (active.length !== state.sessions.length) {
+      const removed = state.sessions.filter((entry) => !active.includes(entry));
       state.sessions = active;
       await saveState(state);
+      await Promise.all(removed.map((entry) => notifyAuthenticationSessionRevoked(entry.id,
+        entry.expiresAt <= now ? 'auth_session_expired' : 'auth_session_revoked')));
     }
     if (!session) return null;
     const principal = principalForUserId(state, session.userId);
@@ -1333,6 +1350,14 @@ export function createHeadlessAdminService(options) {
         entry.id === sessionId && entry.userId === accountId && !entry.revokedAt && entry.expiresAt > now
         && (deviceId === null || entry.deviceId === deviceId)
       ));
+    },
+
+    /** @param {string} sessionId @param {string} accountId */
+    async getSessionExpiry(sessionId, accountId) {
+      const session = (await loadState()).sessions.find((entry) => (
+        entry.id === sessionId && entry.userId === accountId && !entry.revokedAt && entry.expiresAt > Date.now()
+      ));
+      return session?.expiresAt ?? null;
     },
 
     /** @param {Pick<import('./server-admin-types.js').DeviceCredential, 'accountId' | 'deviceId'>} credential */
@@ -1603,6 +1628,7 @@ export function createHeadlessAdminService(options) {
       const user = state.users.find((entry) => entry.id === userId);
       if (!user) throw Object.assign(new Error('User account was not found.'), { status: 404 });
       ensureUserScope(principal, user);
+      const candidate = { ...user };
       if (input.name !== undefined) {
         const name = String(input.name || '').trim();
         if (!name || name.length > 80) throw Object.assign(new Error('User name must be between 1 and 80 characters.'), { status: 400 });
@@ -1611,7 +1637,7 @@ export function createHeadlessAdminService(options) {
           || state.users.some((entry) => entry.id !== user.id && normalizedIdentity(entry.name) === normalizedIdentity(name))) {
           throw Object.assign(new Error('A user with that name already exists.'), { status: 409 });
         }
-        user.name = name;
+        candidate.name = name;
       }
       const role = input.role === undefined ? user.role : input.role;
       if (typeof role !== 'string' || !USER_ROLES.includes(role)) throw Object.assign(new Error('User role is invalid.'), { status: 400 });
@@ -1633,13 +1659,14 @@ export function createHeadlessAdminService(options) {
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
         if (rootIds === null || rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
       }
-      user.role = role;
-      user.permissions = permissions;
-      user.rootIds = rootIds;
-      user.deviceIds = deviceIds;
-      user.maxSessions = maxSessions;
-      if (input.disabled !== undefined) user.disabled = input.disabled === true;
-      user.updatedAt = Date.now();
+      candidate.role = role;
+      candidate.permissions = [...permissions];
+      candidate.rootIds = rootIds === null ? null : [...rootIds];
+      candidate.deviceIds = deviceIds === null ? null : [...deviceIds];
+      candidate.maxSessions = maxSessions;
+      if (input.disabled !== undefined) candidate.disabled = input.disabled === true;
+      candidate.updatedAt = Date.now();
+      Object.assign(user, candidate);
       if (user.disabled) state.sessions = state.sessions.filter((session) => session.userId !== user.id);
       await saveState(state);
       await appendLog('info', `User account updated: ${user.name}`, { userId: user.id });
@@ -2053,8 +2080,15 @@ export function createHeadlessAdminService(options) {
       await fs.unlink(verified.realPath).catch((error) => {
         throw Object.assign(new Error('The media file could not be deleted.'), { status: errorCode(error) === 'EACCES' ? 403 : 500 });
       });
-      state.catalog = state.catalog.filter((entry) => entry.id !== itemId);
-      await saveState(state);
+      if (stateStore?.deleteMediaSource) {
+        const source = stateStore.resolveScanIdentity?.(item.path, item.id);
+        stateStore.deleteMediaSource(itemId, source?.sourceId || item.sourceId || `${itemId}:primary`);
+        state.catalog = normalizeState(stateStore.readAdminState()).catalog;
+      } else {
+        const catalog = state.catalog.filter((entry) => entry.id !== itemId);
+        await saveState({ ...state, catalog });
+        state.catalog = catalog;
+      }
       // Logs are readable by any account holding logs.read, including a
       // root-scoped administrator, so record the path below the root rather
       // than the absolute path the catalog stored.

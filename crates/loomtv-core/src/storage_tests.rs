@@ -37,6 +37,38 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn saving_restrictions_keeps_the_owner_selection_active() {
+    let fixture = Fixture::new();
+    let mut store = Store::open(&fixture.0.join("tauri")).unwrap();
+    let owner: String = store
+        .db
+        .query_row(
+            "SELECT id FROM profiles WHERE profile_type='owner'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    store.select_profile(&owner, None).unwrap();
+    let revision = store.selection_revision();
+    store
+        .save_restrictions(
+            &owner,
+            &json!({
+                "country": "US", "maximumAge": null, "allowUnrated": true, "allowedFolders": []
+            }),
+        )
+        .unwrap();
+    assert_eq!(store.selection_revision(), revision + 1);
+    assert_eq!(store.require_active(Some(&owner)).unwrap(), owner);
+    store.set_pin(&owner, Some("1234")).unwrap();
+    store.sync_desktop_selection().unwrap();
+    assert_eq!(store.require_owner().unwrap(), owner);
+    store.select_profile(&owner, Some("1234")).unwrap();
+    assert_eq!(store.selection_revision(), revision + 2);
+    assert_eq!(store.require_active(Some(&owner)).unwrap(), owner);
+}
+
+#[test]
 fn storage_rejects_electron_overlap_before_creating_paths() {
     let fixture = Fixture::new();
     let electron = fixture.0.join("LoomTV");

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Connection, MobileProfile, PlayTarget } from './mobileDomain';
 import { filePathFromUrl } from './mobileLibrary';
 import {
+  clearMobileDownloads,
   listMobileDownloads,
   removeMobileDownload,
   saveMobileDownload,
@@ -61,7 +62,7 @@ export function useMobileDownloadsController({ activeProfile, client, connection
   const targetWithOfflineDownload = useCallback((target: PlayTarget): PlayTarget | null => {
     const download = downloads[mediaIdForPlayTarget(target)];
     return download && download.hostDeviceId === connection?.hostDeviceId && download.profileId === activeProfile?.id
-      ? { ...target, streamPath: download.uri, offlineUri: download.uri, transcode: false } : null;
+      ? { ...target, offlineUri: download.uri, transcode: false } : null;
   }, [downloads, connection?.hostDeviceId, activeProfile?.id]);
 
   const downloadPlayTarget = useCallback(async (target: PlayTarget): Promise<void> => {
@@ -80,11 +81,13 @@ export function useMobileDownloadsController({ activeProfile, client, connection
         throw new Error(payload?.message || 'The server could not prepare this download.');
       }
       capability = payload;
+      if (generation.current !== startedGeneration) return;
       const saved = await saveMobileDownload({
         hostDeviceId: connection.hostDeviceId,
         profileId: activeProfile.id,
         title: target.title,
         capability,
+        isCurrent: () => generation.current === startedGeneration,
         contentUrl: secureLanUrl(new URL(capability.contentUrl, connection.baseUrl).toString()),
       });
       if (generation.current === startedGeneration) setStored((current) => current.scope === scope
@@ -115,5 +118,12 @@ export function useMobileDownloadsController({ activeProfile, client, connection
     });
   }, [downloads, scope]);
 
-  return { downloads, downloadingMediaId, downloadPlayTarget, removeDownloadedTarget, targetWithOfflineDownload };
+  const clearHostDownloads = useCallback((hostDeviceId: string): Promise<void> => {
+    generation.current += 1;
+    setStored({ scope, items: {} });
+    setDownloadingMediaId('');
+    return clearMobileDownloads(hostDeviceId);
+  }, [scope]);
+
+  return { clearHostDownloads, downloads, downloadingMediaId, downloadPlayTarget, removeDownloadedTarget, targetWithOfflineDownload };
 }

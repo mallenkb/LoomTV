@@ -455,7 +455,7 @@ function replaceAdminState(database, state) {
   }
 
   const itemFields = new Set([
-    'id','rootId','path','relativePath','type','kind','title','year','animeLikely','series','seriesId','seasonNumber','episodeNumber',
+    'id','rootId','path','relativePath','type','kind','title','year','animeLikely','series','seasonNumber','episodeNumber',
     'extension','sizeBytes','modifiedAtMs','available','indexedAt','sourceId','sourceIds','legacyIds','localMetadata','createdAt','updatedAt',
   ]);
   const upsertItem = database.prepare(`INSERT INTO catalog_items(
@@ -473,7 +473,7 @@ function replaceAdminState(database, state) {
     if (!desiredRoots.has(item.rootId)) continue;
     const now = Number(item.indexedAt) || Date.now();
     upsertItem.run(item.id, item.type, item.kind, item.title, item.year ?? null, item.animeLikely === true ? 1 : 0,
-      item.series?.title ?? null, item.series?.season ?? null, item.series?.episode ?? null,
+      item.series?.title ?? null, item.series?.season ?? item.seasonNumber ?? null, item.series?.episode ?? item.episodeNumber ?? null,
       json(extensionFrom(item, itemFields)), now, now);
     const sourceId = item.sourceId || `${item.id}:primary`;
     upsertSource.run(sourceId, item.id, item.rootId, item.relativePath, item.path,
@@ -894,9 +894,14 @@ function validateCanonicalJsonState(database) {
   }
   for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['catalog_items']>} */ (database.prepare('SELECT extension_json FROM catalog_items').all())) {
     const extension = objectJson(row.extension_json, 'catalog extension');
-    const authoritative = new Set(['id','rootId','path','relativePath','locator','type','kind','title','year','animeLikely','series','seriesId','seasonNumber','episodeNumber','extension','sizeBytes','modifiedAtMs','available','indexedAt','sourceId','sourceIds','legacyIds','localMetadata','createdAt','updatedAt']);
+    const authoritative = new Set(['id','rootId','path','relativePath','locator','type','kind','title','year','animeLikely','series','seasonNumber','episodeNumber','extension','sizeBytes','modifiedAtMs','available','indexedAt','sourceId','sourceIds','legacyIds','localMetadata','createdAt','updatedAt']);
     if (Object.keys(extension).some((key) => authoritative.has(key))) {
       throw codedError('canonical_backup_invalid', 'Canonical catalog extension JSON duplicates authoritative state.');
+    }
+    if (extension.seriesId !== undefined && (typeof extension.seriesId !== 'string'
+      || !extension.seriesId || extension.seriesId.length > 128
+      || !database.prepare("SELECT 1 FROM catalog_items WHERE id=? AND media_kind='series'").get(extension.seriesId))) {
+      throw codedError('canonical_backup_invalid', 'Canonical episode series reference is invalid.');
     }
   }
   for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['media_sources']>} */ (database.prepare('SELECT extension_json FROM media_sources').all())) objectJson(row.extension_json, 'media source extension');
@@ -1556,6 +1561,31 @@ export function createCanonicalStateStore({ dataDir }) {
         active.prepare(`UPDATE offline_download_leases SET revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,?)
           WHERE device_id=?`).run(revokedAt, String(reason).slice(0, 64), deviceId);
         return { id: row.id, accountId: row.account_id, alreadyRevoked: row.disabled === 1 };
+      });
+    },
+    /** @param {string} locator @param {string} alias */
+    resolveScanIdentity(locator, alias) {
+      const active = requireDatabase();
+      const source = active.prepare('SELECT id,media_id FROM media_sources WHERE locator=?').get(locator);
+      const aliases = source ? [] : active.prepare(`SELECT DISTINCT media_id FROM media_identity_aliases
+        WHERE alias=? AND namespace IN ('desktop-path-hash','headless-path-hash','legacy-media-id')`).all(alias);
+      if (!source && aliases.length > 1) throw codedError('media_identity_ambiguous', 'The scanned path has conflicting identity aliases.');
+      const mediaId = source?.media_id ?? aliases[0]?.media_id;
+      if (typeof mediaId !== 'string') return null;
+      const item = active.prepare('SELECT extension_json FROM catalog_items WHERE id=?').get(mediaId);
+      const extension = parseRequiredJson(item?.extension_json, 'catalog extension');
+      return {
+        mediaId,
+        ...(typeof source?.id === 'string' ? { sourceId: source.id } : {}),
+        ...(typeof extension.seriesId === 'string' ? { seriesId: extension.seriesId } : {}),
+      };
+    },
+    /** @param {string} mediaId @param {string} sourceId */
+    deleteMediaSource(mediaId, sourceId) {
+      return inTransaction(requireDatabase(), () => {
+        const active = requireDatabase();
+        active.prepare('DELETE FROM media_sources WHERE media_id=? AND id=?').run(mediaId, sourceId);
+        active.prepare("DELETE FROM catalog_items WHERE id=? AND media_kind!='series' AND NOT EXISTS (SELECT 1 FROM media_sources WHERE media_id=?)").run(mediaId, mediaId);
       });
     },
     /** @param {string} mediaId @param {string} [sourceId] */

@@ -2,7 +2,15 @@ name: Trusted macOS release attester
 
 on:
   workflow_call:
+    outputs:
+      artifact-id:
+        description: Exact artifact ID attested by this workflow
+        value: ${{ jobs.attest.outputs.artifact-id }}
     inputs:
+      artifact-id:
+        description: Exact artifact ID from this release run
+        required: true
+        type: string
       artifact-name:
         description: Exact artifact name produced by this release run
         required: true
@@ -21,6 +29,8 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
+    outputs:
+      artifact-id: ${{ inputs.artifact-id }}
     steps:
       - name: Check out trusted attester policy
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -30,7 +40,10 @@ jobs:
       - name: Download exact macOS build artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: ${{ inputs.artifact-name }}
+          artifact-ids: ${{ inputs.artifact-id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
           path: release-subjects
 
       - name: Enforce macOS-only attestation subjects

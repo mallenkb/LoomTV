@@ -35,6 +35,73 @@ function registryFor(route) {
   });
 }
 
+test('legacy catalog extras normalize required fields and genres with modern precedence', () => {
+  const catalog = { type: 'movie', id: 'legacy', name: 'Legacy', extraSupported: ['search', 'genre', 'search'], extraRequired: ['search', 'skip'], genres: ['Drama', 'Comedy'] };
+  const normalize = (entry) => normalizeStremioManifest({ ...manifest, catalogs: [entry] }, 'https://catalog.example/manifest.json').catalogs[0].extra;
+  assert.deepEqual(normalize(catalog), [
+    { name: 'search', isRequired: true },
+    { name: 'genre', isRequired: false, options: ['Drama', 'Comedy'] },
+    { name: 'skip', isRequired: true },
+  ]);
+  assert.deepEqual(normalize({ type: 'movie', id: 'genres', name: 'Genres', genres: ['Drama'] }), [
+    { name: 'genre', isRequired: false, options: ['Drama'] },
+  ]);
+  assert.deepEqual(normalize({ ...catalog, extra: [] }), []);
+  assert.deepEqual(normalize({ ...catalog, extra: [{ name: 'genre', options: ['Modern'] }, { name: 'search', isRequired: false }] }), [
+    { name: 'genre', isRequired: false, options: ['Modern'] },
+    { name: 'search', isRequired: false },
+  ]);
+  assert.throws(() => normalize({ ...catalog, extraSupported: 'search' }), StremioAdapterError);
+  assert.throws(() => normalize({ ...catalog, extraSupported: Array.from({ length: 32 }, (_, index) => `field${index}`) }), StremioAdapterError);
+});
+
+test('registry capacity is enforced before changing records and permits replacements', async () => {
+  let nextManifest = manifest;
+  const registry = registryFor(() => nextManifest);
+  for (let index = 0; index < 64; index += 1) {
+    nextManifest = { ...manifest, id: `org.example.addon${index}` };
+    const review = await registry.reviewManifestUrl(`https://catalog.example/${index}/manifest.json`);
+    registry.approve(review.addonId, { confirmed: true, reviewToken: review.reviewToken });
+  }
+  const before = registry.toJSON();
+  const restored = createStremioAddonRegistry();
+  restored.loadPersistedState(JSON.parse(JSON.stringify(before)));
+  assert.deepEqual(restored.toJSON(), before);
+  nextManifest = { ...manifest, id: 'org.example.overflow' };
+  for (const url of ['https://catalog.example/overflow/manifest.json', 'https://catalog.example/0/manifest.json']) {
+    await assert.rejects(() => registry.reviewManifestUrl(url), (error) => error instanceof StremioAdapterError
+      && error.code === 'REGISTRY_CAPACITY_EXCEEDED' && error.retryable === false);
+    assert.deepEqual(registry.toJSON(), before);
+  }
+  nextManifest = { ...manifest, id: 'org.example.addon0', version: '1.1.0' };
+  const replacement = await registry.reviewManifestUrl('https://catalog.example/0/manifest.json');
+  assert.equal(replacement.manifest.version, '1.1.0');
+  assert.equal(replacement.state, 'pending-review');
+  assert.equal(registry.list().length, 64);
+  assert.notEqual(replacement.reviewToken, before.addons[0].reviewToken);
+  registry.remove('org.example.addon1');
+  nextManifest = { ...manifest, id: 'org.example.new' };
+  await registry.reviewManifestUrl('https://catalog.example/new/manifest.json');
+  restored.loadPersistedState(JSON.parse(JSON.stringify(registry.toJSON())));
+  assert.equal(restored.list().length, 64);
+});
+
+test('concurrent manifest reviews cannot overfill the registry', async () => {
+  const registry = registryFor((url) => ({ ...manifest, id: `org.example.addon${new URL(url).pathname.split('/')[1]}` }));
+  const results = await Promise.allSettled(Array.from({ length: 65 }, (_, index) => registry.reviewManifestUrl(`https://catalog.example/${index}/manifest.json`)));
+  assert.equal(results.filter(({ status }) => status === 'fulfilled').length, 64);
+  assert.equal(results.find(({ status }) => status === 'rejected').reason.code, 'REGISTRY_CAPACITY_EXCEEDED');
+  assert.equal(registry.toJSON().addons.length, 64);
+});
+
+test('legacy extras survive registry persistence as modern declarations', async () => {
+  const registry = registryFor(() => ({ ...manifest, catalogs: [{ type: 'movie', id: 'legacy', name: 'Legacy', extraSupported: ['search'], extraRequired: ['search'], genres: ['Drama'] }] }));
+  const review = await registry.reviewManifestUrl('https://catalog.example/manifest.json');
+  const restored = createStremioAddonRegistry();
+  restored.loadPersistedState(JSON.parse(JSON.stringify(registry.toJSON())));
+  assert.deepEqual(restored.get(review.addonId).manifest.catalogs, review.manifest.catalogs);
+});
+
 test('known Stremio Addons signature metadata is accepted and ignored', () => {
   const normalized = normalizeStremioManifest({
     ...manifest,

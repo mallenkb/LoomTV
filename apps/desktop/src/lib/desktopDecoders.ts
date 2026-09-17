@@ -432,6 +432,10 @@ export const transcodeSessionSchema = z.object({
 });
 
 const playbackCapabilitiesSchema = z.object({
+  contractVersion: z.literal(1),
+  streamingProtocols: z.array(z.enum(['http', 'hls'])),
+  subtitleModes: z.array(z.enum(['text', 'bitmap', 'burn-in', 'external'])),
+  hdrFormats: z.array(z.enum(['hdr10', 'hdr10-plus', 'hlg', 'dolby-vision'])),
   containers: z.array(z.string()),
   videoCodecs: z.array(z.string()),
   audioCodecs: z.array(z.string()),

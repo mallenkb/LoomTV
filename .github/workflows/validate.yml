@@ -119,7 +119,7 @@ jobs:
         run: cargo test --locked -p loom-scanner
 
       - name: Install Cargo audit
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Audit both Rust workspaces
         shell: bash

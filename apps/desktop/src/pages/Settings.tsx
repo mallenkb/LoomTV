@@ -289,6 +289,7 @@ export default function Settings() {
     [activeProfile?.type, isRemoteLibraryMode],
   );
   const peerScanInFlightRef = useRef(false);
+  const remoteSnapshotPendingRef = useRef(false);
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
   const {
     theme,
@@ -473,13 +474,26 @@ export default function Settings() {
   useEffect(() => {
     if (activeSection !== 'playback') return undefined;
     let cancelled = false;
-    const refresh = () => void desktopApi.getLocalSegmentAnalysisStatus().then((status) => {
-      if (!cancelled) setLocalAnalysisStatus(status);
-    });
-    refresh();
+    let pending = false;
+    const refresh = async () => {
+      if (cancelled || pending || document.hidden) return;
+      pending = true;
+      try {
+        const status = await desktopApi.getLocalSegmentAnalysisStatus();
+        if (!cancelled) setLocalAnalysisStatus(status);
+      } catch (error) {
+        if (!cancelled) console.warn('Could not refresh analysis status:', error);
+      } finally { pending = false; }
+    };
+    void refresh();
     // Poll faster while a scan is running so the progress bar tracks it.
     const timer = window.setInterval(refresh, analysisIsActive ? 2000 : 5000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [activeSection, analysisIsActive]);
 
   useEffect(() => {
@@ -895,7 +909,8 @@ export default function Settings() {
 
   const refreshRemoteLibrarySnapshot = useCallback(async () => {
     const snapshot = sharedLibrarySnapshotRef.current;
-    if (!snapshot) return;
+    if (!snapshot || remoteSnapshotPendingRef.current || document.hidden) return;
+    remoteSnapshotPendingRef.current = true;
     try {
       const refreshed = await desktopApi.refreshRemoteLibrary(
         snapshot.baseUrl,
@@ -905,7 +920,7 @@ export default function Settings() {
         snapshot.accessTokenExpiresAt,
         snapshot.refreshTokenExpiresAt,
       );
-      if (!refreshed) return; // 304 — no change.
+      if (!refreshed || sharedLibrarySnapshotRef.current !== snapshot) return;
       const next: SharedLibrarySnapshot = {
         ...snapshot,
         library: refreshed.library,
@@ -920,7 +935,7 @@ export default function Settings() {
       setSharedLibrarySnapshot(next);
     } catch (error) {
       console.warn('Remote library refresh failed:', error);
-    }
+    } finally { remoteSnapshotPendingRef.current = false; }
   }, []);
 
   const disconnectRemoteLibrary = async () => {
@@ -962,8 +977,8 @@ export default function Settings() {
     if (activeSection !== 'network') return;
     void refreshLocalNetworkStatus();
     void scanForPeers();
-    const peerScanId = setInterval(() => void scanForPeers(), 8000);
-    const pinRefreshId = setInterval(() => void refreshLocalNetworkStatus(), 15000);
+    const peerScanId = setInterval(() => { if (!document.hidden) void scanForPeers(); }, 8000);
+    const pinRefreshId = setInterval(() => { if (!document.hidden) void refreshLocalNetworkStatus(); }, 15000);
     return () => {
       clearInterval(peerScanId);
       clearInterval(pinRefreshId);

@@ -138,12 +138,12 @@ export class CanonicalTvClient {
     );
   }
 
-  async saveProgress(mediaId: string, positionSeconds: number, durationSeconds: number, watched = false) {
+  async saveProgress(mediaId: string, position: number, duration: number, watched?: boolean) {
     if (!this.activeProfileId) throw new Error('Choose a profile before saving progress.');
     return payload<{ progress: unknown }>(await fetch(
       this.endpoint(`/api/v1/profiles/${encodeURIComponent(this.activeProfileId)}/progress/${encodeURIComponent(mediaId)}`),
       {
-        method: 'PUT', headers: this.headers(true), body: JSON.stringify({ positionSeconds, durationSeconds, watched }),
+        method: 'PUT', headers: this.headers(true), body: JSON.stringify({ position, duration, ...(watched !== undefined ? { watched } : {}) }),
       },
     ));
   }

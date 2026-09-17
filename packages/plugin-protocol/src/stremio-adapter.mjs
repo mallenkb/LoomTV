@@ -53,6 +53,7 @@ const controlCharacterPattern = /[^\x20-\x7e\u0080-\uffff]/;
 const peerDiscoveryFieldNames = Object.freeze(['sources', 'servers']);
 const MAX_CATALOG_OPTION_ITEMS = 256;
 const MAX_ADDON_CATALOGS = 200;
+const MAX_INSTALLED_ADDONS = 64;
 
 export const STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON = 'This source uses torrent or peer-to-peer transport. LoomTV does not provide a peer-to-peer playback engine, so the source cannot be played.';
 
@@ -519,10 +520,15 @@ function normalizeStremioCatalog(value, path, issues) {
   const type = normalizeToken(value.type, `${path}.type`, issues);
   const id = addIssueIfInvalidString(value.id, `${path}.id`, issues, { required: true, maxLength: 128, message: 'Expected a catalog ID.' });
   const name = addIssueIfInvalidString(value.name, `${path}.name`, issues, { required: true, maxLength: 160, message: 'Expected a catalog name.' });
-  const extra = value.extra === undefined ? [] : normalizeExtraDefinition(value.extra, `${path}.extra`, issues);
-  if (value.genres !== undefined) normalizeStringArray(value.genres, `${path}.genres`, issues, { maxItems: MAX_CATALOG_OPTION_ITEMS, maxLength: 128 });
-  if (value.extraSupported !== undefined) normalizeStringArray(value.extraSupported, `${path}.extraSupported`, issues, { maxItems: 32, maxLength: 64, pattern: safeTokenPattern });
-  if (value.extraRequired !== undefined) normalizeStringArray(value.extraRequired, `${path}.extraRequired`, issues, { maxItems: 32, maxLength: 64, pattern: safeTokenPattern });
+  const genres = normalizeStringArray(value.genres, `${path}.genres`, issues, { maxItems: MAX_CATALOG_OPTION_ITEMS, maxLength: 128 });
+  const supported = normalizeStringArray(value.extraSupported, `${path}.extraSupported`, issues, { maxItems: 32, maxLength: 64, pattern: safeTokenPattern });
+  const required = normalizeStringArray(value.extraRequired, `${path}.extraRequired`, issues, { maxItems: 32, maxLength: 64, pattern: safeTokenPattern });
+  const legacyExtra = [...new Set([...supported, ...required, ...(genres.length ? ['genre'] : [])])].map((name) => ({
+    name,
+    isRequired: required.includes(name),
+    ...(name === 'genre' && value.genres !== undefined ? { options: genres } : {}),
+  }));
+  const extra = normalizeExtraDefinition(value.extra === undefined ? legacyExtra : value.extra, `${path}.extra`, issues);
   return type && id && name ? { type, id, name, extra } : null;
 }
 
@@ -1344,6 +1350,9 @@ export class StremioAddonRegistry {
       label: 'manifest',
     });
     const manifest = normalizeStremioManifest(rawManifest, safeManifestUrl, this.options.limits);
+    if (!this.records.has(manifest.id) && this.records.size >= MAX_INSTALLED_ADDONS) {
+      throw new StremioAdapterError('REGISTRY_CAPACITY_EXCEEDED', `At most ${MAX_INSTALLED_ADDONS} Stremio add-ons can be installed.`, { retryable: false });
+    }
     const timestamp = nowTimestamp(this.options.now);
     for (const [id, existing] of this.records.entries()) {
       if (existing.manifestUrl === safeManifestUrl && id !== manifest.id) {
@@ -1475,7 +1484,7 @@ export class StremioAddonRegistry {
     if (!isRecord(snapshot)) throw new StremioAdapterError('INVALID_PERSISTED_STATE', 'Persisted Stremio add-on state must be an object.', { retryable: false });
     addUnknownKeys(snapshot, new Set(['stateVersion', 'addons']), '$', issues);
     if (snapshot.stateVersion !== STREMIO_INSTALL_STATE_VERSION) issues.push(createIssue('$.stateVersion', 'unsupported_version', 'Unsupported Stremio install state version.'));
-    if (!Array.isArray(snapshot.addons) || snapshot.addons.length > 64) issues.push(createIssue('$.addons', 'invalid_value', 'Persisted add-ons must be a bounded array.'));
+    if (!Array.isArray(snapshot.addons) || snapshot.addons.length > MAX_INSTALLED_ADDONS) issues.push(createIssue('$.addons', 'invalid_value', 'Persisted add-ons must be a bounded array.'));
     if (issues.length > 0) throw new StremioAdapterError('INVALID_PERSISTED_STATE', 'Persisted Stremio add-on state failed validation.', { issues, retryable: false });
     const records = new Map();
     for (let index = 0; index < snapshot.addons.length; index += 1) {

@@ -412,14 +412,9 @@ async function extractMacUpdate(updateFilePath: string, extractDir: string): Pro
   return appBundles[0];
 }
 
-async function waitForChildToSpawn(child: ReturnType<typeof spawn>): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    child.once('spawn', resolve);
-    child.once('error', reject);
-  });
-}
+type PreparedMacUpdate = { commit: () => Promise<void>; cancel: () => Promise<void> };
 
-async function prepareMacUpdateWithoutSquirrel(updateFilePath: string): Promise<() => Promise<void>> {
+async function prepareMacUpdateWithoutSquirrel(updateFilePath: string): Promise<PreparedMacUpdate> {
   if (process.platform !== 'darwin') {
     throw new Error('The custom macOS updater was invoked on a non-macOS platform.');
   }
@@ -437,7 +432,7 @@ async function prepareMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
   // Replace the bundle that was actually launched so a legacy installation is
   // updated in place instead of leaving the user's Dock icon behind.
   const targetAppPath = runningAppPath;
-  const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
+  const backupAppPath = path.join(path.dirname(targetAppPath), `.${path.basename(targetAppPath)}.${path.basename(helperDir)}.previous`);
   const extractDir = path.join(helperDir, 'extracted');
   const logPath = path.join(helperDir, 'install.log');
   const parentPid = String(process.pid);
@@ -458,6 +453,7 @@ async function prepareMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
   const script = `#!/bin/sh
 set -eu
 LOG=${shellQuote(logPath)}
+exec 3>&1
 exec >> "$LOG" 2>&1
 echo "Starting LoomTV macOS update install at $(date)"
 PARENT_PID=${shellQuote(parentPid)}
@@ -465,27 +461,40 @@ SOURCE_APP=${shellQuote(sourceAppPath)}
 TARGET_APP=${shellQuote(targetAppPath)}
 BACKUP_APP=${shellQuote(backupAppPath)}
 
+PHASE=waiting
+restore_previous_app() {
+  STATUS=$?
+  trap - EXIT HUP INT TERM
+  if [ "$PHASE" = replacing ] && [ -d "$BACKUP_APP" ]; then
+    rm -rf "$TARGET_APP"
+    /bin/mv "$BACKUP_APP" "$TARGET_APP" || exit 1
+    /usr/bin/open -n "$TARGET_APP" || true
+  elif [ "$PHASE" = replacing ] && [ -d "$TARGET_APP" ]; then
+    /usr/bin/open -n "$TARGET_APP" || true
+  fi
+  exit "$STATUS"
+}
+trap restore_previous_app EXIT
+trap 'exit 1' HUP INT TERM
+
+[ ! -e "$BACKUP_APP" ]
+[ -d "$TARGET_APP" ]
+[ -w "$(dirname "$TARGET_APP")" ]
+printf 'READY\\n' >&3
+IFS= read -r DECISION || exit 1
+[ "$DECISION" = COMMIT ] || exit 1
+PHASE=authorized
+printf 'COMMITTED\\n' >&3
+exec 3>&-
 while kill -0 "$PARENT_PID" >/dev/null 2>&1; do
   sleep 0.25
 done
 
-rm -rf "$BACKUP_APP"
-if [ -d "$TARGET_APP" ]; then
-  /bin/mv "$TARGET_APP" "$BACKUP_APP"
-fi
-
-restore_previous_app() {
-  echo "Restoring previous app bundle"
-  rm -rf "$TARGET_APP"
-  if [ -d "$BACKUP_APP" ]; then
-    /bin/mv "$BACKUP_APP" "$TARGET_APP"
-    /usr/bin/open -n "$TARGET_APP" || true
-  fi
-}
+PHASE=replacing
+/bin/mv "$TARGET_APP" "$BACKUP_APP"
 
 if ! /usr/bin/ditto "$SOURCE_APP" "$TARGET_APP"; then
   echo "Failed to copy updated app, restoring previous app"
-  restore_previous_app
   exit 1
 fi
 
@@ -493,7 +502,6 @@ fi
 
 if ! /usr/bin/open -n "$TARGET_APP"; then
   echo "Failed to relaunch updated app"
-  restore_previous_app
   exit 1
 fi
 
@@ -511,10 +519,10 @@ done
 
 if [ "$LAUNCHED" -ne 1 ]; then
   echo "Updated app did not stay running after relaunch"
-  restore_previous_app
   exit 1
 fi
 
+PHASE=complete
 rm -rf "$BACKUP_APP" "$SOURCE_APP"
 echo "Finished LoomTV macOS update install at $(date)"
 `;
@@ -526,22 +534,76 @@ echo "Finished LoomTV macOS update install at $(date)"
     throw error;
   }
 
-  return async () => {
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn('/bin/sh', [helperPath], {
-        detached: true,
-        stdio: 'ignore',
-      });
-      await waitForChildToSpawn(child);
-    } catch (error) {
-      await removeUpdateHelperDirectory(helperDir);
-      throw error;
-    }
-    child.unref();
-
-    setTimeout(() => app.exit(0), 5000);
-    app.quit();
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn('/bin/sh', [helperPath], {
+      detached: true,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+  } catch (error) {
+    await removeUpdateHelperDirectory(helperDir);
+    throw error;
+  }
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  let failure: Error | undefined;
+  let cancelled = false;
+  let committed = false;
+  let received = '';
+  let notify = () => undefined;
+  const fail = (error: Error) => {
+    failure = error;
+    notify();
+    if (committed && !cancelled) recoverUpdateInstall(error);
+  };
+  child.on('error', fail);
+  child.stdin?.on('error', fail);
+  child.once('exit', () => fail(new Error('The update helper exited before app shutdown.')));
+  child.stdout?.on('data', (chunk: Buffer) => {
+    received += chunk.toString();
+    notify();
+  });
+  const waitFor = (line: string): Promise<void> => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      notify = () => undefined;
+      reject(new Error('The update helper handshake timed out.'));
+    }, 10_000);
+    notify = () => {
+      if (!failure && !received.split('\n').includes(line)) return;
+      clearTimeout(timer);
+      notify = () => undefined;
+      if (failure) reject(failure);
+      else resolve();
+    };
+    notify();
+  });
+  const cancel = async () => {
+    cancelled = true;
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.kill();
+    await closed;
+    await removeUpdateHelperDirectory(helperDir);
+  };
+  try {
+    await waitFor('READY');
+  } catch (error) {
+    await cancel();
+    throw error;
+  }
+  return {
+    cancel,
+    commit: async () => {
+      if (failure) throw failure;
+      const acknowledgement = waitFor('COMMITTED');
+      child.stdin?.end('COMMIT\n');
+      await acknowledgement;
+      if (failure) throw failure;
+      committed = true;
+      child.unref();
+      child.stdout?.destroy();
+      updateQuitFallbackTimer = setTimeout(() => app.exit(0), 5000);
+      app.quit();
+    },
   };
 }
 
@@ -738,6 +800,28 @@ async function handleManualUpdateCheck() {
   }
 }
 
+let installCleanupStarted = false;
+let installRecoveryStarted = false;
+
+function recoverUpdateInstall(error: unknown): void {
+  if (installRecoveryStarted) return;
+  installRecoveryStarted = true;
+  clearUpdateQuitFallback();
+  updateInstallStarted = false;
+  reportUpdateFailure(error, 'install');
+  app.relaunch();
+  app.exit(0);
+}
+
+function reportUpdateFailure(error: unknown, stage: UpdateFailureStage): UpdateState {
+  if (updateState.status === 'error') return updateState;
+  return setUpdateState({
+    status: 'error',
+    message: updateFailureMessage(error, stage),
+    checkedAt: new Date().toISOString(),
+  });
+}
+
 export async function installDownloadedUpdate() {
   if (updateInstallStarted) return updateState;
   if (updateState.status !== 'downloaded') return updateState;
@@ -745,7 +829,7 @@ export async function installDownloadedUpdate() {
 
   setUpdateState({ status: 'installing', message: 'Installing update and restarting Loom...' });
 
-  let installMacUpdate: (() => Promise<void>) | undefined;
+  let installMacUpdate: PreparedMacUpdate | undefined;
   if (process.platform === 'darwin') {
     try {
       const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
@@ -773,6 +857,7 @@ export async function installDownloadedUpdate() {
     ['media server', () => deps.closeMediaServer()],
     ['update timer', () => stopUpdateCheckTimer()],
   ];
+  installCleanupStarted = true;
   for (const [label, cleanup] of cleanupSteps) {
     try {
       await cleanup();
@@ -783,14 +868,10 @@ export async function installDownloadedUpdate() {
 
   if (installMacUpdate) {
     try {
-      await installMacUpdate();
+      await installMacUpdate.commit();
     } catch (error) {
-      updateInstallStarted = false;
-      setUpdateState({
-        status: 'error',
-        message: updateFailureMessage(error, 'install'),
-        checkedAt: new Date().toISOString(),
-      });
+      await installMacUpdate.cancel();
+      recoverUpdateInstall(error);
     }
     return updateState;
   }
@@ -808,13 +889,7 @@ export async function installDownloadedUpdate() {
       scheduleUpdateQuitFallback();
       autoUpdater.quitAndInstall(true, true);
     } catch (error) {
-      clearUpdateQuitFallback();
-      updateInstallStarted = false;
-      setUpdateState({
-        status: 'error',
-        message: updateFailureMessage(error, 'install'),
-        checkedAt: new Date().toISOString(),
-      });
+      recoverUpdateInstall(error);
     }
   }, 250);
 
@@ -902,15 +977,11 @@ function configureAutoUpdater() {
       : updateState.status === 'available' || updateState.status === 'downloading'
         ? 'download'
         : 'check';
-    if (failureStage === 'install') {
-      updateInstallStarted = false;
-      clearUpdateQuitFallback();
+    if (failureStage === 'install' && installCleanupStarted) {
+      recoverUpdateInstall(error);
+      return;
     }
-    setUpdateState({
-      status: 'error',
-      message: updateFailureMessage(error, failureStage),
-      checkedAt: new Date().toISOString(),
-    });
+    reportUpdateFailure(error, failureStage);
   });
 
 }
@@ -938,15 +1009,13 @@ export async function checkForUpdates(): Promise<UpdateState> {
   updateCheckInFlight = true;
   setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
   updateCheckPromise = autoUpdater.checkForUpdates()
-    .then(() => updateState)
-    .catch((error) => {
-      setUpdateState({
-        status: 'error',
-        message: updateFailureMessage(error, 'check'),
-        checkedAt: new Date().toISOString(),
+    .then((result) => {
+      void result?.downloadPromise?.catch((error: unknown) => {
+        reportUpdateFailure(error, 'download');
       });
       return updateState;
     })
+    .catch((error) => reportUpdateFailure(error, 'check'))
     .finally(() => {
       updateCheckInFlight = false;
       updateCheckPromise = null;

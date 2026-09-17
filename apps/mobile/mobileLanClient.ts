@@ -400,7 +400,7 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       const profileId = await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/progress/${encodeURIComponent(body.mediaId)}`, {
         method: 'PUT', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }), body: JSON.stringify({
-          positionSeconds: body.position, durationSeconds: body.duration, watched: body.duration > 0 && body.position / body.duration >= 0.9,
+          position: body.position, duration: body.duration,
         }),
       }), (data) => asRecord(data).progress || {});
     },

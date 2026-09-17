@@ -70,6 +70,31 @@ test('canonical preferences survive reopening and a corrupt snapshot rolls back 
   assert.deepEqual(await client.getTrackPreferences(profile.id, 'movie-1', owner.id), { audio: { enabled: true, language: 'en', index: 0 } });
 });
 
+test('migrated episodes round-trip through canonical backup with validated series references', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAllState({
+    adminState: { owner },
+    catalogItems: [
+      { id: 'series-1', kind: 'series', title: 'Show', createdAt: 123, updatedAt: 123 },
+      { id: 'episode-1', kind: 'episode', title: 'Pilot', seriesId: 'series-1', seasonNumber: 1, episodeNumber: 1, createdAt: 123, updatedAt: 123 },
+    ],
+  });
+  const before = store.readAdminState().catalog;
+  const snapshot = store.exportCanonicalSnapshot();
+  assert.equal(JSON.parse(snapshot.tables.catalog_items.find((item) => item.id === 'episode-1').extension_json).seriesId, 'series-1');
+  await store.restoreCanonicalSnapshot(JSON.parse(JSON.stringify(snapshot)));
+  assert.deepEqual(store.readAdminState().catalog, before);
+  for (const seriesId of [null, 42, '', 'missing-series', 'episode-1']) {
+    const invalid = structuredClone(snapshot);
+    invalid.tables.catalog_items.find((item) => item.id === 'episode-1').extension_json = JSON.stringify({ seriesId });
+    await assert.rejects(store.restoreCanonicalSnapshot(invalid), { code: 'canonical_backup_invalid' });
+    assert.deepEqual(store.readAdminState().catalog, before);
+  }
+});
+
 test('preference validation rejects non-numeric values without replacing saved preferences', async (t) => {
   const dataDir = await temporaryDirectory(t);
   const store = createCanonicalStateStore({ dataDir });

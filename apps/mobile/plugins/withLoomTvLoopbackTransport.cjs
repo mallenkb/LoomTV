@@ -8,13 +8,14 @@ const {
 const ANDROID_BUILD_POLICY = require('../android-build-policy.cjs');
 
 module.exports = function withLoomTvLoopbackTransport(config) {
-  if (config.android?.package !== ANDROID_BUILD_POLICY.applicationId) {
+  const isTv = config.android?.package === 'app.loomtv.tv';
+  if (!isTv && config.android?.package !== ANDROID_BUILD_POLICY.applicationId) {
     throw new Error(`Android package must be ${ANDROID_BUILD_POLICY.applicationId}.`);
   }
-  if (config.version !== ANDROID_BUILD_POLICY.version) {
+  if (!isTv && config.version !== ANDROID_BUILD_POLICY.version) {
     throw new Error(`Android version must be ${ANDROID_BUILD_POLICY.version}.`);
   }
-  if (config.android?.versionCode !== ANDROID_BUILD_POLICY.versionCode) {
+  if (!isTv && config.android?.versionCode !== ANDROID_BUILD_POLICY.versionCode) {
     throw new Error(`Android versionCode must be ${ANDROID_BUILD_POLICY.versionCode}.`);
   }
   if (config.android?.usesCleartextTraffic !== false) {

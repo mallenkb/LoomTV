@@ -555,7 +555,7 @@ function transcodeArgs(filePath, outputDir, health, profile) {
   return args;
 }
 
-/** @param {import('./server-media-types.js').MediaServiceOptions} options */
+/** @param {import('./server-media-types.js').MediaServiceOptions & { adminService: import('./server-media-types.js').MediaAdmin & Partial<Pick<ReturnType<typeof import('./admin-service.js').createHeadlessAdminService>, 'isSessionActive' | 'getSessionExpiry'>> }} options */
 export function createHeadlessMediaService({
   adminService,
   clientState,
@@ -581,6 +581,8 @@ export function createHeadlessMediaService({
 
   /** @param {string} principalId @param {import('./server-media-types.js').ProfileBinding | null | undefined} profile */
   async function resolveBoundPrincipal(principalId, profile) {
+    if (profile?.authenticationSessionId
+      && !await adminService.isSessionActive?.(profile.authenticationSessionId, principalId)) return null;
     if (profile?.invitationSessionId && remotePolicy?.resolveInvitationPrincipal) {
       return remotePolicy.resolveInvitationPrincipal(profile.invitationSessionId);
     }
@@ -612,6 +614,7 @@ export function createHeadlessMediaService({
   let stopPromise;
   /** @type {Promise<number> | null} */
   let reconciliationPromise = null;
+  let sessionGeneration = 0;
   /** @type {Promise<Awaited<ReturnType<import('./server-media-types.js').Quota['status']>> | null> | null} */
   let quotaSweepPromise = null;
   const cacheQuota = createTranscodeCacheQuota({
@@ -668,6 +671,7 @@ export function createHeadlessMediaService({
       } catch {
         return 0;
       }
+      const generation = sessionGeneration;
       const active = new Set([...sessions.values()]
         .filter((session) => !session.cleaned)
         .map((session) => path.resolve(session.outputDir)));
@@ -679,6 +683,9 @@ export function createHeadlessMediaService({
         if (active.has(path.resolve(candidate))) continue;
         try {
           const verified = await resolveContainedPath(configuredCacheDir, candidate);
+          if (generation !== sessionGeneration || [...sessions.values()].some((session) => (
+            !session.cleaned && path.resolve(session.outputDir) === verified.realPath
+          ))) continue;
           await fsPromises.rm(verified.realPath, { recursive: true, force: true });
           removed += 1;
         } catch {
@@ -696,21 +703,20 @@ export function createHeadlessMediaService({
     if (quotaSweepPromise) return quotaSweepPromise;
     quotaSweepPromise = (async () => {
       await reconcileOrphanedTranscodes();
-      const current = await cacheQuota.status();
-      const sessionsByAge = [...sessions.values()]
-        .filter((session) => !session.cleaned)
-        .sort((left, right) => left.lastActivityAt - right.lastActivityAt);
-      const oversized = sessionsByAge.filter((session) => (current.sessionBytes.get(session.id) || 0) > cacheQuota.maxSessionBytes);
-      const cleanup = new Set(oversized);
-      if (current.totalBytes + current.reservedBytes >= cacheQuota.maxTotalBytes
-        || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes)
-        || (current.freeBytes === null && cacheQuota.minFreeBytes > 0)) {
-        for (const session of sessionsByAge) cleanup.add(session);
+      let current = await cacheQuota.status();
+      for (;;) {
+        const sessionsByAge = [...sessions.values()]
+          .filter((session) => !session.cleaned)
+          .sort((left, right) => left.lastActivityAt - right.lastActivityAt);
+        const oversized = sessionsByAge.find((session) => (current.sessionBytes.get(session.id) || 0) > cacheQuota.maxSessionBytes);
+        const exceeded = current.totalBytes + current.reservedBytes > cacheQuota.maxTotalBytes
+          || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes + current.reservedBytes)
+          || (current.freeBytes === null && cacheQuota.minFreeBytes > 0);
+        const session = oversized || (exceeded ? sessionsByAge[0] : null);
+        if (!session) return current;
+        await trackCleanup(cleanupSession(session, { reason: 'transcode_quota_exceeded' }));
+        current = await cacheQuota.status();
       }
-      for (const session of cleanup) {
-        trackCleanup(cleanupSession(session, { reason: 'transcode_quota_exceeded' }));
-      }
-      return current;
     })().catch(() => null).finally(() => { quotaSweepPromise = null; });
     return quotaSweepPromise;
   }
@@ -718,10 +724,10 @@ export function createHeadlessMediaService({
   /** @param {import('./server-media-types.js').TranscodeSession} session */
   async function enforceSessionQuota(session) {
     try {
-      const current = await cacheQuota.sessionBytes(session.id);
-      const exceeded = current.bytes > cacheQuota.maxSessionBytes
-        || current.totalBytes + (cacheQuota.snapshot().reservedBytes || 0) >= cacheQuota.maxTotalBytes
-        || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes)
+      const current = await cacheQuota.status();
+      const exceeded = (current.sessionBytes.get(session.id) || 0) > cacheQuota.maxSessionBytes
+        || current.totalBytes + current.reservedBytes > cacheQuota.maxTotalBytes
+        || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes + current.reservedBytes)
         || (current.freeBytes === null && cacheQuota.minFreeBytes > 0);
       if (!exceeded) return true;
     } catch {
@@ -750,11 +756,24 @@ export function createHeadlessMediaService({
   // cached value and never triggers an unbounded filesystem scan itself.
   void enforceCacheQuota();
 
+  /** @param {string} principalId @param {import('./server-media-types.js').ProfileBinding | null | undefined} profile */
+  async function authenticationExpiry(principalId, profile) {
+    if (!profile?.authenticationSessionId) return Infinity;
+    const sessionId = profile.authenticationSessionId;
+    if (await adminService.isSessionActive?.(sessionId, principalId)) {
+      const expiresAt = await adminService.getSessionExpiry?.(sessionId, principalId);
+      if (typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt > now()) return expiresAt;
+    }
+    throw playbackError('playback_session_invalid', 'The bound authentication session is no longer active.', 401);
+  }
+
   /** @param {string} itemId @param {string} userId @param {string} action @param {import('./server-media-types.js').ProfileBinding | null} [profileContext] */
-  function issuePlaybackToken(itemId, userId, action, profileContext = null) {
+  async function issuePlaybackToken(itemId, userId, action, profileContext = null) {
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
     if (action === 'download') throw playbackError('download_not_allowed', 'Offline downloads require a persistent download lease.', 410);
+    const authExpiresAt = await authenticationExpiry(userId, profileContext);
     const session = playbackRegistry.create({
+      absoluteExpiresAt: Math.min(now() + SESSION_TTL_MS, authExpiresAt),
       itemId,
       principalId: userId,
       action,
@@ -786,7 +805,7 @@ export function createHeadlessMediaService({
   async function authorizePlaybackToken(token, url, permission, req) {
     const expectedAction = permission === 'downloads' ? 'download' : 'direct';
     const itemId = url.searchParams.get('itemId');
-    const entry = playbackRegistry.authorize(token, {
+    const entry = playbackRegistry.authorizeCapability(token, {
       ...(itemId ? { itemId } : {}),
       action: expectedAction,
     });
@@ -1004,7 +1023,15 @@ export function createHeadlessMediaService({
       quotaReservationId = id;
       await cacheQuota.reserve(id, principal.id);
       const outputDir = path.join(transcodeRoot, id);
+      if (principal.sessionId) {
+        requestedProfile.profileContext = {
+          ...requestedProfile.profileContext,
+          authenticationSessionId: requestedProfile.profileContext?.authenticationSessionId || principal.sessionId,
+        };
+      }
+      const authExpiresAt = await authenticationExpiry(principal.id, requestedProfile.profileContext);
       const registrySession = playbackRegistry.create({
+        absoluteExpiresAt: Math.min(now() + HLS_ABSOLUTE_TIMEOUT_MS, authExpiresAt),
         id,
         principalId: principal.id,
         principalType: principal.type,
@@ -1066,6 +1093,7 @@ export function createHeadlessMediaService({
         detachRequestAbort = () => requestSignal.removeEventListener('abort', onAbort);
       }
       sessions.set(id, session);
+      sessionGeneration += 1;
       if (session.cleaned || stopping) throw cancelledError();
       await resolveContainedPath(configuredCacheDir, outputDir, { allowMissing: true });
       await fsPromises.mkdir(outputDir, { recursive: true });
@@ -1444,7 +1472,7 @@ export function createHeadlessMediaService({
       // the client hand off the new capability without rebuilding the media
       // source. Native HLS still uses the short-lived URL overlap below.
       const token = tokenFromRequest(req, url);
-      const playback = playbackRegistry.authorize(token, { action: 'hls' });
+      const playback = playbackRegistry.authorizeCapability(token, { action: 'hls' });
       const session = playback && playback.id === transcodeMatch[1] ? sessions.get(playback.id) : null;
       if (!playback || !session || session.cleaned) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
       session.token = playback.token;
@@ -1573,11 +1601,16 @@ export function createHeadlessMediaService({
           return null;
         }
       }
+      let authExpiresAt;
+      try { authExpiresAt = await authenticationExpiry(current.principalId, current.profile); } catch {
+        playbackRegistry.revoke(current.id, 'auth_session_revoked', now());
+        return null;
+      }
       const renewed = playbackRegistry.renew(identifier, {
         principalId: resolvedPrincipal.id,
         itemId: targetItemId,
         ...(action ? { action } : {}),
-      }, now());
+      }, now(), authExpiresAt);
       if (!renewed) return null;
       const session = sessions.get(renewed.id);
       if (session) session.token = renewed.token;

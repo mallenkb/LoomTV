@@ -324,10 +324,38 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     // Progress against real media persists.
     const profile = await authed('GET', '/api/v1/profiles');
     const profileId = profile.payload.data.profiles[0].id;
-    const saved = await authed('PUT', `/api/v1/profiles/${profileId}/progress/${encodeURIComponent(mediaId)}`, { position: 61, duration: 120 });
+    const progressRoute = `/api/v1/profiles/${profileId}/progress/${encodeURIComponent(mediaId)}`;
+    const saved = await authed('PUT', progressRoute, { position: 61.5, duration: 120 });
     assert.equal(saved.status, 200);
-    const read = await authed('GET', `/api/v1/profiles/${profileId}/progress/${encodeURIComponent(mediaId)}`);
-    assert.equal(read.payload.data.progress.position, 61);
+    const read = await authed('GET', progressRoute);
+    assert.equal(read.status, 200);
+    assert.deepEqual(read.payload.data.progress, saved.payload.data.progress);
+    assert.equal(read.payload.data.progress.position, 61.5);
+    assert.equal(read.payload.data.progress.duration, 120);
+    assert.equal(read.payload.data.progress.watched, false);
+    const listed = await authed('GET', `/api/v1/profiles/${profileId}/progress`);
+    assert.deepEqual(listed.payload.data.progress[mediaId], read.payload.data.progress);
+
+    for (const method of ['PUT', 'POST']) {
+      for (const body of [{}, { position: 10 }, { duration: 120 }, { positionSeconds: 10, durationSeconds: 120 },
+        { position: '10', duration: 120 }, { position: -1, duration: 120 }, { position: 1, duration: null },
+        { position: 1, duration: -1 }, { position: 1, duration: 120, watched: 'false' }]) {
+        const rejected = await authed(method, progressRoute, body);
+        assert.equal(rejected.status, 400);
+        assert.equal(rejected.payload.error.code, 'invalid_request');
+        assert.deepEqual((await authed('GET', progressRoute)).payload.data.progress, read.payload.data.progress);
+      }
+    }
+
+    for (const body of [{ position: 108, duration: 120 }, { position: 10, duration: 120 }, { position: 0, duration: 0 }]) {
+      assert.equal((await authed('PUT', progressRoute, body)).status, 200);
+      assert.equal((await authed('GET', progressRoute)).payload.data.progress.watched, true);
+    }
+    const cleared = await authed('POST', progressRoute, { position: 108, duration: 120, watched: false });
+    assert.equal(cleared.status, 200);
+    assert.equal((await authed('GET', progressRoute)).payload.data.progress.watched, false);
+    await authed('PUT', progressRoute, { position: 0, duration: 0, watched: true });
+    assert.equal((await authed('GET', progressRoute)).payload.data.progress.watched, true);
   });
 
   await t.test('signing out revokes the token', async () => {

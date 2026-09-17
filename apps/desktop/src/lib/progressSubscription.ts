@@ -33,7 +33,7 @@ export function createProgressRefreshSubscription({
     eventTarget.addEventListener('focus', handleEvent);
     eventTarget.addEventListener('storage', handleEvent);
     eventTarget.addEventListener('loomtv-progress', handleEvent);
-    timerId = setInterval(publish, intervalMs);
+    if (intervalMs > 0) timerId = setInterval(publish, intervalMs);
   };
 
   const detach = () => {

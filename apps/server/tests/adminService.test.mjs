@@ -11,6 +11,10 @@ import {
   loginThrottleDelayMs,
 } from '../src/admin-service.js';
 import { createBootstrapSecurity } from '../src/secure-bootstrap.js';
+import { createHeadlessMediaService } from '../src/media-service.js';
+import { createPlaybackSessionRegistry } from '../src/playback-session-registry.js';
+import { createCanonicalStateStore } from '../src/canonical-state-store.js';
+import { createMediaItemId } from '@loom-media-server/media-core';
 
 const OWNER_PASSWORD = 'correct-horse-battery';
 const BOOTSTRAP_SECRET = 'test-bootstrap-secret-32-bytes-minimum';
@@ -51,6 +55,77 @@ async function waitForScan(service, principal, timeoutMs = 5000) {
   }
 }
 
+test('canonical rescans reuse relinked sources and retain source-less series across restart and deletion', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-canonical-scan-'));
+  const store = createCanonicalStateStore({ dataDir });
+  await store.start();
+  const { service, principal } = await onboardedService({ dataDir, options: { stateStore: store } });
+  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const rootPath = path.join(dataDir, 'library');
+  await fs.mkdir(rootPath);
+  const filePath = path.join(rootPath, 'Show.S01E01.mkv');
+  await fs.writeFile(filePath, 'episode bytes');
+  const stats = await fs.stat(filePath);
+  const root = await service.addLibraryRoot({ path: rootPath, kind: 'tvShows' }, principal);
+  store.replaceAllState({
+    adminState: store.readAdminState(),
+    catalogItems: [
+      { id: 'series-1', kind: 'series', title: 'Show', createdAt: 123, updatedAt: 123 },
+      { id: 'migrated-episode', kind: 'episode', title: 'Pilot', seriesId: 'series-1', seasonNumber: 1, episodeNumber: 1, createdAt: 123, updatedAt: 123 },
+    ],
+    mediaSources: [{ id: 'migrated-source', mediaId: 'migrated-episode', rootId: root.id, relativePath: path.basename(filePath),
+      locator: filePath, state: 'online', fileExtension: 'mkv', sizeBytes: stats.size, modifiedAtMs: stats.mtimeMs, indexedAt: 123 }],
+    mediaIdentityAliases: [{ namespace: 'desktop-path-hash', alias: createMediaItemId(filePath), mediaId: 'migrated-episode', createdAt: 123 }],
+  });
+  assert.deepEqual(store.resolveScanIdentity(filePath, createMediaItemId(filePath)), {
+    mediaId: 'migrated-episode', sourceId: 'migrated-source', seriesId: 'series-1',
+  });
+  assert.equal(store.resolveScanIdentity(path.join(rootPath, 'alias.mkv'), createMediaItemId(filePath)).mediaId, 'migrated-episode');
+  const reopened = (await makeService({ dataDir, options: { stateStore: store } })).service;
+  t.after(() => reopened.stop());
+  for (const mode of ['quick', 'full', 'metadata']) {
+    await reopened.startLibraryScan({ mode }, principal);
+    assert.equal((await waitForScan(reopened, principal)).state, 'completed');
+    const items = await reopened.listLibraryItems(principal);
+    assert.equal(items.length, 2);
+    assert.equal(items.find((item) => item.id === 'migrated-episode').sourceId, 'migrated-source');
+    assert.equal(items.find((item) => item.id === 'series-1').available, true);
+    assert.equal(store.listMediaSources('migrated-episode').length, 1);
+    assert.equal(store.readAdminState().catalog.find((item) => item.id === 'migrated-episode').seriesId, 'series-1');
+  }
+  await reopened.deleteLibraryItem('migrated-episode', principal);
+  await store.stop();
+  await store.start();
+  assert.equal(store.readMediaSource('migrated-episode'), null);
+  assert.deepEqual(store.readAdminState().catalog.map((item) => item.id), ['series-1']);
+});
+
+test('a failed canonical scan write leaves the cached and persisted catalog unchanged', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-scan-failure-'));
+  const store = createCanonicalStateStore({ dataDir });
+  await store.start();
+  let failCompleted = false;
+  const adapter = { ...store, replaceAdminState(state) {
+    if (failCompleted && state.scan?.state === 'completed') throw new Error('Injected catalog persistence failure');
+    return store.replaceAdminState(state);
+  } };
+  const { service, principal } = await onboardedService({ dataDir, options: { stateStore: adapter } });
+  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const rootPath = path.join(dataDir, 'library');
+  await fs.mkdir(rootPath);
+  await fs.writeFile(path.join(rootPath, 'first.mkv'), 'first');
+  await service.addLibraryRoot({ path: rootPath, kind: 'movies' }, principal);
+  await service.startLibraryScan({}, principal);
+  assert.equal((await waitForScan(service, principal)).state, 'completed');
+  const before = await service.listLibraryItems(principal);
+  await fs.writeFile(path.join(rootPath, 'second.mkv'), 'second');
+  failCompleted = true;
+  await service.startLibraryScan({}, principal);
+  assert.equal((await waitForScan(service, principal)).state, 'failed');
+  assert.deepEqual(await service.listLibraryItems(principal), before);
+  assert.deepEqual(store.readAdminState().catalog.map((item) => item.id), before.map((item) => item.id));
+});
+
 function fileSystemError(code) {
   return Object.assign(new Error(code), { code });
 }
@@ -58,6 +133,61 @@ function fileSystemError(code) {
 function storageCheck(health) {
   return health.checks.find((entry) => entry.name === 'Persistent storage');
 }
+
+test('quick admin scans reuse probes and refresh changed and removed sidecars after reload', async (t) => {
+  let probeCalls = 0;
+  const options = { probeMedia: async (_path, { sourceId }) => {
+    probeCalls += 1;
+    return { sourceId, container: 'matroska', tracks: [], chapters: [], hdr: false, probedAt: 1, adapterGaps: [] };
+  } };
+  const { service, dataDir, principal } = await onboardedService({ options });
+  const rootPath = path.join(dataDir, 'media');
+  await fs.mkdir(rootPath);
+  await fs.writeFile(path.join(rootPath, 'stable.mkv'), 'video');
+  const sidecar = path.join(rootPath, 'stable.en.srt');
+  await fs.writeFile(sidecar, 'first');
+  await service.addLibraryRoot({ path: rootPath }, principal);
+  await service.startLibraryScan({ mode: 'quick' }, principal);
+  assert.equal((await waitForScan(service, principal)).state, 'completed');
+  assert.equal(probeCalls, 1);
+  await service.stop();
+  const statePath = path.join(dataDir, headlessAdminStateFilename);
+  const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  state.catalog[0].summary = 'Keep descriptive enrichment.';
+  await fs.writeFile(statePath, JSON.stringify(state));
+  const { service: reloaded } = await makeService({ dataDir, options });
+  t.after(async () => { await reloaded.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  await fs.writeFile(sidecar, 'changed subtitle contents');
+  await reloaded.startLibraryScan({ mode: 'quick' }, principal);
+  assert.equal((await waitForScan(reloaded, principal)).state, 'completed');
+  assert.equal(probeCalls, 1);
+  let saved = JSON.parse(await fs.readFile(statePath, 'utf8')).catalog[0];
+  assert.equal(saved.summary, 'Keep descriptive enrichment.');
+  assert.equal(saved.localMetadata.container, 'matroska');
+  assert.equal(saved.subtitleSidecars[0].sizeBytes, Buffer.byteLength('changed subtitle contents'));
+  await fs.unlink(sidecar);
+  await reloaded.startLibraryScan({ mode: 'quick' }, principal);
+  await waitForScan(reloaded, principal);
+  saved = JSON.parse(await fs.readFile(statePath, 'utf8')).catalog[0];
+  assert.deepEqual(saved.subtitleSidecars, []);
+  assert.equal(probeCalls, 1);
+});
+
+test('source-less canonical series remain listed and cannot resolve for playback', async (t) => {
+  const { service, dataDir } = await makeService({ options: { stateStore: {
+    readAdminState: () => ({ catalog: [{ id: 'series-1', rootId: null, path: null, kind: 'series', title: 'Migrated series' }] }),
+    replaceAdminState() {},
+    listMediaSources: () => [],
+    readMediaSource: () => null,
+  } } });
+  t.after(async () => { await service.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const items = await service.listLibraryItems();
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, 'Migrated series');
+  assert.equal(items[0].available, false);
+  assert.deepEqual(items[0].sourceIds, []);
+  await assert.rejects(service.resolveMediaPath('series-1', null), { status: 404 });
+});
 
 test('admin storage health verifies a writable directory and removes its probe file', async () => {
   const { service, dataDir } = await makeService({
@@ -481,6 +611,81 @@ test('credential resets enforce privilege scope, verify self-service, revoke ses
   for (const password of [managerPassword, limitedAdminPassword, broadAdminPassword, viewerPassword, 'viewer-password-2']) {
     assert.equal(serializedLogs.includes(password), false, 'security logs must not record credentials');
   }
+});
+
+test('authentication expiry cleanup and logout revoke only their bound playback sessions', async (t) => {
+  let currentTime = Date.now();
+  t.mock.method(Date, 'now', () => currentTime);
+  const registry = createPlaybackSessionRegistry({ sweepIntervalMs: 0 });
+  let media;
+  const revocations = [];
+  const { service, dataDir, principal, token } = await onboardedService({
+    options: {
+      onAuthenticationSessionRevoked: (id, reason) => {
+        revocations.push({ id, reason });
+        return media.revokeAuthenticationSession(id, reason);
+      },
+    },
+  });
+  media = createHeadlessMediaService({
+    adminService: service, cacheDir: dataDir, playbackSessionRegistry: registry,
+    authorize: async () => true, transcoder: { path: null, getHealth: () => ({}) },
+    cacheQuotaOptions: { sweepIntervalMs: 0, minFreeBytes: 0 },
+  });
+  t.after(async () => { await media.stop(); registry.close(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const expiresAt = await service.getSessionExpiry(principal.sessionId, principal.id);
+  const bound = await media.issuePlaybackToken('item-1', principal.id, 'direct', { authenticationSessionId: principal.sessionId });
+  const longLived = registry.create({ principalId: principal.id, itemId: 'item-2', action: 'hls',
+    profile: { authenticationSessionId: principal.sessionId }, idleTimeoutMs: expiresAt - currentTime + 60_000,
+    absoluteExpiresAt: expiresAt + 60_000 });
+  assert.ok(bound.absoluteExpiresAt <= expiresAt);
+  currentTime = expiresAt;
+  assert.equal(await service.isSessionActive(principal.sessionId, principal.id), false);
+  assert.equal(await service.getSessionExpiry(principal.sessionId, principal.id), null);
+  assert.equal(await service.authenticateRequest(bearer(token)), null);
+  assert.equal(registry.get(longLived.id), null);
+  assert.deepEqual(revocations, [{ id: principal.sessionId, reason: 'auth_session_expired' }]);
+  const login = await service.createSession({ password: OWNER_PASSWORD, address: '127.0.0.1' });
+  const signedIn = await service.authenticateRequest(bearer(login.adminToken));
+  const playback = await media.issuePlaybackToken('item-1', principal.id, 'direct', { authenticationSessionId: signedIn.sessionId });
+  const independent = await media.issuePlaybackToken('item-2', principal.id, 'direct');
+  assert.equal(await service.revokeRequest(bearer(login.adminToken)), true);
+  assert.equal(registry.get(playback.sessionId), null);
+  assert.ok(registry.get(independent.sessionId));
+  assert.deepEqual(revocations.at(-1), { id: signedIn.sessionId, reason: 'auth_session_revoked' });
+});
+
+test('rejected user updates leave cached and persisted records unchanged', async (t) => {
+  const { service, dataDir, principal } = await onboardedService();
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const user = await service.createUser({ name: 'Original', password: OWNER_PASSWORD, role: 'viewer', rootIds: [] }, principal);
+  const statePath = path.join(dataDir, headlessAdminStateFilename);
+  const before = await fs.readFile(statePath, 'utf8');
+  const original = await service.getPrincipalById(user.id);
+  const manager = { ...principal, type: 'user', role: 'user', permissions: ['users.manage', 'library.read', 'stream', 'account.password'], rootIds: [] };
+  for (const [input, actor, status] of [
+    [{ role: 'invalid' }, principal, 400],
+    [{ permissions: ['invalid'] }, principal, 400],
+    [{ rootIds: ['unknown'] }, principal, 400],
+    [{ deviceIds: 'invalid' }, principal, 400],
+    [{ maxSessions: -1 }, principal, 400],
+    [{ role: 'admin' }, manager, 403],
+    [{ permissions: ['logs.read'] }, manager, 403],
+    [{ rootIds: null }, manager, 403],
+  ]) {
+    await assert.rejects(() => service.updateUser(user.id, { name: 'Rejected name', ...input }, actor), { status });
+    assert.deepEqual(await service.getPrincipalById(user.id), original);
+    assert.equal(await fs.readFile(statePath, 'utf8'), before);
+  }
+  await service.updateUser(user.id, { name: 'Accepted', role: 'user', permissions: ['stream'], deviceIds: ['device-1'], maxSessions: 2 }, principal);
+  const updated = await service.getPrincipalById(user.id);
+  assert.equal(updated.name, 'Accepted');
+  assert.equal(updated.role, 'user');
+  assert.deepEqual(updated.permissions, ['stream']);
+  assert.deepEqual(updated.deviceIds, ['device-1']);
+  assert.equal(updated.maxSessions, 2);
+  const { service: reopened } = await makeService({ dataDir });
+  assert.deepEqual(await reopened.getPrincipalById(user.id), updated);
 });
 
 test('library roots resolve to absolute paths and unauthenticated principals cannot manage them', async () => {
