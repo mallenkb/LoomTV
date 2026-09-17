@@ -32,6 +32,7 @@ function updaterFixture({
   rejectRequirement = false,
   rejectSignature = false,
   rejectDownloadedSignature = false,
+  rejectGatekeeper = false,
   rejectChecksum = false,
   rejectExtraction = false,
   rejectPermission = false,
@@ -63,6 +64,10 @@ function updaterFixture({
     }
     if (args.includes('-R')) assert.ok(args[args.indexOf('-R') + 1].startsWith('=anchor apple generic'));
     if (rejectRequirement && args.includes('-R')) throw new Error(`signature requirement failed: ${args.at(-1)}`);
+    if (file === '/usr/sbin/spctl') {
+      assert.deepEqual(Array.from(args.slice(0, 4)), ['--assess', '--type', 'execute', '--verbose=4']);
+      if (rejectGatekeeper) throw new Error(`Gatekeeper rejected ${args.at(-1)}`);
+    }
     if (file === '/usr/bin/ditto') {
       assert.deepEqual(Array.from(args), ['-x', '-k', archivePath, `${helperDir}/extracted`]);
       if (rejectExtraction) throw new Error(`Cannot extract ${helperDir}`);
@@ -174,7 +179,7 @@ function updaterFixture({
     exports: module.exports,
     Error,
     process: { platform: 'darwin', arch: 'arm64', pid: 1234, resourcesPath: '/resources', env: {} },
-    console: { error: (...args: unknown[]) => { errors.push(args); }, warn: () => undefined },
+    console: { error: (...args: unknown[]) => { errors.push(args); }, warn: () => undefined, info: () => undefined },
     setTimeout: (callback: () => void) => {
       const timer = { callback, unref: () => undefined };
       timers.push(timer.callback);
@@ -271,13 +276,33 @@ async function assertPreflightFailure(fixture: ReturnType<typeof updaterFixture>
   assert.equal(await fixture.api.installDownloadedUpdate(), state);
 }
 
-test('legacy ad-hoc install preflight requires a manual Developer ID upgrade without draining cleanup', async () => {
-  for (const downloaded of [adHocIdentity, 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=OTHER12345']) {
+test('legacy ad-hoc install bootstraps to a verified notarized Developer ID update', async () => {
+  const fixture = updaterFixture({
+    installed: adHocIdentity,
+    downloaded: 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=ABCDE12345',
+  });
+  fixture.download();
+  const state = await fixture.api.installDownloadedUpdate();
+  assert.equal(state.status, 'installing');
+  assert.ok(fixture.calls.some(({ file, args }) => file === '/usr/bin/codesign'
+    && args.includes('-R')
+    && args.some((arg) => arg.includes('subject.OU] = "ABCDE12345"'))
+    && args.some((arg) => arg.includes('identifier "com.mallenkb.loommediaserver"'))));
+  assert.ok(fixture.calls.some(({ file, args }) => file === '/usr/sbin/spctl'
+    && args.at(-1)?.endsWith('/extracted/LoomTV.app')));
+  assert.deepEqual(fixture.cleanups, ['transcodes', 'native playback', 'discovery', 'media server', 'update timer']);
+});
+
+test('legacy ad-hoc bootstrap still rejects ad-hoc or wrong-bundle updates before cleanup', async () => {
+  for (const downloaded of [
+    adHocIdentity,
+    'Identifier=wrong.app\nTeamIdentifier=ABCDE12345',
+  ]) {
     const fixture = updaterFixture({ installed: adHocIdentity, downloaded });
     fixture.download();
-    await assertPreflightFailure(fixture, /Developer ID.*manually/);
-    assert.ok(fixture.calls.some(({ args }) => args.includes('--display')));
-    assert.ok(!fixture.calls.some(({ file }) => file === '/usr/bin/ditto'));
+    await assertPreflightFailure(fixture, /could not be verified and was not installed/);
+    assert.ok(fixture.calls.some(({ file }) => file === '/usr/bin/ditto'));
+    assert.deepEqual(fixture.effects, ['remove-helper']);
   }
 });
 
@@ -308,6 +333,7 @@ for (const [label, options] of [
   ['different publisher', { downloaded: 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=OTHER12345' }],
   ['different bundle', { downloaded: 'Identifier=wrong.app\nTeamIdentifier=ABCDE12345' }],
   ['Apple signing requirement', { rejectRequirement: true }],
+  ['Gatekeeper/notarization assessment', { rejectGatekeeper: true }],
   ['downloaded signature', { rejectDownloadedSignature: true }],
   ['signature with failed temporary cleanup', { rejectDownloadedSignature: true, rejectHelperCleanup: true }],
 ] as const) {

@@ -19,11 +19,7 @@ import { z } from 'zod';
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
 const UPDATE_RELEASE_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`;
-class LegacyMacUpdateError extends Error {
-  constructor() {
-    super('This legacy ad-hoc installation has no trusted publisher identity. Download a Developer ID-signed LoomTV release from the official releases page and install it manually once to enable verified automatic updates.');
-  }
-}
+const MACOS_BUNDLE_IDENTIFIER = 'com.mallenkb.loommediaserver';
 const execFileAsync = promisify(execFile);
 const githubReleaseSchema = z.object({
   tag_name: z.string().optional(),
@@ -155,8 +151,7 @@ function updateFailureMessage(error: unknown, stage: UpdateFailureStage): string
   const rawMessage = error instanceof Error ? error.message : String(error);
   console.error(`[updates] ${stage} failed:`, error);
 
-  if (error instanceof LegacyMacUpdateError) return error.message;
-  if (/code.?sign|signature|publisher|bundle identifier|checksum|sha512/i.test(rawMessage)) {
+  if (/code.?sign|signature|publisher|bundle identifier|checksum|sha512|gatekeeper|notari[sz]/i.test(rawMessage)) {
     return 'The downloaded update could not be verified and was not installed.';
   }
   if (/EACCES|EPERM|permission denied|not permitted/i.test(rawMessage)) {
@@ -350,34 +345,58 @@ async function getMacAppPublisherIdentity(appPath: string, label: string): Promi
   };
 }
 
-async function getTrustedMacPublisher(runningAppPath: string): Promise<MacAppPublisherIdentity> {
-  await verifyMacAppSignature(runningAppPath, 'Installed LoomTV app');
-  const identity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
-  if (identity.adHoc || !identity.teamIdentifier) throw new LegacyMacUpdateError();
-  return identity;
+async function verifyMacGatekeeper(appPath: string, label: string): Promise<void> {
+  try {
+    await execFileAsync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath]);
+  } catch (error) {
+    throw new Error(`${label} failed Gatekeeper/notarization assessment: ${describeSubprocessError(error)}`, { cause: error });
+  }
 }
 
 async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
-  const runningIdentity = await getTrustedMacPublisher(runningAppPath);
+  await verifyMacAppSignature(runningAppPath, 'Installed LoomTV app');
+  const runningIdentity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
+  if (runningIdentity.bundleIdentifier !== MACOS_BUNDLE_IDENTIFIER) {
+    throw new Error(
+      `Installed LoomTV bundle identifier ${runningIdentity.bundleIdentifier} does not match ${MACOS_BUNDLE_IDENTIFIER}.`,
+    );
+  }
 
   await verifyMacAppSignature(sourceAppPath, 'Downloaded update app');
   const sourceIdentity = await getMacAppPublisherIdentity(sourceAppPath, 'Downloaded update app');
-
-  if (sourceIdentity.bundleIdentifier !== runningIdentity.bundleIdentifier) {
+  if (sourceIdentity.bundleIdentifier !== MACOS_BUNDLE_IDENTIFIER
+    || sourceIdentity.bundleIdentifier !== runningIdentity.bundleIdentifier) {
     throw new Error(
       `Downloaded update bundle identifier ${sourceIdentity.bundleIdentifier} does not match the installed LoomTV app (${runningIdentity.bundleIdentifier}).`,
     );
   }
+  if (sourceIdentity.adHoc || !sourceIdentity.teamIdentifier) {
+    throw new Error('Downloaded update publisher is not a Developer ID Application identity.');
+  }
 
-  if (sourceIdentity.adHoc || sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier) {
+  // Signed installs pin subsequent updates to the already-trusted Team ID.
+  // Legacy ad-hoc installs have no publisher identity to compare, so their
+  // one-time bootstrap is allowed only after the hard-coded GitHub feed's
+  // SHA-512 check, exact bundle-ID match, Developer ID requirement, and
+  // Gatekeeper/notarization assessment all succeed. The signed replacement
+  // then becomes the Team-ID trust anchor for every future update.
+  const trustedTeamIdentifier = runningIdentity.adHoc || !runningIdentity.teamIdentifier
+    ? sourceIdentity.teamIdentifier
+    : runningIdentity.teamIdentifier;
+  if (!runningIdentity.adHoc && sourceIdentity.teamIdentifier !== trustedTeamIdentifier) {
     throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
   }
 
-  const requirement = `=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = ${JSON.stringify(runningIdentity.teamIdentifier)} and identifier ${JSON.stringify(runningIdentity.bundleIdentifier)}`;
+  const requirement = `=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = ${JSON.stringify(trustedTeamIdentifier)} and identifier ${JSON.stringify(MACOS_BUNDLE_IDENTIFIER)}`;
   try {
     await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R', requirement, sourceAppPath]);
   } catch (error) {
     throw new Error(`Downloaded update failed Developer ID publisher verification: ${describeSubprocessError(error)}`, { cause: error });
+  }
+  await verifyMacGatekeeper(sourceAppPath, 'Downloaded update app');
+
+  if (runningIdentity.adHoc) {
+    console.info(`[updates] Verified one-time legacy macOS bootstrap to Developer ID Team ${sourceIdentity.teamIdentifier}.`);
   }
 }
 
@@ -832,8 +851,6 @@ export async function installDownloadedUpdate() {
   let installMacUpdate: PreparedMacUpdate | undefined;
   if (process.platform === 'darwin') {
     try {
-      const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-      await getTrustedMacPublisher(runningAppPath);
       if (!downloadedUpdateFilePath) throw new Error('The downloaded update archive is missing; its publisher cannot be verified.');
       installMacUpdate = await prepareMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
     } catch (error) {
