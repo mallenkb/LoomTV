@@ -2,7 +2,7 @@ import { app } from 'electron';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
+import { LIBVLC_INSTANCE_ARGUMENTS, shouldEagerWarmLibVlc } from './libvlcRuntimeConfig.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 
 /**
@@ -286,8 +286,14 @@ function registerWarmup(): void {
   const electronApp = app as (typeof app | undefined);
   if (!electronApp || typeof electronApp.once !== 'function' || typeof electronApp.isReady !== 'function') return;
   if (!enabled()) return;
-  if (electronApp.isReady()) warmLibVlcRuntime();
-  else electronApp.once('ready', () => { warmLibVlcRuntime(); });
+  // macOS prefers libmpv because VLC/VideoToolbox can retain a large decoded
+  // IOSurface pool for 4K media. Keep LibVLC lazy there and initialize it only
+  // if libmpv cannot open the source. Windows retains the warm fallback for
+  // its existing click-to-first-frame behavior.
+  if (shouldEagerWarmLibVlc(process.platform)) {
+    if (electronApp.isReady()) warmLibVlcRuntime();
+    else electronApp.once('ready', () => { warmLibVlcRuntime(); });
+  }
   electronApp.once('will-quit', () => { releaseWarmLibVlcRuntime(); });
 }
 

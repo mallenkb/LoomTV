@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { LIBVLC_INSTANCE_ARGUMENTS } from '../src/main/libvlcRuntimeConfig.ts';
+import { LIBVLC_INSTANCE_ARGUMENTS, shouldEagerWarmLibVlc } from '../src/main/libvlcRuntimeConfig.ts';
 import {
   captureLibVlcTrackSelection,
   restoreLibVlcTrackSelection,
@@ -9,6 +9,12 @@ import {
 
 test('all LibVLC instance paths bypass a stale plugin cache', () => {
   assert.deepEqual(LIBVLC_INSTANCE_ARGUMENTS, ['--no-plugins-cache', '--quiet']);
+});
+
+test('LibVLC warmup stays lazy on macOS where libmpv is preferred', () => {
+  assert.equal(shouldEagerWarmLibVlc('darwin'), false);
+  assert.equal(shouldEagerWarmLibVlc('win32'), true);
+  assert.equal(shouldEagerWarmLibVlc('linux'), false);
 });
 
 test('fullscreen re-arm captures and restores video, audio, and subtitle tracks', () => {

@@ -114,6 +114,7 @@ import {
   isTimeBuffered,
   isPlayerControlTarget,
   playbackProgressForExit,
+  preferMpvForLocalPlayback,
   resolveEngineTrackId,
   resolveInitialPlaybackPosition,
   shouldRestartUnseekableDirectStream,
@@ -1863,8 +1864,12 @@ export default function VideoPlayer({
         // Native players already inspect their own duration and tracks. Try
         // them directly. Availability checks and ffprobe only duplicated work
         // and delayed the first frame.
+        const localNativeEngines: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> =
+          preferMpvForLocalPlayback(navigator.platform || '')
+            ? [MpvPlaybackEngine, LibVlcPlaybackEngine]
+            : [LibVlcPlaybackEngine, MpvPlaybackEngine];
         const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = isLocalFile
-          ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
+          ? localNativeEngines
           : isIptvStream
             ? [LibVlcPlaybackEngine]
             : [];

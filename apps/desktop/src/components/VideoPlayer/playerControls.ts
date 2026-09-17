@@ -2,6 +2,10 @@ import { SUBTITLE_DELAY_LIMIT_SECONDS } from './constants.ts';
 
 const BUFFERED_SEEK_TOLERANCE_SECONDS = 0.35;
 
+export function preferMpvForLocalPlayback(platform: string): boolean {
+  return /mac/i.test(platform);
+}
+
 export function resolveEngineTrackId({
   engineKind,
   tracks,

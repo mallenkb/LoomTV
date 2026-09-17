@@ -7,3 +7,7 @@ export const LIBVLC_INSTANCE_ARGUMENTS: readonly string[] = [
     ? ['--no-quiet', '--verbose=2']
     : ['--quiet']),
 ];
+
+export function shouldEagerWarmLibVlc(platform: NodeJS.Platform): boolean {
+  return platform === 'win32';
+}
