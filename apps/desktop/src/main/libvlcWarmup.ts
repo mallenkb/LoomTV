@@ -6,13 +6,13 @@ import { LIBVLC_INSTANCE_ARGUMENTS, shouldEagerWarmLibVlc } from './libvlcRuntim
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 
 /**
- * Keep one LibVLC instance alive for the lifetime of the desktop process.
+ * Optional process-lifetime LibVLC warmup.
  *
- * LibVLC discovers and loads its plugin bank inside libvlc_new(). Doing that
- * after the user clicks Play puts module discovery directly on the
- * click-to-first-frame path. Playback sessions borrow this process-lifetime
- * instance, while media descriptors, media players, audio tracks and subtitle
- * state remain session-owned and are released normally between videos.
+ * Local playback prefers libmpv, so LoomTV no longer creates a LibVLC instance
+ * just because the desktop process started. By default a LibVLC fallback/IPTV
+ * session owns its instance and releases it when that session closes. Set
+ * LOOMTV_WARM_LIBVLC=1 only when trading idle memory for a warmer VLC first
+ * frame is deliberate.
  */
 
 type NativeValue = string | number | bigint | boolean | null | undefined
@@ -52,6 +52,7 @@ function explicitBoolean(value: unknown): boolean | undefined {
 }
 
 function enabled(): boolean {
+  if (!truthy(process.env.LOOMTV_WARM_LIBVLC)) return false;
   if (process.platform !== 'darwin' && process.platform !== 'win32') return false;
   if (truthy(process.env.LOOMTV_DISABLE_EXPERIMENTAL_LIBVLC)) return false;
   if (truthy(process.env.LOOMTV_DISABLE_LIBVLC)) return false;
@@ -261,9 +262,9 @@ export function warmLibVlcRuntime(): boolean {
 }
 
 /**
- * Return the process-lifetime LibVLC instance only when the playback runtime
- * resolved the same native library. A different configured runtime must never
- * receive a pointer created by another libvlc image.
+ * Return the optional shared LibVLC instance only when the playback runtime
+ * resolved the same native library. With the default configuration this returns
+ * null, so each LibVLC fallback/IPTV session owns and releases its own instance.
  */
 export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance | null {
   if (!warmRuntime && !warmupStarted) warmLibVlcRuntime();
@@ -274,6 +275,7 @@ export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance
 export function releaseWarmLibVlcRuntime(): void {
   const loaded = warmRuntime;
   warmRuntime = null;
+  warmupStarted = false;
   if (!loaded) return;
   try {
     loaded.release(loaded.instance);

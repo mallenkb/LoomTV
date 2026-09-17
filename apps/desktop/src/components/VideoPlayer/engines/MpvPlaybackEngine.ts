@@ -10,8 +10,6 @@ import type {
 import PlaybackVolumeController from './PlaybackVolumeController';
 import { NativeSessionLease } from './NativeSessionLease';
 
-const SEEK_COALESCE_MS = 16;
-
 export default class MpvPlaybackEngine implements PlaybackEngine {
   readonly kind = 'mpv' as const;
   // Do not claim in-window composition until the native host confirms it.
@@ -22,9 +20,6 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     await this.command({ type: 'set-muted', muted });
   });
   private lastState: PlaybackEngineState | null = null;
-  private seekTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingSeekPosition: number | null = null;
-  private lastSeekSentAt = 0;
   private lastPauseCommand: boolean | null = null;
   private destroyed = false;
 
@@ -51,7 +46,6 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   async load(filePath: string, options?: PlaybackStartOptions): Promise<boolean> {
     if (this.destroyed) throw new Error('The native playback engine has been disposed.');
-    this.cancelSeek();
     this.lastState = null;
     this.lastPauseCommand = null;
     this.volumeController.reset(options?.volume, options?.muted);
@@ -86,19 +80,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   private reflectSeek(position: number): void {
     if (!this.lastState) return;
-    this.emitState({ ...this.lastState, position });
-  }
-
-  private sendSeek(position: number): Promise<void> {
-    this.lastSeekSentAt = performance.now();
-    return this.command({ type: 'seek', position });
-  }
-
-  private cancelSeek(): void {
-    if (this.seekTimer) clearTimeout(this.seekTimer);
-    this.seekTimer = null;
-    this.pendingSeekPosition = null;
-    this.lastSeekSentAt = 0;
+    this.emitState({ ...this.lastState, status: 'loading', position });
   }
 
   play(): Promise<void> { return this.setPaused(false); }
@@ -107,22 +89,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     if (this.destroyed) return Promise.resolve();
     const target = Math.max(0, Number.isFinite(position) ? position : 0);
     this.reflectSeek(target);
-    const elapsed = performance.now() - this.lastSeekSentAt;
-    if (!this.seekTimer && elapsed >= SEEK_COALESCE_MS) return this.sendSeek(target);
-    this.pendingSeekPosition = target;
-    if (!this.seekTimer) {
-      this.seekTimer = setTimeout(() => {
-        this.seekTimer = null;
-        const pending = this.pendingSeekPosition;
-        this.pendingSeekPosition = null;
-        if (pending !== null && !this.destroyed) {
-          void this.sendSeek(pending).catch((error) => {
-            console.error('[playback] Deferred native seek failed.', error);
-          });
-        }
-      }, Math.max(0, SEEK_COALESCE_MS - elapsed));
-    }
-    return Promise.resolve();
+    return this.command({ type: 'seek', position: target });
   }
   setVolume(volume: number): Promise<void> { return this.volumeController.setVolume(volume); }
   setMuted(muted: boolean): Promise<void> { return this.volumeController.setMuted(muted); }
@@ -145,7 +112,6 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
   async destroy(): Promise<void> {
     this.destroyed = true;
     this.listener = undefined;
-    this.cancelSeek();
     this.lastPauseCommand = null;
     this.lastState = null;
     await this.lease.dispose();

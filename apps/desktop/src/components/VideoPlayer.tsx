@@ -137,9 +137,8 @@ import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
 
-// LazyVideoPlayer imports this module while the library screen is idle. Warm
-// the native runtime then, not after the user clicks Play.
-void LibVlcPlaybackEngine.available().catch(() => false);
+// LazyVideoPlayer imports this module while the library screen is idle. Resolve
+// the preferred libmpv runtime then, but keep LibVLC cold until IPTV or fallback.
 void MpvPlaybackEngine.available().catch(() => false);
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
@@ -345,7 +344,7 @@ export default function VideoPlayer({
   const nativePlaybackEndedRef = useRef(false);
   const libVlcEofReachedRef = useRef(false);
   // Only engines reporting an in-window surface participate in native layout.
-  // The MPV process currently uses an external window in both desktop apps.
+  // Both native backends can use the composited child surface.
   const libVlcSurfaceActive = nativePlaybackActive && (
     nativeEngineKind === 'libvlc'
     || playbackEngineRef.current?.surface === 'composited-window'
@@ -1609,6 +1608,44 @@ export default function VideoPlayer({
         return;
       }
       void (async () => {
+        if (failedEngineKind === 'mpv' && await LibVlcPlaybackEngine.available().catch(() => false)) {
+          nativeAutoplayIssuedRef.current = false;
+          const fallbackEngine = new LibVlcPlaybackEngine(handleNativePlaybackState);
+          if (!playbackEngineRef.current && playerActiveRef.current) {
+            playbackEngineRef.current = fallbackEngine;
+            try {
+              const loaded = await fallbackEngine.load(filePath, {
+                startSeconds: fallbackPosition,
+                audioDelay: audioDelayRef.current,
+                subtitleDelay: 0,
+                subtitleFiles: visibleSubtitlesRef.current.flatMap((subtitle) => {
+                  try {
+                    const parsed = new URL(subtitle.url, 'http://127.0.0.1');
+                    const subtitlePath = parsed.searchParams.get('path');
+                    return subtitlePath ? [{ path: subtitlePath, source: subtitle.source || 'sidecar' as const }] : [];
+                  } catch {
+                    return [];
+                  }
+                }),
+                nativeSubtitles: subtitlesDefaultEnabledRef.current,
+              });
+              if (loaded && playerActiveRef.current && playbackEngineRef.current === fallbackEngine) {
+                setNativePlaybackActive(true);
+                setNativeEngineKind('libvlc');
+                document.documentElement.classList.add('loom-native-active');
+                setStatusMessage('Opening with LibVLC...');
+                setErrorMessage(null);
+                return;
+              }
+            } catch (error) {
+              console.warn('[player] LibVLC fallback after libmpv failure could not start.', error);
+            }
+            if (playbackEngineRef.current === fallbackEngine) playbackEngineRef.current = null;
+            await fallbackEngine.destroy();
+          } else {
+            await fallbackEngine.destroy();
+          }
+        }
         if (failedEngineKind === 'libvlc' && await MpvPlaybackEngine.available().catch(() => false)) {
           nativeAutoplayIssuedRef.current = false;
           const fallbackEngine = new MpvPlaybackEngine(handleNativePlaybackState);
