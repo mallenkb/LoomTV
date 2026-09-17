@@ -107,6 +107,15 @@ for (const kind of ['libvlc', 'mpv']) {
     await assert.rejects(f.engine.pause()); f.commandOk = true; await f.engine.pause();
     assert.equal(f.commands.filter(c=>c.value.type==='set-paused').length,2); await f.engine.destroy();
   });
+  test(`${kind}: optimistic seek reports loading at the requested position`, async () => {
+    const f = fixture(kind); await start(f);
+    f.emit({ sessionId: 'active', status: 'ready', position: 4 });
+    await f.engine.seek(42);
+    assert.equal(f.states.at(-1).status, 'loading');
+    assert.equal(f.states.at(-1).position, 42);
+    assert.deepEqual(f.commands.at(-1).value, { type: 'seek', position: 42 });
+    await f.engine.destroy();
+  });
   test(`${kind}: queued seeks are cancelled on destroy`, async () => {
     const f = fixture(kind); await start(f); await f.engine.seek(1); await f.engine.seek(2); await f.engine.seek(3);
     await f.engine.destroy(); const count=f.commands.length; await new Promise(r=>setTimeout(r,30));
