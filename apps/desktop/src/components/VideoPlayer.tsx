@@ -137,9 +137,9 @@ import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
 
-// LazyVideoPlayer imports this module while the library screen is idle. Resolve
-// the preferred libmpv runtime then, but keep LibVLC cold until IPTV or fallback.
-void MpvPlaybackEngine.available().catch(() => false);
+// LazyVideoPlayer imports this module while the library screen is idle. Keep
+// both native runtimes cold until playback starts; libmpv stays the default
+// engine and initializes on demand, with LibVLC as the fallback.
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
