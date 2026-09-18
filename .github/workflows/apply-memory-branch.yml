@@ -1,4 +1,4 @@
-name: Apply and verify memory branch
+name: Verify memory branch
 
 on:
   push:
@@ -9,25 +9,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: memory-branch-implementation
-  cancel-in-progress: false
+  group: memory-branch-verification
+  cancel-in-progress: true
 
 jobs:
-  implement:
+  verify:
     if: github.repository == 'mallenkb/LoomTV' && github.ref == 'refs/heads/codex/reduce-memory-keep-vlc-warm'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    permissions:
-      contents: write
     steps:
       - name: Check out the exact branch revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Apply scoped source edits
-        id: apply
-        run: python3 scripts/apply-memory-branch.py
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
         with:
@@ -38,59 +34,20 @@ jobs:
         with:
           node-version: 22
       - name: Install typecheck and test dependencies without native install scripts
-        id: install
         run: |
           corepack enable
           corepack pnpm install --frozen-lockfile --ignore-scripts
       - name: Desktop typecheck
-        id: typecheck
-        continue-on-error: true
         run: corepack pnpm --filter loom-media-server-desktop typecheck
-      - name: Memory and playback regression tests
-        id: tests
-        continue-on-error: true
+      - name: Memory, playback, and catalog projection regression tests
         working-directory: apps/desktop
-        run: node --experimental-strip-types --test tests/boundedMemoryCache.test.ts tests/lazyNativeMemory.test.ts tests/nativePlaybackLifecycle.test.ts tests/libvlcSessionState.test.ts tests/videoPlayerHelpers.test.ts
+        run: node --experimental-strip-types --test tests/boundedMemoryCache.test.ts tests/lazyNativeMemory.test.ts tests/nativePlaybackLifecycle.test.ts tests/libvlcSessionState.test.ts tests/videoPlayerHelpers.test.ts tests/libraryProjections.test.ts
       - name: Lint changed code
-        id: lint
-        continue-on-error: true
         working-directory: apps/desktop
         run: corepack pnpm exec eslint src/main/boundedMemoryCache.ts src/main/libvlcNativeTypes.ts src/main/memoryMetrics.ts src/main/libvlcWarmup.ts src/main/libvlcPlayback.ts src/main/libmpvPlayback.ts src/main.ts src/App.tsx src/contexts/LibraryContext.tsx src/components/VideoPlayer.tsx src/components/VideoPlayer/LazyVideoPlayer.tsx src/shared/desktopProtocol.ts tests/boundedMemoryCache.test.ts tests/lazyNativeMemory.test.ts tests/lazyNativeMemory.cases.cjs
       - name: Build desktop bundles
-        id: build
-        continue-on-error: true
         run: corepack pnpm --filter loom-media-server-desktop build
-      - name: Record checks and commit only to the requested branch
-        if: always() && steps.apply.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Check diff whitespace and preserved runtime options
         run: |
-          set -euo pipefail
-          cat > apps/desktop/docs/scanner-benchmarks/memory-preserve-vlc-checks.txt <<'CHECKS'
-          Automated verification of the memory branch
-          Dependency install: ${{ steps.install.outcome }}
-          Desktop typecheck: ${{ steps.typecheck.outcome }}
-          Focused regression tests: ${{ steps.tests.outcome }}
-          Changed-code lint: ${{ steps.lint.outcome }}
-          Desktop bundle build: ${{ steps.build.outcome }}
-          Native macOS playback and memory measurements: not run
-          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          CHECKS
-          git diff --check
-          git config user.name 'LoomTV coding agent'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/desktop/src apps/desktop/tests apps/desktop/docs/scanner-benchmarks scripts/apply-memory-branch.py
-          git commit -m 'Reduce idle memory while preserving LibVLC startup warmup'
-          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          echo "::add-mask::$AUTH"
-          CURRENT=$(git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" ls-remote origin refs/heads/codex/reduce-memory-keep-vlc-warm | cut -f1)
-          test "$CURRENT" = "$GITHUB_SHA" || { echo 'Branch moved; refusing to overwrite another change.'; exit 1; }
-          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/codex/reduce-memory-keep-vlc-warm
-      - name: Require successful verification
-        if: always()
-        run: |
-          test '${{ steps.install.outcome }}' = success
-          test '${{ steps.typecheck.outcome }}' = success
-          test '${{ steps.tests.outcome }}' = success
-          test '${{ steps.lint.outcome }}' = success
-          test '${{ steps.build.outcome }}' = success
+          git diff --check 01e287f31a2f5b622feac07d3108b511c3e4a02c HEAD
+          git diff --exit-code 01e287f31a2f5b622feac07d3108b511c3e4a02c HEAD -- apps/desktop/src/main/libvlcRuntimeConfig.ts apps/desktop/native/libmpv/bridge.m apps/desktop/src/main/windowManager.ts apps/desktop/src/components/VideoPlayer/usePlayerScrubbing.ts apps/desktop/src/components/VideoPlayer/engines/MpvPlaybackEngine.ts apps/desktop/src/components/VideoPlayer/engines/LibVlcPlaybackEngine.ts
