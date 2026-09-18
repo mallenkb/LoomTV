@@ -15,7 +15,12 @@ function compile(file, mocks, fakeProcess) {
     if (name.startsWith('node:')) return nativeRequire(name);
     throw new Error(`Unexpected dependency in native-memory fixture: ${name}`);
   };
-  const { outputText, diagnostics } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+  // The production ESM source creates its own require for Koffi. Give that
+  // local binding a distinct name inside our CommonJS evaluation wrapper.
+  const source = fs.readFileSync(filename, 'utf8')
+    .replace('const require = createRequire(__filename);', 'const runtimeRequire = createRequire(__filename);')
+    .replaceAll("require('koffi')", "runtimeRequire('koffi')");
+  const { outputText, diagnostics } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     reportDiagnostics: true,
   });
@@ -46,7 +51,7 @@ function mpvFixture(present = true) {
     LOOMTV_LIBMPV_BRIDGE_PATH: '/fixture/bridge.dylib',
   } };
   const module = compile('main/libmpvPlayback.ts', {
-    electron: { BrowserWindow: { fromWebContents: () => ({}) } },
+    electron: { BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false }) } },
     'node:fs': nativeFs(new Set(present ? ['/fixture/libmpv.dylib', '/fixture/bridge.dylib'] : [])),
     './mpvPlaybackHelpers.ts': { finiteNumber: v => Number(v), normalizeMpvTracks: () => [] },
     './libvlcPlayback.ts': {
