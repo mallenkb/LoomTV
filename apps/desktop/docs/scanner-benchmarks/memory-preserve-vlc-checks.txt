@@ -1,0 +1,8 @@
+Automated verification of the memory branch
+Dependency install: success
+Desktop typecheck: success
+Focused regression tests: failure
+Changed-code lint: success
+Desktop bundle build: success
+Native macOS playback and memory measurements: not run
+Run: https://github.com/mallenkb/LoomTV/actions/runs/35389036785
