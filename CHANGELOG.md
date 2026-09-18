@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.176](docs/releases/v1.0.176.md)
+
+Lowers idle memory while keeping LibVLC warm and first for local playback.
+
 ### [1.0.175](docs/releases/v1.0.175.md)
 
 Restores the 1.0.172 playback path with LibVLC as the default local engine.
