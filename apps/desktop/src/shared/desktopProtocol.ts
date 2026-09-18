@@ -161,6 +161,8 @@ export type MpvPlaybackDiagnostics = {
 
 export type MpvAvailability = {
   available: boolean;
+  /** Detection does not load the bridge or establish playback readiness. */
+  verification?: 'detected' | 'loaded';
   surface?: 'composited-window' | 'external-window' | 'unavailable';
   libraryPath?: string;
   executablePath?: string;

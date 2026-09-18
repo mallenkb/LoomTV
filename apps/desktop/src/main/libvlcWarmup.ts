@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { recordMemoryCheckpoint } from './memoryMetrics.ts';
+import type { DynamicFunction, KoffiLibrary, KoffiRuntime, NativeValue } from './libvlcNativeTypes.ts';
 
 /**
  * Keep one LibVLC instance alive for the lifetime of the desktop process.
@@ -15,20 +17,11 @@ import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
  * state remain session-owned and are released normally between videos.
  */
 
-type NativeValue = string | number | bigint | boolean | null | undefined
-  | Record<string, unknown>
-  | readonly (string | null)[];
-type DynamicFunction = (...args: NativeValue[]) => NativeValue;
-type KoffiLibrary = {
-  func: (name: string, returnType: string, argumentTypes: readonly string[]) => DynamicFunction;
-};
-type KoffiRuntime = {
-  load: (libraryPath: string) => KoffiLibrary;
-};
 export type SharedLibVlcInstance = bigint | number;
 type NativeHandle = SharedLibVlcInstance | null;
 
 type WarmRuntime = {
+  library: KoffiLibrary;
   instance: SharedLibVlcInstance;
   release: DynamicFunction;
   libraries: KoffiLibrary[];
@@ -228,7 +221,7 @@ function loadCandidate(koffi: KoffiRuntime, libraryPath: string): WarmRuntime | 
     try {
       const instance = nativeHandle(create(LIBVLC_INSTANCE_ARGUMENTS.length, LIBVLC_INSTANCE_ARGUMENTS));
       if (!instance) return null;
-      return { instance, release, libraries, libraryPath };
+      return { instance, release, libraries, libraryPath, library };
     } finally {
       if (previousPluginPath === undefined) delete process.env.VLC_PLUGIN_PATH;
       else process.env.VLC_PLUGIN_PATH = previousPluginPath;
@@ -250,6 +243,7 @@ export function warmLibVlcRuntime(): boolean {
       if (!loaded) continue;
       warmRuntime = loaded;
       recordPlaybackDiagnostic('vlc.warmup.ready');
+      recordMemoryCheckpoint('vlc.warmup.ready');
       console.info(`[playback] LibVLC process instance ready (${candidate})`);
       return true;
     }
@@ -269,6 +263,12 @@ export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance
   if (!warmRuntime && !warmupStarted) warmLibVlcRuntime();
   if (!warmRuntime || !sameLibraryPath(warmRuntime.libraryPath, libraryPath)) return null;
   return warmRuntime.instance;
+}
+
+/** Reuse the startup library handles instead of dlopening VLC again for availability. */
+export function getWarmLibVlcLibraries(libraryPath: string): { library: KoffiLibrary; libraries: readonly KoffiLibrary[] } | null {
+  if (!warmRuntime || !sameLibraryPath(warmRuntime.libraryPath, libraryPath)) return null;
+  return { library: warmRuntime.library, libraries: warmRuntime.libraries };
 }
 
 export function releaseWarmLibVlcRuntime(): void {

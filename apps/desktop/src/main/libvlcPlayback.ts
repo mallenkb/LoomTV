@@ -13,7 +13,10 @@ import {
   libVlcPlatformVariants,
   orderWindowsLibVlcChildren,
 } from './libvlcPlatform.ts';
-import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
+import { getWarmLibVlcInstance, getWarmLibVlcLibraries } from './libvlcWarmup.ts';
+import { recordMemoryCheckpoint } from './memoryMetrics.ts';
+import type { DynamicFunction, KoffiLibrary, KoffiRuntime, KoffiType, KoffiTypeSpec, NativeValue } from './libvlcNativeTypes.ts';
+export type { KoffiLibrary, KoffiRuntime } from './libvlcNativeTypes.ts';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { playbackDiagnostics, recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 import {
@@ -22,33 +25,6 @@ import {
   type LibVlcTrackSelection,
 } from './libvlcSessionState.ts';
 
-/**
- * A koffi type descriptor. `koffi.struct(...)` returns one of these opaque
- * objects, and it may appear anywhere a primitive type name like `'void *'` is
- * accepted — including a function's return type.
- */
-type KoffiType = object;
-type KoffiTypeSpec = string | KoffiType;
-
-/**
- * Values that cross the FFI boundary. koffi marshals a `void *` as a BigInt
- * address (or `null` for NULL), primitives as themselves, and a struct as a
- * plain object matching its descriptor.
- */
-type NativeValue = string | number | bigint | boolean | null | undefined
-  | Buffer
-  | Record<string, unknown>
-  | readonly (string | null)[];
-type DynamicFunction = (...args: NativeValue[]) => NativeValue;
-
-export type KoffiLibrary = {
-  func: (name: string, returnType: KoffiTypeSpec, argumentTypes: readonly KoffiTypeSpec[]) => DynamicFunction;
-};
-export type KoffiRuntime = {
-  load: (libraryPath: string) => KoffiLibrary;
-  struct: (fields: Record<string, KoffiTypeSpec>) => KoffiType;
-  decode: (value: NativeValue, type: KoffiTypeSpec) => Record<string, NativeValue>;
-};
 export type NativeDrawable = bigint | number;
 /** A native pointer result: an address, or null when the call returned NULL. */
 type NativeHandle = NativeDrawable | null;
@@ -393,12 +369,13 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
   const rejected: string[] = [];
   for (const candidate of candidateLibraryPaths()) {
     try {
-      const loadedLibraries: KoffiLibrary[] = [];
+      const warmed = getWarmLibVlcLibraries(candidate.path);
+      const loadedLibraries: KoffiLibrary[] = warmed ? [...warmed.libraries] : [];
       // VLC's bundled libraries are normally loaded by the VLC executable,
       // which supplies the sibling core library and plugin path. Electron/
       // Koffi does not inherit that executable loader setup, so load the
       // sibling core first on both supported native platforms.
-      if (process.platform === 'darwin' || process.platform === 'win32') {
+      if (!warmed && (process.platform === 'darwin' || process.platform === 'win32')) {
         const corePath = path.join(
           path.dirname(candidate.path),
           process.platform === 'win32' ? 'libvlccore.dll' : 'libvlccore.dylib',
@@ -411,8 +388,8 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
           // is usable.
         }
       }
-      const library = koffi.load(candidate.path);
-      loadedLibraries.push(library);
+      const library = warmed?.library ?? koffi.load(candidate.path);
+      if (!warmed) loadedLibraries.push(library);
       const trackDescriptionType = koffi.struct({
         i_id: 'int',
         psz_name: 'str',
@@ -1906,6 +1883,7 @@ class LibVlcPlaybackSession {
     this.clearWindowListeners();
     this.release();
     this.destroyNativeView();
+    recordMemoryCheckpoint('vlc.session.released');
     this.emit({
       status: finalStatus || (this.ended ? 'ended' : 'closed'),
       paused: true,
@@ -1936,6 +1914,7 @@ export function startLibVlcPlayback(
       if (currentSession === terminated) currentSession = null;
     });
     currentSession = session;
+    recordMemoryCheckpoint('vlc.session.started');
     return { ok: true, sessionId: session.id, surface: 'composited-window' };
   } catch (error) {
     invalidateLibVlcRuntimeCache();
