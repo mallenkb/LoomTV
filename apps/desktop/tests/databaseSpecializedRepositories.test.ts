@@ -203,14 +203,24 @@ test('artwork repository persists custom artwork and maintains the disk cache th
 
   const firstUrl = 'https://image.tmdb.org/first.png';
   const first = await repository.cacheArtworkSource(firstUrl);
-  assert.ok(first?.cachePath && fs.existsSync(first.cachePath));
+  const firstCachePath = first?.cachePath;
+  assert.ok(firstCachePath && fs.existsSync(firstCachePath));
   assert.equal((await repository.cacheArtworkSource(firstUrl))?.cachePath, first?.cachePath);
   assert.deepEqual(fetched, [firstUrl]);
+
+  // Repeated reads may reuse the hash, but a same-size edit must invalidate it.
+  assert.ok(repository.getCachedArtwork(firstUrl));
+  if (!firstCachePath) throw new Error('The first artwork cache path was not created.');
+  const originalBytes = fs.readFileSync(firstCachePath);
+  fs.writeFileSync(firstCachePath, Buffer.alloc(originalBytes.length, 120));
+  assert.equal(repository.getCachedArtwork(firstUrl), null);
+  await repository.cacheArtworkSource(firstUrl);
+  assert.ok(repository.getCachedArtwork(firstUrl));
 
   const secondUrl = 'https://image.tmdb.org/second.png';
   await repository.cacheLibraryArtwork(artworkLibrary(secondUrl));
   assert.equal(repository.getCachedArtwork(firstUrl), null);
   assert.ok(repository.getCachedArtwork(secondUrl)?.cachePath);
   assert.equal(first?.cachePath ? fs.existsSync(first.cachePath) : true, false);
-  assert.deepEqual(fetched, [firstUrl, secondUrl]);
+  assert.deepEqual(fetched, [firstUrl, firstUrl, secondUrl]);
 });

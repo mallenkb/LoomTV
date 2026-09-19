@@ -81,7 +81,8 @@ function hashArtworkFile(filePath: string): { byteLength: number; contentHash: s
     if (signature === `${after.dev}:${after.ino}:${after.size}:${after.mtimeNs}:${after.ctimeNs}`) {
       artworkFileHashes.set(filePath, { signature, ...result });
       if (artworkFileHashes.size > 512) {
-        artworkFileHashes.delete(artworkFileHashes.keys().next().value!);
+        const oldestKey = artworkFileHashes.keys().next().value;
+        if (oldestKey !== undefined) artworkFileHashes.delete(oldestKey);
       }
     }
     return result;

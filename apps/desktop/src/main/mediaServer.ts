@@ -1541,13 +1541,16 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         // rendition. The client cannot substitute an upstream host or path.
         const originalSourceUrl = sourceUrl;
         sourceUrl = smallerTmdbArtwork(sourceUrl, reqUrl.searchParams.get('width'));
-        const sendArtwork = (cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>) => {
+        const sendArtwork = (
+          cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>,
+          cacheControl = LAN_IMAGE_CACHE_CONTROL,
+        ) => {
           if (!canWriteResponse(res)) return;
           if (cachedArtwork.cachePath) {
             res.writeHead(200, cachedArtworkResponseHeaders(
               cachedArtwork.mimeType,
               cachedArtwork.byteLength,
-              isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
+              isCacheableImageRequest ? cacheControl : undefined,
             ));
             const stream = fs.createReadStream(cachedArtwork.cachePath);
             pipeResponse(stream, res);
@@ -1564,7 +1567,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           res.writeHead(200, cachedArtworkResponseHeaders(
             cachedArtwork.mimeType || decoded.mimeType,
             decoded.buffer.byteLength,
-            isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
+            isCacheableImageRequest ? cacheControl : undefined,
           ));
           res.end(decoded.buffer);
         };
@@ -1584,7 +1587,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             ? getCachedPluginArtwork(artworkOwnerId, originalSourceUrl)
             : getCachedArtwork(originalSourceUrl);
           if (originalArtwork) {
-            sendArtwork(originalArtwork);
+            sendArtwork(originalArtwork, 'private, max-age=60');
             void (artworkOwnerId
               ? cachePluginArtworkSource(artworkOwnerId, sourceUrl)
               : cacheArtworkSource(sourceUrl)).catch(() => undefined);
