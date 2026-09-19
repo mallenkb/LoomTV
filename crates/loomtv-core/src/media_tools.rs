@@ -11,6 +11,7 @@ use tokio::{io::AsyncReadExt, sync::Semaphore};
 pub enum Transform {
     Subtitle(Option<u32>),
     Thumbnail(String),
+    SeekPreview(String),
 }
 #[derive(Clone)]
 pub struct MediaTools {
@@ -59,11 +60,14 @@ impl MediaTools {
             "-threads",
             "2",
         ]);
-        if let Transform::Thumbnail(time) = transform {
+        if let Transform::Thumbnail(time) | Transform::SeekPreview(time) = transform {
             if !valid_time(time) {
                 return Err(Error::new("invalid_time", "Choose a valid thumbnail time."));
             }
             command.args(["-ss", time]);
+        }
+        if matches!(transform, Transform::SeekPreview(_)) {
+            command.args(["-noaccurate_seek", "-skip_frame", "nokey", "-filter_threads", "1"]);
         }
         command.arg("-i").arg(path);
         let content_type = match transform {
@@ -82,7 +86,8 @@ impl MediaTools {
                 ]);
                 "text/vtt; charset=utf-8"
             }
-            Transform::Thumbnail(_) => {
+            Transform::Thumbnail(_) | Transform::SeekPreview(_) => {
+                let preview = matches!(transform, Transform::SeekPreview(_));
                 command.args([
                     "-map",
                     "0:v:0",
@@ -91,7 +96,8 @@ impl MediaTools {
                     "-an",
                     "-sn",
                     "-vf",
-                    "scale=640:-2",
+                    if preview { "scale='min(320,iw)':-2" } else { "scale=640:-2" },
+                    "-threads", "1",
                     "-q:v",
                     "4",
                     "-f",

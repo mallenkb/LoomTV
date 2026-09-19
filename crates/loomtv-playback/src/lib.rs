@@ -1,4 +1,7 @@
 pub mod mpv;
+mod snapshot_delivery;
+
+use snapshot_delivery::SnapshotDelivery;
 
 use libloading::Library;
 use serde_json::{json, Value};
@@ -7,7 +10,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{mpsc, Arc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
 
@@ -51,20 +54,27 @@ impl PlaybackService {
             let runtime = path.as_deref().ok_or_else(|| "The packaged LibVLC runtime is missing.".to_string())
                 .and_then(|path| unsafe { WarmRuntime::open(path, plugins.as_deref()).map(Rc::new) });
             let mut player:Option<Player>=None;
+            let mut delivery = SnapshotDelivery::default();
             loop {
                 // Native subtitle overlays follow the playback timestamp
                 // emitted after each snapshot. Keep this cadence close to a
                 // video frame so cues do not visibly trail the picture.
-                match receiver.recv_timeout(Duration::from_millis(16)) {
+                let request = match player.as_ref().and_then(|_| delivery.poll_interval()) {
+                    Some(interval) => receiver.recv_timeout(interval),
+                    None => receiver.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+                };
+                match request {
                     Ok(Request::Availability { reply }) => {
                         let warning = runtime.as_ref().err();
                         let _ = reply.send(Ok(json!({"available":runtime.is_ok(),"enabled":true,"surface":if runtime.is_ok(){"composited-window"}else{"unavailable"},"libraryPath":path,"runtimeSource":"bundled","warning":warning})));
                     }
                     Ok(Request::Start{source,options,drawable,reply}) => {
+                        delivery = SnapshotDelivery::default();
                         let result=(|| {
                             if let Some(mut previous)=player.take() { previous.close(); emit(json!({"sessionId":previous.session,"status":"closed"})); }
                             let runtime = runtime.as_ref().map_err(Clone::clone)?;
-                            let next=unsafe {Player::open(Rc::clone(runtime),source,options,drawable)}?;
+                            let mut next=unsafe {Player::open(Rc::clone(runtime),source,options,drawable)}?;
+                            unsafe { next.verify_start()?; }
                             let response=json!({"ok":true,"sessionId":next.session,"surface":"composited-window"});
                             player=Some(next);Ok(response)
                         })();
@@ -75,11 +85,12 @@ impl PlaybackService {
                             Some(player) if player.session==session=>unsafe{player.command(command)},
                             _=>Err("This playback session is no longer active.".into()),
                         };
+                        if result.is_ok() { delivery.acknowledge_command(); }
                         let _=reply.send(result);
                     }
                     Ok(Request::Stop{session,reply}) => {
                         let matching=player.as_ref().is_some_and(|p|session.as_ref().is_none_or(|s|s==&p.session));
-                        if matching {if let Some(mut previous)=player.take(){previous.close();emit(json!({"sessionId":previous.session,"status":"closed"}));}}
+                        if matching {delivery = SnapshotDelivery::default();if let Some(mut previous)=player.take(){previous.close();emit(json!({"sessionId":previous.session,"status":"closed"}));}}
                         let _=reply.send(Ok(json!(matching)));
                     }
                     Ok(Request::Shutdown{reply}) => {
@@ -91,8 +102,8 @@ impl PlaybackService {
                 }
                 if let Some(player)=player.as_mut() {
                     match unsafe {player.snapshot()} {
-                        Ok(value)=>emit(value),
-                        Err(error)=>emit(json!({"sessionId":player.session,"status":"error","error":error})),
+                        Ok(value)=>{ if let Some(changed) = delivery.changed(value) { emit(changed); } },
+                        Err(error)=>{ if let Some(changed) = delivery.changed(json!({"sessionId":player.session,"status":"error","error":error})) { emit(changed); } },
                     }
                 }
             }
@@ -147,12 +158,34 @@ struct TrackDescription {
     next: *mut TrackDescription,
 }
 
+#[repr(C)]
+#[derive(Default)]
+struct MediaStats {
+    read_bytes: c_int,
+    input_bitrate: f32,
+    demux_bytes: c_int,
+    demux_bitrate: f32,
+    corrupt: c_int,
+    discontinuities: c_int,
+    decoded_video: c_int,
+    decoded_audio: c_int,
+    displayed: c_int,
+    lost: c_int,
+    played_audio: c_int,
+    lost_audio: c_int,
+    sent_packets: c_int,
+    sent_bytes: c_int,
+    sent_bitrate: f32,
+}
+
 // Initialized on the owner worker at app startup. Sessions share plugin discovery
 // and the LibVLC instance, but keep their media/player handles independent.
 struct WarmRuntime {
     library: Library,
     _core_library: Option<Library>,
     instance: *mut c_void,
+    path: PathBuf,
+    plugins: Option<PathBuf>,
 }
 impl WarmRuntime {
     unsafe fn open(
@@ -163,6 +196,8 @@ impl WarmRuntime {
         // no VLC executable rpath, so retain the sibling core for the process lifetime.
         let core_name = if cfg!(windows) {
             "libvlccore.dll"
+        } else if cfg!(target_os = "linux") {
+            "libvlccore.so.9"
         } else {
             "libvlccore.dylib"
         };
@@ -183,20 +218,25 @@ impl WarmRuntime {
         if version.is_null() || !CStr::from_ptr(version).to_bytes().starts_with(b"3.") {
             return Err("This adapter requires the bundled LibVLC 3 ABI.".into());
         }
-        let instance = Self::create_instance(&library, plugins)?;
+        let instance = Self::create_instance(&library, plugins, false)?;
         Ok(Self {
             library,
             _core_library: core_library,
             instance,
+            path: path.to_path_buf(),
+            plugins: plugins.map(PathBuf::from),
         })
     }
 
     unsafe fn create_instance(
         library: &Library,
         plugins: Option<&std::path::Path>,
+        observe_decoder: bool,
     ) -> Result<*mut c_void, String> {
         let mut arguments = vec!["--no-plugins-cache"];
-        if std::env::var("LOOMTV_DEBUG_LIBVLC").as_deref() == Ok("1") {
+        if observe_decoder {
+            arguments.extend(["--quiet", "--verbose=2"]);
+        } else if std::env::var("LOOMTV_DEBUG_LIBVLC").as_deref() == Ok("1") {
             arguments.extend(["--no-quiet", "--verbose=2"]);
         } else {
             arguments.push("--quiet");
@@ -245,6 +285,11 @@ impl Drop for WarmRuntime {
 }
 struct Player {
     runtime: Rc<WarmRuntime>,
+    instance: *mut c_void,
+    owns_instance: bool,
+    decoder_probe: *mut c_void,
+    decode_mode: DecodeMode,
+    initially_paused: bool,
     media: *mut c_void,
     player: *mut c_void,
     session: String,
@@ -253,10 +298,13 @@ struct Player {
     muted: bool,
     speed: f64,
     tracks: Value,
-    poll_count: u32,
+    last_track_refresh: Option<Instant>,
     restore_pending: bool,
     restore_commands: std::collections::BTreeMap<String, Value>,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DecodeMode { Hardware, Software }
 
 impl std::ops::Deref for Player {
     type Target = WarmRuntime;
@@ -272,6 +320,47 @@ macro_rules! vlc {
     }};
 }
 impl Player {
+    unsafe fn verify_start(&mut self) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut first_unproven_video = None;
+        while Instant::now() < deadline {
+            let state = vlc!(self,"libvlc_media_player_get_state",unsafe extern "C" fn(*mut c_void)->c_int,self.player);
+            if state == 7 { return Err("LibVLC reported a playback error before video became ready.".into()); }
+            let mut stats = MediaStats::default();
+            let frames = if let Ok(get_stats) = self.library.get::<unsafe extern "C" fn(*mut c_void,*mut MediaStats)->c_int>(b"libvlc_media_get_stats\0") {
+                if get_stats(self.media, &mut stats) != 0 { stats.decoded_video } else { 0 }
+            } else { 0 };
+            let ready = state == 3 || state == 4;
+            let hardware = self.decode_mode == DecodeMode::Hardware
+                && loomtv_vlc_probe::loom_vlc_probe_hardware(self.decoder_probe) == 1;
+            let moving = vlc!(self,"libvlc_media_player_get_time",unsafe extern "C" fn(*mut c_void)->i64,self.player) > 0;
+            let video_tracks = self.library
+                .get::<unsafe extern "C" fn(*mut c_void)->c_int>(b"libvlc_video_get_track_count\0")
+                .map(|count| count(self.player)).unwrap_or(-1);
+            if self.decode_mode == DecodeMode::Hardware && ready && frames > 0 && !hardware {
+                let first = first_unproven_video.get_or_insert_with(Instant::now);
+                if first.elapsed() >= Duration::from_millis(250) {
+                    return Err("LibVLC decoded video without proving hardware decoding.".into());
+                }
+            }
+            if ready && match self.decode_mode {
+                DecodeMode::Hardware => hardware && frames > 0,
+                DecodeMode::Software => frames > 0 || (video_tracks == 0 && moving),
+            } {
+                vlc!(self,"libvlc_audio_set_volume",unsafe extern "C" fn(*mut c_void,c_int)->c_int,self.player,self.volume);
+                vlc!(self,"libvlc_audio_set_mute",unsafe extern "C" fn(*mut c_void,c_int),self.player,self.muted as c_int);
+                if self.initially_paused {
+                    vlc!(self,"libvlc_media_player_set_pause",unsafe extern "C" fn(*mut c_void,c_int),self.player,1);
+                }
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err(match self.decode_mode {
+            DecodeMode::Hardware => "LibVLC did not prove hardware video decoding before the startup deadline.",
+            DecodeMode::Software => "LibVLC did not decode the first video frame before the startup deadline.",
+        }.into())
+    }
     unsafe fn open(
         runtime: Rc<WarmRuntime>,
         source: String,
@@ -281,9 +370,22 @@ impl Player {
         if drawable == 0 {
             return Err("The native video view is unavailable.".into());
         }
-        let instance = runtime.instance;
+        let decode_mode = match options["decodeMode"].as_str().unwrap_or("hardware") {
+            "hardware" => DecodeMode::Hardware,
+            "software" => DecodeMode::Software,
+            _ => return Err("The decoder mode is invalid.".into()),
+        };
+        let owns_instance = decode_mode == DecodeMode::Hardware;
+        let instance = if owns_instance {
+            WarmRuntime::create_instance(&runtime.library, runtime.plugins.as_deref(), true)?
+        } else { runtime.instance };
         let mut result = Self {
             runtime,
+            instance,
+            owns_instance,
+            decoder_probe: std::ptr::null_mut(),
+            decode_mode,
+            initially_paused: options["paused"].as_bool().unwrap_or(false),
             media: std::ptr::null_mut(),
             player: std::ptr::null_mut(),
             session: uuid::Uuid::new_v4().to_string(),
@@ -295,10 +397,18 @@ impl Player {
             muted: options["muted"].as_bool().unwrap_or(false),
             speed: options["speed"].as_f64().unwrap_or(1.).clamp(0.25, 3.),
             tracks: json!([]),
-            poll_count: 0,
+            last_track_refresh: None,
             restore_pending: false,
             restore_commands: std::collections::BTreeMap::new(),
         };
+        if decode_mode == DecodeMode::Hardware {
+            let path = CString::new(result.runtime.path.to_string_lossy().as_bytes())
+                .map_err(|_| "The LibVLC path is invalid.")?;
+            result.decoder_probe = loomtv_vlc_probe::loom_vlc_probe_attach(path.as_ptr(), instance);
+            if result.decoder_probe.is_null() {
+                return Err("LibVLC decoder logging could not be attached.".into());
+            }
+        }
         let network = source.starts_with("http://127.0.0.1:");
         let source =
             CString::new(source).map_err(|_| "The source contains an invalid character.")?;
@@ -325,6 +435,18 @@ impl Player {
         let mut media_options = Vec::new();
         #[cfg(target_os = "macos")]
         media_options.push(":vout=macosx".to_string());
+        #[cfg(windows)]
+        media_options.push(":vout=direct3d11".to_string());
+        #[cfg(target_os = "linux")]
+        media_options.push(":vout=xcb_x11".to_string());
+        if decode_mode == DecodeMode::Hardware {
+            #[cfg(target_os = "macos")]
+            media_options.extend([":codec=videotoolbox,none".into(), ":videotoolbox-hw-decoder-only".into()]);
+            #[cfg(not(target_os = "macos"))]
+            media_options.push(":avcodec-hw=any".into());
+        } else {
+            media_options.extend([":avcodec-hw=none".into(), ":codec=avcodec,dav1d,none".into()]);
+        }
         if let Some(language) = options["audioLanguage"].as_str() {
             if language.len() > 32
                 || !language
@@ -387,9 +509,16 @@ impl Player {
             result.player,
             drawable as *mut c_void
         );
-        if !cfg!(any(target_os = "macos", windows)) {
-            return Err("Native LibVLC embedding is not implemented on this platform.".into());
-        }
+        #[cfg(target_os = "linux")]
+        vlc!(
+            result,
+            "libvlc_media_player_set_xwindow",
+            unsafe extern "C" fn(*mut c_void, u32),
+            result.player,
+            drawable as u32
+        );
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+        return Err("Native LibVLC embedding is not implemented on this platform.".into());
         vlc!(
             result,
             "libvlc_video_set_mouse_input",
@@ -413,8 +542,8 @@ impl Player {
         {
             return Err("LibVLC could not start playback.".into());
         }
-        result.command(json!({"type":"set-volume","volume":result.volume as f64/100.}))?;
-        result.command(json!({"type":"set-muted","muted":result.muted}))?;
+        vlc!(result,"libvlc_audio_set_volume",unsafe extern "C" fn(*mut c_void,c_int)->c_int,result.player,0);
+        vlc!(result,"libvlc_audio_set_mute",unsafe extern "C" fn(*mut c_void,c_int),result.player,1);
         result.command(json!({"type":"set-speed","speed":result.speed}))?;
         if let Some(delay) = options["audioDelay"].as_f64() {
             result.command(json!({"type":"set-audio-delay","seconds":delay}))?;
@@ -570,7 +699,7 @@ impl Player {
                 {
                     return Ok(json!(false));
                 }
-                self.poll_count = 0;
+                self.last_track_refresh = None;
             }
             "set-subtitle-track" => {
                 let track = match command.get("trackId") {
@@ -591,7 +720,7 @@ impl Player {
                 {
                     return Ok(json!(false));
                 }
-                self.poll_count = 0;
+                self.last_track_refresh = None;
             }
             "set-video-track" => {
                 let track = match command.get("trackId") {
@@ -612,7 +741,7 @@ impl Player {
                 {
                     return Ok(json!(false));
                 }
-                self.poll_count = 0;
+                self.last_track_refresh = None;
             }
             "set-video-aspect" => {
                 let value = CString::new(command["aspect"].as_str().unwrap_or(""))
@@ -670,12 +799,24 @@ impl Player {
                 let _ = self.command(command)?;
             }
         }
-        self.poll_count = self.poll_count.wrapping_add(1);
-        let tracks_changed = self.poll_count % 10 == 1;
-        if tracks_changed {
-            self.tracks = self.tracks()?;
+        let mut tracks_changed = false;
+        if self
+            .last_track_refresh
+            .is_none_or(|last| last.elapsed() >= Duration::from_millis(500))
+        {
+            let tracks = self.tracks()?;
+            tracks_changed = self.last_track_refresh.is_none() || tracks != self.tracks;
+            self.tracks = tracks;
+            self.last_track_refresh = Some(Instant::now());
         }
-        let mut snapshot = json!({"sessionId":self.session,"status":match state{0|1=>"starting",2=>"loading",3|4=>"ready",5=>"closed",6=>"ended",_=>"error"},"paused":state==4,"position":vlc!(self,"libvlc_media_player_get_time",unsafe extern "C" fn(*mut c_void)->i64,self.player).max(0)as f64/1000.,"duration":vlc!(self,"libvlc_media_player_get_length",unsafe extern "C" fn(*mut c_void)->i64,self.player).max(0)as f64/1000.,"volume":self.volume as f64/100.,"muted":self.muted,"speed":self.speed});
+        let mut snapshot = json!({"sessionId":self.session,"status":match state{0|1=>"starting",2=>"loading",3|4=>"ready",5=>"closed",6=>"ended",_=>"error"},"paused":state==4,"position":vlc!(self,"libvlc_media_player_get_time",unsafe extern "C" fn(*mut c_void)->i64,self.player).max(0)as f64/1000.,"duration":vlc!(self,"libvlc_media_player_get_length",unsafe extern "C" fn(*mut c_void)->i64,self.player).max(0)as f64/1000.,"volume":self.volume as f64/100.,"muted":self.muted,"speed":self.speed,"diagnostics":{"hardwareDecode":self.decode_mode==DecodeMode::Hardware}});
+        if self.decode_mode == DecodeMode::Hardware {
+            let mut decoder = [0i8; 64];
+            let length = loomtv_vlc_probe::loom_vlc_probe_decoder(self.decoder_probe, decoder.as_mut_ptr(), decoder.len());
+            if length > 0 {
+                snapshot["diagnostics"]["hardwareDecoder"] = json!(CStr::from_ptr(decoder.as_ptr()).to_string_lossy().into_owned());
+            }
+        }
         if tracks_changed {
             snapshot["tracks"] = self.tracks.clone();
         }
@@ -763,6 +904,16 @@ impl Player {
                 }
                 self.media = std::ptr::null_mut();
             }
+            if !self.decoder_probe.is_null() {
+                loomtv_vlc_probe::loom_vlc_probe_detach(self.decoder_probe);
+                self.decoder_probe = std::ptr::null_mut();
+            }
+            if self.owns_instance && !self.instance.is_null() {
+                if let Ok(release) = self.library.get::<unsafe extern "C" fn(*mut c_void)>(b"libvlc_release\0") {
+                    release(self.instance);
+                }
+                self.instance = std::ptr::null_mut();
+            }
         }
     }
 }
@@ -782,7 +933,7 @@ mod tests {
         let library: Library = libloading::os::unix::Library::this().into();
         let before = std::env::var_os("VLC_PLUGIN_PATH");
         let result = unsafe {
-            WarmRuntime::create_instance(&library, Some(std::path::Path::new("/unused/plugins")))
+            WarmRuntime::create_instance(&library, Some(std::path::Path::new("/unused/plugins")), false)
         };
         assert_eq!(
             result.unwrap_err(),

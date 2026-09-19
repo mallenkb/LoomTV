@@ -248,7 +248,7 @@ export type DesktopBridgeApi = {
       playMedia: (filePath: string) => Promise<boolean>;
       getStreamUrl: (filePath: string, options?: StreamUrlOptions) => Promise<StreamUrlResult>;
       getSubtitleUrl?: (filePath: string, streamOrdinal?: number) => Promise<{ url: string }>;
-      getThumbnail: (filePath: string, time?: string) => Promise<{ url: string }>;
+      getThumbnail: (filePath: string, time?: string, seekPreview?: boolean) => Promise<{ url: string }>;
       getFileInfo: (filePath: string) => Promise<{ size: number; path: string; exists: boolean }>;
       getServerBase: () => Promise<string>;
       getRendererSession?: () => Promise<RendererSession>;
@@ -1258,13 +1258,14 @@ const desktopTransport = {
     })).catch(() => undefined);
   },
 
-  async getThumbnail(filePath: string, time?: string): Promise<{ url: string }> {
+  async getThumbnail(filePath: string, time?: string, seekPreview?: boolean): Promise<{ url: string }> {
     if (isRemoteDesktopMode()) {
-      return { url: remoteMediaRoute('/api/thumbnail', filePath, time ? { t: time } : undefined) };
+      return { url: remoteMediaRoute('/api/thumbnail', filePath, { t: time, preview: seekPreview ? '1' : undefined }) };
     }
-    if (window.desktopApi?.getThumbnail) return window.desktopApi.getThumbnail(filePath, time);
+    if (window.desktopApi?.getThumbnail) return window.desktopApi.getThumbnail(filePath, time, seekPreview);
     const params = new URLSearchParams({ path: filePath });
     if (time) params.set('t', time);
+    if (seekPreview) params.set('preview', '1');
     return { url: await localMediaUrl('/api/thumbnail', params) };
   },
 

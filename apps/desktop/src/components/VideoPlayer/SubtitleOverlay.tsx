@@ -3,9 +3,11 @@ import { MAX_SUBTITLE_OUTLINE_WIDTH } from './constants';
 import { activeSubtitleText, type SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
 import { subtitleMediaSeconds } from './playbackClock';
+import { subtitleBottom } from './subtitleLayout';
 
 interface SubtitleOverlayProps {
   controlsVisible: boolean;
+  controlsRef: React.RefObject<HTMLDivElement | null>;
   cues: SubtitleCue[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
   currentTimeRef?: React.RefObject<number>;
@@ -37,6 +39,7 @@ function fallbackTextOutline(width: number, color: string): string {
 
 function SubtitleOverlay({
   controlsVisible,
+  controlsRef,
   cues,
   videoRef,
   currentTimeRef,
@@ -48,7 +51,7 @@ function SubtitleOverlay({
   clockEvents,
 }: SubtitleOverlayProps) {
   const [text, setText] = useState('');
-  const [bounds, setBounds] = useState({ blockHeight: 0, viewportHeight: 0 });
+  const [bounds, setBounds] = useState({ blockHeight: 0, viewportHeight: 0, controlsInset: 0 });
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef('');
   const sortedCues = useMemo(
@@ -139,13 +142,17 @@ function SubtitleOverlay({
     if (!node || !viewport || !visible || !text) return undefined;
 
     const measure = () => {
+      const timeline = controlsRef.current?.getBoundingClientRect();
       const nextBounds = {
         blockHeight: node.offsetHeight,
         viewportHeight: viewport.clientHeight,
+        // Include space for the timeline's seek preview above its hit area.
+        controlsInset: timeline ? Math.max(0, viewport.getBoundingClientRect().bottom - timeline.top + 32) : 128,
       };
       setBounds((current) => (
         current.blockHeight === nextBounds.blockHeight
         && current.viewportHeight === nextBounds.viewportHeight
+        && current.controlsInset === nextBounds.controlsInset
           ? current
           : nextBounds
       ));
@@ -155,17 +162,15 @@ function SubtitleOverlay({
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     observer.observe(viewport);
+    if (controlsRef.current) observer.observe(controlsRef.current);
     return () => observer.disconnect();
-  }, [fontSize, lineHeight, text, visible]);
+  }, [controlsRef, controlsVisible, fontSize, lineHeight, text, visible]);
 
   if (!visible || !text) return null;
 
-  const baseBottomPx = bounds.viewportHeight * ((100 - verticalPosition) / 100);
-  const desiredBottomPx = baseBottomPx + (controlsVisible ? 128 : 0);
-  const maxBottomPx = Math.max(0, bounds.viewportHeight - bounds.blockHeight - 16);
   const bottom = bounds.viewportHeight > 0
-    ? `${Math.min(desiredBottomPx, maxBottomPx)}px`
-    : `calc(${100 - verticalPosition}% + ${controlsVisible ? 128 : 0}px)`;
+    ? `${subtitleBottom(verticalPosition, bounds.viewportHeight, bounds.blockHeight, bounds.controlsInset, controlsVisible)}px`
+    : controlsVisible ? `max(${100 - verticalPosition}%, 128px)` : `${100 - verticalPosition}%`;
   const subtitleTextStyle = {
     color: style.fontColor,
     whiteSpace: 'pre-wrap',

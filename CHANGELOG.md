@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.177](docs/releases/v1.0.177.md)
+
+Improves native desktop playback, packaged runtime handling, and player controls.
+
 ### [1.0.176](docs/releases/v1.0.176.md)
 
 Lowers idle memory while keeping LibVLC warm and first for local playback.

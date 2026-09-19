@@ -63,6 +63,9 @@ export type PlaybackViewport = {
 
 export type PlaybackStartOptions = {
   startSeconds?: number;
+  /** Require this decode path to be verified before accepting the native session. */
+  decodeMode?: 'hardware' | 'software';
+  paused?: boolean;
   volume?: number;
   muted?: boolean;
   speed?: number;

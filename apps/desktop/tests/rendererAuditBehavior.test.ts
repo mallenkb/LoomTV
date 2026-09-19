@@ -247,7 +247,7 @@ test('remote profile polling refreshes personal state without overwriting pendin
 
 test('player window handlers defer controls and Escape to the topmost modal', () => {
   const source = readFileSync(new URL('../src/components/VideoPlayer.tsx', import.meta.url), 'utf8');
-  const start = source.indexOf('    const ownsShortcut =');
+  const start = source.indexOf('    const ownsPlaybackShortcut =');
   const end = source.indexOf('    return () => {', start);
   assert.ok(start > 0 && end > start);
   const handlers = new Map<string, (event: KeyboardEvent) => void>();

@@ -359,7 +359,7 @@ function verifyMpvPayload(targetPlatform, targetArch) {
     : targetPlatform === 'win32' ? 'mpv-2.dll' : 'libmpv.so';
   const bridgeName = targetPlatform === 'darwin'
     ? 'libloomtv_mpv_bridge.dylib'
-    : targetPlatform === 'win32' ? 'loomtv_mpv_bridge.dll' : 'loomtv_mpv_bridge.so';
+    : targetPlatform === 'win32' ? 'loomtv_mpv_bridge.dll' : 'libloomtv_mpv_bridge.so';
   verifyNativeFile(
     path.join(payloadRoot, libraryName),
     'bundled libmpv library',
@@ -580,6 +580,9 @@ if (!exists(mpvNotice)) {
 // selected platform/architecture, file formats, plugin layout, and optional
 // hashes; it never requires, dlopens, or launches LibVLC or MPV.
 const selectedNativeRuntimeTarget = `${targetPlatform}-${targetArch}`;
+const vlcProbeName = targetPlatform === 'darwin' ? 'libloomtv_vlc_probe.dylib'
+  : targetPlatform === 'win32' ? 'loomtv_vlc_probe.dll' : 'libloomtv_vlc_probe.so';
+verifyNativeFile(path.join(resources, 'libvlc-probe', vlcProbeName), 'VLC decoder verification bridge', targetPlatform, false);
 const bundledNativePlaybackTargets = runtimeManifest?.distributionPolicy?.bundledNativePlaybackTargets;
 if (bundledNativePlaybackTargets?.libvlc.includes(selectedNativeRuntimeTarget)) {
   verifyLibVlcPayload(targetPlatform, targetArch);

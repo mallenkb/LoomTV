@@ -16,12 +16,12 @@ const USAGE = `
 Native runtime staging is explicit and offline.
 
 Required source-root layout:
-  <source-root>/<platform>-<arch>/libvlc/   # darwin and win32 support local LibVLC
+  <source-root>/<platform>-<arch>/libvlc/   # darwin, win32 and linux
 
 Set LOOMTV_NATIVE_RUNTIME_SOURCE_ROOT to an absolute source-root and select
 targets with LOOMTV_NATIVE_RUNTIME_TARGETS (comma-separated), or use the
-single-target overrides LOOMTV_LIBVLC_SOURCE_DIR and
-The LibVLC override is required for darwin and win32. libmpv is staged as an
+single-target override LOOMTV_LIBVLC_SOURCE_DIR.
+The LibVLC override applies to every desktop platform. libmpv is staged as an
 in-process library by stage-libmpv.cjs; external player payloads are unsupported.
 These overrides must be absolute and must be used with exactly one target.
 
@@ -226,8 +226,7 @@ function copyPayloadDeref(source, destination, sourceRoot) {
 }
 
 function enginesForTarget(target) {
-  if (target.platform === 'darwin') return ENGINES;
-  if (target.platform === 'win32') return ['libvlc'];
+  if (SUPPORTED_PLATFORMS.has(target.platform)) return ENGINES;
   return [];
 }
 
@@ -256,7 +255,7 @@ function directSources(targets) {
   if (!libvlc) return undefined;
   const requiredEngines = new Set(targets.flatMap(enginesForTarget));
   if (requiredEngines.has('libvlc') && !libvlc) {
-    throw new Error('LOOMTV_LIBVLC_SOURCE_DIR is required for a darwin or win32 target when using per-engine source overrides.');
+    throw new Error('LOOMTV_LIBVLC_SOURCE_DIR is required when using per-engine source overrides.');
   }
   if (targets.length !== 1) {
     throw new Error('The per-engine source overrides support exactly one native runtime target.');
@@ -313,7 +312,7 @@ function stagePayload(source, destination, engine, target, sourceMode) {
       'utf8',
     );
     const files = filesUnder(temporaryPayload)
-      .filter((candidate) => ![MARKER_NAME, 'runtime-manifest.json'].includes(path.basename(candidate)))
+      .filter((candidate) => ![MARKER_NAME, 'runtime-manifest.json', 'packaged-runtime-manifest.json'].includes(path.basename(candidate)))
       .map((candidate) => ({
         path: path.relative(temporaryPayload, candidate).split(path.sep).join('/'),
         sha256: sha256File(candidate),
@@ -329,6 +328,20 @@ function stagePayload(source, destination, engine, target, sourceMode) {
       }, null, 2)}\n`,
       'utf8',
     );
+    if (engine === 'libvlc' && target.platform === 'darwin') {
+      // Electron Builder copies only these VLC directories into its flattened
+      // resource layout. Generate the manifest on every stage, including when
+      // a patched runtime replaces an earlier generated payload.
+      const prefix = 'VLC.app/Contents/MacOS/';
+      const packagedFiles = files
+        .filter((entry) => entry.path.startsWith(prefix))
+        .map((entry) => ({ ...entry, path: entry.path.slice(prefix.length) }))
+        .filter((entry) => /^(lib|plugins|share)\//.test(entry.path)
+          && entry.path !== 'plugins/libmacosx_plugin.dylib');
+      fs.writeFileSync(path.join(temporaryPayload, 'packaged-runtime-manifest.json'),
+        `${JSON.stringify({ manifestVersion: 1, engine, platform: target.platform,
+          architecture: target.arch, files: packagedFiles }, null, 2)}\n`, 'utf8');
+    }
     if (fs.existsSync(destination)) fs.rmSync(destination, { recursive: true, force: true });
     fs.renameSync(temporaryPayload, destination);
   } finally {

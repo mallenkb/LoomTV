@@ -135,11 +135,7 @@ import { usePlayerScrubbing } from './VideoPlayer/usePlayerScrubbing';
 import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
-
-// LazyVideoPlayer imports this module while the library screen is idle. Warm
-// the native runtime then, not after the user clicks Play.
-void LibVlcPlaybackEngine.available().catch(() => false);
-// MPV is a fallback. Detection and initialization happen only when it is selected.
+import { nativeAttemptsForSource, nativeStartOptionsForAttempt } from './VideoPlayer/nativeFallbackPolicy';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
@@ -318,6 +314,13 @@ export default function VideoPlayer({
   // treated as an interrupted transcode that should restart this file.
   const pendingCreditsCompletionRef = useRef(false);
   const playbackEngineRef = useRef<PlaybackEngine | null>(null);
+  const nativeFailureRef = useRef<((state: PlaybackEngineState) => void) | null>(null);
+  const nativeHandoffSelectionRef = useRef<{
+    video?: number;
+    audio?: number;
+    subtitle: number;
+    secondarySubtitle: number;
+  } | null>(null);
   const nativeInitialTracksAppliedRef = useRef(false);
   const applyResolvedNativePreferencesRef = useRef<(preferences: PlaybackTrackPreferences) => void>(() => undefined);
 
@@ -441,6 +444,7 @@ export default function VideoPlayer({
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [selectedSecondarySubtitleTrackIndex, setSelectedSecondarySubtitleTrackIndex] = useState(-1);
+  const selectedSecondarySubtitleTrackIndexRef = useRef(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
   const autoplayNextEnabled = true;
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
@@ -457,6 +461,8 @@ export default function VideoPlayer({
   const [cropMode, setCropMode] = useState<CropMode>('none');
   const [rotation, setRotation] = useState<RotationMode>(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const nativeSettingsRef = useRef({ volume, muted, playbackRate });
+  nativeSettingsRef.current = { volume, muted, playbackRate };
   const [displaySleepTimeoutMinutes, setDisplaySleepTimeoutMinutes] = useState(0);
   useEffect(() => window.desktopApi?.onPlaybackSleepTimerReset?.(() => {
     setDisplaySleepTimeoutMinutes(0);
@@ -840,7 +846,7 @@ export default function VideoPlayer({
       // LibVLC reads live-stream subtitle tracks from the network manifest.
       // The local subtitle endpoint only accepts authorized library files.
       if (isIptvPlaybackReference(filePath)) return '';
-      if (nativeEngineKind === 'libvlc' && shouldRenderSubtitleNativelyInLibVlc(embeddedCodec)) return '';
+      if (isBitmapSubtitleCodec(embeddedCodec)) return '';
       if (index <= -1000) {
         return externalUrl ? subtitleSource(externalUrl, serverBase) : '';
       }
@@ -1026,7 +1032,7 @@ export default function VideoPlayer({
       ).catch(() => undefined);
       return;
     }
-    void engine.selectSubtitle(subtitlesEnabled ? selectedSubtitle : null).catch(() => undefined);
+    void engine.selectSubtitle(subtitlesEnabled ? engineTrackId(engine, tracks, 'subtitle', selectedSubtitle) : null).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -1325,6 +1331,10 @@ export default function VideoPlayer({
 
   const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
+    if (state.status === 'error') {
+      nativeFailureRef.current?.(state);
+      return;
+    }
     if (state.sessionId) setNativeSessionId(state.sessionId);
 
     const now = performance.now();
@@ -1385,10 +1395,9 @@ export default function VideoPlayer({
         timingAttempt.metadataReported = true;
         logPlaybackTiming('metadata_loaded', { trackCount: state.tracks.length });
       }
-      const stateEngine = playbackEngineRef.current;
       const nextTracks: MediaTrack[] = state.tracks.map((track) => ({
-        index: stateEngine?.kind === 'libvlc' ? track.streamIndex ?? track.id : track.id,
-        ...(stateEngine?.kind === 'libvlc' ? { nativeId: track.id } : {}),
+        index: track.streamIndex ?? track.id,
+        nativeId: track.id,
         type: track.type,
         codec: track.codec,
         language: track.language,
@@ -1418,23 +1427,33 @@ export default function VideoPlayer({
       if (!nativeInitialTracksAppliedRef.current) {
         nativeInitialTracksAppliedRef.current = true;
         const preferences = sharedTrackPreferencesRef.current;
+        const handoff = nativeHandoffSelectionRef.current;
+        nativeHandoffSelectionRef.current = null;
         const selectedVideoTrack = state.tracks.find((track) => track.type === 'video' && track.selected);
         const selectedAudioTrack = state.tracks.find((track) => track.type === 'audio' && track.selected);
         const selectedSubtitleTrack = state.tracks.find((track) => track.type === 'subtitle' && track.selected);
-        const selectedVideo = selectedVideoTrack
-          ? selectedVideoTrack.streamIndex ?? selectedVideoTrack.id
-          : firstTrackIndex(nextTracks, 'video');
+        const selectedVideo = handoff?.video !== undefined
+          && nextTracks.some((track) => track.type === 'video' && track.index === handoff.video)
+          ? handoff.video
+          : selectedVideoTrack
+            ? selectedVideoTrack.streamIndex ?? selectedVideoTrack.id
+            : firstTrackIndex(nextTracks, 'video');
         const engineSelectedAudio = selectedAudioTrack
           ? selectedAudioTrack.streamIndex ?? selectedAudioTrack.id
           : firstTrackIndex(nextTracks, 'audio');
         const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
-        const requestedAudio = preferredAudio ?? engineSelectedAudio;
+        const requestedAudio = handoff?.audio !== undefined
+          && nextTracks.some((track) => track.type === 'audio' && track.index === handoff.audio)
+          ? handoff.audio
+          : preferredAudio ?? engineSelectedAudio;
         const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
         const engineSelectedSubtitle = selectedSubtitleTrack
           ? selectedSubtitleTrack.streamIndex ?? selectedSubtitleTrack.id
           : firstSubtitleTrackIndex(nextTracks);
-        const selectedSubtitle = preferredSubtitle
-          ?? (subtitlesDefaultEnabledRef.current ? engineSelectedSubtitle : -1);
+        const selectedSubtitle = handoff && (handoff.subtitle < 0
+          || nextTracks.some((track) => track.type === 'subtitle' && track.index === handoff.subtitle))
+          ? handoff.subtitle
+          : preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? engineSelectedSubtitle : -1);
 
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
         // Keep the engine-confirmed selection separate from the saved request.
@@ -1449,6 +1468,14 @@ export default function VideoPlayer({
         setSelectedVideoTrackIndex(selectedVideo);
         setSelectedAudioTrackIndex(engineSelectedAudio);
         setSelectedSubtitleTrackIndex(selectedSubtitle);
+        if (handoff) {
+          const secondary = nextTracks.some((track) => track.type === 'subtitle' && track.index === handoff.secondarySubtitle)
+            ? handoff.secondarySubtitle : -1;
+          selectedSecondarySubtitleTrackIndexRef.current = secondary;
+          setSelectedSecondarySubtitleTrackIndex(secondary);
+          void playbackEngineRef.current?.selectSecondarySubtitle(secondary >= 0
+            ? engineTrackId(playbackEngineRef.current, nextTracks, 'subtitle', secondary) : null).catch(() => undefined);
+        }
         const activeEngine = playbackEngineRef.current;
         const nativeVideoId = engineTrackId(activeEngine, nextTracks, 'video', selectedVideo);
         if (activeEngine?.kind !== 'libvlc' || nativeVideoId !== null) {
@@ -1487,7 +1514,8 @@ export default function VideoPlayer({
             nativeSubtitleRequired ? nativeSubtitleId : null,
           ).catch(() => undefined);
         } else {
-          void initialSubtitleEngine?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null).catch(() => undefined);
+          void initialSubtitleEngine?.selectSubtitle(selectedSubtitle >= 0
+            ? engineTrackId(initialSubtitleEngine, nextTracks, 'subtitle', selectedSubtitle) : null).catch(() => undefined);
         }
       } else {
         const selectedVideoTrack = state.tracks.find((track) => track.type === 'video' && track.selected);
@@ -1591,76 +1619,8 @@ export default function VideoPlayer({
       document.documentElement.classList.remove('loom-native-active');
       setPaused(true);
       setStatusMessage('');
-    } else if (state.status === 'error') {
-      const fallbackPosition = playbackPositionRef.current;
-      const failedEngineKind = playbackEngineRef.current?.kind;
-      const engine = playbackEngineRef.current;
-      playbackEngineRef.current = null;
-      void engine?.destroy();
-      setNativePlaybackActive(false);
-      setNativeEngineKind(null);
-      document.documentElement.classList.remove('loom-native-active');
-      if (failedEngineKind === 'libvlc' && libVlcEofReachedRef.current) {
-        setPlayerState('error');
-        setPaused(true);
-        setStatusMessage('');
-        setErrorMessage(state.error || 'LibVLC could not resume this video. Retry playback.');
-        return;
-      }
-      void (async () => {
-        if (failedEngineKind === 'libvlc' && await MpvPlaybackEngine.available().catch(() => false)) {
-          nativeAutoplayIssuedRef.current = false;
-          const fallbackEngine = new MpvPlaybackEngine(handleNativePlaybackState);
-          if (!playbackEngineRef.current && playerActiveRef.current) {
-            playbackEngineRef.current = fallbackEngine;
-            try {
-              const style = subtitleStyleRef.current;
-              const loaded = await fallbackEngine.load(filePath, {
-                startSeconds: fallbackPosition,
-                audioDelay: audioDelayRef.current,
-                subtitleDelay: 0,
-                subtitleStyle: {
-                  fontSize: Math.round(style.fontSize * style.scale),
-                  color: style.fontColor,
-                  borderColor: style.borderColor,
-                  borderWidth: style.borderEnabled ? style.borderWidth : 0,
-                  backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
-                  position: style.position,
-                },
-                subtitleFiles: visibleSubtitlesRef.current.flatMap((subtitle) => {
-                  try {
-                    const parsed = new URL(subtitle.url, 'http://127.0.0.1');
-                    const subtitlePath = parsed.searchParams.get('path');
-                    return subtitlePath ? [{ path: subtitlePath, source: subtitle.source || 'sidecar' as const }] : [];
-                  } catch {
-                    return [];
-                  }
-                }),
-              });
-              if (loaded && playerActiveRef.current && playbackEngineRef.current === fallbackEngine) {
-                setNativePlaybackActive(true);
-                setNativeEngineKind('mpv');
-                document.documentElement.classList.add('loom-native-active');
-                setStatusMessage('Opening with libmpv…');
-                setErrorMessage(null);
-                return;
-              }
-            } catch (error) {
-              console.warn('[player] MPV fallback after LibVLC failure could not start.', error);
-            }
-            if (playbackEngineRef.current === fallbackEngine) playbackEngineRef.current = null;
-            await fallbackEngine.destroy();
-          } else {
-            await fallbackEngine.destroy();
-          }
-        }
-        if (!playerActiveRef.current) return;
-        setStatusMessage('Falling back to the compatible player...');
-        setErrorMessage(state.error || null);
-        void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
-      })();
     }
-  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, reportFirstFrame, savePlaybackProgress, startBrowserStreamAt, updatePlaybackSnapshot]);
+  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, reportFirstFrame, savePlaybackProgress, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -1674,6 +1634,7 @@ export default function VideoPlayer({
     nativeAutoplayIssuedRef.current = false;
     document.documentElement.classList.remove('loom-native-active');
     setSelectedSecondarySubtitleTrackIndex(-1);
+    selectedSecondarySubtitleTrackIndexRef.current = -1;
     nativeInitialTracksAppliedRef.current = false;
     audioReapplyAttemptsRef.current = 0;
     setPlayerState('loading');
@@ -1776,6 +1737,8 @@ export default function VideoPlayer({
     setNativeEngineKind(null);
     nativeAutoplayIssuedRef.current = false;
     nativeInitialTracksAppliedRef.current = false;
+    nativeFailureRef.current = null;
+    nativeHandoffSelectionRef.current = null;
     audioReapplyAttemptsRef.current = 0;
     document.documentElement.classList.remove('loom-native-active');
     updatePlaybackSnapshot(
@@ -1860,113 +1823,170 @@ export default function VideoPlayer({
             return [];
           }
         });
-        // Native players already inspect their own duration and tracks. Try
-        // them directly. Availability checks and ffprobe only duplicated work
-        // and delayed the first frame.
-        const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = isLocalFile
-          ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
-          : isIptvStream
-            ? [LibVlcPlaybackEngine]
-            : [];
-        for (const NativePlaybackEngine of nativeEngineFactories) {
-          const engine = new NativePlaybackEngine(handleNativePlaybackState);
-          playbackEngineRef.current = engine;
-          const timingAttempt = playbackTimingAttemptRef.current;
-          if (timingAttempt) timingAttempt.engine = engine.kind;
+        const nativeAttempts = nativeAttemptsForSource(isLocalFile ? 'local' : isIptvStream ? 'iptv' : 'other');
+        const currentLoad = () => playerActiveRef.current && loadToken === loadTokenRef.current;
+        const startBrowserFallback = async (position: number) => {
+          // The browser path needs codec details for remux and transcode.
+          const preferences = await preferencesPromise;
+          if (!currentLoad()) return;
+          if (isLocalFile) {
+            const probeResult = await desktopApi.media.probe(filePath);
+            if (!currentLoad()) return;
+            if (probeResult.ok) applyProbeData(probeResult.data, preferences);
+          }
+          nativeFailureRef.current = null;
+          setNativePlaybackActive(false);
+          setNativeEngineKind(null);
+          document.documentElement.classList.remove('loom-native-active');
+          const browserTimingAttempt = playbackTimingAttemptRef.current;
+          if (browserTimingAttempt) browserTimingAttempt.engine = 'browser';
+          logPlaybackTiming('fallback_started', { nextEngine: 'browser' });
           logPlaybackTiming('engine_start_requested');
-          const initialSubtitleStyle = subtitleStyleRef.current;
-          let loaded = false;
-          try {
-            loaded = await engine.load(filePath, {
-              startSeconds: requestedStartPosition,
-              audioDelay: audioDelayRef.current,
-              subtitleDelay: 0,
-              subtitleStyle: {
-                fontSize: Math.round(initialSubtitleStyle.fontSize * initialSubtitleStyle.scale),
-                color: initialSubtitleStyle.fontColor,
-                borderColor: initialSubtitleStyle.borderColor,
-                borderWidth: initialSubtitleStyle.borderEnabled ? initialSubtitleStyle.borderWidth : 0,
-                backgroundColor: initialSubtitleStyle.backgroundEnabled
-                  ? initialSubtitleStyle.backgroundColor
-                  : '#00000000',
-                position: initialSubtitleStyle.position,
-              },
-              subtitleFiles: allSubtitleFiles,
-              // Start with SPU support available. Once LibVLC reports native
-              // track IDs, Loom keeps ASS, SSA, and bitmap tracks native while
-              // SRT and WebVTT can use the styled Loom overlay.
-              nativeSubtitles: engine.kind === 'libvlc'
-                ? subtitlesDefaultEnabledRef.current
-                : subtitlesDefaultEnabledRef.current && selectedSubtitleTrackIndexRef.current !== -1,
+          await startBrowserStreamAt(position);
+        };
+        const startNativeFrom = async (startIndex: number, position: number): Promise<void> => {
+          for (let index = startIndex; index < nativeAttempts.length; index += 1) {
+            if (!currentLoad()) return;
+            const attempt = nativeAttempts[index];
+            const Engine = attempt.engine === 'libvlc' ? LibVlcPlaybackEngine : MpvPlaybackEngine;
+            let accepted = false;
+            let failedBeforeAcceptance = false;
+            let bufferedState: PlaybackEngineState | null = null;
+            const engine = new Engine((state) => {
+              if (!currentLoad() || playbackEngineRef.current !== engine) return;
+              if (!accepted) {
+                if (state.status === 'error' || state.status === 'closed') failedBeforeAcceptance = true;
+                else bufferedState = state;
+                return;
+              }
+              handleNativePlaybackState(state);
             });
-          } catch (error) {
-            logPlaybackTiming('fallback_started', {
-              failedEngine: engine.kind,
-              reason: error instanceof Error ? error.name : 'unknown',
-            });
-            console.warn(
-              `[player] Native ${engine.kind} startup failed; trying the next fallback.`,
-              error instanceof Error ? `${error.name}: ${error.message}` : error,
-            );
-          }
-          if (!playerActiveRef.current || loadToken !== loadTokenRef.current) {
-            await engine.destroy();
-            return;
-          }
-          if (loaded) {
-            // Native playback should not wait for ffprobe, but the track list
-            // still powers Loom's audio and subtitle controls. Resolve it in
-            // the background and apply saved preferences once it arrives.
-            if (isLocalFile) {
-              void (async () => {
-                const preferences = await preferencesPromise;
-                if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-                if (engine.kind === 'libvlc' && !await waitForNativeMetadataWindow()) return;
-                if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-                const probeResult = await desktopApi.media.probe(filePath);
-                if (!playerActiveRef.current || loadToken !== loadTokenRef.current || !probeResult.ok) return;
-                applyProbeData(probeResult.data, preferences);
-                applyResolvedNativePreferencesRef.current(preferences);
-              })().catch((error) => {
-                console.warn('[player] Background track metadata unavailable:', error);
+            playbackEngineRef.current = engine;
+            const timingAttempt = playbackTimingAttemptRef.current;
+            if (timingAttempt) timingAttempt.engine = engine.kind;
+            logPlaybackTiming('engine_start_requested');
+            const style = subtitleStyleRef.current;
+            const settings = nativeSettingsRef.current;
+            let loaded = false;
+            try {
+              loaded = await engine.load(filePath, nativeStartOptionsForAttempt(attempt, {
+                startSeconds: position,
+                paused: userPausedRef.current,
+                volume: settings.volume,
+                muted: settings.muted,
+                speed: settings.playbackRate,
+                audioLanguage: sharedTrackPreferencesRef.current.audio?.language,
+                audioDelay: audioDelayRef.current,
+                subtitleDelay: 0,
+                subtitleStyle: {
+                  fontSize: Math.round(style.fontSize * style.scale),
+                  color: style.fontColor,
+                  borderColor: style.borderColor,
+                  borderWidth: style.borderEnabled ? style.borderWidth : 0,
+                  backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+                  position: style.position,
+                },
+                subtitleFiles: allSubtitleFiles,
+                nativeSubtitles: engine.kind === 'libvlc'
+                  ? subtitlesDefaultEnabledRef.current
+                  : subtitlesDefaultEnabledRef.current && selectedSubtitleTrackIndexRef.current !== -1,
+              }));
+            } catch (error) {
+              logPlaybackTiming('fallback_started', {
+                failedEngine: engine.kind,
+                decodeMode: attempt.decodeMode,
+                reason: error instanceof Error ? error.name : 'unknown',
               });
+              console.warn(`[player] Native ${engine.kind} ${attempt.decodeMode || 'default'} start failed.`, error);
             }
-            const openedAttempt = playbackTimingAttemptRef.current;
-            if (openedAttempt && !openedAttempt.sourceOpenedReported) {
-              openedAttempt.sourceOpenedReported = true;
-              logPlaybackTiming('source_opened');
+            if (!currentLoad()) {
+              await engine.destroy();
+              return;
             }
-            setNativePlaybackActive(true);
-            setNativeEngineKind(engine.kind);
-            setStreamUrl('');
-            document.documentElement.classList.add('loom-native-active');
-            setStatusMessage(`Opening with ${engine.kind}...`);
-            return;
+            if (loaded && !failedBeforeAcceptance) {
+              let switching = false;
+              nativeFailureRef.current = (state) => {
+                if (switching || playbackEngineRef.current !== engine || !currentLoad()) return;
+                switching = true;
+                nativeFailureRef.current = null;
+                accepted = false;
+                const fallbackPosition = playbackPositionRef.current;
+                nativeHandoffSelectionRef.current = {
+                  video: selectedVideoTrackIndexRef.current,
+                  audio: desiredAudioTrackIndexRef.current ?? selectedAudioTrackIndexRef.current,
+                  subtitle: selectedSubtitleTrackIndexRef.current,
+                  secondarySubtitle: selectedSecondarySubtitleTrackIndexRef.current,
+                };
+                playbackEngineRef.current = null;
+                setNativeSessionId(null);
+                setNativePlaybackActive(false);
+                setNativeEngineKind(null);
+                document.documentElement.classList.remove('loom-native-active');
+                if (engine.kind === 'libvlc' && libVlcEofReachedRef.current) {
+                  void engine.destroy();
+                  setPlayerState('error');
+                  setPaused(true);
+                  setStatusMessage('');
+                  setErrorMessage(state.error || 'LibVLC could not resume this video. Retry playback.');
+                  return;
+                }
+                nativeInitialTracksAppliedRef.current = false;
+                nativeAutoplayIssuedRef.current = false;
+                setPlayerState('loading');
+                setStatusMessage('Trying another decoder...');
+                setErrorMessage(null);
+                void (async () => {
+                  await engine.destroy();
+                  if (currentLoad()) await startNativeFrom(index + 1, fallbackPosition);
+                })().catch((error) => {
+                  if (!currentLoad()) return;
+                  setPlayerState('error');
+                  setStatusMessage('Failed to resolve stream');
+                  setErrorMessage(error instanceof Error ? error.message : 'Playback failed.');
+                });
+              };
+              accepted = true;
+              if (isLocalFile) {
+                void (async () => {
+                  const preferences = await preferencesPromise;
+                  if (!currentLoad() || playbackEngineRef.current !== engine) return;
+                  if (engine.kind === 'libvlc' && !await waitForNativeMetadataWindow()) return;
+                  if (!currentLoad() || playbackEngineRef.current !== engine) return;
+                  const probeResult = await desktopApi.media.probe(filePath);
+                  if (!currentLoad() || playbackEngineRef.current !== engine || !probeResult.ok) return;
+                  applyProbeData(probeResult.data, preferences);
+                  applyResolvedNativePreferencesRef.current(preferences);
+                })().catch((error) => console.warn('[player] Background track metadata unavailable:', error));
+              }
+              const openedAttempt = playbackTimingAttemptRef.current;
+              if (openedAttempt && !openedAttempt.sourceOpenedReported) {
+                openedAttempt.sourceOpenedReported = true;
+                logPlaybackTiming('source_opened');
+              }
+              setNativePlaybackActive(true);
+              setNativeEngineKind(engine.kind);
+              setStreamUrl('');
+              document.documentElement.classList.add('loom-native-active');
+              setStatusMessage(`Opening with ${engine.kind}...`);
+              const acceptedState = bufferedState as PlaybackEngineState | null;
+              if (acceptedState) {
+                const acceptedSettings = nativeSettingsRef.current;
+                handleNativePlaybackState({
+                  ...acceptedState,
+                  paused: userPausedRef.current,
+                  volume: acceptedSettings.volume,
+                  muted: acceptedSettings.muted,
+                  speed: acceptedSettings.playbackRate,
+                });
+              }
+              return;
+            }
+            if (playbackEngineRef.current === engine) playbackEngineRef.current = null;
+            await engine.destroy();
           }
-          playbackEngineRef.current = null;
-          await engine.destroy();
-        }
-
-        // The browser pipeline needs exact codec and stream information for
-        // remux/transcode decisions. Pay that cost only after native playback
-        // is unavailable.
-        const preferences = await preferencesPromise;
-        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-        if (isLocalFile) {
-          const probeResult = await desktopApi.media.probe(filePath);
-          if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-          if (probeResult.ok) applyProbeData(probeResult.data, preferences);
-        }
-        setNativePlaybackActive(false);
-        setNativeEngineKind(null);
-        document.documentElement.classList.remove('loom-native-active');
-        const browserTimingAttempt = playbackTimingAttemptRef.current;
-        if (browserTimingAttempt) {
-          browserTimingAttempt.engine = 'browser';
-        }
-        logPlaybackTiming('fallback_started', { nextEngine: 'browser' });
-        logPlaybackTiming('engine_start_requested');
-        await startBrowserStreamAt(requestedStartPosition);
+          if (currentLoad()) await startBrowserFallback(position);
+        };
+        await startNativeFrom(0, requestedStartPosition);
       } catch (error) {
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         setPlayerState('error');
@@ -1983,6 +2003,8 @@ export default function VideoPlayer({
       browserStreamGenerationRef.current += 1;
       const engine = playbackEngineRef.current;
       playbackEngineRef.current = null;
+      nativeFailureRef.current = null;
+      nativeHandoffSelectionRef.current = null;
       void engine?.destroy();
       document.documentElement.classList.remove('loom-native-active');
       void stopTranscodeSession();
@@ -2625,7 +2647,7 @@ export default function VideoPlayer({
     void handleBack();
   }, [fullscreen, handleBack, showMarkerEditor, showMediaPanel, showSidebar, toggleFullscreen]);
 
-  useModalLayer({ contentRef: containerRef, onEscape: handlePlayerEscape });
+  useModalLayer({ contentRef: containerRef, initialFocusRef: containerRef, onEscape: handlePlayerEscape });
   useModalLayer({
     open: playerState === 'error',
     contentRef: errorDialogRef,
@@ -3180,7 +3202,7 @@ export default function VideoPlayer({
       return;
     }
     if (engine) {
-      void engine.selectSubtitle(enabled ? trackIndex : null).catch(() => undefined);
+      void engine.selectSubtitle(enabled ? engineTrackId(engine, probeTracksRef.current, 'subtitle', trackIndex) : null).catch(() => undefined);
       return;
     }
     if (playbackAction === 'burn-in') {
@@ -3205,8 +3227,10 @@ export default function VideoPlayer({
 
   const selectSecondarySubtitleTrack = useCallback((trackIndex: number) => {
     if (!playbackEngineRef.current) return;
+    selectedSecondarySubtitleTrackIndexRef.current = trackIndex;
     setSelectedSecondarySubtitleTrackIndex(trackIndex);
-    void playbackEngineRef.current.selectSecondarySubtitle(trackIndex >= 0 ? trackIndex : null);
+    void playbackEngineRef.current.selectSecondarySubtitle(trackIndex >= 0
+      ? engineTrackId(playbackEngineRef.current, probeTracksRef.current, 'subtitle', trackIndex) : null);
   }, []);
 
   const changeVolume = useCallback((delta: number) => {
@@ -3443,20 +3467,25 @@ export default function VideoPlayer({
   }, runMediaSessionCommand);
 
   useEffect(() => {
-    const ownsShortcut = (event: KeyboardEvent) => (
+    const ownsPlaybackShortcut = (event: KeyboardEvent) => (
       !event.defaultPrevented && !event.isComposing
       && isTopmostModalContent(containerRef.current)
-      && !isEditableShortcutTarget(event.target) && !isPlayerControlTarget(event.target)
-      && !isEditableShortcutTarget(document.activeElement) && !isPlayerControlTarget(document.activeElement)
+      && !isEditableShortcutTarget(event.target)
+      && !isEditableShortcutTarget(document.activeElement)
+    );
+    const ownsShortcut = (event: KeyboardEvent) => (
+      ownsPlaybackShortcut(event)
+      && !isPlayerControlTarget(event.target) && !isPlayerControlTarget(document.activeElement)
     );
     const isPlaybackSpace = (event: KeyboardEvent) => (
-      ownsShortcut(event)
+      ownsPlaybackShortcut(event)
       && (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar')
       && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing
       && !isEditableShortcutTarget(event.target)
+      && !isPlayerControlTarget(event.target) && !isPlayerControlTarget(document.activeElement)
     );
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || !ownsShortcut(e)) return;
+      if (e.key === 'Escape' || !ownsPlaybackShortcut(e)) return;
       if (isPlaybackSpace(e)) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -3464,6 +3493,13 @@ export default function VideoPlayer({
         return;
       }
       const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
+      if (!hasCommandModifier && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.repeat && playerStateRef.current !== 'error') toggleMute();
+        return;
+      }
+      if (!ownsShortcut(e)) return;
       if (!hasCommandModifier && !e.isComposing
         && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)
         && !isEditableShortcutTarget(e.target)) {
@@ -3545,13 +3581,6 @@ export default function VideoPlayer({
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
           runMediaSessionCommand({ type: 'nextItem' });
-          break;
-        case 'm':
-        case 'M':
-          if (hasCommandModifier) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          toggleMute();
           break;
         case 'Backspace':
           if (e.metaKey || e.ctrlKey || e.altKey) break;
@@ -3670,7 +3699,7 @@ export default function VideoPlayer({
   );
   const subtitleUsesNativeLibVlc = Boolean(nativeEngineKind === 'libvlc'
     && selectedSubtitleTrackForSettings
-    && shouldRenderSubtitleNativelyInLibVlc(selectedSubtitleTrackForSettings.codec));
+    && shouldRenderSubtitleNativelyInLibVlc(selectedSubtitleTrackForSettings.codec, subtitleCues.length > 0));
   const subtitleStyleCompatibilityMessage = subtitleUsesNativeLibVlc
     ? 'This formatted subtitle is rendered by LibVLC and cannot use Loom\'s live subtitle styling. Choose an SRT or WebVTT track to use Loom\'s position, size, outline, and color controls.'
     : undefined;
@@ -3683,15 +3712,15 @@ export default function VideoPlayer({
     subtitleIsBurnedIn,
   });
 
-  // Keep formatted, bitmap, and cue-less external subtitles on LibVLC's live
-  // native track. Plain text files move to Loom's overlay once cues are ready.
+  // Keep bitmap and cue-less subtitles on the native track. Text tracks,
+  // including ASS dialogue, use the saved style and avoid visible controls.
   useEffect(() => {
     const engine = playbackEngineRef.current;
-    if (!nativePlaybackActive || nativeEngineKind !== 'libvlc' || engine?.kind !== 'libvlc') return;
+    if (!nativePlaybackActive || !engine || engine.kind === 'browser') return;
     const selectedTrack = mediaTracks.find((track) =>
       track.type === 'subtitle' && track.index === selectedSubtitleTrackIndex,
     );
-    const nativeFallbackAllowed = selectedSubtitleTrackIndex <= -1000
+    const nativeFallbackAllowed = engine.kind === 'mpv' || selectedSubtitleTrackIndex <= -1000
       || Boolean(selectedTrack && shouldRenderSubtitleNativelyInLibVlc(selectedTrack.codec));
     const nativeTrackId = nativeFallbackAllowed
       ? engineTrackId(engine, mediaTracks, 'subtitle', selectedSubtitleTrackIndex)
@@ -3700,7 +3729,7 @@ export default function VideoPlayer({
       && selectedSubtitleTrackIndex !== -1
       && !showSubtitleOverlay
       && nativeTrackId !== null;
-    libVlcSubtitleFallbackRef.current = shouldUseNativeTrack;
+    libVlcSubtitleFallbackRef.current = engine.kind === 'libvlc' && shouldUseNativeTrack;
     void engine.selectSubtitle(shouldUseNativeTrack ? nativeTrackId : null).catch(() => undefined);
   }, [mediaTracks, nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
 
@@ -4029,6 +4058,7 @@ export default function VideoPlayer({
             paused={paused}
             clockEvents={clockEvents}
             controlsVisible={showControls && playerState !== 'error'}
+            controlsRef={seekSliderRef}
             cues={activeOnlineCaption?.cues ?? subtitleCues}
             videoRef={videoRef}
             currentTimeRef={nativePlaybackActive ? playbackPositionRef : undefined}
@@ -4190,6 +4220,7 @@ export default function VideoPlayer({
 
         {/* Controls overlay */}
         <PlayerControlBar
+          filePath={filePath}
           showControls={showControls && playerState !== 'error' && !activeIframeUrl}
           seekSliderRef={seekSliderRef}
           progressFillRef={progressFillRef}

@@ -27,6 +27,8 @@ const subtitleStyleSchema = z.object({
 });
 export const playbackStartOptionsSchema = z.object({
   startSeconds: playbackTimeSchema.optional(),
+  decodeMode: z.enum(['hardware', 'software']).optional(),
+  paused: z.boolean().optional(),
   volume: finiteNumber.min(0).max(1).optional(),
   muted: z.boolean().optional(),
   speed: finiteNumber.min(0.25).max(3).optional(),

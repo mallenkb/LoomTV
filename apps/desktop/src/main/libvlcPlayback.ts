@@ -1,5 +1,6 @@
-import { BrowserWindow, type WebContents } from 'electron';
+import { app, BrowserWindow, type WebContents } from 'electron';
 import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,6 +55,7 @@ type LibVlcApi = {
   mediaNewLocation: DynamicFunction;
   mediaAddOption: DynamicFunction;
   mediaRelease: DynamicFunction;
+  mediaGetStats?: DynamicFunction;
   playerNewFromMedia: DynamicFunction;
   playerRelease: DynamicFunction;
   playerPlay: DynamicFunction;
@@ -72,6 +74,7 @@ type LibVlcApi = {
   videoSetKeyInput?: DynamicFunction;
   videoSetTrack?: DynamicFunction;
   videoGetTrack?: DynamicFunction;
+  videoGetTrackCount?: DynamicFunction;
   videoGetTrackDescription?: DynamicFunction;
   videoSetAspectRatio?: DynamicFunction;
   videoSetCropGeometry?: DynamicFunction;
@@ -93,6 +96,13 @@ type LibVlcRuntime = {
   source: 'environment' | 'bundled' | 'system';
   decode: KoffiRuntime['decode'];
   trackDescriptionType: KoffiType;
+};
+
+type LibVlcDecoderProbe = {
+  handle: NativeDrawable;
+  hardware: () => boolean;
+  decoder: () => string;
+  detach: () => void;
 };
 
 type RuntimeCache = {
@@ -147,6 +157,10 @@ function libVlcKillSwitchEnabled(): boolean {
 // the gate below is only open on platforms with a real child-surface host.
 // LOOMTV_LIBVLC_COMPOSITED_SURFACE=0 still forces the fallback-only behavior.
 function libVlcCompositionGateEnabled(): boolean {
+  if (process.platform === 'linux' && (!process.env.DISPLAY
+    || (process.env.WAYLAND_DISPLAY && app.commandLine.getSwitchValue('ozone-platform') !== 'x11'))) {
+    return false;
+  }
   const configured = explicitBoolean(process.env.LOOMTV_LIBVLC_COMPOSITED_SURFACE);
   if (configured !== undefined) return configured;
   return libVlcPlatformBinding(process.platform) !== null;
@@ -160,6 +174,9 @@ function disabledReason(): string {
     return 'Native LibVLC playback was disabled by configuration. LoomTV is using libmpv or Chromium/HLS fallback playback.';
   }
   if (!libVlcCompositionGateEnabled()) {
+    if (process.platform === 'linux') {
+      return 'Native LibVLC playback requires Electron on X11 or XWayland. LoomTV is using other playback engines.';
+    }
     return 'Native LibVLC playback has no in-window composition host on this platform. LoomTV is using libmpv or Chromium/HLS fallback playback.';
   }
   return 'Native LibVLC playback is unavailable. LoomTV is using libmpv or Chromium/HLS fallback playback.';
@@ -267,6 +284,15 @@ function candidateLibraryPaths(): Array<{ path: string; source: 'environment' | 
       ...(localAppData ? [{ path: path.join(localAppData, 'Programs', 'VideoLAN', 'VLC', 'libvlc.dll'), source: 'system' as const }] : []),
       { path: 'libvlc.dll', source: 'system' },
     );
+  } else if (process.platform === 'linux') {
+    candidates.push(
+      { path: '/usr/lib/x86_64-linux-gnu/libvlc.so.5', source: 'system' },
+      { path: '/usr/lib/aarch64-linux-gnu/libvlc.so.5', source: 'system' },
+      { path: '/usr/lib64/libvlc.so.5', source: 'system' },
+      { path: '/usr/lib/libvlc.so.5', source: 'system' },
+      { path: 'libvlc.so.5', source: 'system' },
+      { path: 'libvlc.so', source: 'system' },
+    );
   }
   return [...new Map(candidates.map((candidate) => [candidate.path, candidate])).values()];
 }
@@ -333,7 +359,7 @@ function pluginPathForLibrary(libraryPath: string): string | undefined {
   });
 }
 
-function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
+function createLibVlcInstance(runtime: LibVlcRuntime, observeDecoder = false): NativeHandle {
   // This is the fallback path when the process-lifetime instance could not be
   // warmed or the active runtime resolves a different libvlc image.
   const previousPluginPath = process.env.VLC_PLUGIN_PATH;
@@ -344,14 +370,70 @@ function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
     // VLC's plugins.dat. Let the one process-wide instance scan its plugins
     // once during LoomTV's startup splash instead of validating a stale cache
     // every time the user presses Play.
-    return nativeHandle(runtime.api.newInstance(
-      LIBVLC_INSTANCE_ARGUMENTS.length,
-      LIBVLC_INSTANCE_ARGUMENTS,
-    ));
+    const arguments_ = observeDecoder
+      ? ['--no-plugins-cache', '--quiet', '--verbose=2']
+      : LIBVLC_INSTANCE_ARGUMENTS;
+    return nativeHandle(runtime.api.newInstance(arguments_.length, arguments_));
   } finally {
     if (previousPluginPath === undefined) delete process.env.VLC_PLUGIN_PATH;
     else process.env.VLC_PLUGIN_PATH = previousPluginPath;
   }
+}
+
+function decoderProbeName(): string {
+  return process.platform === 'darwin' ? 'libloomtv_vlc_probe.dylib'
+    : process.platform === 'win32' ? 'loomtv_vlc_probe.dll' : 'libloomtv_vlc_probe.so';
+}
+
+function decoderProbePath(): string | undefined {
+  const candidates = [
+    process.env.LOOMTV_LIBVLC_PROBE_PATH?.trim(),
+    ...(typeof process.resourcesPath === 'string'
+      ? [path.join(process.resourcesPath, 'libvlc-probe', decoderProbeName())] : []),
+    ...((process as NodeJS.Process & { defaultApp?: boolean }).defaultApp
+      ? [path.resolve(__dirname, '../../resources/libvlc-probe', decoderProbeName())] : []),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  return candidates.find((candidate) => {
+    try { return fs.statSync(candidate).isFile(); } catch { return false; }
+  });
+}
+
+function createDecoderProbe(koffi: KoffiRuntime, runtime: LibVlcRuntime, instance: NativeDrawable): LibVlcDecoderProbe {
+  const probePath = decoderProbePath();
+  if (!probePath) throw new Error('The native LibVLC decoder probe is unavailable.');
+  const library = koffi.load(probePath);
+  const version = bind(library, 'loom_vlc_probe_version', 'uint32', []);
+  if (nativeInt(version()) !== 1) throw new Error('The LibVLC decoder probe version is unsupported.');
+  const attach = bind(library, 'loom_vlc_probe_attach', 'void *', ['str', 'void *']);
+  const detach = bind(library, 'loom_vlc_probe_detach', 'void', ['void *']);
+  const hardware = bind(library, 'loom_vlc_probe_hardware', 'int', ['void *']);
+  const decoder = bind(library, 'loom_vlc_probe_decoder', 'size_t', ['void *', 'void *', 'size_t']);
+  const handle = nativeHandle(attach(runtime.libraryPath, instance));
+  if (!handle) throw new Error('LibVLC decoder logging could not be attached.');
+  let detached = false;
+  return {
+    handle,
+    hardware: () => nativeInt(hardware(handle)) === 1,
+    decoder: () => {
+      const buffer = Buffer.alloc(64);
+      const length = nativeInt(decoder(handle, buffer, buffer.length));
+      return buffer.toString('utf8', 0, Math.min(buffer.length - 1, Math.max(0, length)));
+    },
+    detach: () => {
+      if (detached) return;
+      detached = true;
+      detach(handle);
+    },
+  };
+}
+
+function decodedVideoFrames(runtime: LibVlcRuntime, media: NativeDrawable): number {
+  if (!runtime.api.mediaGetStats) return 0;
+  // libvlc_media_stats_t in the pinned VLC 3 ABI starts with six 32-bit
+  // fields, followed by i_decoded_video at byte 24.
+  const stats = Buffer.alloc(64);
+  if (nativeInt(runtime.api.mediaGetStats(media, stats)) === 0) return 0;
+  return Math.max(0, stats.readInt32LE(24));
 }
 
 function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
@@ -375,10 +457,11 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
       // which supplies the sibling core library and plugin path. Electron/
       // Koffi does not inherit that executable loader setup, so load the
       // sibling core first on both supported native platforms.
-      if (!warmed && (process.platform === 'darwin' || process.platform === 'win32')) {
+      if (!warmed) {
         const corePath = path.join(
           path.dirname(candidate.path),
-          process.platform === 'win32' ? 'libvlccore.dll' : 'libvlccore.dylib',
+          process.platform === 'win32' ? 'libvlccore.dll'
+            : process.platform === 'darwin' ? 'libvlccore.dylib' : 'libvlccore.so.9',
         );
         try {
           if (fs.statSync(corePath).isFile()) loadedLibraries.push(koffi.load(corePath));
@@ -403,6 +486,7 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         mediaNewLocation: bind(library, 'libvlc_media_new_location', 'void *', ['void *', 'str']),
         mediaAddOption: bind(library, 'libvlc_media_add_option', 'void', ['void *', 'str']),
         mediaRelease: bind(library, 'libvlc_media_release', 'void', ['void *']),
+        mediaGetStats: optionalBind(library, 'libvlc_media_get_stats', 'int', ['void *', 'void *']),
         playerNewFromMedia: bind(library, 'libvlc_media_player_new_from_media', 'void *', ['void *']),
         playerRelease: bind(library, 'libvlc_media_player_release', 'void', ['void *']),
         playerPlay: bind(library, 'libvlc_media_player_play', 'int', ['void *']),
@@ -416,11 +500,13 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         audioSetMute: bind(library, 'libvlc_audio_set_mute', 'void', ['void *', 'int']),
         audioGetTrack: optionalBind(library, 'libvlc_audio_get_track', 'int', ['void *']),
         playerSetRate: bind(library, 'libvlc_media_player_set_rate', 'int', ['void *', 'float']),
-        setDrawable: bind(library, platformBinding.drawableSymbol, 'void', ['void *', 'void *']),
+        setDrawable: bind(library, platformBinding.drawableSymbol, 'void',
+          platformBinding.host === 'linux-x11-child' ? ['void *', 'uint32'] : ['void *', 'void *']),
         videoSetMouseInput: optionalBind(library, 'libvlc_video_set_mouse_input', 'void', ['void *', 'int']),
         videoSetKeyInput: optionalBind(library, 'libvlc_video_set_key_input', 'void', ['void *', 'int']),
         videoSetTrack: optionalBind(library, 'libvlc_video_set_track', 'int', ['void *', 'int']),
         videoGetTrack: optionalBind(library, 'libvlc_video_get_track', 'int', ['void *']),
+        videoGetTrackCount: optionalBind(library, 'libvlc_video_get_track_count', 'int', ['void *']),
         videoGetTrackDescription: optionalBind(library, 'libvlc_video_get_track_description', 'void *', ['void *']),
         videoSetAspectRatio: optionalBind(library, 'libvlc_video_set_aspect_ratio', 'void', ['void *', 'str']),
         videoSetCropGeometry: optionalBind(library, 'libvlc_video_set_crop_geometry', 'void', ['void *', 'str']),
@@ -485,11 +571,14 @@ export function libVlcRuntimeSummary(): string {
   }
 
   const candidate = configuredLibraryCandidate();
+  const initialization = process.platform === 'darwin'
+    ? 'loaded when VLC playback is requested'
+    : 'one process-lifetime instance is warmed at app startup';
   if (candidate) {
-    return `[playback] LibVLC default — ${candidate.source} runtime detected at ${candidate.path}; one process-lifetime instance is warmed at app startup`;
+    return `[playback] LibVLC runtime detected at ${candidate.path} (${candidate.source}); ${initialization}`;
   }
 
-  return '[playback] LibVLC default — no bundled or installed runtime file detected; compatibility playback will be used if startup warmup cannot create the native runtime';
+  return '[playback] No bundled or installed LibVLC runtime file detected; other playback engines remain available';
 }
 
 function finite(value: unknown, fallback: number): number {
@@ -529,10 +618,10 @@ export type NativeViewHost = {
  *
  * BrowserWindow/native-window drawables are not composited with WebContents:
  * LibVLC takes over that view and hides the renderer. The only supported
- * single-window route here is a real platform child surface, inserted at the
- * bottom of Electron's native view so the renderer remains the interactive
- * layer above it. Koffi is used only for the narrow platform calls; no second
- * BrowserWindow or owned window is created.
+ * macOS and Windows use native child views. Linux uses a native underlay
+ * below Electron's transparent X11 window so Chromium's controls stay above
+ * the video. Koffi only makes the platform calls; no second BrowserWindow is
+ * created.
  */
 function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
   if (process.platform !== 'darwin') throw new Error('The LibVLC NSView host is only available on macOS.');
@@ -781,8 +870,8 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
     // same hierarchy synchronizer here also avoids a first-frame ordering
     // difference between initial playback and fullscreen rebinds.
     attachToContentView(true);
-    setBackdropHidden(false);
-    setHidden(false);
+    // The caller reveals the host after the decoder and first frames pass
+    // verification. The same host is used by provisional mpv attempts.
 
     let destroyed = false;
     return {
@@ -845,7 +934,6 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
   ]);
 
   const WS_CHILD = 0x40000000;
-  const WS_VISIBLE = 0x10000000;
   const WS_CLIPSIBLINGS = 0x04000000;
   const WS_CLIPCHILDREN = 0x02000000;
   const WS_EX_NOACTIVATE = 0x08000000;
@@ -886,7 +974,7 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
   };
 
   try {
-    const childStyle = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+    const childStyle = WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
     backdrop = nativeHandle(createWindowEx(
       WS_EX_NOACTIVATE,
       'STATIC',
@@ -963,8 +1051,6 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
 
     syncBounds();
     syncHierarchy(true);
-    showWindow(backdrop, SW_SHOW);
-    showWindow(nativeView, SW_SHOW);
 
     return {
       drawable: nativeView,
@@ -984,10 +1070,243 @@ function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWi
   }
 }
 
+function createLinuxX11NativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
+  if (process.platform !== 'linux') throw new Error('The X11 video host is only available on Linux.');
+  if (!process.env.DISPLAY) throw new Error('Native video embedding requires an X11 display or XWayland.');
+  if (process.env.WAYLAND_DISPLAY && app.commandLine.getSwitchValue('ozone-platform') !== 'x11') {
+    throw new Error('Native video embedding requires Electron to use X11 or XWayland.');
+  }
+  const probePath = decoderProbePath();
+  if (!probePath) throw new Error('The native X11 host guard is unavailable.');
+  const guardLibrary = koffi.load(probePath);
+  const registerGuard = bind(guardLibrary, 'loom_x11_guard_register', 'int', ['void *']);
+  const guardErrors = bind(guardLibrary, 'loom_x11_guard_errors', 'uint32', ['void *']);
+  const unregisterGuard = bind(guardLibrary, 'loom_x11_guard_unregister', 'void', ['void *']);
+  const x11 = koffi.load('libX11.so.6');
+  const shape = koffi.load('libXext.so.6');
+  const openDisplay = x11.func('XOpenDisplay', 'void *', ['str']);
+  const closeDisplay = x11.func('XCloseDisplay', 'int', ['void *']);
+  const getAttributes = x11.func('XGetWindowAttributes', 'int', ['void *', 'ulong', 'void *']);
+  const defaultScreen = x11.func('XDefaultScreen', 'int', ['void *']);
+  const rootWindow = x11.func('XRootWindow', 'ulong', ['void *', 'int']);
+  const queryTree = x11.func('XQueryTree', 'int', [
+    'void *', 'ulong', 'void *', 'void *', 'void *', 'void *',
+  ]);
+  const translateCoordinates = x11.func('XTranslateCoordinates', 'int', [
+    'void *', 'ulong', 'ulong', 'int', 'int', 'void *', 'void *', 'void *',
+  ]);
+  const freeX11 = x11.func('XFree', 'int', ['void *']);
+  const createWindow = x11.func('XCreateSimpleWindow', 'ulong', [
+    'void *', 'ulong', 'int', 'int', 'uint', 'uint', 'uint', 'ulong', 'ulong',
+  ]);
+  const destroyWindow = x11.func('XDestroyWindow', 'int', ['void *', 'ulong']);
+  const mapWindow = x11.func('XMapWindow', 'int', ['void *', 'ulong']);
+  const unmapWindow = x11.func('XUnmapWindow', 'int', ['void *', 'ulong']);
+  const changeAttributes = x11.func('XChangeWindowAttributes', 'int', ['void *', 'ulong', 'ulong', 'void *']);
+  const configureWindow = x11.func('XConfigureWindow', 'int', ['void *', 'ulong', 'uint', 'void *']);
+  const moveResizeWindow = x11.func('XMoveResizeWindow', 'int', ['void *', 'ulong', 'int', 'int', 'uint', 'uint']);
+  const shapeVersion = shape.func('XShapeQueryVersion', 'int', ['void *', 'void *', 'void *']);
+  const shapeInput = shape.func('XShapeCombineRectangles', 'void', [
+    'void *', 'ulong', 'int', 'int', 'int', 'void *', 'int', 'int', 'int',
+  ]);
+  const sync = x11.func('XSync', 'int', ['void *', 'int']);
+  const display = nativeHandle(openDisplay(process.env.DISPLAY));
+  if (!display) throw new Error('The X11 display could not be opened for native video.');
+  if (nativeInt(registerGuard(display)) !== 1) {
+    closeDisplay(display);
+    throw new Error('The X11 error guard could not be installed.');
+  }
+
+  let underlay: NativeHandle = null;
+  let video: NativeHandle = null;
+  let destroyed = false;
+  let requestedVisible = false;
+  let mapped = false;
+  let viewport: PlaybackViewport | null = null;
+  const listeners: Array<() => void> = [];
+  const validXid = (value: NativeDrawable): boolean => BigInt(value) > 0n && BigInt(value) <= 0xffffffffn;
+  const checkErrors = (before: number): void => {
+    sync(display, 0);
+    if (nativeInt(guardErrors(display)) !== before) throw new Error('The X11 video child could not be updated.');
+  };
+  const validateParent = (value: NativeDrawable): { width: number; height: number } => {
+    // Electron returns an XID in X11 mode and a native pointer in Wayland
+    // mode. The native guard catches an X11 BadWindow if Electron has already
+    // destroyed or replaced an otherwise plausible XID.
+    if (!validXid(value)) {
+      throw new Error('Electron did not provide an X11 window for native video.');
+    }
+    const attributes = Buffer.alloc(256);
+    const before = nativeInt(guardErrors(display));
+    const found = nativeInt(getAttributes(display, value, attributes)) !== 0;
+    checkErrors(before);
+    if (!found) throw new Error('Electron did not provide an X11 window for native video.');
+    return { width: attributes.readInt32LE(8), height: attributes.readInt32LE(12) };
+  };
+  const root = nativeHandle(rootWindow(display, nativeInt(defaultScreen(display))));
+  const topLevelAncestor = (owner: NativeDrawable): NativeDrawable => {
+    if (!root) throw new Error('The X11 root window is unavailable.');
+    let current = owner;
+    for (let depth = 0; depth < 16; depth += 1) {
+      const rootResult = Buffer.alloc(8);
+      const parentResult = Buffer.alloc(8);
+      const childrenResult = Buffer.alloc(8);
+      const childCount = Buffer.alloc(4);
+      const before = nativeInt(guardErrors(display));
+      const found = nativeInt(queryTree(display, current, rootResult, parentResult, childrenResult, childCount)) !== 0;
+      checkErrors(before);
+      const children = childrenResult.readBigUInt64LE(0);
+      if (children) freeX11(children);
+      if (!found) throw new Error('The X11 window hierarchy is unavailable.');
+      const parent = parentResult.readBigUInt64LE(0);
+      if (parent === BigInt(root)) return current;
+      if (!parent) break;
+      current = parent;
+    }
+    throw new Error('The Electron X11 window has no root-level ancestor.');
+  };
+  const locationInRoot = (owner: NativeDrawable): { x: number; y: number } => {
+    if (!root) throw new Error('The X11 root window is unavailable.');
+    const x = Buffer.alloc(4);
+    const y = Buffer.alloc(4);
+    const child = Buffer.alloc(8);
+    const before = nativeInt(guardErrors(display));
+    const found = nativeInt(translateCoordinates(display, owner, root, 0, 0, x, y, child)) !== 0;
+    checkErrors(before);
+    if (!found) throw new Error('The Electron X11 window position is unavailable.');
+    return { x: x.readInt32LE(0), y: y.readInt32LE(0) };
+  };
+  const stackBelowOwner = (): void => {
+    if (!underlay || ownerWindow.isDestroyed()) return;
+    const ancestor = topLevelAncestor(nativeHandleForWindow(ownerWindow));
+    // XWindowChanges: five ints, 4 bytes of padding, Window sibling, int mode.
+    const changes = Buffer.alloc(40);
+    changes.writeBigUInt64LE(BigInt(ancestor), 24);
+    changes.writeInt32LE(1, 32); // Below
+    const before = nativeInt(guardErrors(display));
+    configureWindow(display, underlay, (1 << 5) | (1 << 6), changes); // CWSibling | CWStackMode
+    checkErrors(before);
+  };
+  const setMapped = (visible: boolean): void => {
+    if (!underlay || mapped === visible) return;
+    const before = nativeInt(guardErrors(display));
+    if (visible) mapWindow(display, underlay);
+    else unmapWindow(display, underlay);
+    checkErrors(before);
+    mapped = visible;
+    if (visible) stackBelowOwner();
+  };
+  const destroy = (): void => {
+    if (destroyed) return;
+    destroyed = true;
+    // Keep the bridge image loaded until its Xlib error handler is removed.
+    void guardLibrary;
+    for (const remove of listeners.splice(0)) remove();
+    try { if (underlay) destroyWindow(display, underlay); } catch { /* best effort */ }
+    try { sync(display, 0); } catch { /* best effort */ }
+    try { closeDisplay(display); } catch { /* best effort */ }
+    try { unregisterGuard(display); } catch { /* best effort */ }
+    video = null;
+    underlay = null;
+  };
+  try {
+    const owner = nativeHandleForWindow(ownerWindow);
+    validateParent(owner);
+    if (!root) throw new Error('The X11 root window is unavailable.');
+    const major = Buffer.alloc(4);
+    const minor = Buffer.alloc(4);
+    if (nativeInt(shapeVersion(display, major, minor)) === 0
+      || major.readInt32LE(0) < 1 || (major.readInt32LE(0) === 1 && minor.readInt32LE(0) < 1)) {
+      throw new Error('The X11 input-shape extension is unavailable.');
+    }
+    const before = nativeInt(guardErrors(display));
+    underlay = nativeHandle(createWindow(display, root, 0, 0, 1, 1, 0, 0, 0));
+    if (!underlay) throw new Error('The X11 video underlay could not be created.');
+    // XSetWindowAttributes.override_redirect is the int at byte 88 on the
+    // supported 64-bit Linux ABIs. Set it before mapping to keep the WM out.
+    const attributes = Buffer.alloc(112);
+    attributes.writeInt32LE(1, 88);
+    changeAttributes(display, underlay, 1 << 9, attributes); // CWOverrideRedirect
+    video = nativeHandle(createWindow(display, underlay, 0, 0, 1, 1, 0, 0, 0));
+    checkErrors(before);
+    if (!video) throw new Error('The X11 video child could not be created.');
+    const inputBefore = nativeInt(guardErrors(display));
+    shapeInput(display, underlay, 2, 0, 0, null, 0, 0, 0);
+    shapeInput(display, video, 2, 0, 0, null, 0, 0, 0);
+    mapWindow(display, video);
+    checkErrors(inputBefore);
+    const syncBounds = (nextViewport?: PlaybackViewport | null): void => {
+      if (destroyed || !video || !underlay || ownerWindow.isDestroyed()) return;
+      if (nextViewport !== undefined) viewport = nextViewport;
+      const currentOwner = nativeHandleForWindow(ownerWindow);
+      const [contentWidth, contentHeight] = ownerWindow.getContentSize();
+      const nativeSize = validateParent(currentOwner);
+      const position = locationInRoot(currentOwner);
+      const width = Math.max(1, nativeSize.width);
+      const height = Math.max(1, nativeSize.height);
+      const scaleX = clamp(width / Math.max(1, contentWidth), 0.5, 4);
+      const scaleY = clamp(height / Math.max(1, contentHeight), 0.5, 4);
+      const before = nativeInt(guardErrors(display));
+      moveResizeWindow(display, underlay, position.x, position.y, width, height);
+      const left = viewport ? clamp(viewport.x * scaleX, 0, Math.max(0, width - 1)) : 0;
+      const top = viewport ? clamp(viewport.y * scaleY, 0, Math.max(0, height - 1)) : 0;
+      const frameWidth = viewport ? clamp(viewport.width * scaleX, 1, width - left) : width;
+      const frameHeight = viewport ? clamp(viewport.height * scaleY, 1, height - top) : height;
+      moveResizeWindow(display, video, Math.round(left), Math.round(top), Math.round(frameWidth), Math.round(frameHeight));
+      checkErrors(before);
+    };
+    const syncHierarchy = (): boolean => {
+      if (destroyed || !video || !underlay || ownerWindow.isDestroyed()) return false;
+      syncBounds();
+      stackBelowOwner();
+      return false;
+    };
+    const resync = (): void => {
+      try {
+        syncHierarchy();
+        setMapped(requestedVisible && !ownerWindow.isMinimized() && ownerWindow.isVisible());
+      } catch {
+        try { setMapped(false); } catch { /* Owner may have closed. */ }
+      }
+    };
+    const on = (event: string, listener: () => void): void => {
+      EventEmitter.prototype.on.call(ownerWindow, event, listener);
+      listeners.push(() => EventEmitter.prototype.removeListener.call(ownerWindow, event, listener));
+    };
+    for (const event of ['move', 'resize', 'maximize', 'unmaximize', 'restore', 'show',
+      'focus', 'enter-full-screen', 'leave-full-screen', 'enter-html-full-screen', 'leave-html-full-screen']) {
+      on(event, resync);
+    }
+    on('minimize', () => { try { setMapped(false); } catch { /* best effort */ } });
+    on('hide', () => { try { setMapped(false); } catch { /* best effort */ } });
+    on('closed', () => setImmediate(destroy));
+    syncBounds();
+    syncHierarchy();
+    return {
+      drawable: video,
+      setVisible: (nextVisible) => {
+        if (destroyed) return;
+        requestedVisible = nextVisible;
+        if (nextVisible) syncHierarchy();
+        setMapped(nextVisible && !ownerWindow.isDestroyed()
+          && !ownerWindow.isMinimized() && ownerWindow.isVisible());
+      },
+      syncBounds,
+      setAutoresize: () => { /* X11 child geometry follows renderer viewport messages. */ },
+      syncHierarchy,
+      destroy,
+    };
+  } catch (error) {
+    destroy();
+    throw error;
+  }
+}
+
 export function createNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
   const platformBinding = libVlcPlatformBinding(process.platform);
   if (platformBinding?.host === 'macos-child') return createMacOsNativeViewHost(koffi, ownerWindow);
   if (platformBinding?.host === 'windows-child') return createWindowsNativeViewHost(koffi, ownerWindow);
+  if (platformBinding?.host === 'linux-x11-child') return createLinuxX11NativeViewHost(koffi, ownerWindow);
   throw new Error('No LibVLC native child-surface host is available for this platform.');
 }
 
@@ -1006,8 +1325,8 @@ class LibVlcPlaybackSession {
   private readonly media: NativeHandle;
   private player: NativeHandle;
   private timer: NodeJS.Timeout | null = null;
-  private readonly startupPollDeadline = Date.now() + 2500;
-  private startupPolling = true;
+  private pollIntervalMs = 16;
+  private rapidPollUntil = 0;
   private nativeSyncTimer: NodeJS.Timeout | null = null;
   private nativeSyncRetryCount = 0;
   private nativeSyncForceRebind = false;
@@ -1043,6 +1362,10 @@ class LibVlcPlaybackSession {
   private nativeTracksSignature = '';
   private lastNativeTrackRefreshAt = 0;
   private state: LibVlcPlaybackState;
+  private readonly decodeMode: 'hardware' | 'software';
+  private decoderProbe: LibVlcDecoderProbe | null = null;
+  private verified = false;
+  private firstUnprovenVideoAt = 0;
   private readonly windowListeners: Array<() => void> = [];
 
   constructor(
@@ -1053,7 +1376,9 @@ class LibVlcPlaybackSession {
     options: LibVlcStartOptions,
     private readonly onTerminated: (session: LibVlcPlaybackSession) => void,
   ) {
+    this.decodeMode = options.decodeMode ?? 'hardware';
     this.startSeconds = Math.max(0, finite(options.startSeconds, 0));
+    this.requestedPaused = options.paused === true;
     this.preferredAudioTrackId = Number.isFinite(options.audioTrackId)
       ? Number(options.audioTrackId)
       : null;
@@ -1069,10 +1394,18 @@ class LibVlcPlaybackSession {
     };
 
     const api = runtime.api;
-    const sharedInstance = getWarmLibVlcInstance(runtime.libraryPath);
-    this.instance = sharedInstance ?? createLibVlcInstance(runtime);
+    const sharedInstance = this.decodeMode === 'software' ? getWarmLibVlcInstance(runtime.libraryPath) : null;
+    this.instance = sharedInstance ?? createLibVlcInstance(runtime, this.decodeMode === 'hardware');
     this.ownsInstance = sharedInstance === null;
     if (!this.instance) throw new Error('LibVLC could not create a media instance.');
+    if (this.decodeMode === 'hardware') {
+      try {
+        this.decoderProbe = createDecoderProbe(loadKoffi(), runtime, this.instance);
+      } catch (error) {
+        this.releaseOwnedInstance();
+        throw error;
+      }
+    }
     const isRemoteLocation = /^https:\/\//i.test(filePath);
     let media: NativeHandle;
     try {
@@ -1093,6 +1426,19 @@ class LibVlcPlaybackSession {
       const platformBinding = libVlcPlatformBinding(process.platform);
       if (!platformBinding) throw new Error('LibVLC playback is not supported on this platform.');
       api.mediaAddOption(media, platformBinding.mediaVoutOption);
+      if (this.decodeMode === 'hardware') {
+        // VideoToolbox is a separate decoder plugin. Disallow a silent
+        // avcodec fallback on macOS; Windows and Linux are checked by logs.
+        if (process.platform === 'darwin') {
+          api.mediaAddOption(media, ':codec=videotoolbox,none');
+          api.mediaAddOption(media, ':videotoolbox-hw-decoder-only');
+        } else {
+          api.mediaAddOption(media, ':avcodec-hw=any');
+        }
+      } else {
+        api.mediaAddOption(media, ':avcodec-hw=none');
+        api.mediaAddOption(media, ':codec=avcodec,dav1d,none');
+      }
       if (options.audioLanguage && /^[a-z0-9_-]+$/i.test(options.audioLanguage)) {
         api.mediaAddOption(media, `:audio-language=${options.audioLanguage}`);
       }
@@ -1139,24 +1485,71 @@ class LibVlcPlaybackSession {
     this.ownerWindow.once('closed', stopForClosedOwner);
     this.windowListeners.push(() => this.ownerWindow.removeListener('closed', stopForClosedOwner));
     this.emit({ status: 'loading' });
-    // Detect initial readiness and apply resume seeks without waiting for the
-    // steady-state progress interval. Bound the faster polling for slow media.
-    this.timer = setInterval(() => this.poll(), 16);
+    this.setPollingInterval(16);
+  }
+
+  private setPollingInterval(intervalMs: number): void {
+    if (this.timer && intervalMs === this.pollIntervalMs) return;
+    if (this.timer) clearInterval(this.timer);
+    this.pollIntervalMs = intervalMs;
+    this.timer = setInterval(() => this.poll(), intervalMs);
     this.timer.unref();
+  }
+
+  async verifyStart(): Promise<string | null> {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (this.stopped) return this.state.error || 'LibVLC stopped before video became ready.';
+      const frames = this.media ? decodedVideoFrames(this.runtime, this.media) : 0;
+      const hardware = this.decoderProbe?.hardware() === true;
+      const videoTracks = this.runtime.api.videoGetTrackCount
+        ? nativeInt(this.runtime.api.videoGetTrackCount(this.player)) : -1;
+      const usable = this.state.status === 'ready'
+        && (frames > 0 || (this.decodeMode === 'software' && videoTracks === 0
+          && Number(this.runtime.api.playerGetTime(this.player)) > 0));
+      if (this.decodeMode === 'hardware' && this.state.status === 'ready' && frames > 0 && !hardware) {
+        if (!this.firstUnprovenVideoAt) this.firstUnprovenVideoAt = Date.now();
+        if (Date.now() - this.firstUnprovenVideoAt >= 250) {
+          this.stop();
+          return 'LibVLC decoded video without proving hardware decoding.';
+        }
+      }
+      if (usable && (this.decodeMode === 'software' || hardware && frames > 0)) {
+        this.verified = true;
+        const api = this.runtime.api;
+        api.audioSetVolume(this.player, Math.round((this.state.volume ?? 1) * 100));
+        api.audioSetMute(this.player, this.state.muted ? 1 : 0);
+        if (this.requestedPaused) api.playerSetPause(this.player, 1);
+        this.syncNativeViewVisibility();
+        const diagnostics = {
+          hardwareDecode: this.decodeMode === 'hardware',
+          ...(hardware ? { hardwareDecoder: this.decoderProbe?.decoder() } : {}),
+        };
+        this.emit({ diagnostics, paused: this.requestedPaused });
+        return null;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+    const error = this.decodeMode === 'hardware'
+      ? 'LibVLC did not prove hardware video decoding before the startup deadline.'
+      : 'LibVLC did not decode the first video frame before the startup deadline.';
+    this.stop();
+    return error;
   }
 
   private configureNativePlayer(player: NativeHandle): void {
     const api = this.runtime.api;
     if (!this.nativeViewHost) throw new Error('The LoomTV native video view is unavailable.');
-    api.setDrawable(player, this.nativeViewHost.drawable);
+    api.setDrawable(player, process.platform === 'linux'
+      ? Number(this.nativeViewHost.drawable) : this.nativeViewHost.drawable);
     // LibVLC must not handle input; the native view is below WebContents and
     // all user interaction remains in Loom's renderer controls.
     api.videoSetMouseInput?.(player, 0);
     api.videoSetKeyInput?.(player, 0);
     // `volume` is optional on the shared playback state; fall back to full
     // volume rather than asserting, so a state without it cannot send NaN.
-    api.audioSetVolume(player, Math.round((this.state.volume ?? 1) * 100));
-    api.audioSetMute(player, this.state.muted ? 1 : 0);
+    api.audioSetVolume(player, this.verified ? Math.round((this.state.volume ?? 1) * 100) : 0);
+    api.audioSetMute(player, this.verified && !this.state.muted ? 0 : 1);
     api.playerSetRate(player, this.state.speed);
     if (api.videoSetAspectRatio) api.videoSetAspectRatio(player, this.videoAspect);
     if (api.videoSetCropGeometry) api.videoSetCropGeometry(player, this.videoCrop);
@@ -1223,6 +1616,10 @@ class LibVlcPlaybackSession {
 
   private syncNativeViewVisibility(): void {
     if (!this.nativeViewHost || this.ownerWindow.isDestroyed()) return;
+    if (!this.verified) {
+      this.nativeViewHost.setVisible(false);
+      return;
+    }
     if (this.ownerWindow.isMinimized() || !this.ownerWindow.isVisible()) {
       this.nativeViewHost.setVisible(false);
       return;
@@ -1289,12 +1686,13 @@ class LibVlcPlaybackSession {
         // initialize against a hidden NSView and remain black even though
         // playback time continues to advance. Make the confirmed host
         // visible before rebinding/recreating the vout.
-        if (!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible()) {
+        if (this.verified && !this.ownerWindow.isMinimized() && this.ownerWindow.isVisible()) {
           this.nativeViewHost.setVisible(true);
         }
       }
       if (drawableNeedsRebind) {
-        this.runtime.api.setDrawable(this.player, this.nativeViewHost.drawable);
+        this.runtime.api.setDrawable(this.player, process.platform === 'linux'
+          ? Number(this.nativeViewHost.drawable) : this.nativeViewHost.drawable);
         // AppKit can invalidate LibVLC's vout on both sides of a fullscreen
         // transition. Re-arm only after the confirmed post-transition
         // hierarchy/viewport sync, but do it for enter and exit alike.
@@ -1382,7 +1780,7 @@ class LibVlcPlaybackSession {
       this.nativeViewHost.setAutoresize(false);
       const synced = this.syncNativeViewHost(true, this.viewport);
       if (synced) {
-        this.nativeViewHost.setVisible(!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
+        this.nativeViewHost.setVisible(this.verified && !this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
         return;
       }
       // Keep the renderer cover in place until a later attempt really
@@ -1406,7 +1804,7 @@ class LibVlcPlaybackSession {
       if (this.syncNativeViewHost(shouldRebind)) {
         this.nativeSyncRetryCount = 0;
         if (!this.nativeFullscreenTransition && !this.awaitingFullscreenViewport) {
-          this.nativeViewHost?.setVisible(!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
+          this.nativeViewHost?.setVisible(this.verified && !this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
         }
         return;
       }
@@ -1461,7 +1859,7 @@ class LibVlcPlaybackSession {
       this.nativeViewHost?.setAutoresize(false);
       const synced = this.syncNativeViewHost(false);
       if (synced) {
-        this.nativeViewHost?.setVisible(!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
+        this.nativeViewHost?.setVisible(this.verified && !this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
       } else {
         this.nativeViewHost?.setVisible(false);
         this.scheduleNativeViewSync(true, 32);
@@ -1533,11 +1931,16 @@ class LibVlcPlaybackSession {
   }
 
   private emit(patch: Partial<LibVlcPlaybackState>): void {
-    if (patch.status && patch.status !== this.state.status) {
+    let changed = false;
+    for (const key of Object.keys(patch) as Array<keyof LibVlcPlaybackState>) {
+      if (patch[key] !== this.state[key]) { changed = true; break; }
+    }
+    if (this.verified && patch.status && patch.status !== this.state.status) {
       recordPlaybackDiagnostic('vlc.status', patch.status);
       if (patch.status === 'error') console.error('[playback] Recent state transitions', playbackDiagnostics());
     }
-    this.state = { ...this.state, ...patch };
+    if (changed) this.state = { ...this.state, ...patch };
+    if (!this.verified) return;
     syncNativePlaybackDisplaySleep(this.id, {
       ...this.state,
       // The renderer gets optimistic state, but sleep waits for LibVLC to pause.
@@ -1550,7 +1953,9 @@ class LibVlcPlaybackSession {
     });
     // Track metadata only changes on discovery or selection. Do not clone it
     // across IPC with every position update; the renderer keeps the last list.
-    if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', { ...this.state, tracks: patch.tracks });
+    // Keep checking the native pause acknowledgement above, but do not send
+    // unchanged timestamps and paused state through IPC on every poll.
+    if (changed && !this.owner.isDestroyed()) this.owner.send('libvlc:state', { ...this.state, tracks: patch.tracks });
   }
 
   private applyPendingRearmTrackSelection(): void {
@@ -1676,15 +2081,6 @@ class LibVlcPlaybackSession {
       const api = this.runtime.api;
       const nativeState = Number(api.playerGetState(this.player));
       const status = nativeStateStatus(nativeState);
-      if (this.startupPolling && (status === 'ready' || Date.now() >= this.startupPollDeadline)) {
-        this.startupPolling = false;
-        if (this.timer) clearInterval(this.timer);
-        // Native subtitle overlays follow the latest playback timestamp from
-        // this poll. Keep the steady-state cadence close to a video frame so
-        // subtitle cues do not visibly trail the picture.
-        this.timer = setInterval(() => this.poll(), 16);
-        this.timer.unref();
-      }
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
       if (status === 'ended') {
         this.ended = true;
@@ -1723,6 +2119,10 @@ class LibVlcPlaybackSession {
         // button state with a poll from before the decoder applied the command.
         paused: Date.now() < this.pauseAcknowledgementDeadline ? this.requestedPaused : nativePaused,
       });
+      // Moving video keeps the subtitle clock at frame cadence. A settled
+      // paused player needs only a slow health check; commands wake it below.
+      this.setPollingInterval(nativePaused && this.pauseAcknowledgementDeadline === 0
+        && Date.now() >= this.rapidPollUntil ? 250 : 16);
       if (status === 'closed') {
         this.finish('closed');
       } else if (status === 'error') {
@@ -1735,6 +2135,8 @@ class LibVlcPlaybackSession {
 
   command(command: LibVlcCommand): boolean {
     if (this.stopped) return false;
+    this.rapidPollUntil = Date.now() + 750;
+    this.setPollingInterval(16);
     recordPlaybackDiagnostic('vlc.command', command.type);
     try {
       const api = this.runtime.api;
@@ -1764,6 +2166,7 @@ class LibVlcPlaybackSession {
           }
           if (this.replaySeek !== null) { this.replaySeek = position; return true; }
           api.playerSetTime(this.player, Math.round(position * 1_000));
+          this.emit({ status: 'loading', position });
           return true;
         }
         case 'set-volume': {
@@ -1843,6 +2246,8 @@ class LibVlcPlaybackSession {
   }
 
   private releaseOwnedInstance(): void {
+    this.decoderProbe?.detach();
+    this.decoderProbe = null;
     if (!this.ownsInstance || !this.instance) return;
     try { this.runtime.api.releaseInstance(this.instance); } catch { /* best effort */ }
   }
@@ -1893,12 +2298,12 @@ class LibVlcPlaybackSession {
   }
 }
 
-export function startLibVlcPlayback(
+export async function startLibVlcPlayback(
   owner: WebContents,
   filePath: string,
   options: LibVlcStartOptions = {},
   sourcePolicy: { allowRemoteHttps?: boolean } = {},
-): { ok: boolean; sessionId?: string; surface?: LibVlcSurface; error?: string } {
+): Promise<{ ok: boolean; sessionId?: string; surface?: LibVlcSurface; error?: string }> {
   if (!libVlcConfiguredEnabled() || libVlcKillSwitchEnabled() || !libVlcCompositionGateEnabled()) return { ok: false, surface: 'unavailable', error: disabledReason() };
   const isRemoteHttps = /^https:\/\//i.test(filePath);
   if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) && !(isRemoteHttps && sourcePolicy.allowRemoteHttps)) || /^\\\\/.test(filePath)) {
@@ -1914,6 +2319,17 @@ export function startLibVlcPlayback(
       if (currentSession === terminated) currentSession = null;
     });
     currentSession = session;
+    let verificationError: string | null;
+    try {
+      verificationError = await session.verifyStart();
+    } catch (error) {
+      session.stop();
+      throw error;
+    }
+    if (verificationError || currentSession !== session) {
+      session.stop();
+      return { ok: false, surface: 'unavailable', error: verificationError || 'The LibVLC session was replaced.' };
+    }
     recordMemoryCheckpoint('vlc.session.started');
     return { ok: true, sessionId: session.id, surface: 'composited-window' };
   } catch (error) {

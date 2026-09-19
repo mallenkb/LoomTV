@@ -9,6 +9,7 @@ impl Fixture {
         let root =
             std::env::temp_dir().join(format!("loomtv-storage-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
         fs::write(root.join("TEST-OWNED"), b"synthetic snapshot fixture").unwrap();
         Self(root)
     }

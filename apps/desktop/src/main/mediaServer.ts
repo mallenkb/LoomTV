@@ -1650,6 +1650,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
         const embedded = reqUrl.searchParams.get('embedded') === '1';
+        const seekPreview = !embedded && reqUrl.searchParams.get('preview') === '1';
         const streamIndex = parseIntegerTag(reqUrl.searchParams.get('stream') || undefined);
         if (!filePath) {
           res.writeHead(404);
@@ -1665,7 +1666,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           pipeResponse(fs.createReadStream(filePath), res);
           return;
         }
-        const cacheKey = thumbnailCacheKey(filePath, time, embedded, streamIndex);
+        const cacheKey = thumbnailCacheKey(filePath, seekPreview ? `seek-v1:${time}` : time, embedded, streamIndex);
         const cachedThumbnail = cacheKey ? getCachedThumbnail(cacheKey) : null;
         res.writeHead(200, {
           'Content-Type': cachedThumbnail?.mimeType || 'image/jpeg',
@@ -1691,7 +1692,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               '-q:v', '2',
               'pipe:1',
             ]
-          : ['-ss', time, '-i', filePath, '-vf', THUMBNAIL_SCALE_FILTER, '-vframes', '1', '-f', 'image2', '-vcodec', 'mjpeg', '-q:v', '2', 'pipe:1'];
+          : [
+              '-ss', time,
+              // Seek previews use nearby keyframes, avoiding full 4K GOP decoding.
+              ...(seekPreview ? ['-noaccurate_seek', '-skip_frame', 'nokey'] : []),
+              '-i', filePath, '-an', '-sn', '-dn',
+              '-vf', seekPreview ? "scale='min(320,iw)':-2" : THUMBNAIL_SCALE_FILTER,
+              '-vframes', '1', '-threads', '1', '-f', 'image2', '-vcodec', 'mjpeg',
+              '-q:v', seekPreview ? '5' : '2', 'pipe:1',
+            ];
         // Thumbnail requests arrive in bursts (one per episode row); the tool
         // queue keeps them to a couple of concurrent ffmpeg processes.
         acquireFfmpegToolSlot('thumbnail')
@@ -1701,8 +1710,13 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               return;
             }
             try {
-              const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+              const proc = spawn(ffmpegPath, [
+                '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-threads', '2', '-filter_threads', '1', ...args,
+              ], { stdio: ['ignore', 'pipe', 'pipe'] });
               proc.once('exit', release);
+              const thumbnailTimeout = setTimeout(() => proc.kill('SIGKILL'), 15_000);
+              thumbnailTimeout.unref();
               const chunks: Buffer[] = [];
               let outputBytes = 0;
               proc.stdout?.on('data', (chunk: Buffer) => {
@@ -1711,14 +1725,17 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
                 else chunks.length = 0;
                 if (!res.destroyed && !res.writableEnded) res.write(chunk);
               });
-              proc.stdout?.once('end', () => {
-                if (cacheKey && outputBytes > 0 && outputBytes <= 2 * 1024 * 1024) {
+              proc.once('close', (code) => {
+                clearTimeout(thumbnailTimeout);
+                // Hover cancellation must never persist an incomplete JPEG.
+                if (code === 0 && !res.destroyed && cacheKey && outputBytes > 0 && outputBytes <= 2 * 1024 * 1024) {
                   saveCachedThumbnail(cacheKey, Buffer.concat(chunks), 'image/jpeg');
                 }
                 chunks.length = 0;
                 safeEndResponse(res);
               });
               proc.once('error', (error) => {
+                clearTimeout(thumbnailTimeout);
                 console.error('thumbnail FFmpeg spawn error:', error);
                 release();
                 safeEndResponse(res);

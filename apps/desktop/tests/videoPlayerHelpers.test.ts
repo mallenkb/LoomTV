@@ -366,7 +366,7 @@ test('LibVLC track selection uses the native runtime ID without changing engines
     tracks,
     type: 'audio',
     streamIndex: 2,
-  }), 2);
+  }), 7);
 });
 
 test('native subtitle tracks remain available as an external subtitle fallback', () => {
@@ -394,4 +394,8 @@ test('native subtitle tracks remain available as an external subtitle fallback',
     overlayVisible: false,
     subtitleIsBurnedIn: false,
   }), false);
+});
+
+test('mpv uses its native ID when ffprobe stream indices differ', () => {
+  assert.equal(resolveEngineTrackId({ engineKind: 'mpv', tracks: [{ type: 'subtitle', index: 4, nativeId: 1 }], type: 'subtitle', streamIndex: 4 }), 1);
 });

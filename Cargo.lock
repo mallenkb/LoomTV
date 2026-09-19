@@ -2519,14 +2519,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "loomtv-mpv-bridge"
+version = "0.1.0"
+dependencies = [
+ "libloading 0.8.9",
+ "serde_json",
+]
+
+[[package]]
 name = "loomtv-playback"
 version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
+ "loomtv-vlc-probe",
  "serde",
  "serde_json",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "loomtv-vlc-probe"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "libloading 0.8.9",
 ]
 
 [[package]]

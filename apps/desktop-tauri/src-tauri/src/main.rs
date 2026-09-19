@@ -449,11 +449,16 @@ async fn desktop_invoke(
         }
         "media:get-thumbnail" => {
             let time = args.get(1).and_then(Value::as_str).unwrap_or("00:00:01");
+            let transform = if args.get(2).and_then(Value::as_bool).unwrap_or(false) {
+                loomtv_core::media_tools::Transform::SeekPreview(time.into())
+            } else {
+                loomtv_core::media_tools::Transform::Thumbnail(time.into())
+            };
             let url = state
                 .media
                 .grant_resource(
                     string(&args, 0)?,
-                    loomtv_core::media_tools::Transform::Thumbnail(time.into()),
+                    transform,
                 )
                 .await?;
             Ok(json!({"url":url}))

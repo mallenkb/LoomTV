@@ -15,6 +15,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-playback:
+    name: Native playback bridges on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, windows-latest, ubuntu-latest]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install repository Rust toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import tomllib
+          with open("rust-toolchain.toml", "rb") as file:
+              toolchain = tomllib.load(file)["toolchain"]
+          subprocess.run(["rustup", "toolchain", "install", toolchain["channel"], "--profile", "minimal"], check=True)
+          PY
+      - name: Test native bridge contracts
+        run: cargo test --locked -p loomtv-mpv-bridge -p loomtv-vlc-probe
+      - name: Build native playback bridges
+        run: cargo build --locked --release -p loomtv-mpv-bridge -p loomtv-vlc-probe
+
   code:
     name: Lint, typecheck, and test
     runs-on: ubuntu-latest

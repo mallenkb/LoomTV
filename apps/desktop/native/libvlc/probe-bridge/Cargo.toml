@@ -1,0 +1,16 @@
+[package]
+name = "loomtv-vlc-probe"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+name = "loomtv_vlc_probe"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+libloading = "0.8"
+
+[build-dependencies]
+cc = "1"

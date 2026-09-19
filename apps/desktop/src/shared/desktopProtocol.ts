@@ -120,6 +120,7 @@ export type WireSubtitleRecord = {
 
 export type MpvPlaybackTrack = {
   id: number;
+  streamIndex?: number;
   type: 'video' | 'audio' | 'subtitle';
   codec?: string;
   language?: string;
@@ -174,6 +175,8 @@ export type MpvAvailability = {
 
 export type MpvStartOptions = {
   startSeconds?: number;
+  decodeMode?: 'hardware' | 'software';
+  paused?: boolean;
   volume?: number;
   muted?: boolean;
   speed?: number;
@@ -181,6 +184,7 @@ export type MpvStartOptions = {
   audioLanguage?: string;
   audioDelay?: number;
   subtitleDelay?: number;
+  nativeSubtitles?: boolean;
   subtitleStyle?: {
     fontSize: number;
     color: string;

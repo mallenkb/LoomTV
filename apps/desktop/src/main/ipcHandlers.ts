@@ -98,7 +98,7 @@ const playbackViewportSchema = z.object({
   width: finiteNumber.positive().max(100_000),
   height: finiteNumber.positive().max(100_000),
 });
-const mpvStartOptionsSchema = playbackStartOptionsSchema.omit({ nativeSubtitles: true });
+const mpvStartOptionsSchema = playbackStartOptionsSchema;
 const libraryScanOptionsSchema = z.object({
   force: z.boolean().optional(),
   mode: z.enum(['quick', 'metadata', 'full']).optional(),
@@ -913,13 +913,14 @@ export function registerIpcHandlers<
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/subtitle?${params.toString()}` };
   }, z.tuple([nonEmptyString, finiteNumber.int().nonnegative().optional()]));
 
-  handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
+  handle('media:get-thumbnail', (_event, filePath: string, time?: string, seekPreview?: boolean) => {
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (time) params.set('t', time);
+    if (seekPreview) params.set('preview', '1');
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/api/thumbnail?${params.toString()}` };
-  }, z.tuple([nonEmptyString, z.string().max(8192).optional()]));
+  }, z.tuple([nonEmptyString, z.string().max(8192).optional(), z.boolean().optional()]));
 
   handle('media:get-file-info', (_event, filePath: string) => {
     try {

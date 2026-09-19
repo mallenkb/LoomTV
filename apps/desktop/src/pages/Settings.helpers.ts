@@ -32,7 +32,7 @@ export const LOADER_OPTIONS: { id: AppLoaderStyle; label: string; description: s
 export const APP_LICENSE = {
   name: 'Loom',
   license: 'MIT',
-  copyright: 'Copyright (c) 2026 malllenkb',
+  copyright: 'Copyright © 2026 LoomTV',
 };
 
 export const THIRD_PARTY_DEPENDENCIES = [

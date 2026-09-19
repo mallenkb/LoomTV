@@ -357,6 +357,12 @@ const disableZeroCopy = ['1', 'true', 'yes'].includes(
 );
 if (disableZeroCopy) app.commandLine.appendSwitch('disable-zero-copy');
 
+// Native video hosts use X11 child windows. A Wayland desktop can provide
+// these through XWayland, while Chromium continues to draw LoomTV's controls.
+if (process.platform === 'linux' && process.env.DISPLAY && !app.commandLine.hasSwitch('ozone-platform')) {
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
+
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
   ...MEDIA_PROTOCOL_SCHEMES.map((scheme) => ({ scheme, privileges: mediaSchemePrivileges })),
@@ -429,10 +435,10 @@ const activeScans = new Set<AbortController>();
 // Full metadata is an expiring read-through snapshot, never the durable store.
 const libraryCache = new IdleValueCache<LibraryData>(30_000);
 const rendererIndexCache = new MemoryLruCache<string, ReturnType<typeof projectLibraryIndexForRenderer>>({
-  maxEntries: 2, maxBytes: 8 * 1024 * 1024, idleMs: 60_000,
+  maxEntries: 2, maxBytes: 8 * 1024 * 1024, idleMs: 300_000,
 });
 const rendererDetailCache = new MemoryLruCache<string, ReturnType<typeof projectLibraryItemForRenderer>>({
-  maxEntries: 50, maxBytes: 8 * 1024 * 1024, idleMs: 30_000,
+  maxEntries: 50, maxBytes: 8 * 1024 * 1024, idleMs: 300_000,
 });
 let rendererReadScope: string | null = null;
 
@@ -2384,6 +2390,7 @@ async function startBackgroundServices(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  app.setAboutPanelOptions({ copyright: 'Copyright © 2026 LoomTV' });
   startMemoryMetrics();
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');

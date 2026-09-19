@@ -11,7 +11,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 type Create = unsafe extern "C" fn(*const c_char, *mut c_char, usize) -> *mut c_void;
 type Attach = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_char, usize) -> i32;
@@ -41,6 +41,13 @@ struct Session {
     state: contract::State,
     after_load: Vec<Value>,
     load_request: Option<u64>,
+    decode_mode: Option<bool>,
+    file_loaded: bool,
+    playback_restarted: bool,
+    hardware_decoder: Option<bool>,
+    hardware_failed: bool,
+    verified: bool,
+    verification: Option<oneshot::Sender<std::result::Result<(), String>>>,
 }
 
 struct Inner {
@@ -66,6 +73,17 @@ fn native_error(buffer: &[c_char]) -> String {
 
 fn failure(message: impl Into<String>) -> Error {
     Error::new("libmpv_error", message)
+}
+
+fn hardware_hwdec() -> &'static str {
+    #[cfg(target_os = "macos")]
+    { "videotoolbox" }
+    #[cfg(target_os = "windows")]
+    { "d3d11va" }
+    #[cfg(target_os = "linux")]
+    { "vaapi" }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    { "auto-safe" }
 }
 
 impl LibMpvService {
@@ -186,12 +204,16 @@ impl LibMpvService {
                             .is_some_and(|error| error != "success");
                     if event["event"] == "start-file" {
                         session.awaiting_start = false;
+                        session.file_loaded = false;
+                        session.playback_restarted = false;
+                        session.hardware_decoder = None;
                     }
                     // Ignore idle-core properties left over from the stopped file.
                     if session.awaiting_start && !load_failed && event["event"] != "bridge-error" {
                         continue;
                     }
                     if event["event"] == "file-loaded" {
+                        session.file_loaded = true;
                         // Resume seeking and sidecars belong to the loaded file.
                         // Applying either while the persistent core is idle can
                         // fail or affect the previous file.
@@ -215,6 +237,17 @@ impl LibMpvService {
                             }
                         }
                     }
+                    if event["event"] == "playback-restart" {
+                        session.playback_restarted = true;
+                    }
+                    if event["event"] == "property-change" && event["name"] == "hwdec-current" {
+                        if let Some(decoder) = event["data"].as_str().filter(|value| !value.is_empty()) {
+                            session.hardware_decoder = Some(decoder != "no");
+                            if session.verified && session.decode_mode == Some(true) && decoder == "no" {
+                                session.hardware_failed = true;
+                            }
+                        }
+                    }
                     if event["event"] == "bridge-error" || load_failed {
                         session.state.value["status"] = json!("error");
                         session.state.value["error"] = event["error"].clone();
@@ -222,9 +255,29 @@ impl LibMpvService {
                     } else {
                         session.state.event(&event);
                     }
+                    if session.hardware_failed {
+                        session.state.value["status"] = json!("error");
+                        session.state.value["error"] = json!("Hardware decoding stopped during playback.");
+                        session.state.dirty = true;
+                    }
+                    if let Some(verification) = session.verification.take() {
+                        if session.state.value["status"] == "error" {
+                            let message = session.state.value["error"].as_str().unwrap_or("libmpv could not start playback.");
+                            let _ = verification.send(Err(message.to_owned()));
+                        } else if session.file_loaded && session.playback_restarted
+                            && session.decode_mode.is_some_and(|hardware| session.hardware_decoder == Some(hardware))
+                        {
+                            session.verified = true;
+                            let _ = verification.send(Ok(()));
+                        } else {
+                            session.verification = Some(verification);
+                        }
+                    }
                 }
-                if let Some(value) = session.state.take_update() {
-                    (inner.emit)(value);
+                if session.decode_mode.is_none() || session.verified {
+                    if let Some(value) = session.state.take_update() {
+                        (inner.emit)(value);
+                    }
                 }
             }
         });
@@ -298,7 +351,43 @@ impl LibMpvService {
         if source.is_empty() || source.len() > 32_768 || source.contains('\0') {
             return Err(failure("The authorized media source is invalid."));
         }
+        let decode_mode = match options.get("decodeMode").and_then(Value::as_str) {
+            Some("hardware") => Some(true),
+            Some("software") => Some(false),
+            None => None,
+            _ => return Err(failure("The requested decode mode is unsupported.")),
+        };
+        let hwdec = match decode_mode {
+            Some(true) => hardware_hwdec(),
+            Some(false) => "no",
+            None => "auto-safe",
+        };
+        let paused = options
+            .get("paused")
+            .map(|value| value.as_bool().ok_or_else(|| failure("The paused option must be a boolean.")))
+            .transpose()?
+            .unwrap_or(false);
         let commands = contract::start_commands(&options).map_err(failure)?;
+        let mut after_load = Vec::new();
+        let mut after_accept = Vec::new();
+        for command in commands {
+            if decode_mode.is_some() && matches!(command[1].as_str(), Some("volume" | "mute")) {
+                after_accept.push(command);
+            } else {
+                after_load.push(command);
+            }
+        }
+        if decode_mode.is_some() {
+            after_accept.push(json!(["set_property", "pause", paused]));
+        } else {
+            after_load.push(json!(["set_property", "pause", paused]));
+        }
+        let (verification, verified) = if decode_mode.is_some() {
+            let (tx, rx) = oneshot::channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
         self.stop_inner(None).await?;
         let id = uuid::Uuid::new_v4().to_string();
         {
@@ -347,9 +436,15 @@ impl LibMpvService {
             id: id.clone(),
             awaiting_start: true,
             load_request: None,
-            after_load: commands
+            decode_mode,
+            file_loaded: false,
+            playback_restarted: false,
+            hardware_decoder: None,
+            hardware_failed: false,
+            verified: false,
+            verification,
+            after_load: after_load
                 .into_iter()
-                .chain(std::iter::once(json!(["set_property", "pause", false])))
                 .chain(
                     options["startSeconds"]
                         .as_f64()
@@ -365,6 +460,27 @@ impl LibMpvService {
                 )
                 .collect(),
         });
+        // Set hwdec before loadfile so no frame from this attempt decodes
+        // with the previous session's setting.
+        if let Err(error) = self.send(json!(["set_property", "hwdec", hwdec])).await {
+            let _ = self.stop_inner(Some(id.clone())).await;
+            return Err(error);
+        }
+        let allow_software_fallback = decode_mode != Some(true);
+        if let Err(error) = self.send(json!(["set_property", "hwdec-software-fallback", allow_software_fallback])).await {
+            let _ = self.stop_inner(Some(id.clone())).await;
+            return Err(error);
+        }
+        if decode_mode.is_some() {
+            if let Err(error) = self.send(json!(["set_property", "mute", true])).await {
+                let _ = self.stop_inner(Some(id.clone())).await;
+                return Err(error);
+            }
+            if let Err(error) = self.send(json!(["set_property", "pause", false])).await {
+                let _ = self.stop_inner(Some(id.clone())).await;
+                return Err(error);
+            }
+        }
         // Properties such as volume are unavailable while the persistent core
         // is idle. Load first, then apply the queued session settings when
         // libmpv reports file-loaded.
@@ -372,6 +488,25 @@ impl LibMpvService {
         if let Err(error) = result {
             let _ = self.stop_inner(Some(id.clone())).await;
             return Err(error);
+        }
+        if let Some(verified) = verified {
+            match tokio::time::timeout(Duration::from_secs(12), verified).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(message))) => {
+                    let _ = self.stop_inner(Some(id.clone())).await;
+                    return Err(failure(message));
+                }
+                _ => {
+                    let _ = self.stop_inner(Some(id.clone())).await;
+                    return Err(failure("libmpv did not verify the requested decode mode before the start deadline."));
+                }
+            }
+            for command in after_accept {
+                if let Err(error) = self.send(command).await {
+                    let _ = self.stop_inner(Some(id.clone())).await;
+                    return Err(error);
+                }
+            }
         }
         Ok(json!({"ok":true,"sessionId":id,"surface":"composited-window"}))
     }
@@ -614,12 +749,12 @@ mod tests {
                 let service = service.clone();
                 tokio::spawn(async move { service.stop(None).await })
             };
-            until(|| fake.lock().unwrap().commands.len() == 2).await;
+            until(|| fake.lock().unwrap().commands.len() == 4).await;
             let replacing = {
                 let service = service.clone();
                 tokio::spawn(async move { service.start("second".into(), json!({}), 1).await })
             };
-            let request = fake.lock().unwrap().commands[1].0;
+            let request = fake.lock().unwrap().commands[3].0;
             fake.lock().unwrap().events.push_back(
                 json!([
                     {"event":"command-reply","request_id":request - 1,"error":"success"},
@@ -629,7 +764,7 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
             assert!(!stopping.is_finished());
-            assert_eq!(fake.lock().unwrap().commands.len(), 2);
+            assert_eq!(fake.lock().unwrap().commands.len(), 4);
             assert!(updates.lock().unwrap().is_empty());
             {
                 let mut fake = fake.lock().unwrap();
@@ -657,7 +792,7 @@ mod tests {
                 .command(first["sessionId"].as_str().unwrap().into(), json!({}))
                 .await
                 .is_err());
-            assert_eq!(fake.lock().unwrap().commands.len(), 3);
+            assert_eq!(fake.lock().unwrap().commands.len(), 7);
             assert!(fake
                 .lock()
                 .unwrap()
@@ -681,12 +816,12 @@ mod tests {
                     fake.reject = mode == "submit";
                     match mode {
                         "reply" => fake.events.push_back(
-                            json!([{"event":"command-reply","request_id":2,"error":"failed"}])
+                            json!([{"event":"command-reply","request_id":4,"error":"failed"}])
                                 .to_string(),
                         ),
                         "malformed" => fake.events.push_back("invalid JSON".into()),
                         "missing-error" => fake.events.push_back(
-                            json!([{"event":"command-reply","request_id":2}]).to_string(),
+                            json!([{"event":"command-reply","request_id":4}]).to_string(),
                         ),
                         _ => {}
                     }
@@ -730,7 +865,7 @@ mod tests {
                 "starting"
             );
             assert!(updates.lock().unwrap().last().unwrap()["position"].is_null());
-            assert_eq!(fake.lock().unwrap().commands.len(), 1);
+            assert_eq!(fake.lock().unwrap().commands.len(), 3);
             fake.lock().unwrap().events.push_back(
                 json!([
                     {"event":"start-file"}, {"event":"file-loaded"},
@@ -747,7 +882,7 @@ mod tests {
             })
             .await;
             assert_eq!(updates.lock().unwrap().last().unwrap()["status"], "ready");
-            assert!(fake.lock().unwrap().commands.len() > 1);
+            assert!(fake.lock().unwrap().commands.len() > 3);
             service.shutdown().await;
         });
     }
@@ -765,7 +900,7 @@ mod tests {
             let (service, fake, updates) = fixture();
             service.start("first".into(), json!({}), 1).await.unwrap();
             fake.lock().unwrap().events.push_back(
-                json!([{"event":"command-reply","request_id":1,"error":"load failed"}]).to_string(),
+                json!([{"event":"command-reply","request_id":3,"error":"load failed"}]).to_string(),
             );
             service.start_polling();
             until(|| {
@@ -776,7 +911,78 @@ mod tests {
                     .is_some_and(|value| value["status"] == "error")
             })
             .await;
-            assert_eq!(fake.lock().unwrap().commands.len(), 1);
+            assert_eq!(fake.lock().unwrap().commands.len(), 3);
+            service.shutdown().await;
+        });
+    }
+
+    #[test]
+    fn hardware_start_waits_for_decoder_proof_and_restores_user_settings() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (service, fake, updates) = fixture();
+            let starting = {
+                let service = service.clone();
+                tokio::spawn(async move {
+                    service.start("movie".into(), json!({
+                        "decodeMode":"hardware", "paused":true, "volume":0.3, "muted":false
+                    }), 1).await
+                })
+            };
+            until(|| fake.lock().unwrap().commands.len() >= 5).await;
+            {
+                let guard = fake.lock().unwrap();
+                assert_eq!(guard.commands[0].1, json!(["set_property", "hwdec", hardware_hwdec()]));
+                assert_eq!(guard.commands[1].1, json!(["set_property", "hwdec-software-fallback", false]));
+                assert_eq!(guard.commands[2].1, json!(["set_property", "mute", true]));
+                assert_eq!(guard.commands[3].1, json!(["set_property", "pause", false]));
+            }
+            fake.lock().unwrap().events.push_back(json!([
+                {"event":"start-file"},
+                {"event":"file-loaded"},
+                {"event":"playback-restart"},
+                {"event":"property-change","name":"hwdec-current","data":"no"}
+            ]).to_string());
+            service.start_polling();
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            assert!(!starting.is_finished());
+            assert!(updates.lock().unwrap().is_empty());
+            fake.lock().unwrap().events.push_back(json!([
+                {"event":"property-change","name":"hwdec-current","data":hardware_hwdec()}
+            ]).to_string());
+            assert!(tokio::time::timeout(Duration::from_secs(2), starting).await.unwrap().unwrap().is_ok());
+            let commands: Vec<Value> = fake.lock().unwrap().commands.iter().map(|(_, value)| value.clone()).collect();
+            assert!(commands.contains(&json!(["set_property", "volume", 30.0])));
+            assert!(commands.contains(&json!(["set_property", "mute", false])));
+            assert!(commands.contains(&json!(["set_property", "pause", true])));
+            fake.lock().unwrap().events.push_back(json!([
+                {"event":"property-change","name":"hwdec-current","data":"no"}
+            ]).to_string());
+            until(|| updates.lock().unwrap().last().is_some_and(|value| value["status"] == "error")).await;
+            service.shutdown().await;
+        });
+    }
+
+    #[test]
+    fn software_start_disables_hwdec_and_waits_for_a_software_frame() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (service, fake, _) = fixture();
+            let starting = {
+                let service = service.clone();
+                tokio::spawn(async move {
+                    service.start("movie".into(), json!({"decodeMode":"software"}), 1).await
+                })
+            };
+            until(|| fake.lock().unwrap().commands.len() >= 5).await;
+            assert_eq!(fake.lock().unwrap().commands[0].1, json!(["set_property", "hwdec", "no"]));
+            assert_eq!(fake.lock().unwrap().commands[1].1, json!(["set_property", "hwdec-software-fallback", true]));
+            fake.lock().unwrap().events.push_back(json!([
+                {"event":"start-file"},
+                {"event":"file-loaded"},
+                {"event":"playback-restart"},
+                {"event":"property-change","name":"hwdec-current","data":"no"}
+            ]).to_string());
+            service.start_polling();
+            assert!(tokio::time::timeout(Duration::from_secs(2), starting).await.unwrap().unwrap().is_ok());
             service.shutdown().await;
         });
     }

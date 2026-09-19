@@ -7,6 +7,11 @@ export function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+// The AppKit bridge can encode boxed C flags as 0/1; mpv's JSON IPC uses booleans.
+export function mpvFlag(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
 export function normalizeMpvTracks(
   value: unknown,
   subtitleSources: ReadonlyMap<string, SubtitleSource>,
@@ -25,15 +30,16 @@ export function normalizeMpvTracks(
       : null;
     return [{
       id,
+      streamIndex: finiteNumber(track['ff-index']),
       type: type === 'sub' ? 'subtitle' : type,
       codec: typeof track.codec === 'string' ? track.codec : undefined,
       language: typeof track.lang === 'string' ? track.lang : undefined,
       title: typeof track.title === 'string' ? track.title : undefined,
       channels: finiteNumber(track['demux-channel-count']),
-      default: track.default === true,
-      forced: track.forced === true,
-      selected: track.selected === true,
-      external: track.external === true,
+      default: mpvFlag(track.default),
+      forced: mpvFlag(track.forced),
+      selected: mpvFlag(track.selected),
+      external: mpvFlag(track.external),
       source: externalPath ? subtitleSources.get(externalPath) || 'sidecar' : 'embedded',
     }];
   });

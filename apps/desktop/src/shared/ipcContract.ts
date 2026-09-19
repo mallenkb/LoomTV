@@ -120,7 +120,7 @@ export interface IpcContract {
   'media:get-server-port': { args: []; result: number };
   'media:get-stream-url': { args: [filePath: string, options?: StreamUrlOptions]; result: StreamUrlResult };
   'media:get-subtitle-url': { args: [filePath: string, streamOrdinal?: number]; result: { url: string } };
-  'media:get-thumbnail': { args: [filePath: string, time?: string]; result: { url: string } };
+  'media:get-thumbnail': { args: [filePath: string, time?: string, seekPreview?: boolean]; result: { url: string } };
   'media:play': { args: [filePath: string]; result: boolean };
   'media:probe': { args: [filePath: string]; result: ApiResult<unknown> };
   'media:start-transcode': { args: [filePath: string, options?: TranscodeOptions]; result: ApiResult<TranscodeSession> };

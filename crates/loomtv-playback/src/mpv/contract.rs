@@ -84,7 +84,7 @@ pub fn commands(value: &Value) -> Result<Vec<Value>> {
         Some("set-video-crop") => (
             "video-crop",
             if value["crop"].is_null() {
-                json!("no")
+                json!("")
             } else {
                 json!(text(&value["crop"], 64)?)
             },

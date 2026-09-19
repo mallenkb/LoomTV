@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
@@ -141,13 +142,14 @@ function StartupReadySignal({
 }
 
 export default function App() {
-  const hasDesktopLibVlcBridge = Boolean(window.desktopApi?.libvlc?.refreshAvailability);
+  const shouldProbeLibVlcAtStartup = !/^Mac/i.test(navigator.platform)
+    && Boolean(window.desktopApi?.libvlc?.refreshAvailability);
   const [contentReady, setContentReady] = useState(false);
   const startupReady = contentReady;
   const markStartupReady = useCallback(() => setContentReady(true), []);
 
   useEffect(() => {
-    if (!hasDesktopLibVlcBridge || !startupReady) return undefined;
+    if (!shouldProbeLibVlcAtStartup || !startupReady) return undefined;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void desktopApi.libvlc.refreshAvailability()
@@ -167,7 +169,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [hasDesktopLibVlcBridge, startupReady]);
+  }, [shouldProbeLibVlcAtStartup, startupReady]);
 
   // Routes load on navigation or existing hover/focus intent, never a blanket idle preload.
 
@@ -526,7 +528,10 @@ function AppShell({
   }, []);
 
   const handleClose = useCallback(() => {
-    setNowPlaying(null);
+    // Escape comes from the document's native modal listener. Commit the
+    // library before the native video view is removed, just as a React
+    // button click does, so the compositor cannot retain a transparent player.
+    flushSync(() => setNowPlaying(null));
   }, []);
 
   return (

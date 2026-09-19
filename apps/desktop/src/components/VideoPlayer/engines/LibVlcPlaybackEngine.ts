@@ -31,6 +31,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   private probedTracks: MediaTrack[] = [];
   private externalSubtitleTracks: MediaTrack[] = [];
   private mergedTracks: PlaybackTrack[] | null = null;
+  private publishedTracks: PlaybackTrack[] | null = null;
   private pendingMetadataFilePath: string | null = null;
   private metadataProbeTimer: ReturnType<typeof setTimeout> | null = null;
   private metadataProbeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -86,6 +87,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
       source: subtitle.source,
     }));
     this.mergedTracks = null;
+    this.publishedTracks = null;
     if (!await this.lease.load(filePath, options)) return false;
     if (this.destroyed) return false;
     this.pendingMetadataFilePath = filePath;
@@ -113,10 +115,13 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     }
     if (state.status === 'ready') this.beginMetadataProbe();
     const tracks = this.effectiveTracks();
+    const tracksChanged = tracks !== this.publishedTracks
+      && (tracks.length > 0 || (this.publishedTracks?.length ?? 0) > 0);
+    this.publishedTracks = tracks;
     this.listener?.({
       ...state,
       sessionId: this.sessionId,
-      ...(tracks.length > 0 ? { tracks } : {}),
+      tracks: tracksChanged ? tracks : undefined,
     });
   }
 

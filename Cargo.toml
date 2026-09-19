@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["apps/desktop-tauri/src-tauri", "crates/loomtv-core", "crates/loomtv-playback"]
+members = ["apps/desktop-tauri/src-tauri", "apps/desktop/native/libmpv/portable-bridge", "apps/desktop/native/libvlc/probe-bridge", "crates/loomtv-core", "crates/loomtv-playback"]
 default-members = ["crates/loomtv-core", "crates/loomtv-playback"]
 
 [workspace.package]
@@ -18,3 +18,8 @@ uuid = { version = "1", features = ["v4"] }
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+[profile.release.package.loomtv-vlc-probe]
+# Xcode's linker can misalign the Mach-O string pool after strip=debuginfo.
+# dyld rejects that dylib, including when Koffi loads the staged copy.
+strip = "none"

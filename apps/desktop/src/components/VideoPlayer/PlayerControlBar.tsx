@@ -16,12 +16,14 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { formatTime, seekAccessibilityText } from './helpers';
 import type { ControlTab } from './types';
+import SeekHoverPreview from './SeekHoverPreview';
 
 const VOLUME_ACK_TIMEOUT_MS = 1_200;
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 
 interface PlayerControlBarProps {
+  filePath: string;
   showControls: boolean;
   seekSliderRef: React.RefObject<HTMLDivElement | null>;
   progressFillRef: React.RefObject<HTMLDivElement | null>;
@@ -61,6 +63,7 @@ interface PlayerControlBarProps {
 }
 
 export default function PlayerControlBar({
+  filePath,
   showControls,
   seekSliderRef,
   progressFillRef,
@@ -180,13 +183,13 @@ export default function PlayerControlBar({
 
   return (
     <div
-      className={`loom-player-controls absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-6 pb-6 pt-14 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+      className={`loom-player-controls absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-6 pb-4 pt-10 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
       aria-hidden={!showControls}
       inert={!showControls}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      <div className="mb-3 flex items-center gap-3">
+      <div className="mb-2 flex items-center gap-3">
         {isLiveStream ? (
           <div
             className="flex min-w-[6.75rem] shrink-0 items-center gap-2 px-1 text-sm font-semibold tracking-wide text-white sm:text-base"
@@ -228,11 +231,14 @@ export default function PlayerControlBar({
           onKeyDown={isLiveStream ? undefined : handleProgressKeyDown}
           className={`group relative h-6 min-w-0 flex-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isLiveStream ? 'cursor-default' : 'cursor-pointer'}`}
         >
+          {!isLiveStream && duration > 0 && (
+            <SeekHoverPreview key={filePath} filePath={filePath} duration={duration} sliderRef={seekSliderRef} visible={showControls} playbackPositionRef={playbackPositionRef} />
+          )}
           {!isLiveStream && (
             <div
               ref={scrubTimeHudRef}
               aria-hidden="true"
-              className="pointer-events-none absolute bottom-full z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-black/85 px-2.5 py-1 text-xs font-semibold tabular-nums text-white opacity-0 shadow-lg backdrop-blur-md transition-opacity duration-150"
+              className="sr-only"
               style={{ left: `${progressPct}%` }}
             >
               {formatTime(position)} / {formatTime(duration)}

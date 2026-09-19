@@ -86,7 +86,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   private reflectSeek(position: number): void {
     if (!this.lastState) return;
-    this.emitState({ ...this.lastState, position });
+    this.emitState({ ...this.lastState, status: 'loading', position });
   }
 
   private sendSeek(position: number): Promise<void> {
