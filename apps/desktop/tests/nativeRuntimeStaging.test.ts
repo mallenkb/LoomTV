@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,7 +31,7 @@ test('Linux packaging requires and stages the VLC runtime instead of silently om
   assert.equal(manifest.architecture, 'x64');
 });
 
-test('restaging patched VLC regenerates the flattened macOS package checksums', (t) => {
+test('restaging patched VLC regenerates the flattened macOS package manifest', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-vlc-staging-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const desktop = path.join(root, 'desktop');
@@ -63,7 +62,9 @@ test('restaging patched VLC regenerates the flattened macOS package checksums', 
       'lib/libvlc.dylib', 'plugins/libvideotoolbox_plugin.dylib', 'share/license.txt',
     ]);
     const entry = manifest.files.find((entry: { path: string }) => entry.path === 'plugins/libvideotoolbox_plugin.dylib');
-    assert.equal(entry.sha256, createHash('sha256').update(version).digest('hex'));
+    assert.ok(entry);
+    assert.equal(entry.sha256, undefined);
+    assert.ok(manifest.files.every((entry: { sha256?: string }) => entry.sha256 === undefined));
     assert.equal(fs.readFileSync(path.join(destination, 'VLC.app/Contents/MacOS/plugins/libvideotoolbox_plugin.dylib'), 'utf8'), version);
   }
 });
