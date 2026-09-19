@@ -95,6 +95,7 @@ import PlayerSettingsPanel from './VideoPlayer/PlayerSettingsPanel';
 import OpenSubtitlesV3Panel from './VideoPlayer/OpenSubtitlesV3Panel';
 import type { OnlineSubtitle, SubtitleVideo } from '../lib/openSubtitlesV3';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
+import { isAssDialogueTrack, isAssSignsTrack, parseAssDialogueCues } from './VideoPlayer/subtitleCues';
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
@@ -309,6 +310,7 @@ export default function VideoPlayer({
   const subtitleStyleApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nativeSubtitleFallbackRef = useRef(false);
   const libVlcSubtitleFallbackRef = useRef(false);
+  const assDialogueSelectionRef = useRef(false);
   const nativeSubtitleStyleRefreshRafRef = useRef<number | null>(null);
   // Set before handing control to the next episode so queued events from the
   // outgoing media element cannot restart that same episode during teardown.
@@ -760,6 +762,7 @@ export default function VideoPlayer({
       return {
         ordinal: -1,
         codec: external?.format || 'external',
+        title: external?.label || '',
         externalUrl: external?.url || '',
       };
     }
@@ -767,6 +770,7 @@ export default function VideoPlayer({
     return {
       ordinal: embedded?.ordinal ?? -1,
       codec: embedded?.track.codec || '',
+      title: embedded?.track.title || '',
       externalUrl: '',
     };
   }, [mediaTracks, selectedSubtitleTrackIndex, visibleSubtitles]);
@@ -836,18 +840,22 @@ export default function VideoPlayer({
     const index = selectedSubtitleTrackIndex;
     const embeddedOrdinal = selectedSubtitleCueOrdinal;
     const embeddedCodec = selectedSubtitleCueCodec;
+    const assDialogue = index >= 0 && isAssDialogueTrack(embeddedCodec, selectedSubtitleCueDetails.title);
     const externalUrl = selectedSubtitleCueExternalUrl;
     const resolveSubtitleUrl = async (): Promise<string> => {
       // LibVLC reads live-stream subtitle tracks from the network manifest.
       // The local subtitle endpoint only accepts authorized library files.
       if (isIptvPlaybackReference(filePath)) return '';
-      if (nativeEngineKind === 'libvlc' && shouldRenderSubtitleNativelyInLibVlc(embeddedCodec)) return '';
+      if (nativeEngineKind === 'libvlc' && shouldRenderSubtitleNativelyInLibVlc(embeddedCodec) && !assDialogue) return '';
       if (index <= -1000) {
         return externalUrl ? subtitleSource(externalUrl, serverBase) : '';
       }
       if (index >= 0 && embeddedOrdinal >= 0 && !isBitmapSubtitleCodec(embeddedCodec)) {
         const result = await desktopApi.getSubtitleUrl(filePath, embeddedOrdinal);
-        return result.url;
+        if (!assDialogue) return result.url;
+        const url = new URL(result.url);
+        url.searchParams.set('format', 'ass');
+        return url.toString();
       }
       return '';
     };
@@ -859,7 +867,7 @@ export default function VideoPlayer({
         if (cancelled || !url) return;
         const response = await fetch(url, { signal: controller.signal });
         const text = response.ok ? await response.text() : '';
-        if (!cancelled) setSubtitleCues(parseVttCues(text));
+        if (!cancelled) setSubtitleCues(assDialogue ? parseAssDialogueCues(text) : parseVttCues(text));
       } catch {
         if (!cancelled) setSubtitleCues([]);
       }
@@ -872,6 +880,7 @@ export default function VideoPlayer({
   }, [
     filePath,
     selectedSubtitleCueCodec,
+    selectedSubtitleCueDetails.title,
     selectedSubtitleCueExternalUrl,
     selectedSubtitleCueOrdinal,
     selectedSubtitleTrackIndex,
@@ -1527,7 +1536,7 @@ export default function VideoPlayer({
         // SPU IDs live in a different namespace. Do not let recurring LibVLC
         // state snapshots overwrite the renderer-overlay selection with the
         // native fallback track (or "off").
-        if (playbackEngineRef.current?.kind !== 'libvlc') {
+        if (playbackEngineRef.current?.kind !== 'libvlc' && !assDialogueSelectionRef.current) {
           const selectedSubtitleTrack = state.tracks.find((track) => track.type === 'subtitle' && track.selected);
           const selectedSubtitle = selectedSubtitleTrack
             ? selectedSubtitleTrack.streamIndex ?? selectedSubtitleTrack.id
@@ -3669,9 +3678,15 @@ export default function VideoPlayer({
   const selectedSubtitleTrackForSettings = mediaTracks.find((track) =>
     track.type === 'subtitle' && track.index === selectedSubtitleTrackIndex,
   );
+  const assDialogueSelected = selectedSubtitleTrackIndex >= 0
+    && isAssDialogueTrack(selectedSubtitleTrackForSettings?.codec, selectedSubtitleTrackForSettings?.title);
+  const assSignsTrack = assDialogueSelected ? mediaTracks.find((track) =>
+    track.type === 'subtitle' && isAssSignsTrack(track.codec, track.title),
+  ) : undefined;
   const subtitleUsesNativeLibVlc = Boolean(nativeEngineKind === 'libvlc'
     && selectedSubtitleTrackForSettings
-    && shouldRenderSubtitleNativelyInLibVlc(selectedSubtitleTrackForSettings.codec));
+    && shouldRenderSubtitleNativelyInLibVlc(selectedSubtitleTrackForSettings.codec)
+    && !(assDialogueSelected && subtitleCues.length > 0));
   const subtitleStyleCompatibilityMessage = subtitleUsesNativeLibVlc
     ? 'This formatted subtitle is rendered by LibVLC and cannot use Loom\'s live subtitle styling. Choose an SRT or WebVTT track to use Loom\'s position, size, outline, and color controls.'
     : undefined;
@@ -3683,6 +3698,7 @@ export default function VideoPlayer({
     cueCount: subtitleCues.length,
     subtitleIsBurnedIn,
   });
+  assDialogueSelectionRef.current = assDialogueSelected;
 
   // Keep formatted, bitmap, and cue-less external subtitles on LibVLC's live
   // native track. Plain text files move to Loom's overlay once cues are ready.
@@ -3694,16 +3710,24 @@ export default function VideoPlayer({
     );
     const nativeFallbackAllowed = selectedSubtitleTrackIndex <= -1000
       || Boolean(selectedTrack && shouldRenderSubtitleNativelyInLibVlc(selectedTrack.codec));
-    const nativeTrackId = nativeFallbackAllowed
-      ? engineTrackId(engine, mediaTracks, 'subtitle', selectedSubtitleTrackIndex)
-      : null;
+    const nativeTrackId = assDialogueSelected && showSubtitleOverlay
+      ? assSignsTrack ? engineTrackId(engine, mediaTracks, 'subtitle', assSignsTrack.index) : null
+      : nativeFallbackAllowed
+        ? engineTrackId(engine, mediaTracks, 'subtitle', selectedSubtitleTrackIndex)
+        : null;
     const shouldUseNativeTrack = subtitlesDefaultEnabled
       && selectedSubtitleTrackIndex !== -1
-      && !showSubtitleOverlay
+      && (!showSubtitleOverlay || assDialogueSelected)
       && nativeTrackId !== null;
     libVlcSubtitleFallbackRef.current = shouldUseNativeTrack;
     void engine.selectSubtitle(shouldUseNativeTrack ? nativeTrackId : null).catch(() => undefined);
-  }, [mediaTracks, nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
+  }, [assDialogueSelected, assSignsTrack, mediaTracks, nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
+
+  useEffect(() => {
+    const engine = playbackEngineRef.current;
+    if (!nativePlaybackActive || engine?.kind !== 'mpv' || !assDialogueSelected || !showSubtitleOverlay) return;
+    void engine.selectSubtitle(assSignsTrack?.index ?? null).catch(() => undefined);
+  }, [assDialogueSelected, assSignsTrack, nativePlaybackActive, showSubtitleOverlay]);
 
   const useNativeSubtitleTracks = shouldUseNativeSubtitleTracks({
     subtitlesEnabled: subtitlesDefaultEnabled,

@@ -30,7 +30,7 @@ import {
   stopTranscode,
 } from './transcodeManager';
 import { acquireFfmpegToolSlot, acquirePlaybackActivityLease, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
-import { buildEmbeddedSubtitleVttArgs } from './transcodePlan';
+import { buildEmbeddedSubtitleTextArgs } from './transcodePlan';
 import { cachedArtworkResponseHeaders } from './artworkCache';
 import { trackServerConnections } from './updateInstall';
 import {
@@ -1804,8 +1804,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             return;
           }
 
+          const subtitleFormat = reqUrl.searchParams.get('format') === 'ass' ? 'ass' : 'webvtt';
           res.writeHead(200, {
-            'Content-Type': 'text/vtt; charset=utf-8',
+            'Content-Type': subtitleFormat === 'ass' ? 'text/x-ssa; charset=utf-8' : 'text/vtt; charset=utf-8',
             'Cache-Control': 'no-store',
           });
           acquireFfmpegToolSlot('subtitle extract')
@@ -1815,7 +1816,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
                 return;
               }
               try {
-                const proc = spawn(ffmpegPath, buildEmbeddedSubtitleVttArgs(subtitleFilePath, streamOrdinal), { stdio: ['ignore', 'pipe', 'pipe'] });
+                const proc = spawn(ffmpegPath, buildEmbeddedSubtitleTextArgs(subtitleFilePath, streamOrdinal, subtitleFormat), { stdio: ['ignore', 'pipe', 'pipe'] });
                 proc.once('exit', release);
                 if (proc.stdout) pipeResponse(proc.stdout, res);
                 proc.once('error', (error) => {

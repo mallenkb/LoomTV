@@ -5,6 +5,7 @@ import {
   HLS_SEGMENT_SECONDS,
   HLS_WINDOW_SEGMENTS,
   TRANSCODE_READY_SEGMENTS,
+  buildEmbeddedSubtitleTextArgs,
   buildEmbeddedSubtitleVttArgs,
   buildHlsArgs,
   buildVodPlaylist,
@@ -275,5 +276,8 @@ test('embedded subtitle extraction emits a WebVTT stream from the selected subti
     '-f',
     'webvtt',
     'pipe:1',
+  ]);
+  assert.deepEqual(buildEmbeddedSubtitleTextArgs('/media/movie.mkv', 2, 'ass').slice(-5), [
+    '-map', '0:s:2', '-f', 'ass', 'pipe:1',
   ]);
 });

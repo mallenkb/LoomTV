@@ -1,5 +1,15 @@
 export type SubtitleCue = { start: number; end: number; text: string };
 
+export function isAssDialogueTrack(codec?: string, title?: string): boolean {
+  return /^(ass|ssa)$|substation alpha/i.test((codec || '').trim())
+    && /\b(dialogue|honorific)\b/i.test(title || '');
+}
+
+export function isAssSignsTrack(codec?: string, title?: string): boolean {
+  return /^(ass|ssa)$|substation alpha/i.test((codec || '').trim())
+    && /\b(signs?|sings?)\s*&\s*songs?\b/i.test(title || '');
+}
+
 export function cleanSubtitleCueText(value: string): string {
   return value
     // Subtitle files sometimes carry ASS overrides or stray conversion marks
@@ -19,6 +29,56 @@ export function cleanSubtitleCueText(value: string): string {
     })
     .replace(/[ \t]+\n/g, '\n')
     .trim();
+}
+
+export function cleanAssCueText(value: string): string {
+  // ASS defines every {...} block as an override or inline comment. A raw
+  // alternate translation in one of those blocks is not spoken dialogue.
+  return value
+    .replace(/\{[^{}\r\n]*\}/g, '')
+    .replace(/\\N/g, '\n')
+    .replace(/\\n/g, ' ')
+    .replace(/\\h/g, '\u00a0')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function parseAssTimestamp(value: string): number {
+  const match = value.trim().match(/^(\d+):(\d{2}):(\d{2})\.(\d{1,2})$/);
+  if (!match) return NaN;
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) + Number(match[4].padEnd(2, '0')) / 100;
+}
+
+export function parseAssDialogueCues(content: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  let columns: string[] = [];
+  let inEvents = false;
+  for (const line of content.split(/\r?\n/)) {
+    if (/^\[.*\]$/.test(line.trim())) {
+      inEvents = line.trim().toLowerCase() === '[events]';
+      continue;
+    }
+    if (!inEvents) continue;
+    if (/^Format:/i.test(line)) {
+      columns = line.slice(line.indexOf(':') + 1).split(',').map((column) => column.trim().toLowerCase());
+      continue;
+    }
+    if (!/^Dialogue:/i.test(line) || columns.length === 0) continue;
+    // Text is the last field in ASS and may contain commas.
+    const parts = line.slice(line.indexOf(':') + 1).trimStart().split(',');
+    if (parts.length < columns.length) continue;
+    const values = [...parts.slice(0, columns.length - 1), parts.slice(columns.length - 1).join(',')];
+    const start = parseAssTimestamp(values[columns.indexOf('start')] || '');
+    const end = parseAssTimestamp(values[columns.indexOf('end')] || '');
+    const style = values[columns.indexOf('style')]?.trim() || '';
+    if (!/^(default(?:\s*-\s*alt)?|dialogue|subtitles|main)$/i.test(style)) continue;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const text = cleanAssCueText(values[columns.indexOf('text')] || '');
+    if (text) cues.push({ start, end, text });
+  }
+  return cues.sort((a, b) => a.start - b.start);
 }
 
 function parseVttTimestamp(value: string): number {

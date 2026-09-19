@@ -42,6 +42,10 @@ export function hlsSegmentProfileForScope(scope?: string): HlsSegmentProfile {
 }
 
 export function buildEmbeddedSubtitleVttArgs(filePath: string, streamOrdinal: number): string[] {
+  return buildEmbeddedSubtitleTextArgs(filePath, streamOrdinal, 'webvtt');
+}
+
+export function buildEmbeddedSubtitleTextArgs(filePath: string, streamOrdinal: number, format: 'webvtt' | 'ass'): string[] {
   const safeOrdinal = Number.isFinite(streamOrdinal) && streamOrdinal > 0
     ? Math.floor(streamOrdinal)
     : 0;
@@ -54,7 +58,7 @@ export function buildEmbeddedSubtitleVttArgs(filePath: string, streamOrdinal: nu
     '-map',
     `0:s:${safeOrdinal}`,
     '-f',
-    'webvtt',
+    format,
     'pipe:1',
   ];
 }
