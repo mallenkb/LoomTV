@@ -367,6 +367,7 @@ export interface UpdateState {
   platform: NodeJS.Platform;
   arch: string;
   supported: boolean;
+  manualDownload?: boolean;
   downloadPercent?: number;
   latestVersion?: string;
   releaseUrl?: string;

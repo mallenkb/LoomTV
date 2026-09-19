@@ -163,7 +163,7 @@ function updaterFixture({
         stop: () => { cleanups.push('update timer'); },
       }),
     },
-    './safeFetch': {},
+    './safeFetch': { safeFetch: async () => ({ ok: true, json: async () => ({ tag_name: 'v1.0.177', html_url: 'https://github.com/mallenkb/LoomTV/releases/tag/v1.0.177' }) }) },
     './runtimeValidation.ts': { parseRequiredJson: (raw: string, schema: ZodType) => schema.parse(JSON.parse(raw)) },
     './openSettings': {},
     './ffmpegGovernor': {},
@@ -271,11 +271,13 @@ async function assertPreflightFailure(fixture: ReturnType<typeof updaterFixture>
   assert.equal(await fixture.api.installDownloadedUpdate(), state);
 }
 
-test('legacy ad-hoc install preflight requires a manual Developer ID upgrade without draining cleanup', async () => {
+test('legacy ad-hoc install offers manual download without draining cleanup', async () => {
   for (const downloaded of [adHocIdentity, 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=OTHER12345']) {
     const fixture = updaterFixture({ installed: adHocIdentity, downloaded });
     fixture.download();
-    await assertPreflightFailure(fixture, /Developer ID.*manually/);
+    await assertPreflightFailure(fixture, /manual updates/);
+    assert.equal(fixture.api.getUpdateState().manualDownload, true);
+    assert.equal(fixture.api.getUpdateState().supported, false);
     assert.ok(fixture.calls.some(({ args }) => args.includes('--display')));
     assert.ok(!fixture.calls.some(({ file }) => file === '/usr/bin/ditto'));
   }
@@ -457,4 +459,21 @@ test('update install shutdown force-closes active media server connections', asy
 
   assert.equal(server.listening, false);
   assert.equal(sockets.size, 0);
+});
+
+
+test('ad-hoc update checks offer official manual downloads without starting automatic downloads', async () => {
+  const f = updaterFixture({ installed: adHocIdentity });
+  let automaticChecks = 0;
+  f.autoUpdater.checkForUpdates = async () => { automaticChecks++; return undefined; };
+  const state = await f.api.checkForUpdates();
+  assert.equal(state.status, 'available');
+  assert.equal(state.manualDownload, true);
+  assert.equal(state.supported, false);
+  assert.equal(state.releaseUrl, 'https://github.com/mallenkb/LoomTV/releases/latest');
+  assert.match(state.message ?? '', /replace the app in Applications/);
+  assert.equal(automaticChecks, 0);
+  assert.deepEqual(f.cleanups, []);
+  await f.api.checkForUpdates();
+  assert.equal(automaticChecks, 0);
 });

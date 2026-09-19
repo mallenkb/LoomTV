@@ -96,6 +96,7 @@ export function isSettingsSection(value: string | null): value is SettingsSectio
 export function getUpdateButtonLabel(updateState: UpdateState | null): string {
   if (!updateState) return 'Check for updates';
   if (updateState.status === 'checking') return 'Checking...';
+  if (updateState.manualDownload) return 'Download from GitHub';
   if (updateState.status === 'downloading') return updateState.downloadPercent ? `Downloading ${updateState.downloadPercent}%` : 'Downloading...';
   if (updateState.status === 'downloaded') return 'Update now';
   if (updateState.status === 'installing') return 'Restarting...';

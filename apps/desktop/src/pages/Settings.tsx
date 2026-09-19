@@ -1074,6 +1074,10 @@ export default function Settings() {
 
   const handleUpdateAction = async () => {
     if (isUpdateBusy) return;
+    if (updateState?.manualDownload) {
+      await desktopApi.openExternal('https://github.com/mallenkb/LoomTV/releases/latest');
+      return;
+    }
 
     if (updateState?.status === 'downloaded') {
       setUpdateState((current) => ({

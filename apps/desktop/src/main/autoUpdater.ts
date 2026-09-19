@@ -21,7 +21,7 @@ const UPDATE_REPO = 'LoomTV';
 const UPDATE_RELEASE_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`;
 class LegacyMacUpdateError extends Error {
   constructor() {
-    super('This legacy ad-hoc installation has no trusted publisher identity. Download a Developer ID-signed LoomTV release from the official releases page and install it manually once to enable verified automatic updates.');
+    super('This installation uses manual updates. Download LoomTV from the official releases page and replace the app in Applications.');
   }
 }
 const execFileAsync = promisify(execFile);
@@ -50,6 +50,7 @@ export interface UpdateState {
   platform: NodeJS.Platform;
   arch: string;
   supported: boolean;
+  manualDownload?: boolean;
   downloadPercent?: number;
   latestVersion?: string;
   releaseUrl?: string;
@@ -128,7 +129,7 @@ function setUpdateState(nextState: Partial<UpdateState>) {
     currentVersion: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
-    supported: isUpdaterSupportedPlatform(),
+    supported: isUpdaterSupportedPlatform() && !(nextState.manualDownload ?? updateState.manualDownload),
   };
   emitUpdateState();
   return updateState;
@@ -211,9 +212,11 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
     return setUpdateState({
       status: hasUpdate ? 'available' : 'not-available',
       latestVersion,
-      releaseUrl: release.html_url,
+      releaseUrl: UPDATE_RELEASE_URL,
       checkedAt: new Date().toISOString(),
-      message: hasUpdate
+      message: updateState.manualDownload && hasUpdate
+        ? `LoomTV ${latestVersion} is available. Download it and replace the app in Applications.`
+        : hasUpdate
         ? `Loom ${latestVersion} is available.`
         : `Loom is up to date at ${currentVersion}.`,
     });
@@ -841,6 +844,7 @@ export async function installDownloadedUpdate() {
       return setUpdateState({
         status: 'error',
         releaseUrl: UPDATE_RELEASE_URL,
+        ...(error instanceof LegacyMacUpdateError ? { manualDownload: true, supported: false } : {}),
         message: updateFailureMessage(error, 'install'),
         checkedAt: new Date().toISOString(),
       });
@@ -1008,7 +1012,19 @@ export async function checkForUpdates(): Promise<UpdateState> {
 
   updateCheckInFlight = true;
   setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
-  updateCheckPromise = autoUpdater.checkForUpdates()
+  updateCheckPromise = (async () => {
+    if (process.platform === 'darwin') {
+      const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
+      try {
+        await getTrustedMacPublisher(runningAppPath);
+      } catch (error) {
+        if (!(error instanceof LegacyMacUpdateError)) throw error;
+        setUpdateState({ manualDownload: true, supported: false, releaseUrl: UPDATE_RELEASE_URL });
+        return checkLatestGitHubRelease().then(() => undefined);
+      }
+    }
+    return autoUpdater.checkForUpdates();
+  })()
     .then((result) => {
       void result?.downloadPromise?.catch((error: unknown) => {
         reportUpdateFailure(error, 'download');
