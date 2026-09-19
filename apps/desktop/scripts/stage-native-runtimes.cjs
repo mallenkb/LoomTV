@@ -335,7 +335,10 @@ function stagePayload(source, destination, engine, target, sourceMode) {
       const prefix = 'VLC.app/Contents/MacOS/';
       const packagedFiles = files
         .filter((entry) => entry.path.startsWith(prefix))
-        .map((entry) => ({ ...entry, path: entry.path.slice(prefix.length) }))
+        // Electron's macOS packaging/signing pass rewrites Mach-O files after
+        // this manifest is created. Keep the flattened manifest as an exact
+        // path inventory, while runtime-manifest.json retains source hashes.
+        .map((entry) => ({ path: entry.path.slice(prefix.length) }))
         .filter((entry) => /^(lib|plugins|share)\//.test(entry.path)
           && entry.path !== 'plugins/libmacosx_plugin.dylib');
       fs.writeFileSync(path.join(temporaryPayload, 'packaged-runtime-manifest.json'),

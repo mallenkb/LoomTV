@@ -6,6 +6,7 @@ import { queryClient } from './lib/queryClient';
 import { useLocation, parseDesktopSearch, stringifyDesktopSearch } from './lib/navigation';
 import { MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
+import { ArtworkSuspendedContext } from './contexts/ArtworkSuspendedContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
 import ProfileGate from './components/profiles/ProfileGate';
@@ -539,6 +540,7 @@ function AppShell({
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
       {appStartupReady && !homeReady && <StartupSplash />}
+      <ArtworkSuspendedContext.Provider value={Boolean(nowPlaying)}>
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
       <Sidebar />
       <div
@@ -573,6 +575,7 @@ function AppShell({
         </motion.div>
       </main>
       </div>
+      </ArtworkSuspendedContext.Provider>
       {nowPlaying && (
         <ErrorBoundary
           title="Playback stopped unexpectedly"
@@ -601,9 +604,11 @@ function AppShell({
           />
         </ErrorBoundary>
       )}
+      <ArtworkSuspendedContext.Provider value={Boolean(nowPlaying)}>
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
         <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
       </div>
+      </ArtworkSuspendedContext.Provider>
       {librarySetupVisible && <FirstRunLibrarySetup onComplete={dismissLibrarySetup} onSkip={dismissLibrarySetup} />}
     </div>
     </LibraryFilterVisibilityContext.Provider>
