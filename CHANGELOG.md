@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.181](docs/releases/v1.0.181.md)
+
+Improves release gating so desktop publication waits for completed validation.
+
 ### [1.0.180](docs/releases/v1.0.180.md)
 
 Refreshes the desktop release metadata and updater package set.

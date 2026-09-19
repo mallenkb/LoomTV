@@ -101,25 +101,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          validation="$(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
-            --workflow validate.yml \
-            --commit "$RELEASE_SHA" \
-            --event push \
-            --branch main \
-            --limit 1 \
-            --json status,conclusion,event,headBranch,headSha)"
-          if ! jq -e --arg sha "$RELEASE_SHA" '
-            length == 1 and
-            .[0].headSha == $sha and
-            .[0].event == "push" and
-            .[0].headBranch == "main" and
-            .[0].status == "completed" and
-            .[0].conclusion == "success"
-          ' <<< "$validation" >/dev/null; then
-            echo "Latest Validate push run on main for $RELEASE_SHA must be completed and successful." >&2
-            exit 1
-          fi
+          for attempt in {1..40}; do
+            validation="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow validate.yml \
+              --commit "$RELEASE_SHA" \
+              --event push \
+              --branch main \
+              --limit 1 \
+              --json status,conclusion,event,headBranch,headSha)"
+            if jq -e --arg sha "$RELEASE_SHA" '
+              length == 1 and
+              .[0].headSha == $sha and
+              .[0].event == "push" and
+              .[0].headBranch == "main" and
+              .[0].status == "completed" and
+              .[0].conclusion == "success"
+            ' <<< "$validation" >/dev/null; then
+              exit 0
+            fi
+            if jq -e --arg sha "$RELEASE_SHA" '
+              length == 1 and
+              .[0].headSha == $sha and
+              .[0].status == "completed" and
+              .[0].conclusion != "success"
+            ' <<< "$validation" >/dev/null; then
+              echo "Latest Validate push run on main for $RELEASE_SHA did not succeed." >&2
+              exit 1
+            fi
+            echo "Waiting for Validate push run on main for $RELEASE_SHA (attempt ${attempt}/40)."
+            sleep 15
+          done
+          echo "Timed out waiting for Validate push run on main for $RELEASE_SHA." >&2
+          exit 1
 
       - name: Verify deterministic tag, package, notes, and updater identity
         env:
