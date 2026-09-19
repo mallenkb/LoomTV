@@ -2,11 +2,12 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { MAX_SUBTITLE_OUTLINE_WIDTH } from './constants';
 import { activeSubtitleText, type SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
-import { subtitleMediaSeconds } from './playbackClock';
+import { subtitleCueSeconds, subtitleMediaSeconds } from './playbackClock';
 
 interface SubtitleOverlayProps {
   controlsVisible: boolean;
   cues: SubtitleCue[];
+  delaySeconds?: number;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   currentTimeRef?: React.RefObject<number>;
   timelineOffsetRef?: React.RefObject<number>;
@@ -38,6 +39,7 @@ function fallbackTextOutline(width: number, color: string): string {
 function SubtitleOverlay({
   controlsVisible,
   cues,
+  delaySeconds = 0,
   videoRef,
   currentTimeRef,
   timelineOffsetRef,
@@ -84,7 +86,7 @@ function SubtitleOverlay({
           timelineOffsetRef?.current,
           seekableTimelineRef?.current,
         );
-        const next = activeSubtitleText(sortedCues, time, prefixEndTimes);
+        const next = activeSubtitleText(sortedCues, subtitleCueSeconds(time, delaySeconds), prefixEndTimes);
         if (next !== textRef.current) {
           textRef.current = next;
           setText(next);
@@ -117,7 +119,7 @@ function SubtitleOverlay({
       clockEvents.removeEventListener('change', update);
       document.removeEventListener('visibilitychange', update);
     };
-  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, timelineOffsetRef, seekableTimelineRef, visible, paused, clockEvents]);
+  }, [sortedCues, prefixEndTimes, videoRef, currentTimeRef, timelineOffsetRef, seekableTimelineRef, visible, paused, clockEvents, delaySeconds]);
 
   const textShadow = useMemo(() => {
     const outlineWidth = style.borderEnabled

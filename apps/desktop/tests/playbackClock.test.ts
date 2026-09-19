@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { absoluteMediaSeconds, playerSecondsForAbsolute, subtitleMediaSeconds } from '../src/components/VideoPlayer/playbackClock.ts';
+import { absoluteMediaSeconds, playerSecondsForAbsolute, subtitleCueSeconds, subtitleMediaSeconds } from '../src/components/VideoPlayer/playbackClock.ts';
+import { activeSubtitleText } from '../src/components/VideoPlayer/subtitleCues.ts';
 import {
   activeSkipSegmentAt,
   shouldShowSkipPrompt,
   skipPromptLabel,
 } from '../src/components/VideoPlayer/skipPrompt.ts';
+
+test('positive subtitle delay shows cues later than media time', () => {
+  assert.equal(subtitleCueSeconds(10, 1.25), 8.75);
+  assert.equal(subtitleCueSeconds(10, -0.5), 10.5);
+  assert.equal(subtitleCueSeconds(10, Number.NaN), 10);
+  const cues = [{ start: 10, end: 12, text: 'Hello' }];
+  assert.equal(activeSubtitleText(cues, subtitleCueSeconds(10, 1)), '');
+  assert.equal(activeSubtitleText(cues, subtitleCueSeconds(11, 1)), 'Hello');
+});
 
 test('direct, remux, and seekable HLS use the absolute timeline', () => {
   for (const mode of ['direct', 'remux', 'hls'] as const) {

@@ -449,10 +449,11 @@ export default function VideoPlayer({
   const onlinePlaybackKeyRef = useRef(onlinePlaybackKey);
   onlinePlaybackKeyRef.current = onlinePlaybackKey;
   const [onlineCaption, setOnlineCaption] = useState<{ key: string; subtitle: OnlineSubtitle; cues: SubtitleCue[] } | null>(null);
+  const [onlineSubtitleDelay, setOnlineSubtitleDelay] = useState(0);
   const [subtitleSelectionRevision, setSubtitleSelectionRevision] = useState(0);
   const subtitleSelectionRevisionRef = useRef(0);
   const activeOnlineCaption = onlineCaption?.key === onlinePlaybackKey ? onlineCaption : null;
-  useEffect(() => { setOnlineCaption(null); }, [onlinePlaybackKey]);
+  useEffect(() => { setOnlineCaption(null); setOnlineSubtitleDelay(0); }, [onlinePlaybackKey]);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [cropMode, setCropMode] = useState<CropMode>('none');
   const [rotation, setRotation] = useState<RotationMode>(0);
@@ -4030,6 +4031,7 @@ export default function VideoPlayer({
             clockEvents={clockEvents}
             controlsVisible={showControls && playerState !== 'error'}
             cues={activeOnlineCaption?.cues ?? subtitleCues}
+            delaySeconds={activeOnlineCaption ? onlineSubtitleDelay : 0}
             videoRef={videoRef}
             currentTimeRef={nativePlaybackActive ? playbackPositionRef : undefined}
             timelineOffsetRef={streamIsTranscoded ? transcodeStartSecondsRef : undefined}
@@ -4278,7 +4280,26 @@ export default function VideoPlayer({
             selectSubtitleTrack={selectSubtitleTrack}
             onlineSubtitles={isLiveStream ? undefined : (
               <div className="space-y-2">
-                {activeOnlineCaption && <p className="text-xs text-[var(--loom-accent)]">Selected: {activeOnlineCaption.subtitle.name} - OpenSubtitles v3</p>}
+                {activeOnlineCaption && (
+                  <div className="space-y-2 rounded-lg bg-white/5 p-3 text-xs text-white/80">
+                    <p className="text-[var(--loom-accent)]">Selected: {activeOnlineCaption.subtitle.name} - OpenSubtitles v3</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="online-subtitle-sync">Subtitle timing</label>
+                      <span className="tabular-nums" aria-live="polite">{onlineSubtitleDelay > 0 ? '+' : ''}{onlineSubtitleDelay.toFixed(2)}s</span>
+                    </div>
+                    <input id="online-subtitle-sync" type="range" min={-10} max={10} step={0.25}
+                      value={onlineSubtitleDelay}
+                      onChange={(event) => setOnlineSubtitleDelay(Number(event.target.value))}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      aria-valuetext={`${Math.abs(onlineSubtitleDelay).toFixed(2)} seconds ${onlineSubtitleDelay < 0 ? 'earlier' : onlineSubtitleDelay > 0 ? 'later' : 'offset'}`}
+                      className="w-full accent-[var(--loom-accent)]" />
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-white/60">
+                      <span>Earlier</span>
+                      <button type="button" onClick={() => setOnlineSubtitleDelay(0)} className="text-white/80 hover:text-white">Reset timing</button>
+                      <span>Later</span>
+                    </div>
+                  </div>
+                )}
                 <OpenSubtitlesV3Panel
                   key={onlinePlaybackKey}
                   selectedId={activeOnlineCaption?.subtitle.id}
@@ -4301,6 +4322,7 @@ export default function VideoPlayer({
                     if (engine) await engine.selectSubtitle(null);
                     if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
                     selectSubtitleTrack(-1, true);
+                    setOnlineSubtitleDelay(0);
                     setOnlineCaption({ key: onlinePlaybackKey, subtitle, cues });
                   }}
                 />

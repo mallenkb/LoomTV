@@ -25,3 +25,8 @@ export function subtitleMediaSeconds(
     offsetSeconds: timelineOffsetSeconds ?? 0,
   });
 }
+
+// Positive delay moves a cue later relative to the picture and audio.
+export function subtitleCueSeconds(mediaSeconds: number, delaySeconds: number): number {
+  return mediaSeconds - (Number.isFinite(delaySeconds) ? delaySeconds : 0);
+}
