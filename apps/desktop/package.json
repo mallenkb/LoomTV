@@ -12,13 +12,13 @@
   },
   "scripts": {
     "preinstall": "node scripts/enforce-pnpm.cjs",
-    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs && node scripts/stage-libmpv.cjs && node scripts/stage-vlc-probe.cjs",
+    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs && node scripts/stage-libmpv.cjs",
     "prebuild": "node scripts/enforce-pnpm.cjs",
-    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs && node scripts/stage-vlc-probe.cjs --required",
-    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs && node scripts/stage-vlc-probe.cjs --required",
-    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs && node scripts/stage-vlc-probe.cjs --required",
-    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs && node scripts/stage-vlc-probe.cjs --required",
-    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs && node scripts/stage-vlc-probe.cjs --required",
+    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
+    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
+    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
+    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
+    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
     "prelint": "node scripts/enforce-pnpm.cjs",
     "start": "node scripts/run-electron-forge.cjs start",
     "start:built": "corepack pnpm run rebuild:natives && corepack pnpm run build && node scripts/run-built-app.cjs",
@@ -113,7 +113,6 @@
     "zod": "catalog:"
   },
   "build": {
-    "copyright": "Copyright © 2026 LoomTV",
     "appId": "com.mallenkb.loommediaserver",
     "productName": "LoomTV",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
@@ -181,10 +180,6 @@
       {
         "from": "resources/mpv/lib",
         "to": "mpv/lib"
-      },
-      {
-        "from": "resources/libvlc-probe",
-        "to": "libvlc-probe"
       },
       {
         "from": "resources/ffmpeg/runtime-provenance.json",
@@ -323,11 +318,6 @@
       "category": "AudioVideo",
       "maintainer": "mallenkb <releases@loomtv.local>",
       "extraResources": [
-        {
-          "from": "resources/libvlc/linux/${arch}",
-          "to": "libvlc/linux/${arch}",
-          "filter": ["**/*", "!.loomtv-native-runtime-staging.json"]
-        },
         {
           "from": "resources/ffmpeg/linux",
           "to": "ffmpeg/linux"

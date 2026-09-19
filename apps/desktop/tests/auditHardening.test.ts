@@ -111,16 +111,12 @@ function mpvFixture() {
   let allocated = 0;
   let destroyed = 0;
   const timers = new Set<() => void>();
-  const startupDeadlines = new Set<() => void>();
-  const eventBatches: unknown[][] = [];
-  let sendFailures = 0;
   const powers = new Set<string>();
   const states: string[] = [];
-  const window = { isDestroyed: () => false, isMinimized: () => false, isVisible: () => true };
   const owner = Object.assign(new EventEmitter(), {
     isDestroyed: () => false,
     send: (_channel: string, state: { status: string }) => {
-      if (failure === 'emit') { sendFailures++; throw new Error('emit failed'); }
+      if (failure === 'emit') throw new Error('emit failed');
       states.push(state.status);
     },
   });
@@ -131,16 +127,8 @@ function mpvFixture() {
       engines++; allocated++; return allocated;
     },
     loom_mpv_attach: () => failure === 'attach' ? -1 : 0,
-    loom_mpv_command: (_engine: unknown, _request: unknown, json: string) => {
-      const [verb] = JSON.parse(json) as string[];
-      return failure === 'command' || (failure === 'loadfile' && verb === 'loadfile') ? -1 : 0;
-    },
-    loom_mpv_poll_into: (_engine: unknown, output: Buffer) => {
-      if (failure === 'poll') return -1;
-      const batch = eventBatches.shift();
-      if (!batch) return 0;
-      return Buffer.from(JSON.stringify(batch)).copy(output);
-    },
+    loom_mpv_command: () => failure === 'loadfile' || failure === 'command' ? -1 : 0,
+    loom_mpv_poll_into: () => failure === 'poll' ? -1 : 0,
     loom_mpv_destroy: () => {
       engines--; destroyed++;
       if (failure === 'destroy') throw new Error('destroy failed');
@@ -148,26 +136,15 @@ function mpvFixture() {
   };
   const koffi = { load: () => ({ func: (name: keyof typeof native) => native[name] }) };
   const api = loadModule('libmpvPlayback', {
-    electron: { BrowserWindow: { fromWebContents: () => window } },
+    electron: { BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false }) } },
     'node:fs': { existsSync: () => true },
-    './mpvPlaybackHelpers.ts': {
-      finiteNumber: (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined,
-      mpvFlag: Boolean,
-      normalizeMpvTracks: (value: unknown) => Array.isArray(value) ? value : [],
-    },
+    './mpvPlaybackHelpers.ts': { finiteNumber: Number, normalizeMpvTracks: () => [] },
     './libvlcPlayback.ts': {
       loadKoffi: () => koffi,
       createNativeViewHost: () => {
         if (failure === 'host') throw new Error('host failed');
         hosts++;
-        return {
-          drawable: 1,
-          setVisible: () => undefined,
-          syncBounds: () => undefined,
-          syncHierarchy: () => false,
-          setAutoresize: () => undefined,
-          destroy: () => { hosts--; },
-        };
+        return { drawable: 1, destroy: () => { hosts--; } };
       },
     },
     './nativePlaybackPower.ts': {
@@ -180,79 +157,42 @@ function mpvFixture() {
     console: { warn: () => undefined },
     setInterval: (callback: () => void) => { timers.add(callback); return callback; },
     clearInterval: (callback: () => void) => { timers.delete(callback); },
-    setTimeout: (callback: () => void) => { startupDeadlines.add(callback); return callback; },
-    clearTimeout: (callback: () => void) => { startupDeadlines.delete(callback); },
   }) as typeof import('../src/main/libmpvPlayback.ts');
-  const poll = () => {
-    for (const timer of [...timers]) {
-      timer();
-    }
-  };
-  const queueReady = () => {
-    eventBatches.push([
-      { event: 'file-loaded' },
-      { event: 'property-change', name: 'track-list', data: [{ type: 'video', id: 1 }] },
-      { event: 'property-change', name: 'video-params', data: { w: 1920, h: 1080 } },
-      { event: 'property-change', name: 'hwdec-current', data: 'videotoolbox' },
-      { event: 'playback-restart' },
-    ]);
-  };
-  const start = async () => {
-    const pending = api.startLibMpvPlayback(owner as never, 'toy.mkv');
-    if (timers.size > 0) { queueReady(); poll(); }
-    return pending;
-  };
+  const start = () => api.startLibMpvPlayback(owner as never, 'toy.mkv');
   const empty = () => {
     assert.equal(engines, 0); assert.equal(hosts, 0); assert.equal(timers.size, 0);
-    assert.equal(startupDeadlines.size, 0);
     assert.equal(powers.size, 0); assert.equal(owner.listenerCount('destroyed'), 0);
     assert.equal(allocated, destroyed);
   };
-  return {
-    api, owner, start, empty, states, timers, poll,
-    sendFailures: () => sendFailures,
-    queueEvent: (event: unknown) => { eventBatches.push([event]); },
-    setFailure: (value: string) => { failure = value; },
-  };
+  return { api, owner, start, empty, states, timers, setFailure: (value: string) => { failure = value; } };
 }
 
-for (const failure of ['create', 'host', 'attach', 'loadfile']) {
-  test(`libmpv transaction releases every allocation on ${failure} failure`, async () => {
+for (const failure of ['create', 'host', 'attach', 'loadfile', 'emit']) {
+  test(`libmpv transaction releases every allocation on ${failure} failure`, () => {
     const f = mpvFixture();
     for (let index = 0; index < 20; index++) {
-      f.setFailure(failure); assert.equal((await f.start()).ok, false); f.empty();
-      f.setFailure(''); assert.equal((await f.start()).ok, true);
+      f.setFailure(failure); assert.equal(f.start().ok, false); f.empty();
+      f.setFailure(''); assert.equal(f.start().ok, true);
       assert.equal(f.api.stopLibMpvPlayback(), true); f.empty();
     }
   });
 }
 
-test('libmpv post-ready state emission failure releases native ownership', async () => {
-  const f = mpvFixture();
-  const started = await f.start();
-  assert.equal(started.ok, true);
-  f.setFailure('emit');
-  f.queueEvent({ event: 'property-change', name: 'time-pos', data: 12 });
-  assert.doesNotThrow(() => f.poll());
-  assert.ok(f.sendFailures() > 0);
-  f.empty();
-});
-
-test('libmpv repeated stop, replacement, owner destruction and native failures release ownership', async () => {
+test('libmpv repeated stop, replacement, owner destruction and native failures release ownership', () => {
   const f = mpvFixture();
   for (let index = 0; index < 30; index++) {
-    const first = await f.start(); assert.equal(first.ok, true);
-    const second = await f.start(); assert.equal(second.ok, true);
+    const first = f.start(); assert.equal(first.ok, true);
+    const second = f.start(); assert.equal(second.ok, true);
     assert.equal(f.owner.listenerCount('destroyed'), 1);
     assert.equal(f.api.stopLibMpvPlayback(first.sessionId), false);
     f.owner.emit('destroyed'); f.empty();
     assert.equal(f.api.stopLibMpvPlayback(), false);
   }
   for (const failure of ['poll', 'command', 'destroy']) {
-    f.setFailure(''); const started = await f.start();
+    f.setFailure(''); const started = f.start();
     assert.ok(started.sessionId);
     f.setFailure(failure);
-    if (failure === 'poll') f.poll();
+    if (failure === 'poll') for (const poll of f.timers) poll();
     else if (failure === 'command') f.api.commandLibMpvPlayback(started.sessionId, { type: 'set-paused', paused: true });
     else f.api.stopLibMpvPlayback();
     f.empty();

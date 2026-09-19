@@ -88,6 +88,7 @@ impl MediaTools {
             }
             Transform::Thumbnail(_) | Transform::SeekPreview(_) => {
                 let preview = matches!(transform, Transform::SeekPreview(_));
+                if preview { command.args(["-threads", "1"]); }
                 command.args([
                     "-map",
                     "0:v:0",
@@ -97,7 +98,6 @@ impl MediaTools {
                     "-sn",
                     "-vf",
                     if preview { "scale='min(320,iw)':-2" } else { "scale=640:-2" },
-                    "-threads", "1",
                     "-q:v",
                     "4",
                     "-f",

@@ -102,11 +102,6 @@ impl MpvService {
         options: Value,
         window: WindowState,
     ) -> Result<Value> {
-        // This external-window host cannot yet prove which decoder produced
-        // a frame, so an explicit hardware request must fail closed.
-        if options["decodeMode"] == "hardware" {
-            return Err("This mpv host cannot verify hardware decoding.".into());
-        }
         contract::start_commands(&options)?;
         self.send(|reply| Request::Start {
             executable,
@@ -405,6 +400,7 @@ impl Session {
             "--force-window=immediate",
             "--keep-open=yes",
             "--idle=yes",
+            "--pause=no",
             "--osc=no",
             "--osd-level=0",
             "--input-default-bindings=no",
@@ -415,20 +411,10 @@ impl Session {
             "--sub-auto=no",
             "--audio-file-auto=no",
             "--cover-art-auto=no",
+            "--hwdec=auto-safe",
             "--terminal=no",
             "--input-terminal=no",
         ]);
-        let paused = options
-            .get("paused")
-            .map(|value| value.as_bool().ok_or("The paused option must be a boolean."))
-            .transpose()?
-            .unwrap_or(false);
-        command.arg(if paused { "--pause=yes" } else { "--pause=no" });
-        command.arg(match options.get("decodeMode").and_then(Value::as_str) {
-            Some("software") => "--hwdec=no",
-            None => "--hwdec=auto-safe",
-            _ => return Err("The requested decode mode is unsupported.".into()),
-        });
         #[cfg(target_os = "macos")]
         command.arg("--focus-on-open=no");
         command.arg(format!("--input-ipc-server={}", endpoint.address));

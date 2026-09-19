@@ -5,6 +5,10 @@
   "architecture": "arm64",
   "files": [
     {
+      "path": ".loomtv-native-runtime-staging.json",
+      "sha256": "c37ed732738a42ba357489087a19454e59285af9bedca0d21e12340b8e8fa485"
+    },
+    {
       "path": "VLC.app/Contents/Frameworks/Breakpad.framework/Breakpad",
       "sha256": "57d9b9789ced6769eb7ccb2978b06b001f1d1c659a6b1921a3eb7b809b4a00e4"
     },
@@ -3942,7 +3946,7 @@
     },
     {
       "path": "VLC.app/Contents/MacOS/plugins/libvideotoolbox_plugin.dylib",
-      "sha256": "deea654f6bd374ec39a4c1b822d187edea5b836bf2de91cfcc5d552e79d62a5b"
+      "sha256": "1ee54e7392126307b2f0b171162c4efd737a758109bb68a65d6632e799eec68d"
     },
     {
       "path": "VLC.app/Contents/MacOS/plugins/libvisual_plugin.dylib",

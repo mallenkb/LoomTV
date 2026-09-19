@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   isLikelyNaturalMpvEof,
   normalizeMpvTracks,
-  mpvFlag,
   unexpectedMpvExitMessage,
 } from '../src/main/mpvPlaybackHelpers.ts';
 
@@ -20,7 +19,6 @@ test('mpv tracks normalize embedded and authorized external subtitles', () => {
   assert.deepEqual(tracks, [
     {
       id: 1,
-      streamIndex: undefined,
       type: 'video',
       codec: 'hevc',
       language: undefined,
@@ -34,7 +32,6 @@ test('mpv tracks normalize embedded and authorized external subtitles', () => {
     },
     {
       id: 2,
-      streamIndex: undefined,
       type: 'audio',
       codec: 'aac',
       language: 'eng',
@@ -48,7 +45,6 @@ test('mpv tracks normalize embedded and authorized external subtitles', () => {
     },
     {
       id: 3,
-      streamIndex: undefined,
       type: 'subtitle',
       codec: 'subrip',
       language: undefined,
@@ -79,15 +75,4 @@ test('unexpected mpv exits retain actionable process diagnostics', () => {
     unexpectedMpvExitMessage({ code: null, signal: 'SIGTERM' }),
     'mpv exited unexpectedly (signal SIGTERM).',
   );
-});
-
-test('native mpv flags preserve pause and track selection across JSON representations', () => {
-  for (const flag of [true, 1]) assert.equal(mpvFlag(flag), true);
-  for (const flag of [false, 0, 'false', '1', null, undefined]) assert.equal(mpvFlag(flag), false);
-  const [track] = normalizeMpvTracks([{ id: 1, 'ff-index': 4, type: 'sub', selected: 1, default: 1, forced: 0, external: 0 }], new Map());
-  assert.equal(track.streamIndex, 4);
-  assert.equal(track.selected, true);
-  assert.equal(track.default, true);
-  assert.equal(track.forced, false);
-  assert.equal(track.external, false);
 });

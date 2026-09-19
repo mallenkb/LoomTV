@@ -38,7 +38,6 @@ export function queryScope(): readonly unknown[] {
 // retained; inactive results have both a TTL and a count limit.
 let trimming = false;
 const sizes = new Map<string, number>();
-const lastAccess = new Map<string, number>();
 function approximateBytes(value: unknown, seen = new WeakSet<object>(), budget = 8 * 1024 * 1024): number {
   if (typeof value === 'string') return value.length * 2;
   if (!value || typeof value !== 'object') return 8;
@@ -59,8 +58,7 @@ export function trimQueryCache(): void {
     const cache = queryClient.getQueryCache();
     const idle = cache.getAll()
       .filter(query => query.getObserversCount() === 0 && query.state.fetchStatus === 'idle')
-      .sort((a, b) => (lastAccess.get(a.queryHash) ?? a.state.dataUpdatedAt)
-        - (lastAccess.get(b.queryHash) ?? b.state.dataUpdatedAt));
+      .sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt);
     const counts = new Map<string, number>();
     for (const query of [...idle].reverse()) {
       const family = String(query.queryKey[0]);
@@ -93,16 +91,11 @@ export function trimQueryCache(): void {
   } finally { trimming = false; }
 }
 queryClient.getQueryCache().subscribe(event => {
-  if (event.type === 'removed') {
-    sizes.delete(event.query.queryHash);
-    lastAccess.delete(event.query.queryHash);
-  }
+  if (event.type === 'removed') sizes.delete(event.query.queryHash);
   if (event.type === 'updated' && event.action.type === 'success') {
     sizes.set(event.query.queryHash, approximateBytes(event.query.state.data));
-    lastAccess.set(event.query.queryHash, event.query.state.dataUpdatedAt);
     trimQueryCache();
   }
-  if (event.type === 'observerAdded') lastAccess.set(event.query.queryHash, Date.now());
   // Large active details become eligible only after the last page releases
   // them. Enforce the budget then, even if no further request completes.
   if (event.type === 'observerRemoved') trimQueryCache();
@@ -140,16 +133,11 @@ export async function cachedDesktopRead<T>(family: string, args: readonly unknow
   const options = {
     queryKey: [family, ...scope, ...args],
     queryFn: ({ signal }: { signal: AbortSignal }) => expensive ? scheduledRead(read, signal) : read(),
-    // Catalog revisions and mutations invalidate details. Keep a recent detail
-    // usable between polls instead of refetching it merely because time passed.
-    staleTime: family === 'detail' ? Infinity : staleTime,
-    ...(family === 'detail' ? { gcTime: 300_000 } : {}),
+    staleTime,
     // LibraryContext owns the catalog. Retain only its in-flight request here,
     // rather than another complete response for the default three minutes.
     ...(family === 'getLibraryIndex' || family === 'getLibrary' ? { gcTime: 0 } : {}),
   };
-  const existing = queryClient.getQueryCache().find({ queryKey: options.queryKey, exact: true });
-  if (existing) lastAccess.set(existing.queryHash, Date.now());
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await queryClient.fetchQuery(options);

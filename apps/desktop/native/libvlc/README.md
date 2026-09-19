@@ -1,16 +1,15 @@
-# LibVLC VideoToolbox initialization fix
+# 4K HEVC VideoToolbox fix
 
-## Cause and patch
+The bundled VLC 3.0.23 decoder opens a VideoToolbox session from nonempty HEVC `hvcC` data. The supplied 3840 × 2160 Main 10 file has a 23-byte `hvcC` header with zero parameter-set arrays; its VPS, SPS, and PPS arrive in video packets. VideoToolbox rejects the incomplete header with status `-4`, and VLC falls back to software decoding.
 
-VLC 3.0.23 starts a VideoToolbox HEVC session whenever the container supplies nonempty codec extra data. A valid 23-byte `hvcC` record can contain zero parameter-set arrays, with VPS, SPS, and PPS delivered in the video packets instead. The user's 3840 × 2160, 30 fps, Main 10 MKV has this layout. VideoToolbox rejects that incomplete configuration with status `-4`, and unmodified VLC falls back to software decoding.
+The patch waits for those packet parameter sets and builds a complete `hvcC` record only when both conditions hold:
 
-The patch waits until the HEVC parser has VPS, SPS, and PPS, then builds the VideoToolbox configuration from those parsed sets. It preserves the original media, resolution, bit depth, and frame rate. No remux, transcode, thread limit, or libmpv substitution is involved.
+- The longer visible dimension is at least 3840 pixels and the shorter dimension exceeds 1440 pixels, regardless of orientation.
+- The source `hvcC` header has zero parameter-set arrays.
 
-The change is in VLC's existing Objective-C decoder. The verification program is Rust. Source and license remain those of the [official VLC 3.0.23 release](https://download.videolan.org/pub/videolan/vlc/3.0.23/).
+For every other input, including 1080p and 2560 × 1440 video, the original VLC conditions remain intact. This changes neither the source file nor playback resolution, bit depth, frame rate, engine order, or idle initialization.
 
-## Reproduce
-
-The build script accepts the official `vlc-3.0.23.tar.xz`, an existing VLC 3.0.23 Apple Silicon runtime, and a new output directory ending in `VLC.app`. It verifies the archive SHA-256, patches a temporary source copy, and builds only the VideoToolbox plugin. It does not download dependencies or change the input runtime.
+The change is confined to VLC's existing VideoToolbox plugin. Its source comes from the [official VLC 3.0.23 archive](https://download.videolan.org/pub/videolan/vlc/3.0.23/). The build script checks that archive's SHA-256, applies the patch to a temporary source tree, builds the plugin, and places it in a copy of the supplied Apple Silicon VLC runtime.
 
 ```sh
 bash apps/desktop/native/libvlc/build-videotoolbox-fix.sh \
@@ -20,28 +19,12 @@ bash apps/desktop/native/libvlc/build-videotoolbox-fix.sh \
 
 rustc --edition=2021 apps/desktop/native/libvlc/verify-videotoolbox.rs \
   -o /tmp/verify-videotoolbox
-/tmp/verify-videotoolbox /absolute/patched/VLC.app /absolute/video.mkv 30
+/tmp/verify-videotoolbox /absolute/patched/VLC.app /absolute/4k-video.mkv 30
+
+clang -std=c11 -Wall -Wextra -Werror \
+  apps/desktop/native/libvlc/test-videotoolbox-4k-gate.c \
+  -o /tmp/verify-videotoolbox-4k-gate
+/tmp/verify-videotoolbox-4k-gate
 ```
 
-The probe requires hardware-only VideoToolbox and disables other decoders. It uses dummy video output and disables audio to isolate decoding. A pass requires pictures to reach the output. Inspect `lost` counters and the `vt cvpx chroma` log for frame loss and pixel format.
-
-## Verification on 19 September 2026
-
-The original GTA file has a 23-byte configuration record without parameter-set arrays. The patched decoder reads its in-band sets and produces `x420` 10-bit frames. The initial 30-second run delivered 895 pictures and reported zero lost pictures. The old plugin selected `avcodec`; the patched plugin selected `videotoolbox`.
-
-Separate 15-second checks used the original 4K file and 45-second 1440p and 1080p HEVC Main 10 clips derived from it.
-
-| Input | Decoder | Median decoder-process RSS | Lost pictures |
-| --- | --- | ---: | ---: |
-| Original 4K, unmodified plugin | Software | 1,107 MiB | 0 |
-| Original 4K, patched plugin | VideoToolbox | 81 MiB | 0 |
-| Derived 1440p, patched plugin | VideoToolbox | 77 MiB | 0 |
-| Derived 1080p, patched plugin | VideoToolbox | 75 MiB | 0 |
-
-These are isolated decoder-process measurements with dummy output. They exclude Electron, real display surfaces, audio, and allocations in macOS media services. They must not be presented as total LoomTV memory or compared directly with Activity Monitor totals. Full application rendering and the subsequent exit fix are recorded in [the full application test report](full-app-check-2026-09-19.md). Full-movie and 60 fps playback remain unverified.
-
-## Integration boundary
-
-The patched runtime is staged in `apps/desktop/resources/libvlc/darwin/arm64`. The staging script regenerates the flattened macOS package manifest when replacing a runtime. The engine order and normal library database remain unchanged. The rebuilt source payload is `/tmp/loom-vlc-vt-fix/verified-runtime/VLC.app`.
-
-To reproduce staging, supply the patched runtime's parent directory through `LOOMTV_LIBVLC_SOURCE_DIR`. The final application packaging must sign the containing bundle after staging. The build script signs only the replacement library for local loading. An ad hoc signed Apple Silicon application passed the package runtime and signature checks, and loaded its bundled VideoToolbox decoder during 4K playback. This is local verification, not a notarized release.
+The probe requires VideoToolbox and counts displayed and lost pictures with dummy video output. It does not measure the desktop application's total memory. Compare its output and decoder logs with the unmodified plugin, then check 1080p and 1440p fixtures to confirm their original decoder behavior. The containing application needs signing after the plugin is staged.

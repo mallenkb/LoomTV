@@ -105,7 +105,7 @@ const desktopApi = {
     forceTranscode?: boolean;
   }) => ipcRenderer.invoke('media:get-stream-url', filePath, options || {}),
   getSubtitleUrl: (filePath: string, streamOrdinal?: number) => ipcRenderer.invoke('media:get-subtitle-url', filePath, streamOrdinal),
-  getThumbnail: (filePath: string, time?: string, seekPreview?: boolean) => ipcRenderer.invoke('media:get-thumbnail', filePath, time, seekPreview),
+  getThumbnail: (filePath: string, time?: string) => ipcRenderer.invoke('media:get-thumbnail', filePath, time),
   getFileInfo: (filePath: string) => ipcRenderer.invoke('media:get-file-info', filePath),
   getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port) => `http://127.0.0.1:${port}`),
   getRendererSession: () => ipcRenderer.invoke('renderer:session'),

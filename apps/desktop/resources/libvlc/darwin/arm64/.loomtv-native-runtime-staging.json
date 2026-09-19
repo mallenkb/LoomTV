@@ -3,5 +3,5 @@
   "engine": "libvlc",
   "target": "darwin-arm64",
   "layout": "resources/libvlc/darwin/arm64",
-  "sourceMode": "per-engine"
+  "sourceMode": "source-root"
 }

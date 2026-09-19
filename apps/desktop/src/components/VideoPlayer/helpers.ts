@@ -395,12 +395,12 @@ export function isBitmapSubtitleCodec(codec?: string): boolean {
   return BITMAP_SUBTITLE_CODECS.some((entry) => normalized.includes(entry));
 }
 
-export function shouldRenderSubtitleNativelyInLibVlc(codec?: string, hasTextCues = false): boolean {
+export function shouldRenderSubtitleNativelyInLibVlc(codec?: string): boolean {
   const normalized = (codec || '').trim().toLowerCase();
   return isBitmapSubtitleCodec(normalized)
-    || (!hasTextCues && (normalized === 'ass'
-      || normalized === 'ssa'
-      || normalized.includes('substation alpha')));
+    || normalized === 'ass'
+    || normalized === 'ssa'
+    || normalized.includes('substation alpha');
 }
 
 function parseVttTimestamp(value: string): number {

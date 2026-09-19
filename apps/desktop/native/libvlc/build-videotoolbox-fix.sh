@@ -20,6 +20,7 @@ trap 'rm -rf "$build_dir"' EXIT
 tar -xf "$archive" -C "$build_dir"
 source_dir="$build_dir/vlc-3.0.23"
 patch -d "$source_dir" -p1 < "$script_dir/videotoolbox-hevc-parameter-sets.patch"
+cp "$script_dir/videotoolbox-4k-gate.h" "$source_dir/modules/codec/videotoolbox-4k-gate.h"
 (
   cd "$source_dir"
   ./configure --disable-plugins --disable-nls --disable-lua --disable-qt \

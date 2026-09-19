@@ -98,7 +98,7 @@ const playbackViewportSchema = z.object({
   width: finiteNumber.positive().max(100_000),
   height: finiteNumber.positive().max(100_000),
 });
-const mpvStartOptionsSchema = playbackStartOptionsSchema;
+const mpvStartOptionsSchema = playbackStartOptionsSchema.omit({ nativeSubtitles: true });
 const libraryScanOptionsSchema = z.object({
   force: z.boolean().optional(),
   mode: z.enum(['quick', 'metadata', 'full']).optional(),

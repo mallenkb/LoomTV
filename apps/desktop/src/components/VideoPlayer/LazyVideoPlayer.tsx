@@ -3,7 +3,7 @@ import { lazy, Suspense, type ComponentProps } from 'react';
 const loadVideoPlayer = () => import('../VideoPlayer');
 const VideoPlayer = lazy(loadVideoPlayer);
 
-// Import the renderer player only when it is mounted.
+// LibVLC warms in main. Import the renderer player only when it is mounted.
 
 type LazyVideoPlayerProps = ComponentProps<typeof VideoPlayer>;
 

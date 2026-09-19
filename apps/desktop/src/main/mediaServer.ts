@@ -1539,18 +1539,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
         // Resolve and authorize the capability before selecting a fixed provider
         // rendition. The client cannot substitute an upstream host or path.
-        const originalSourceUrl = sourceUrl;
         sourceUrl = smallerTmdbArtwork(sourceUrl, reqUrl.searchParams.get('width'));
-        const sendArtwork = (
-          cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>,
-          cacheControl = LAN_IMAGE_CACHE_CONTROL,
-        ) => {
+        const sendArtwork = (cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>) => {
           if (!canWriteResponse(res)) return;
           if (cachedArtwork.cachePath) {
             res.writeHead(200, cachedArtworkResponseHeaders(
               cachedArtwork.mimeType,
               cachedArtwork.byteLength,
-              isCacheableImageRequest ? cacheControl : undefined,
+              isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
             ));
             const stream = fs.createReadStream(cachedArtwork.cachePath);
             pipeResponse(stream, res);
@@ -1567,7 +1563,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           res.writeHead(200, cachedArtworkResponseHeaders(
             cachedArtwork.mimeType || decoded.mimeType,
             decoded.buffer.byteLength,
-            isCacheableImageRequest ? cacheControl : undefined,
+            isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
           ));
           res.end(decoded.buffer);
         };
@@ -1578,21 +1574,6 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         if (cachedArtwork) {
           sendArtwork(cachedArtwork);
           return;
-        }
-
-        // A missing smaller rendition must not hold an existing local image
-        // behind a provider request. Prepare the smaller copy for later visits.
-        if (sourceUrl !== originalSourceUrl) {
-          const originalArtwork = artworkOwnerId
-            ? getCachedPluginArtwork(artworkOwnerId, originalSourceUrl)
-            : getCachedArtwork(originalSourceUrl);
-          if (originalArtwork) {
-            sendArtwork(originalArtwork, 'private, max-age=60');
-            void (artworkOwnerId
-              ? cachePluginArtworkSource(artworkOwnerId, sourceUrl)
-              : cacheArtworkSource(sourceUrl)).catch(() => undefined);
-            return;
-          }
         }
 
         void (artworkOwnerId
@@ -1715,9 +1696,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               '-ss', time,
               // Seek previews use nearby keyframes, avoiding full 4K GOP decoding.
               ...(seekPreview ? ['-noaccurate_seek', '-skip_frame', 'nokey'] : []),
-              '-i', filePath, '-an', '-sn', '-dn',
+              '-i', filePath, ...(seekPreview ? ['-an', '-sn', '-dn'] : []),
               '-vf', seekPreview ? "scale='min(320,iw)':-2" : THUMBNAIL_SCALE_FILTER,
-              '-vframes', '1', '-threads', '1', '-f', 'image2', '-vcodec', 'mjpeg',
+              '-vframes', '1', ...(seekPreview ? ['-threads', '1'] : []), '-f', 'image2', '-vcodec', 'mjpeg',
               '-q:v', seekPreview ? '5' : '2', 'pipe:1',
             ];
         // Thumbnail requests arrive in bursts (one per episode row); the tool
@@ -1729,13 +1710,13 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               return;
             }
             try {
-              const proc = spawn(ffmpegPath, [
+              const proc = spawn(ffmpegPath, seekPreview ? [
                 '-nostdin', '-hide_banner', '-loglevel', 'error',
                 '-threads', '2', '-filter_threads', '1', ...args,
-              ], { stdio: ['ignore', 'pipe', 'pipe'] });
+              ] : args, { stdio: ['ignore', 'pipe', 'pipe'] });
               proc.once('exit', release);
-              const thumbnailTimeout = setTimeout(() => proc.kill('SIGKILL'), 15_000);
-              thumbnailTimeout.unref();
+              const thumbnailTimeout = seekPreview ? setTimeout(() => proc.kill('SIGKILL'), 15_000) : undefined;
+              thumbnailTimeout?.unref();
               const chunks: Buffer[] = [];
               let outputBytes = 0;
               proc.stdout?.on('data', (chunk: Buffer) => {

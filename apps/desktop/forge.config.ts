@@ -127,7 +127,10 @@ function nativeRuntimeFileName(engine: 'libvlc' | 'mpv', platform: string): stri
 }
 
 function nativeEnginesForPlatform(platform: string): Array<'libvlc' | 'mpv'> {
-  if (['darwin', 'win32', 'linux'].includes(platform)) return ['libvlc', 'mpv'];
+  // LibVLC is the primary local engine on macOS and Windows. MPV remains the
+  // macOS fallback; Linux keeps its existing browser/native-system fallback.
+  if (platform === 'darwin') return ['libvlc', 'mpv'];
+  if (platform === 'win32') return ['libvlc'];
   return [];
 }
 
@@ -178,15 +181,7 @@ function prunePackagedNativeResources(outputPath: string, platform: string, arch
     for (const entry of fs.readdirSync(engineRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
       // The in-process MPV library and bridge use mpv/lib on every target.
-      if (engine === 'mpv' && entry.name === 'lib') {
-        for (const file of fs.readdirSync(path.join(engineRoot, 'lib'))) {
-          const belongsElsewhere = platform !== 'win32' && /\.dll$/i.test(file)
-            || platform !== 'darwin' && /\.dylib$/i.test(file)
-            || platform !== 'linux' && /\.so(?:\.|$)/i.test(file);
-          if (belongsElsewhere) fs.rmSync(path.join(engineRoot, 'lib', file), { force: true });
-        }
-        continue;
-      }
+      if (engine === 'mpv' && entry.name === 'lib') continue;
       const platformRoot = path.join(engineRoot, entry.name);
       if (entry.name !== platform) {
         fs.rmSync(platformRoot, { recursive: true, force: true });
@@ -298,11 +293,6 @@ function resignPackagedMacApp(outputPath: string): void {
 function assertPackagedNativeRuntimes(outputPath: string, platform: string, arch: string): void {
   const target = `${platform}/${arch}`;
   const missing: string[] = [];
-  const probeName = platform === 'darwin' ? 'libloomtv_vlc_probe.dylib'
-    : platform === 'win32' ? 'loomtv_vlc_probe.dll' : 'libloomtv_vlc_probe.so';
-  if (!fs.existsSync(path.join(resourcesPath(outputPath, platform), 'libvlc-probe', probeName))) {
-    missing.push(`libvlc-probe/${probeName}`);
-  }
   for (const engine of nativeEnginesForPlatform(platform)) {
     const runtimeRoot = engine === 'mpv'
       ? path.join(resourcesPath(outputPath, platform), 'mpv', 'lib')
@@ -311,7 +301,7 @@ function assertPackagedNativeRuntimes(outputPath: string, platform: string, arch
     if (!fs.existsSync(runtimeRoot) || !containsFile(runtimeRoot, expectedName)) {
       missing.push(engine === 'mpv' ? `mpv/lib/${expectedName}` : `${engine}/${platform}/${arch}/${expectedName}`);
     }
-    if (engine === 'mpv' && (!fs.existsSync(runtimeRoot) || !containsFile(runtimeRoot, platform === 'darwin' ? 'libloomtv_mpv_bridge.dylib' : platform === 'win32' ? 'loomtv_mpv_bridge.dll' : 'libloomtv_mpv_bridge.so'))) {
+    if (engine === 'mpv' && (!fs.existsSync(runtimeRoot) || !containsFile(runtimeRoot, platform === 'darwin' ? 'libloomtv_mpv_bridge.dylib' : platform === 'win32' ? 'loomtv_mpv_bridge.dll' : 'loomtv_mpv_bridge.so'))) {
       missing.push('mpv/lib/native bridge');
     }
   }
@@ -421,7 +411,6 @@ const config: ForgeConfig = {
     },
   },
   packagerConfig: {
-    appCopyright: 'Copyright © 2026 LoomTV',
     asar: {
       // FFmpeg, LibVLC, and MPV are copied through extraResource below and
       // therefore already live outside app.asar. Keep the native Node module
@@ -445,7 +434,6 @@ const config: ForgeConfig = {
       'resources/trayIcon.png',
       'resources/trayIcon@2x.png',
       'resources/libvlc',
-      'resources/libvlc-probe',
       'resources/mpv',
       'resources/DICEBEAR_GLYPHS_LICENSE.md',
       '../server/src/web-app.html',

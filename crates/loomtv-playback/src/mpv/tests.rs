@@ -60,13 +60,6 @@ fn mpv_command_contract_rejects_generic_execution_and_bad_payloads() {
     .is_err());
 }
 #[test]
-fn mpv_crop_reset_uses_empty_geometry() {
-    assert_eq!(
-        contract::commands(&json!({"type":"set-video-crop","crop":null})).unwrap(),
-        vec![json!(["set_property", "video-crop", ""])]
-    );
-}
-#[test]
 fn mpv_tracks_keep_runtime_id_separate_from_stream_index() {
     let tracks = contract::tracks(
         &json!([{"id":3,"ff-index":7,"type":"sub","external":true,"external-filename":"/字幕.srt","selected":true,"lang":"ja","title":"Japanese"},{"id":1,"type":"audio","demux-channel-count":6},{"id":4,"type":"unknown"},{"id":-2,"type":"video"}]),

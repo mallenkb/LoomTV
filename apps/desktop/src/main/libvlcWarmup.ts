@@ -10,9 +10,11 @@ import type { DynamicFunction, KoffiLibrary, KoffiRuntime, NativeValue } from '.
 /**
  * Keep one LibVLC instance alive for the lifetime of the desktop process.
  *
- * Windows warms its default engine at startup. macOS uses mpv by default,
- * so VLC loads on its first playback request. Later VLC sessions borrow the
- * same instance; session resources are released normally between videos.
+ * LibVLC discovers and loads its plugin bank inside libvlc_new(). Doing that
+ * after the user clicks Play puts module discovery directly on the
+ * click-to-first-frame path. Playback sessions borrow this process-lifetime
+ * instance, while media descriptors, media players, audio tracks and subtitle
+ * state remain session-owned and are released normally between videos.
  */
 
 export type SharedLibVlcInstance = bigint | number;
@@ -284,10 +286,8 @@ function registerWarmup(): void {
   const electronApp = app as (typeof app | undefined);
   if (!electronApp || typeof electronApp.once !== 'function' || typeof electronApp.isReady !== 'function') return;
   if (!enabled()) return;
-  if (process.platform === 'win32') {
-    if (electronApp.isReady()) warmLibVlcRuntime();
-    else electronApp.once('ready', () => { warmLibVlcRuntime(); });
-  }
+  if (electronApp.isReady()) warmLibVlcRuntime();
+  else electronApp.once('ready', () => { warmLibVlcRuntime(); });
   electronApp.once('will-quit', () => { releaseWarmLibVlcRuntime(); });
 }
 

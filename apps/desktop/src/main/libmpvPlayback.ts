@@ -11,7 +11,7 @@ import type {
   MpvStartOptions,
 } from '../shared/desktopProtocol.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
-import { finiteNumber, mpvFlag, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
+import { finiteNumber, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
 import {
   createNativeViewHost,
   loadKoffi,
@@ -172,7 +172,7 @@ function commandList(command: MpvCommand): unknown[][] {
     case 'set-subtitle-delay': return [['set_property', 'sub-delay', command.seconds]];
     case 'set-audio-delay': return [['set_property', 'audio-delay', command.seconds]];
     case 'set-video-aspect': return [['set_property', 'video-aspect-override', command.aspect ?? '-1']];
-    case 'set-video-crop': return [['set_property', 'video-crop', command.crop ?? '']];
+    case 'set-video-crop': return [['set_property', 'video-crop', command.crop ?? 'no']];
     case 'set-video-rotation': return [['set_property', 'video-rotate', command.degrees]];
     case 'set-subtitle-style': return [
       ['set_property', 'sub-font-size', command.fontSize],
@@ -194,12 +194,6 @@ class LibMpvSession {
   private readonly onOwnerDestroyed = () => this.stop();
   private request = 0;
   private stopped = false;
-  private accepted = false;
-  private loaded = false;
-  private restarted = false;
-  private startupTimer: NodeJS.Timeout | null = null;
-  private settleStartup!: (result: { ok: boolean; error?: string }) => void;
-  readonly startup = new Promise<{ ok: boolean; error?: string }>((resolve) => { this.settleStartup = resolve; });
   private state: MpvPlaybackState = { sessionId: this.id, status: 'starting' };
   private diagnostics: MpvPlaybackDiagnostics = {};
   private readonly subtitleSources: Map<string, 'sidecar' | 'opensubtitles'>;
@@ -210,18 +204,20 @@ class LibMpvSession {
     private readonly owner: WebContents,
     private readonly ownerWindow: BrowserWindow,
     source: string,
-    private readonly options: MpvStartOptions,
+    options: MpvStartOptions,
     private readonly onStopped: (session: LibMpvSession) => void,
   ) {
     this.subtitleSources = new Map((options.subtitleFiles || []).map((file) => [path.resolve(file.path), file.source]));
     this.afterLoad = [
       ['set_property', 'volume', Math.max(0, Math.min(1, options.volume ?? 1)) * 100],
+      ['set_property', 'mute', options.muted === true],
       ['set_property', 'speed', Math.max(0.25, Math.min(3, options.speed ?? 1))],
-      ...(options.nativeSubtitles === false ? [['set_property', 'sid', 'no']] : []),
+      ['set_property', 'pause', false],
       ...(options.audioLanguage ? [['set_property', 'alang', options.audioLanguage]] : []),
       ...(Number.isFinite(options.audioTrackId) ? [['set_property', 'aid', options.audioTrackId]] : []),
       ...(options.audioDelay !== undefined ? [['set_property', 'audio-delay', options.audioDelay]] : []),
       ...(options.subtitleDelay !== undefined ? [['set_property', 'sub-delay', options.subtitleDelay]] : []),
+      ...(options.startSeconds && options.startSeconds > 0 ? [['seek', options.startSeconds, 'absolute+exact']] : []),
       ...(options.subtitleFiles || []).map((file) => ['sub-add', file.path, 'auto']),
     ];
     if (options.subtitleStyle) this.afterLoad.push(...commandList({ type: 'set-subtitle-style', ...options.subtitleStyle }));
@@ -232,18 +228,9 @@ class LibMpvSession {
       this.host = createNativeViewHost(loadKoffi(), ownerWindow);
       const attached = Number(runtime.api.attach(this.engine, this.host.drawable, error, error.length));
       if (attached < 0) throw new Error(errorText(error, 'The libmpv render surface could not attach.'));
-      this.host.setVisible(false);
       owner.once('destroyed', this.onOwnerDestroyed);
       this.timer = setInterval(() => this.poll(), 16);
       this.timer.unref?.();
-      // Keep candidate engines silent and stationary until the decoder is verified.
-      this.send(['set_property', 'pause', true]);
-      this.send(['set_property', 'mute', true]);
-      this.send(['set_property', 'hwdec', options.decodeMode === 'software' ? 'no' : hardwareDecoders()]);
-      this.send(['set_property', 'hwdec-software-fallback', options.decodeMode === 'software' ? 'yes' : 'no']);
-      if (options.startSeconds && options.startSeconds > 0) this.send(['set_property', 'start', options.startSeconds]);
-      this.startupTimer = setTimeout(() => this.fail('libmpv could not verify playback before the startup deadline.'), 8000);
-      this.startupTimer.unref?.();
       this.send(['loadfile', source, 'replace']);
       this.emit({ status: 'loading' });
     } catch (cause) {
@@ -262,10 +249,7 @@ class LibMpvSession {
       error,
       error.length,
     ));
-    if (result < 0) {
-      const operation = command[0] === 'set_property' ? `set ${String(command[1])}` : String(command[0]);
-      throw new Error(`libmpv ${operation} failed: ${errorText(error, 'command rejected')}`);
-    }
+    if (result < 0) throw new Error(`libmpv ${String(command[0])} failed: ${errorText(error, 'command rejected')}`);
     return true;
   }
 
@@ -281,7 +265,6 @@ class LibMpvSession {
         if (this.stopped) break;
         this.handle(message);
       }
-      this.acceptIfReady();
     } catch (error) {
       this.fail(error instanceof Error ? error.message : 'libmpv returned an invalid event.');
     }
@@ -289,78 +272,39 @@ class LibMpvSession {
 
   private handle(message: MpvMessage): void {
     if (message.event === 'bridge-error') return this.fail(message.error || 'The libmpv renderer failed.');
-    if (message.event === 'command-reply' && message.error && message.error !== 'success') {
-      return this.fail(`libmpv rejected a playback command: ${message.error}`);
-    }
     if (message.event === 'file-loaded') {
-      this.loaded = true;
       const commands = this.afterLoad.splice(0);
       for (const command of commands) this.send(command);
+      this.emit({ status: 'ready', paused: false });
       return;
     }
     if (message.event === 'start-file') return this.emit({ status: 'loading' });
-    if (message.event === 'playback-restart') {
-      this.restarted = true;
-      if (this.accepted) this.emit({ status: 'ready' });
-      return;
-    }
     if (message.event === 'end-file') {
       if (message.reason === 'eof') this.emit({ status: 'ended', paused: true });
       else if (!['stop', 'quit', 'redirect'].includes(message.reason || '')) this.fail(message.error || 'libmpv could not play this source.');
       return;
     }
     if (message.event !== 'property-change' || !message.name) return;
-    if (message.name === 'eof-reached' && mpvFlag(message.data)) {
-      return this.emit({ status: 'ended', paused: true });
-    }
     if (message.name === 'time-pos') this.emit({ position: finiteNumber(message.data) });
     else if (message.name === 'duration') this.emit({ duration: finiteNumber(message.data) });
-    else if (message.name === 'pause') this.emit({ paused: mpvFlag(message.data) });
+    else if (message.name === 'pause') this.emit({ paused: message.data === true });
     else if (message.name === 'volume') this.emit({ volume: finiteNumber(message.data) === undefined ? undefined : Number(message.data) / 100 });
-    else if (message.name === 'mute') this.emit({ muted: mpvFlag(message.data) });
+    else if (message.name === 'mute') this.emit({ muted: message.data === true });
     else if (message.name === 'speed') this.emit({ speed: finiteNumber(message.data) });
     else if (message.name === 'track-list') this.emit({ tracks: normalizeMpvTracks(message.data, this.subtitleSources) });
     else if (message.name === 'video-params' && message.data && typeof message.data === 'object') {
       const params = message.data as Record<string, unknown>;
       this.emit({ videoWidth: finiteNumber(params.w), videoHeight: finiteNumber(params.h) });
-    } else if (message.name === 'hwdec-current' && typeof message.data === 'string' && message.data) {
-      this.updateDiagnostics({ hardwareDecoder: message.data, hardwareDecode: message.data !== 'no' });
-      if (this.accepted && this.options.decodeMode !== 'software' && message.data === 'no') {
-        this.fail('The hardware decoder stopped working.');
-      }
-    }
+    } else if (message.name === 'hwdec-current') this.updateDiagnostics({
+      hardwareDecoder: typeof message.data === 'string' ? message.data : undefined,
+      hardwareDecode: typeof message.data === 'string' && message.data !== 'no',
+    });
     else if (message.name === 'frame-drop-count') this.updateDiagnostics({ frameDrops: finiteNumber(message.data) });
     else if (message.name === 'decoder-frame-drop-count') this.updateDiagnostics({ decoderFrameDrops: finiteNumber(message.data) });
     else if (message.name === 'demuxer-cache-duration') this.updateDiagnostics({ bufferSeconds: finiteNumber(message.data) });
-    else if (message.name === 'paused-for-cache') this.updateDiagnostics({ buffering: mpvFlag(message.data) });
+    else if (message.name === 'paused-for-cache') this.updateDiagnostics({ buffering: message.data === true });
     else if (message.name === 'video-codec') this.updateDiagnostics({ videoCodec: typeof message.data === 'string' ? message.data : undefined });
     else if (message.name === 'estimated-vf-fps') this.updateDiagnostics({ estimatedFps: finiteNumber(message.data) });
-  }
-
-  private acceptIfReady(): void {
-    if (this.accepted || this.stopped || !this.loaded || !this.restarted) return;
-    const hasVideo = this.state.tracks?.some((track) => track.type === 'video')
-      || (this.state.videoWidth ?? 0) > 0;
-    if (hasVideo && this.diagnostics.hardwareDecode === undefined) return;
-    if (hasVideo && !((this.state.videoWidth ?? 0) > 0 && (this.state.videoHeight ?? 0) > 0)) return;
-    if (hasVideo && this.options.decodeMode !== 'software' && !this.diagnostics.hardwareDecode) {
-      this.fail('libmpv could not use a hardware decoder for this video.');
-      return;
-    }
-    if (hasVideo && this.options.decodeMode === 'software' && this.diagnostics.hardwareDecode) {
-      this.fail('libmpv did not apply the requested software decoder.');
-      return;
-    }
-    // Wait for the track list so an early restart cannot masquerade as audio only.
-    if (!hasVideo && !this.state.tracks?.some((track) => track.type === 'audio')) return;
-    if (this.startupTimer) clearTimeout(this.startupTimer);
-    this.startupTimer = null;
-    this.send(['set_property', 'mute', this.options.muted === true]);
-    this.send(['set_property', 'pause', this.options.paused === true]);
-    this.accepted = true;
-    this.host?.setVisible(!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
-    this.emit({ ...this.state, status: 'ready', muted: this.options.muted === true, paused: this.options.paused === true });
-    this.settleStartup({ ok: true });
   }
 
   private updateDiagnostics(patch: MpvPlaybackDiagnostics): void {
@@ -370,26 +314,17 @@ class LibMpvSession {
 
   private emit(patch: Partial<MpvPlaybackState>): void {
     this.state = { ...this.state, ...patch, sessionId: this.id };
-    if (!this.accepted) return;
     syncNativePlaybackDisplaySleep(this.id, this.state, () => {
       if (!this.owner.isDestroyed()) {
         this.owner.send('media-control:command', { type: 'pause' }, true);
       }
       this.command({ type: 'set-paused', paused: true });
     });
-    try {
-      if (!this.owner.isDestroyed()) this.owner.send('mpv:state', { ...patch, sessionId: this.id, status: this.state.status });
-    } catch (error) {
-      // WebContents can disappear between the liveness check and IPC send.
-      // Release native ownership without throwing from the polling timer.
-      this.dispose();
-      console.warn('[playback] libmpv state delivery failed', error);
-    }
+    if (!this.owner.isDestroyed()) this.owner.send('mpv:state', { ...patch, sessionId: this.id, status: this.state.status });
   }
 
   private fail(message: string): void {
-    console.warn(`[playback] libmpv session failed: ${message}`);
-    this.settleStartup({ ok: false, error: message });
+    console.warn(`[playback] libmpv session failed — ${message}`);
     try {
       this.emit({ status: 'error', paused: true, error: message });
     } finally {
@@ -411,7 +346,7 @@ class LibMpvSession {
   syncSurface(owner: WebContents): boolean {
     if (owner !== this.owner || this.stopped || !this.host) return false;
     this.host.syncHierarchy(true);
-    this.host.setVisible(this.accepted && !this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
+    this.host.setVisible(!this.ownerWindow.isMinimized() && this.ownerWindow.isVisible());
     return true;
   }
 
@@ -425,9 +360,6 @@ class LibMpvSession {
   private dispose(): void {
     if (this.stopped) return;
     this.stopped = true;
-    this.settleStartup({ ok: false, error: 'The playback attempt was cancelled.' });
-    if (this.startupTimer) clearTimeout(this.startupTimer);
-    this.startupTimer = null;
     this.owner.removeListener('destroyed', this.onOwnerDestroyed);
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -461,13 +393,7 @@ class LibMpvSession {
 
 let currentSession: LibMpvSession | null = null;
 
-function hardwareDecoders(): string {
-  if (process.platform === 'darwin') return 'videotoolbox,videotoolbox-copy';
-  if (process.platform === 'win32') return 'd3d11va,d3d11va-copy,dxva2-copy';
-  return 'vaapi,nvdec,vaapi-copy,nvdec-copy';
-}
-
-export async function startLibMpvPlayback(owner: WebContents, source: string, options: MpvStartOptions = {}) {
+export function startLibMpvPlayback(owner: WebContents, source: string, options: MpvStartOptions = {}) {
   if (disabled()) return { ok: false, error: libMpvAvailability().reason };
   const runtime = loadRuntime();
   const ownerWindow = BrowserWindow.fromWebContents(owner);
@@ -479,8 +405,6 @@ export async function startLibMpvPlayback(owner: WebContents, source: string, op
       if (currentSession === stopped) currentSession = null;
     });
     currentSession = session;
-    const result = await session.startup;
-    if (!result.ok) return result;
     recordMemoryCheckpoint('mpv.session.started');
     return { ok: true, sessionId: session.id, surface: 'composited-window' as const };
   } catch (error) {

@@ -47,15 +47,11 @@ test('native commands accept boundary values and reject overflow and fractions',
 test('start options retain scaled subtitle sizes and bound native payloads', () => {
   const style = { fontSize: 192, position: 100, borderWidth: 10, color: '#fff', borderColor: '#000', backgroundColor: '#000' };
   assert.equal(playbackStartOptionsSchema.safeParse({ subtitleStyle: style, volume: 1, speed: 3 }).success, true);
-  for (const decodeMode of ['hardware', 'software']) {
-    assert.equal(playbackStartOptionsSchema.safeParse({ decodeMode, paused: true }).success, true);
-  }
   for (const patch of [{ fontSize: 193 }, { position: 101 }, { borderWidth: 11 }]) {
     assert.equal(playbackStartOptionsSchema.safeParse({ subtitleStyle: { ...style, ...patch } }).success, false);
   }
   for (const options of [
     { volume: 2 }, { speed: 4 }, { audioDelay: 61 }, { subtitleDelay: -61 },
-    { decodeMode: 'automatic' }, { paused: 'yes' },
     { audioTrackId: 0.5 }, { audioLanguage: 'x'.repeat(33) },
     { subtitleFiles: Array.from({ length: 129 }, () => ({ path: '/video.srt', source: 'sidecar' })) },
     { subtitleFiles: [{ path: 'x'.repeat(8193), source: 'sidecar' }] },

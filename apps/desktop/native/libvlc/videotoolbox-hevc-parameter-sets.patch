@@ -1,33 +1,27 @@
 --- a/modules/codec/videotoolbox.m
 +++ b/modules/codec/videotoolbox.m
-@@ -763,14 +763,8 @@
-     decoder_sys_t *p_sys = p_dec->p_sys;
- 
-     CFMutableDictionaryRef extradata = nil;
+@@ -35,0 +36 @@
++#import "videotoolbox-4k-gate.h"
+@@ -760,0 +762,14 @@
++/* Leave VLC's original path intact unless a 4K hvcC has no arrays. */
++static bool NeedsInbandParameterSets4K(decoder_t *p_dec)
++{
++    decoder_sys_t *p_sys = p_dec->p_sys;
++    return loomtv_vlc_needs_inband_hevc_sets_4k(
++        p_dec->fmt_in.video.i_visible_width,
++        p_dec->fmt_in.video.i_visible_height,
++        p_dec->fmt_in.video.i_width,
++        p_dec->fmt_in.video.i_height,
++        p_dec->fmt_in.p_extra,
++        p_dec->fmt_in.i_extra,
++        p_sys->hh.b_is_xvcC);
++}
++
+@@ -766 +781,2 @@
 -    if (p_dec->fmt_in.i_extra && p_sys->hh.b_is_xvcC)
--    {
--        /* copy DecoderConfiguration */
--        extradata = ExtradataInfoCreate(CFSTR("hvcC"),
--                                        p_dec->fmt_in.p_extra,
--                                        p_dec->fmt_in.i_extra);
--    }
--    else if (p_sys->hh.hevc.i_pps_count &&
-+    /* Rebuild from parsed sets: an hvcC header may omit in-band VPS/SPS/PPS. */
-+    if (p_sys->hh.hevc.i_pps_count &&
-              p_sys->hh.hevc.i_sps_count &&
-              p_sys->hh.hevc.i_vps_count)
-     {
-@@ -790,10 +784,10 @@
- static bool LateStartHEVC(decoder_t *p_dec)
- {
-     decoder_sys_t *p_sys = p_dec->p_sys;
++    if (p_dec->fmt_in.i_extra && p_sys->hh.b_is_xvcC &&
++        !NeedsInbandParameterSets4K(p_dec))
+@@ -793 +809,2 @@
 -    return (p_dec->fmt_in.i_extra == 0 &&
--            (!p_sys->hh.hevc.i_pps_count ||
-+    /* A nonempty hvcC record does not guarantee complete parameter sets. */
-+    return (!p_sys->hh.hevc.i_pps_count ||
-              !p_sys->hh.hevc.i_sps_count ||
--             !p_sys->hh.hevc.i_vps_count) );
-+             !p_sys->hh.hevc.i_vps_count);
- }
- 
- static bool CodecSupportedHEVC(decoder_t *p_dec)
++    return ((p_dec->fmt_in.i_extra == 0 ||
++             NeedsInbandParameterSets4K(p_dec)) &&

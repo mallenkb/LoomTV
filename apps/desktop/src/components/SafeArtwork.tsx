@@ -1,5 +1,4 @@
-import React, { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArtworkSuspendedContext } from '../contexts/ArtworkSuspendedContext';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 // Warm nearby artwork without decoding several offscreen rails on every page
 // mount. Distant artwork releases its decoded image resource.
@@ -55,7 +54,6 @@ export default function SafeArtwork({
   priority = false,
   naturalSize = false,
 }: SafeArtworkProps) {
-  const suspended = useContext(ArtworkSuspendedContext);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [loadedSource, setLoadedSource] = useState('');
   const [isNearViewport, setIsNearViewport] = useState(
@@ -68,10 +66,9 @@ export default function SafeArtwork({
   const sourceKey = JSON.stringify(sources);
   const currentSource = sources[sourceIndex] || '';
   const sourceLoaded = loadedSource === currentSource;
-  const shouldRenderImage = !suspended && (priority || isNearViewport);
+  const shouldRenderImage = priority || isNearViewport;
 
   useEffect(() => {
-    if (suspended) return undefined;
     const artwork = artworkRef.current;
     if (priority || !artwork) {
       if (priority) setIsNearViewport(true);
@@ -79,7 +76,7 @@ export default function SafeArtwork({
     }
 
     return observeArtwork(artwork, setIsNearViewport);
-  }, [priority, suspended]);
+  }, [priority]);
 
   useEffect(() => {
     setSourceIndex(0);

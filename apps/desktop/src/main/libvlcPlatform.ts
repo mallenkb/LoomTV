@@ -1,8 +1,8 @@
-export type LibVlcPlatformHost = 'macos-child' | 'windows-child' | 'linux-x11-child';
+export type LibVlcPlatformHost = 'macos-child' | 'windows-child';
 
 export type LibVlcPlatformBinding = {
-  drawableSymbol: 'libvlc_media_player_set_nsobject' | 'libvlc_media_player_set_hwnd' | 'libvlc_media_player_set_xwindow';
-  mediaVoutOption: ':vout=macosx' | ':vout=direct3d11' | ':vout=xcb_x11';
+  drawableSymbol: 'libvlc_media_player_set_nsobject' | 'libvlc_media_player_set_hwnd';
+  mediaVoutOption: ':vout=macosx' | ':vout=direct3d11';
   host: LibVlcPlatformHost;
 };
 
@@ -19,8 +19,8 @@ export function libVlcPlatformVariants(platform: NodeJS.Platform): string[] {
 
 /**
  * Keep platform-specific LibVLC ABI choices in one small, testable contract.
- * A raw BrowserWindow handle is never used directly. Linux puts the child
- * drawable in an input-empty native underlay below the Electron window.
+ * A raw BrowserWindow handle is never used directly: both supported targets
+ * create a child surface so Chromium can remain above the video controls.
  */
 export function libVlcPlatformBinding(platform: NodeJS.Platform): LibVlcPlatformBinding | null {
   if (platform === 'darwin') {
@@ -35,13 +35,6 @@ export function libVlcPlatformBinding(platform: NodeJS.Platform): LibVlcPlatform
       drawableSymbol: 'libvlc_media_player_set_hwnd',
       mediaVoutOption: ':vout=direct3d11',
       host: 'windows-child',
-    };
-  }
-  if (platform === 'linux') {
-    return {
-      drawableSymbol: 'libvlc_media_player_set_xwindow',
-      mediaVoutOption: ':vout=xcb_x11',
-      host: 'linux-x11-child',
     };
   }
   return null;

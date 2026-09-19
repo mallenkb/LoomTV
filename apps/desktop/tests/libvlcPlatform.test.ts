@@ -27,12 +27,8 @@ test('keeps the existing macOS NSView surface contract', () => {
   });
 });
 
-test('uses the X11 child drawable for Linux LibVLC', () => {
-  assert.deepEqual(libVlcPlatformBinding('linux'), {
-    drawableSymbol: 'libvlc_media_player_set_xwindow',
-    mediaVoutOption: ':vout=xcb_x11',
-    host: 'linux-x11-child',
-  });
+test('does not advertise an unimplemented Linux LibVLC surface', () => {
+  assert.equal(libVlcPlatformBinding('linux'), null);
 });
 
 test('places the Windows backdrop below the video without raising either above Chromium', () => {

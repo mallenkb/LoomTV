@@ -11,6 +11,7 @@ type Preview = { frame: number; url: string; image: HTMLImageElement; bytes: num
 export default class SeekPreviewCache {
   private entries = new Map<number, Preview>();
   private failed = new Set<number>();
+  private attempted = new Set<number>();
   private target = 0;
   private loading = false;
   private disposed = false;
@@ -23,7 +24,9 @@ export default class SeekPreviewCache {
   ) {}
 
   request(seconds: number): void {
-    this.target = Math.floor(Math.max(0, Math.min(this.duration - 0.1, seconds)) / INTERVAL) * INTERVAL;
+    const target = Math.floor(Math.max(0, Math.min(this.duration - 0.1, seconds)) / INTERVAL) * INTERVAL;
+    if (target !== this.target) this.attempted.clear();
+    this.target = target;
     const cached = this.entries.get(this.target);
     if (cached) {
       this.entries.delete(this.target);
@@ -43,9 +46,10 @@ export default class SeekPreviewCache {
   private pump(): void {
     if (this.disposed || this.loading) return;
     const frame = [this.target, this.target + INTERVAL, this.target - INTERVAL].find(
-      (time) => time >= 0 && time < this.duration && !this.entries.has(time) && !this.failed.has(time),
+      (time) => time >= 0 && time < this.duration && !this.entries.has(time) && !this.failed.has(time) && !this.attempted.has(time),
     );
     if (frame === undefined) return;
+    this.attempted.add(frame);
     this.loading = true;
     void this.load(frame).finally(() => {
       this.loading = false;
@@ -107,5 +111,6 @@ export default class SeekPreviewCache {
     for (const entry of this.entries.values()) entry.image.removeAttribute('src');
     this.entries.clear();
     this.failed.clear();
+    this.attempted.clear();
   }
 }

@@ -118,33 +118,6 @@ test('concurrent identical reads are deduplicated and fresh results are reused',
   assert.equal(calls, 1);
 });
 
-test('revisiting an older detail protects it from cache pressure', async () => {
-  for (let index = 0; index < 24; index++) {
-    queryClient.setQueryData(['detail', ...queryScope(), index], { id: index }, { updatedAt: index + 1 });
-  }
-  let reads = 0;
-  const value = await cachedDesktopRead('detail', [0], async () => { reads++; return { id: 0 }; });
-  assert.deepEqual(value, { id: 0 });
-  assert.equal(reads, 0, 'unchanged catalog details should not refetch because of age');
-  queryClient.setQueryData(['detail', ...queryScope(), 24], { id: 24 });
-  assert.deepEqual(queryClient.getQueryData(['detail', ...queryScope(), 0]), { id: 0 });
-  assert.equal(queryClient.getQueryData(['detail', ...queryScope(), 1]), undefined);
-  assert.equal(queryClient.getQueryCache().getAll().length, 24);
-});
-
-test('catalog invalidation replaces a retained detail and deduplicates the new read', async () => {
-  await cachedDesktopRead('detail', ['changed'], async () => ({ title: 'Old' }));
-  invalidateDesktopData(['detail']);
-  let reads = 0;
-  const load = async () => { reads++; await nextTurn(); return { title: 'Updated' }; };
-  const results = await Promise.all([
-    cachedDesktopRead('detail', ['changed'], load),
-    cachedDesktopRead('detail', ['changed'], load),
-  ]);
-  assert.equal(reads, 1);
-  assert.deepEqual(results, [{ title: 'Updated' }, { title: 'Updated' }]);
-});
-
 test('profile changes do not reuse the previous profile result', async () => {
   setQueryProfile('one');
   assert.equal(await cachedDesktopRead('detail', ['same'], async () => 'one'), 'one');

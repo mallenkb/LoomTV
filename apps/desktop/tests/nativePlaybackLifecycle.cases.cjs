@@ -133,18 +133,3 @@ test('libvlc: disposal cancels metadata work scheduled by an early ready event',
   f.emit({sessionId:'active',status:'ready'}); f.starts[0].resolve({ok:true,sessionId:'active',surface:'composited-window'}); await p;
   await f.engine.destroy(); await new Promise(r=>setTimeout(r,280)); assert.equal(f.probes.length,0);
 });
-
-test('libvlc: clock updates do not rebuild unchanged track metadata', async () => {
-  const f = fixture('libvlc');
-  await start(f);
-  const tracks = [{ id: 1, type: 'audio', source: 'embedded', selected: true }];
-  f.emit({ sessionId: 'active', status: 'ready', tracks, position: 10 });
-  assert.equal(f.states.at(-1).tracks.length, 1);
-  for (let index = 1; index <= 1000; index++) {
-    f.emit({ sessionId: 'active', status: 'ready', position: 10 + index / 60 });
-    assert.equal(f.states.at(-1).tracks, undefined);
-  }
-  f.emit({ sessionId: 'active', status: 'ready', tracks: [{ ...tracks[0], selected: false }] });
-  assert.equal(f.states.at(-1).tracks[0].selected, false);
-  await f.engine.destroy();
-});

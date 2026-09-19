@@ -83,7 +83,6 @@ export function usePlaybackProgressDisplay(
     const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
     const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
     const changed = playbackPositionRef.current !== safePosition || playbackDurationRef.current !== safeDuration;
-    if (!changed && !options.forceReact) return;
     playbackPositionRef.current = safePosition;
     playbackDurationRef.current = safeDuration;
     syncPlaybackUi(safePosition, safeDuration);

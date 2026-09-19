@@ -6,7 +6,7 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ### [1.0.177](docs/releases/v1.0.177.md)
 
-Improves native desktop playback, packaged runtime handling, and player controls.
+Targets 4K HEVC playback memory on Apple Silicon and adds timeline previews with compact player controls.
 
 ### [1.0.176](docs/releases/v1.0.176.md)
 
