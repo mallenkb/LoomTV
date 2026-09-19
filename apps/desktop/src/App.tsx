@@ -169,8 +169,24 @@ export default function App() {
     };
   }, [hasDesktopLibVlcBridge, startupReady]);
 
-  // Routes load on navigation or existing hover/focus intent, never a blanket idle preload.
-
+  useEffect(() => {
+    if (!startupReady || !window.desktopApi) return undefined;
+    // Keep macOS WebKit available for input and the visible route. Intent-based
+    // router preloading still warms the destination on hover or focus.
+    if (document.documentElement.dataset.loomRenderer === 'webkit') return undefined;
+    const preload = () => {
+      void Promise.allSettled([
+        MyList, Movies, Others, TVShows, MovieDetail, TVDetail, Settings,
+        PluginDiscover, LiveTv, ArchiveOrgAddon,
+      ].map((component) => component.preload?.()));
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(preload, { timeout: 2_000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(preload, 500);
+    return () => window.clearTimeout(id);
+  }, [startupReady]);
 
   return (
     <StartupReadyContext.Provider value={markStartupReady}>

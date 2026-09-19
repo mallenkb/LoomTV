@@ -3,7 +3,15 @@ import { lazy, Suspense, type ComponentProps } from 'react';
 const loadVideoPlayer = () => import('../VideoPlayer');
 const VideoPlayer = lazy(loadVideoPlayer);
 
-// LibVLC warms in main. Import the renderer player only when it is mounted.
+// Parse the player while the library screen is idle so clicking Play does not
+// have to download and evaluate the largest renderer chunk first.
+if (typeof window !== 'undefined') {
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(() => { void loadVideoPlayer(); }, { timeout: 1_500 });
+  } else {
+    globalThis.setTimeout(() => { void loadVideoPlayer(); }, 0);
+  }
+}
 
 type LazyVideoPlayerProps = ComponentProps<typeof VideoPlayer>;
 

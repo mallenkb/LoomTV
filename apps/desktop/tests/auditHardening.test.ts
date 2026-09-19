@@ -151,7 +151,6 @@ function mpvFixture() {
       syncNativePlaybackDisplaySleep: (id: string) => { powers.add(id); },
       releaseNativePlaybackDisplaySleep: (id: string) => { powers.delete(id); },
     },
-    './memoryMetrics.ts': { recordMemoryCheckpoint: () => undefined },
   }, {
     process: { platform: 'darwin', resourcesPath: '/mock-runtime', env: {} },
     console: { warn: () => undefined },

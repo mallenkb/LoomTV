@@ -1,5 +1,4 @@
 import { BrowserWindow, type WebContents } from 'electron';
-import { recordMemoryCheckpoint } from './memoryMetrics.ts';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -133,29 +132,27 @@ function disabled(): boolean {
   return value === '1' || value === 'true' || value === 'yes';
 }
 
-/** Presence is not proof of successful playback. Never load native code for a probe. */
 export function libMpvAvailability(force = false): MpvAvailability {
   if (disabled()) return { available: false, surface: 'unavailable', reason: 'Native libmpv playback is disabled for this run.' };
-  // Refresh may retry a failed load, but must not discard an active runtime.
-  if (force && cachedRuntime === null) { cachedRuntime = undefined; cachedWarning = ''; }
-  if (cachedRuntime === null) return { available: false, surface: 'unavailable', reason: cachedWarning || 'libmpv could not load.' };
-  const paths = configuredPaths();
-  if (!paths) return { available: false, surface: 'unavailable', reason: 'The bundled libmpv library or native bridge is missing.' };
-  return {
+  const runtime = loadRuntime(force);
+  return runtime ? {
     available: true,
     surface: 'composited-window',
-    libraryPath: paths.libraryPath,
+    libraryPath: runtime.libraryPath,
     runtimeSource: 'bundled',
-    verification: cachedRuntime ? 'loaded' : 'detected',
-    ...(cachedRuntime ? { version: 'libmpv client API 2' } : {}),
+    version: 'libmpv client API 2',
+  } : {
+    available: false,
+    surface: 'unavailable',
+    reason: cachedWarning || 'libmpv is unavailable.',
   };
 }
 
 export function libMpvRuntimeSummary(): string {
   const availability = libMpvAvailability();
   return availability.available
-    ? `[playback] libmpv fallback detected at ${availability.libraryPath}; loads only when selected`
-    : `[playback] libmpv fallback unavailable: ${availability.reason}`;
+    ? `[playback] native libmpv ready — ${availability.libraryPath}`
+    : `[playback] native libmpv unavailable — ${availability.reason}`;
 }
 
 function commandList(command: MpvCommand): unknown[][] {
@@ -376,7 +373,6 @@ class LibMpvSession {
     ]) {
       try { cleanup(); } catch (error) { console.warn('[playback] libmpv cleanup failed', error); }
     }
-    recordMemoryCheckpoint('mpv.session.released');
   }
 
   stop(): boolean {
@@ -405,7 +401,6 @@ export function startLibMpvPlayback(owner: WebContents, source: string, options:
       if (currentSession === stopped) currentSession = null;
     });
     currentSession = session;
-    recordMemoryCheckpoint('mpv.session.started');
     return { ok: true, sessionId: session.id, surface: 'composited-window' as const };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'libmpv could not start.' };

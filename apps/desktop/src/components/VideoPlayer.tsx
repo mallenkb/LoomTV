@@ -139,7 +139,7 @@ import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './
 // LazyVideoPlayer imports this module while the library screen is idle. Warm
 // the native runtime then, not after the user clicks Play.
 void LibVlcPlaybackEngine.available().catch(() => false);
-// MPV is a fallback. Detection and initialization happen only when it is selected.
+void MpvPlaybackEngine.available().catch(() => false);
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];

@@ -1,4 +1,3 @@
-import { IdleValueCache, MemoryLruCache } from './main/boundedMemoryCache.ts';
 import { scanMetrics, startScanMetrics, measureScanWork } from './main/scanning/scanMetrics.ts';
 import { startMemoryMetrics } from './main/memoryMetrics.ts';
 import { discoverLibraryRoot, inspectLibraryRoot, scannerBinaryPath, type DiscoveryEngine } from './main/scanning/discover.ts';
@@ -426,49 +425,17 @@ const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const SCAN_CACHE_VERSION = 16;
 let libraryMutationVersion = 0;
 const activeScans = new Set<AbortController>();
-// Full metadata is an expiring read-through snapshot, never the durable store.
-const libraryCache = new IdleValueCache<LibraryData>(30_000);
-const rendererIndexCache = new MemoryLruCache<string, ReturnType<typeof projectLibraryIndexForRenderer>>({
-  maxEntries: 2, maxBytes: 8 * 1024 * 1024, idleMs: 60_000,
-});
-const rendererDetailCache = new MemoryLruCache<string, ReturnType<typeof projectLibraryItemForRenderer>>({
-  maxEntries: 50, maxBytes: 8 * 1024 * 1024, idleMs: 30_000,
-});
-let rendererReadScope: string | null = null;
-
-function clearRendererReadCaches(): void {
-  rendererIndexCache.clear();
-  rendererDetailCache.clear();
-  rendererReadScope = null;
-}
-
-function clearFullLibraryCache(): void {
-  libraryCache.clear();
-  clearRendererReadCaches();
-}
-
-function rendererReadCacheKey(revision: number, mediaId?: string): string {
-  const scope = getRendererCatalogIdentity();
-  // Profile/restriction/transport changes must never reuse another scope's payload.
-  if (scope !== rendererReadScope) {
-    clearRendererReadCaches();
-    rendererReadScope = scope;
-  }
-  return JSON.stringify([scope, revision, mediaId ?? null]);
-}
-
-app.once('will-quit', () => { libraryCache.clear(); clearRendererReadCaches(); });
+let cachedLibrary: LibraryData | null = null;
 
 function advanceLibraryMutationVersion(): void {
   libraryMutationVersion++;
-  clearRendererReadCaches();
   for (const scan of activeScans) scan.abort();
   setResourceRegistryCatalogGeneration(libraryMutationVersion);
 }
 
 function saveCustomArtworkAndRefreshCatalog(mediaId: string, target: string, dataUrl: string): void {
   saveCustomArtwork(mediaId, target, dataUrl);
-  clearFullLibraryCache();
+  cachedLibrary = null;
   advanceLibraryMutationVersion();
 }
 
@@ -1173,11 +1140,8 @@ function loadLibraryUncached(): LibraryData {
 }
 
 function loadLibrary(): LibraryData {
-  const cached = libraryCache.value;
-  if (cached) return cached;
-  const loaded = loadLibraryUncached();
-  libraryCache.value = loaded;
-  return loaded;
+  if (!cachedLibrary) cachedLibrary = loadLibraryUncached();
+  return cachedLibrary;
 }
 
 function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
@@ -1198,33 +1162,18 @@ function findLibraryItem(data: LibraryData, mediaId: string): MediaItem | null {
 
 function compactLibraryIndexForRenderer(revision = libraryMutationVersion) {
   const profileId = getDesktopActiveProfileId();
-  const key = rendererReadCacheKey(revision);
-  const cached = rendererIndexCache.get(key);
-  if (cached) {
-    // Folder availability may change without a catalog mutation.
-    const groups = normalizeLibraryFolderGroups({ libraryFolderGroups: cached.libraryFolderGroups });
-    return { ...cached, libraryFolderStatuses: libraryFolderStatusesFor(groups) };
-  }
   const data = loadLibrary();
   const scoped = profileId
     ? filterLibraryForProfile(data, profileId)
     : { ...data, movies: [], tvShows: [], animeShows: [] };
-  const result = projectLibraryIndexForRenderer(scoped, revision);
-  rendererIndexCache.set(key, result, Buffer.byteLength(JSON.stringify(result)));
-  return result;
+  return projectLibraryIndexForRenderer(scoped, revision);
 }
 
 function compactLibraryItemForRenderer(mediaId: string, revision = libraryMutationVersion) {
   const profileId = getDesktopActiveProfileId();
   if (!profileId) return null;
-  const key = rendererReadCacheKey(revision, mediaId);
-  const cached = rendererDetailCache.get(key);
-  if (cached) return cached;
   const item = findLibraryItem(filterLibraryForProfile(loadLibrary(), profileId), mediaId);
-  if (!item) return null;
-  const result = projectLibraryItemForRenderer(item, revision);
-  rendererDetailCache.set(key, result, Buffer.byteLength(JSON.stringify(result)));
-  return result;
+  return item ? projectLibraryItemForRenderer(item, revision) : null;
 }
 
 function getRendererCatalogIdentity(): string {
@@ -1350,8 +1299,7 @@ function saveLibrary(data: LibraryData): boolean {
       scanCache,
     };
     saveLibraryToDatabase(nextLibrary);
-    clearRendererReadCaches();
-    libraryCache.value = nextLibrary;
+    cachedLibrary = nextLibrary;
     return true;
   } catch (e) {
     console.error('saveLibrary error:', e);
@@ -1375,20 +1323,20 @@ function saveLibraryMutation(data: LibraryData): void {
 function saveLibraryItemMutation(item: MediaItem): void {
   advanceLibraryMutationVersion();
   saveLibraryItemToDatabase(item);
-  if (libraryCache.value) {
+  if (cachedLibrary) {
     let replaced = false;
     const replaceItem = (candidate: MediaItem): MediaItem => {
       if (candidate.id !== item.id) return candidate;
       replaced = true;
       return item;
     };
-    libraryCache.value = {
-      ...libraryCache.value,
-      movies: (libraryCache.value.movies || []).map(replaceItem),
-      tvShows: (libraryCache.value.tvShows || []).map(replaceItem),
-      animeShows: (libraryCache.value.animeShows || []).map(replaceItem),
+    cachedLibrary = {
+      ...cachedLibrary,
+      movies: (cachedLibrary.movies || []).map(replaceItem),
+      tvShows: (cachedLibrary.tvShows || []).map(replaceItem),
+      animeShows: (cachedLibrary.animeShows || []).map(replaceItem),
     };
-    if (!replaced) clearFullLibraryCache();
+    if (!replaced) cachedLibrary = null;
   }
 }
 
@@ -1493,7 +1441,7 @@ function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): bool
     .flatMap((root) => { const entry = durableNext.scanCache?.[root]; return entry ? [[root, entry] as const] : []; }));
   try {
     const rowsChanged = saveLibraryScanDeltaToDatabase(delta.changed, delta.removed, cache, commit.aliases, delta.removedFilePaths);
-    libraryCache.value = delta.published;
+    cachedLibrary = delta.published;
     console.info('[scanner] persistence', JSON.stringify({ durationMs: performance.now() - persistenceStarted, rowsChanged, changedItems: delta.changed.length, removedItems: delta.removed.length, cacheWrites: Object.keys(cache).length }));
     return true;
   } catch (error) {
