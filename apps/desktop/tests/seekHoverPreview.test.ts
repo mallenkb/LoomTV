@@ -20,7 +20,6 @@ function mountPreview() {
   const requests: number[] = [];
   let disposed = false;
   class Cache {
-    constructor(_file: string, _duration: number, _changed: () => void) {}
     request(seconds: number) { requests.push(seconds); }
     nearest() { return null; }
     dispose() { disposed = true; }
