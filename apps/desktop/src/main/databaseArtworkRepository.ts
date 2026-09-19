@@ -50,10 +50,25 @@ const artworkCacheEntryRowSchema = z.object({
 });
 const artworkCachePathRowSchema = artworkCacheEntryRowSchema.pick({ source_url: true, cache_path: true });
 
+const artworkFileHashes = new Map<string, {
+  signature: string;
+  byteLength: number;
+  contentHash: string;
+}>();
+
 function hashArtworkFile(filePath: string): { byteLength: number; contentHash: string } {
   const fd = fs.openSync(filePath, 'r');
   try {
-    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(fs.fstatSync(fd).size, 256 * 1024)));
+    const stat = fs.fstatSync(fd, { bigint: true });
+    const signature = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    const cached = artworkFileHashes.get(filePath);
+    if (cached?.signature === signature) {
+      artworkFileHashes.delete(filePath);
+      artworkFileHashes.set(filePath, cached);
+      return cached;
+    }
+    artworkFileHashes.delete(filePath);
+    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(Number(stat.size), 256 * 1024)));
     const hash = createHash('sha256');
     let byteLength = 0;
     let read: number;
@@ -61,7 +76,15 @@ function hashArtworkFile(filePath: string): { byteLength: number; contentHash: s
       hash.update(buffer.subarray(0, read));
       byteLength += read;
     }
-    return { byteLength, contentHash: hash.digest('hex') };
+    const result = { byteLength, contentHash: hash.digest('hex') };
+    const after = fs.fstatSync(fd, { bigint: true });
+    if (signature === `${after.dev}:${after.ino}:${after.size}:${after.mtimeNs}:${after.ctimeNs}`) {
+      artworkFileHashes.set(filePath, { signature, ...result });
+      if (artworkFileHashes.size > 512) {
+        artworkFileHashes.delete(artworkFileHashes.keys().next().value!);
+      }
+    }
+    return result;
   } finally {
     fs.closeSync(fd);
   }

@@ -441,11 +441,13 @@ impl Player {
         media_options.push(":vout=xcb_x11".to_string());
         if decode_mode == DecodeMode::Hardware {
             #[cfg(target_os = "macos")]
-            media_options.extend([":codec=videotoolbox,none".into(), ":videotoolbox-hw-decoder-only".into()]);
+            // Codec preferences also apply to audio and subtitle decoders.
+            // The decoder probe separately verifies hardware video decoding.
+            media_options.extend([":codec=videotoolbox,any".into(), ":videotoolbox-hw-decoder-only".into()]);
             #[cfg(not(target_os = "macos"))]
             media_options.push(":avcodec-hw=any".into());
         } else {
-            media_options.extend([":avcodec-hw=none".into(), ":codec=avcodec,dav1d,none".into()]);
+            media_options.extend([":avcodec-hw=none".into(), ":codec=avcodec,dav1d,any".into()]);
         }
         if let Some(language) = options["audioLanguage"].as_str() {
             if language.len() > 32

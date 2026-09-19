@@ -1427,17 +1427,17 @@ class LibVlcPlaybackSession {
       if (!platformBinding) throw new Error('LibVLC playback is not supported on this platform.');
       api.mediaAddOption(media, platformBinding.mediaVoutOption);
       if (this.decodeMode === 'hardware') {
-        // VideoToolbox is a separate decoder plugin. Disallow a silent
-        // avcodec fallback on macOS; Windows and Linux are checked by logs.
+        // The codec preference applies to audio and subtitles too. Keep their
+        // decoders available; startup verification enforces hardware video.
         if (process.platform === 'darwin') {
-          api.mediaAddOption(media, ':codec=videotoolbox,none');
+          api.mediaAddOption(media, ':codec=videotoolbox,any');
           api.mediaAddOption(media, ':videotoolbox-hw-decoder-only');
         } else {
           api.mediaAddOption(media, ':avcodec-hw=any');
         }
       } else {
         api.mediaAddOption(media, ':avcodec-hw=none');
-        api.mediaAddOption(media, ':codec=avcodec,dav1d,none');
+        api.mediaAddOption(media, ':codec=avcodec,dav1d,any');
       }
       if (options.audioLanguage && /^[a-z0-9_-]+$/i.test(options.audioLanguage)) {
         api.mediaAddOption(media, `:audio-language=${options.audioLanguage}`);

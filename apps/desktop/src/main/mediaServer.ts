@@ -1539,6 +1539,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
         // Resolve and authorize the capability before selecting a fixed provider
         // rendition. The client cannot substitute an upstream host or path.
+        const originalSourceUrl = sourceUrl;
         sourceUrl = smallerTmdbArtwork(sourceUrl, reqUrl.searchParams.get('width'));
         const sendArtwork = (cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>) => {
           if (!canWriteResponse(res)) return;
@@ -1574,6 +1575,21 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         if (cachedArtwork) {
           sendArtwork(cachedArtwork);
           return;
+        }
+
+        // A missing smaller rendition must not hold an existing local image
+        // behind a provider request. Prepare the smaller copy for later visits.
+        if (sourceUrl !== originalSourceUrl) {
+          const originalArtwork = artworkOwnerId
+            ? getCachedPluginArtwork(artworkOwnerId, originalSourceUrl)
+            : getCachedArtwork(originalSourceUrl);
+          if (originalArtwork) {
+            sendArtwork(originalArtwork);
+            void (artworkOwnerId
+              ? cachePluginArtworkSource(artworkOwnerId, sourceUrl)
+              : cacheArtworkSource(sourceUrl)).catch(() => undefined);
+            return;
+          }
         }
 
         void (artworkOwnerId
