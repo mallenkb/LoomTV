@@ -9,4 +9,9 @@ test('subtitle text drops formatting debris while retaining dialogue', () => {
     'Bread & tea\nThank you',
   ]);
   assert.equal(cleanSubtitleCueText('♪ [door opens] {speaker}'), '♪ [door opens] {speaker}');
+  assert.equal(
+    cleanSubtitleCueText("He's amazingly amazing.{same way eris described ghislaine in 15}"),
+    "He's amazingly amazing.",
+  );
+  assert.equal(cleanSubtitleCueText('Watch out! {door opens}'), 'Watch out! {door opens}');
 });

@@ -6,6 +6,9 @@ export function cleanSubtitleCueText(value: string): string {
     // as visible text. Keep dialogue, punctuation, and speaker labels intact.
     .replace(/\{\\[^}]{0,200}\}/g, '')
     .replace(/\{\*\}/g, '')
+    // Some converted subtitles append editor notes after the spoken sentence.
+    // Limit this to long, trailing notes so short sound and speaker cues survive.
+    .replace(/([.!?])\s*\{[^{}\r\n]{20,160}\}(?=\s*(?:\n|$))/g, '$1')
     .replace(/\\[Nn]/g, '\n')
     .replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39);/gi, (entity) => {
       const decoded: Record<string, string> = {
