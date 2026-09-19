@@ -271,7 +271,7 @@ test('release preparation requires the latest trusted push validation for the ex
     ['[]', 0, false], ['{}', 0, false], ['invalid', 0, false], ['', 0, false],
   ];
   for (const [result, code, allowed] of cases) {
-    const script = 'gh() { printf "%s\\n" "$MOCK_RESULT"; return "$MOCK_CODE"; }\n' + gate.run;
+    const script = 'gh() { printf "%s\\n" "$MOCK_RESULT"; return "$MOCK_CODE"; }\nsleep() { :; }\n' + gate.run;
     const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
       env: {
         ...process.env,
@@ -297,7 +297,9 @@ test('release validation rejects a newer pending run despite an older successful
   const mock = `gh() {
     [[ "$*" == "run list --repo example/repo --workflow validate.yml --commit $RELEASE_SHA --event push --branch main --limit 1 --json status,conclusion,event,headBranch,headSha" ]] || return 2
     jq '.[0:1]' <<< "$MOCK_RUNS"
-  }\n`;
+  }
+  sleep() { :; }
+`;
   for (const status of ['queued', 'pending', 'in_progress', 'waiting', 'requested', 'completed']) {
     const runs = [{ ...success, status, conclusion: status === 'completed' ? 'success' : null }, success];
     const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', mock + gate.run], {
@@ -312,7 +314,7 @@ test('release validation rejects a newer pending run despite an older successful
     assert.ifError(run.error);
     assert.equal(run.status, status === 'completed' ? 0 : 1, `${status}: ${run.stderr}`);
     if (status !== 'completed') {
-      assert.match(run.stderr, /Latest Validate push run on main/);
+      assert.match(run.stderr, /Latest Validate push run on main|Timed out waiting/);
     }
   }
 });
