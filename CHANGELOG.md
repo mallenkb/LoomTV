@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.182](docs/releases/v1.0.182.md)
+
+Adds local outro detection, an opt-in SkipDB fallback, verified-marker evidence tiers, and safer skip prompts on desktop.
+
 ### [1.0.181](docs/releases/v1.0.181.md)
 
 Improves release gating so desktop publication waits for completed validation.
