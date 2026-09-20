@@ -99,7 +99,7 @@ import { isAssDialogueTrack, isAssSignsTrack, parseAssDialogueCues } from './Vid
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
-import { activeSkipSegmentAt, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
+import { activeSkipSegmentAt, buildSkipAction, pinVisibleTarget, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
 import { isProfileSelectionRequiredError } from './VideoPlayer/playbackProfileGuard';
 import {
   groupEpisodesBySeason,
@@ -3816,10 +3816,14 @@ export default function VideoPlayer({
     && duration - position <= NEXT_EPISODE_PROMPT_REMAINING_SECONDS
     && !isScrubbing,
   );
+  const skipPinnedTargetRef = useRef<{ id: string | null; targetMs: number | null }>({ id: null, targetMs: null });
   const activeMediaSegment = useMemo(
     () => activeSkipSegmentAt(mediaSegments.filter((segment) => skipPromptTypes[segment.type] !== false), position),
     [mediaSegments, position, skipPromptTypes],
   );
+  if (activeMediaSegment == null && skipPinnedTargetRef.current.id !== null) {
+    skipPinnedTargetRef.current = { id: null, targetMs: null };
+  }
   const selectMarkerType = (type: MediaSegmentType) => {
     setMarkerType(type);
     const existing = mediaSegments.find((segment) => segment.type === type);
@@ -4162,6 +4166,22 @@ export default function VideoPlayer({
               event.stopPropagation();
               const markerDuration = activeMediaSegment.mediaDurationMs / 1000;
               const mediaDuration = Math.max(markerDuration, duration, playbackDurationRef.current);
+              const positionMs = Math.round(playbackPositionRef.current * 1000);
+              const mediaDurationMs = Math.round(mediaDuration * 1000);
+              const freshTargetMs = buildSkipAction(
+                { startMs: activeMediaSegment.startMs, endMs: activeMediaSegment.endMs, mediaDurationMs },
+                positionMs,
+              );
+              if (freshTargetMs === null) return;
+              const pinnedTargetMs = pinVisibleTarget(
+                skipPinnedTargetRef.current.id,
+                skipPinnedTargetRef.current.targetMs,
+                activeMediaSegment.id,
+                freshTargetMs,
+              );
+              if (pinnedTargetMs === null) return;
+              skipPinnedTargetRef.current = { id: activeMediaSegment.id, targetMs: pinnedTargetMs };
+              const pinnedTargetSeconds = pinnedTargetMs / 1000;
               const markerEnd = activeMediaSegment.endMs === null
                 ? mediaDuration
                 : activeMediaSegment.endMs / 1000;
@@ -4179,8 +4199,9 @@ export default function VideoPlayer({
               }
 
               // Never let a stale or overlapping marker turn a Skip action
-              // into an accidental rewind.
-              const targetSeconds = Math.max(playbackPositionRef.current, markerEnd);
+              // into an accidental rewind. The visible target stays pinned to
+              // the first validated seek while the segment id is stable.
+              const targetSeconds = Math.max(playbackPositionRef.current, pinnedTargetSeconds);
               seekTo(targetSeconds);
             }}
             className="loom-player-skip-prompt absolute bottom-32 right-8 z-40 rounded-md border border-white/25 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-md transition hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"

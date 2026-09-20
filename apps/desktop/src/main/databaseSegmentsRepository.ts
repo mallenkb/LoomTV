@@ -14,7 +14,7 @@ import { canTransitionSegmentAnalysisJob, type SegmentAnalysisJob, type SegmentA
 export type StoredMediaFingerprint = {
   fileRevision: string;
   audioTrack: number;
-  windowType: 'intro' | 'credits' | 'recap' | 'preview';
+  windowType: 'intro' | 'credits' | 'recap' | 'outro' | 'preview';
   algorithmVersion: string;
   fingerprintJson: string;
   durationMs: number;
@@ -33,9 +33,10 @@ export type SegmentAnalysisInventory = {
 
 const finiteNumber = z.number().finite();
 const segmentTypeSchema = z.enum(['intro', 'recap', 'outro', 'credits', 'preview']);
-const segmentSourceSchema = z.enum(['manual', 'chapter', 'theintrodb', 'aniskip', 'chromaprint']);
+const segmentSourceSchema = z.enum(['manual', 'chapter', 'theintrodb', 'aniskip', 'skipdb', 'chromaprint']);
 const segmentAnalysisMetadataSchema = z.object({
   detector: z.enum(['chromaprint', 'blackframe', 'chapter']).optional(),
+  fileVerified: z.boolean().optional(),
   peerSupport: finiteNumber.optional(),
   originalStartMs: finiteNumber.optional(),
   originalEndMs: finiteNumber.nullable().optional(),
@@ -94,7 +95,7 @@ const segmentCandidateRowSchema = z.object({
 });
 type SegmentCandidateRow = z.infer<typeof segmentCandidateRowSchema>;
 const segmentSourceCacheRowSchema = z.object({
-  provider: z.enum(['theintrodb', 'aniskip']),
+  provider: z.enum(['theintrodb', 'aniskip', 'skipdb']),
   lookup_key: z.string(),
   duration_bucket: finiteNumber,
   status: z.enum(['success', 'empty']),
@@ -108,7 +109,7 @@ const manualHistoryRowSchema = z.object({ history_id: z.number().int(), snapshot
 const fingerprintRowSchema = z.object({
   file_revision: z.string(),
   audio_track: finiteNumber,
-  window_type: z.enum(['intro', 'credits', 'recap', 'preview']),
+  window_type: z.enum(['intro', 'credits', 'recap', 'outro', 'preview']),
   algorithm_version: z.string(),
   fingerprint_json: z.string(),
   duration_ms: finiteNumber,
@@ -315,8 +316,11 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
       ...(patch.status ? { status: patch.status === 'review' ? undefined : patch.status } : {}),
       ...(patch.type ? { type: patch.type } : {}),
     };
+    const nextMetadata: Record<string, unknown> = { ...existing.analysisMetadata, userDecision };
+    if (patch.status === 'active') nextMetadata.fileVerified = true;
+    else if (patch.status === 'rejected') nextMetadata.fileVerified = false;
     assignments.push('analysis_metadata_json = ?');
-    values.push(jsonString({ ...existing.analysisMetadata, userDecision }));
+    values.push(jsonString(nextMetadata));
     database.prepare(`UPDATE media_segment_candidates SET ${assignments.join(', ')} WHERE id = ?`).run(...values, candidateId);
     refreshResolvedSegments(row.file_revision, database);
     return true;
@@ -355,13 +359,19 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     ).map(candidateFromRow);
     const existingById = new Map(existing.map((candidate) => [candidate.id, candidate]));
     const effectiveCandidates = candidates.map((candidate) => {
-      const decision = existingById.get(candidate.id)?.analysisMetadata?.userDecision;
-      if (!decision) return candidate;
+      const stored = existingById.get(candidate.id)?.analysisMetadata;
+      const decision = stored?.userDecision;
+      const storedVerified = stored?.fileVerified;
+      if (!decision && storedVerified === undefined) return candidate;
       return {
         ...candidate,
-        type: decision.type || candidate.type,
-        status: decision.status || candidate.status,
-        analysisMetadata: { ...candidate.analysisMetadata, userDecision: decision },
+        type: decision?.type || candidate.type,
+        status: decision?.status || candidate.status,
+        analysisMetadata: {
+          ...candidate.analysisMetadata,
+          ...(storedVerified !== undefined ? { fileVerified: storedVerified } : {}),
+          ...(decision ? { userDecision: decision } : {}),
+        },
       };
     });
     const comparable = (candidate: MediaSegmentCandidate) => JSON.stringify({

@@ -23,6 +23,8 @@ export const IPTV_SOURCES_MIGRATION_VERSION = 12;
 export const IPTV_GEO_BLOCKED_MIGRATION_VERSION = 13;
 /** v14 stores the Phosphor icon selected for each IPTV sidebar tab. */
 export const IPTV_SOURCE_ICONS_MIGRATION_VERSION = 14;
+/** v15 widens media_segment_candidates source check to include skipdb. */
+export const SKIPDB_SOURCE_MIGRATION_VERSION = 15;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -365,6 +367,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateIptvSources(database);
   migrateIptvGeoBlocked(database);
   migrateIptvSourceIcons(database);
+  migrateSkipDbSource(database);
 }
 
 /**
@@ -441,6 +444,63 @@ function migrateIptvSourceIcons(database: BetterSqlite3.Database): void {
     ensureColumn(database, 'iptv_sources', 'icon_id', "TEXT NOT NULL DEFAULT 'general'");
     database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
       .run(IPTV_SOURCE_ICONS_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * v15 widens media_segment_candidates source check to include skipdb,
+ * following the migrateOutroSegments rebuild template.
+ *
+ * Enabling the experimentalProviders.skipdb flag opts into the new enum
+ * value; existing installs keep current behavior until the flag is set.
+ * media_segments source column has no check and needs no change.
+ * segment_source_cache has no provider check constraint so no cache
+ * migration is needed.
+ */
+function migrateSkipDbSource(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(SKIPDB_SOURCE_MIGRATION_VERSION)) return;
+  const candidatesSql = (database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_segment_candidates'").get() as { sql?: string } | undefined)?.sql || '';
+  database.transaction(() => {
+    if (!candidatesSql.includes("'skipdb'")) {
+      database.exec(`
+        ALTER TABLE media_segment_candidates RENAME TO media_segment_candidates_pre_skipdb;
+        CREATE TABLE media_segment_candidates (
+          id TEXT PRIMARY KEY,
+          media_id TEXT NOT NULL,
+          season INTEGER NOT NULL,
+          episode INTEGER NOT NULL,
+          file_path TEXT NOT NULL,
+          file_revision TEXT NOT NULL,
+          release_key TEXT,
+          type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
+          start_ms INTEGER NOT NULL,
+          end_ms INTEGER,
+          confidence REAL NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('manual', 'chapter', 'theintrodb', 'aniskip', 'skipdb', 'chromaprint')),
+          status TEXT NOT NULL CHECK (status IN ('active', 'review', 'rejected')),
+          media_duration_ms INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          analysis_metadata_json TEXT
+        );
+        INSERT INTO media_segment_candidates (
+          id, media_id, season, episode, file_path, file_revision, release_key,
+          type, start_ms, end_ms, confidence, source, status, media_duration_ms,
+          updated_at, expires_at, analysis_metadata_json
+        )
+        SELECT
+          id, media_id, season, episode, file_path, file_revision, release_key,
+          type, start_ms, end_ms, confidence, source, status, media_duration_ms,
+          updated_at, expires_at, analysis_metadata_json
+        FROM media_segment_candidates_pre_skipdb;
+        DROP TABLE media_segment_candidates_pre_skipdb;
+        CREATE INDEX idx_media_segment_candidates_revision ON media_segment_candidates(file_revision, type, source);
+        CREATE INDEX idx_media_segment_candidates_episode ON media_segment_candidates(media_id, season, episode, source);
+        CREATE INDEX idx_media_segment_candidates_release ON media_segment_candidates(release_key, source);
+      `);
+    }
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(SKIPDB_SOURCE_MIGRATION_VERSION, Date.now());
   })();
 }
 

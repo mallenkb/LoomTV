@@ -19,7 +19,9 @@ import { mediaFileRevision } from './fileIdentity.ts';
 import {
   aniSkipLookupKey,
   fetchAniSkipSegments,
+  fetchSkipDBSegments,
   fetchTheIntroDbSegments,
+  skipDbLookupKey,
   theIntroDbLookupKey,
   type ProviderLookupResult,
 } from './providers.ts';
@@ -63,11 +65,21 @@ const inFlight = new Map<string, Promise<ProviderLookupResult>>();
 const providerQueues: Record<ProviderCacheEntry['provider'], Promise<void>> = {
   theintrodb: Promise.resolve(),
   aniskip: Promise.resolve(),
+  skipdb: Promise.resolve(),
 };
 const providerBlockedUntil: Record<ProviderCacheEntry['provider'], number> = {
   theintrodb: 0,
   aniskip: 0,
+  skipdb: 0,
 };
+
+function skipDbEnabled(deps: { loadSettings?: () => { skipAnalysis?: SkipAnalysisSettings } }): boolean {
+  try {
+    return deps.loadSettings?.().skipAnalysis?.experimentalProviders?.skipdb === true;
+  } catch {
+    return false;
+  }
+}
 
 function hashId(...values: Array<string | number | null | undefined>): string {
   return createHash('sha256').update(values.map((value) => String(value ?? '')).join('|')).digest('hex').slice(0, 24);
@@ -324,14 +336,29 @@ export function createSkipSegmentService(deps: {
 
   function applyProviderSegments(
     context: SegmentContext,
-    source: Extract<MediaSegmentSource, 'theintrodb' | 'aniskip'>,
+    source: Extract<MediaSegmentSource, 'theintrodb' | 'aniskip' | 'skipdb'>,
     segments: NormalizedSegmentInput[],
   ): MediaSegment[] {
     const policy = policyFor(context);
     const enabledTypes = policy.enabledTypes;
     const permitted = (segment: Pick<NormalizedSegmentInput, 'type' | 'startMs' | 'endMs'>) =>
       enabledTypes?.[segment.type] !== false && policyPermits(context, policy, segment);
-    const fresh = segments.filter(permitted).map((segment) => makeCandidate(context, segment));
+    const fresh = segments.filter(permitted).map((segment) => {
+      const candidate = makeCandidate(context, segment);
+      // SkipDB markers are unverified provider timestamps: record source
+      // skipdb with status active and fileVerified false in analysisMetadata.
+      if (source === 'skipdb') {
+        return {
+          ...candidate,
+          status: 'active' as const,
+          analysisMetadata: {
+            ...(candidate.analysisMetadata || {}),
+            fileVerified: false,
+          } as unknown as MediaSegmentCandidate['analysisMetadata'],
+        };
+      }
+      return candidate;
+    });
     const refreshedTypes = new Set(fresh.map((segment) => segment.type));
     const lastKnown = getSegmentCandidates(context.fileRevision)
       .filter((candidate) => candidate.source === source
@@ -357,9 +384,13 @@ export function createSkipSegmentService(deps: {
   ): Promise<{ segments: MediaSegment[]; kind: ProviderLookupResult['kind'] }> {
     const lookupKey = provider === 'aniskip'
       ? aniSkipLookupKey(context.providerIds.malId, context.episode)
-      : context.item.type === 'movie'
-        ? theIntroDbLookupKey(context.providerIds)
-        : theIntroDbLookupKey(context.providerIds, context.season, context.episode);
+      : provider === 'skipdb'
+        ? (context.item.type === 'movie'
+          ? skipDbLookupKey(context.providerIds)
+          : skipDbLookupKey(context.providerIds, context.season, context.episode))
+        : context.item.type === 'movie'
+          ? theIntroDbLookupKey(context.providerIds)
+          : theIntroDbLookupKey(context.providerIds, context.season, context.episode);
     if (!lookupKey) return { segments: resolvedSegmentsForContext(context), kind: 'empty' };
     const bucket = durationBucket(context.durationMs);
     const cached = getSegmentSourceCache(provider, lookupKey, bucket);
@@ -392,17 +423,27 @@ export function createSkipSegmentService(deps: {
     lookupKey: string,
     bucket: number,
   ): Promise<ProviderLookupResult> {
-    const result = await queuedLookup(provider, `${lookupKey}:${bucket}`, () => provider === 'aniskip'
-      ? fetchAniSkipSegments({
-        malId: context.providerIds.malId,
-        episode: context.episode,
-        durationMs: context.durationMs,
-      })
-      : fetchTheIntroDbSegments({
+    const result = await queuedLookup(provider, `${lookupKey}:${bucket}`, () => {
+      if (provider === 'aniskip') {
+        return fetchAniSkipSegments({
+          malId: context.providerIds.malId,
+          episode: context.episode,
+          durationMs: context.durationMs,
+        });
+      }
+      if (provider === 'skipdb') {
+        return fetchSkipDBSegments({
+          ids: context.providerIds,
+          ...(context.item.type === 'movie' ? {} : { season: context.season, episode: context.episode }),
+          durationMs: context.durationMs,
+        });
+      }
+      return fetchTheIntroDbSegments({
         ids: context.providerIds,
         ...(context.item.type === 'movie' ? {} : { season: context.season, episode: context.episode }),
         durationMs: context.durationMs,
-      }));
+      });
+    });
     if (result.kind !== 'success' && result.kind !== 'empty') return result;
     const now = Date.now();
     const expiresAt = now + (result.kind === 'success' ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS);
@@ -433,7 +474,7 @@ export function createSkipSegmentService(deps: {
     if (!context) return { segments: [], revision: segmentRevision([]) };
     const policy = policyFor(context);
     if (policy.excluded) {
-      for (const source of ['chapter', 'aniskip', 'theintrodb', 'chromaprint'] as const) {
+      for (const source of ['chapter', 'aniskip', 'theintrodb', 'skipdb', 'chromaprint'] as const) {
         replaceSegmentCandidatesForSource(context.fileRevision, source, []);
       }
       const segments = resolvedSegmentsForContext(context);
@@ -451,21 +492,64 @@ export function createSkipSegmentService(deps: {
     if (policy.mode === 'chapter-only') {
       replaceSegmentCandidatesForSource(context.fileRevision, 'aniskip', []);
       replaceSegmentCandidatesForSource(context.fileRevision, 'theintrodb', []);
+      replaceSegmentCandidatesForSource(context.fileRevision, 'skipdb', []);
       const segments = resolvedSegmentsForContext(context);
       return { segments, revision: segmentRevision(segments) };
     }
+    // Merge per type with incumbents winning ties: after SkipDB applies, drop
+    // its candidates for types already covered by higher-priority providers so
+    // partial results fill only missing enabled types.
+    function pruneSkipDbTies(activeContext: SegmentContext, winningSources: MediaSegmentSource[]): void {
+      const all = getSegmentCandidates(activeContext.fileRevision);
+      const winningTypes = new Set(
+        all.filter((candidate) => winningSources.includes(candidate.source) && candidate.status === 'active')
+          .map((candidate) => candidate.type),
+      );
+      if (!winningTypes.size) return;
+      const skipCandidates = all.filter((candidate) => candidate.source === 'skipdb');
+      const filtered = skipCandidates.filter((candidate) => !winningTypes.has(candidate.type));
+      if (filtered.length !== skipCandidates.length) {
+        replaceSegmentCandidatesForSource(activeContext.fileRevision, 'skipdb', filtered);
+      }
+    }
+    const useSkipDb = skipDbEnabled(deps);
     let segments: MediaSegment[];
     if (context.item.type === 'anime') {
       // AniSkip supplies anime openings/endings while TheIntroDB supplies
       // independently timestamped intros, recaps, credits, and previews. Load
       // both so an Ending is never used as a substitute for production credits.
+      // SkipDB is an opt-in fallback for missing enabled types.
       await Promise.all([
         providerSegments(context, 'aniskip', waitForProvider),
         providerSegments(context, 'theintrodb', waitForProvider),
       ]);
       segments = resolvedSegmentsForContext(context);
-    } else {
+      if (useSkipDb) {
+        // Partial results still trigger the next provider for missing enabled
+        // types, not only empty responses. Transport errors and 429s fall
+        // through with existing cooldown behavior via queuedLookup.
+        await providerSegments(context, 'skipdb', waitForProvider);
+        pruneSkipDbTies(context, ['aniskip', 'theintrodb']);
+        segments = resolvedSegmentsForContext(context);
+      }
+    } else if (context.item.type === 'movie') {
+      // Movies query the TheIntroDB movie path plus the SkipDB movie path with
+      // season and episode omitted when the flag is on.
       segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
+      if (useSkipDb) {
+        await providerSegments(context, 'skipdb', waitForProvider);
+        pruneSkipDbTies(context, ['theintrodb']);
+        segments = resolvedSegmentsForContext(context);
+      }
+    } else {
+      // TV episodes query TheIntroDB plus SkipDB when the flag is on, merged
+      // per type with TheIntroDB winning ties.
+      segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
+      if (useSkipDb) {
+        await providerSegments(context, 'skipdb', waitForProvider);
+        pruneSkipDbTies(context, ['theintrodb']);
+        segments = resolvedSegmentsForContext(context);
+      }
     }
     if (prefetchAdjacent) {
       const ordered = (context.item.episodeFiles || []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode);

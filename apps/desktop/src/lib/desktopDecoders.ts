@@ -238,6 +238,9 @@ export const settingsPayloadSchema = z.object({
       paths: z.array(z.string()),
     }),
     seasonOverrides: z.record(z.string(), z.enum(['full', 'chapter-only', 'providers-only'])),
+    experimentalProviders: z.object({
+      skipdb: z.boolean().optional(),
+    }).optional(),
   }).optional(),
   sidebarNavOrder: z.array(z.string()).optional(),
   customFolderNames: z.record(z.string(), z.string()).optional(),
@@ -329,11 +332,12 @@ const mediaSegmentSchema = z.object({
   startMs: finiteNumber,
   endMs: finiteNumber.nullable(),
   confidence: finiteNumber,
-  source: z.enum(['manual', 'chapter', 'theintrodb', 'aniskip', 'chromaprint']),
+  source: z.enum(['manual', 'chapter', 'theintrodb', 'aniskip', 'skipdb', 'chromaprint']),
   mediaDurationMs: finiteNumber,
   updatedAt: z.string(),
   analysisMetadata: z.object({
     detector: z.enum(['chromaprint', 'blackframe', 'chapter']).optional(),
+    fileVerified: z.boolean().optional(),
     peerSupport: finiteNumber.optional(),
     originalStartMs: finiteNumber.optional(),
     originalEndMs: finiteNumber.nullable().optional(),

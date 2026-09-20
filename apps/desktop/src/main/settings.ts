@@ -26,6 +26,7 @@ const skipAnalysisInputSchema = z.object({
   durationLimits: z.record(z.string(), z.unknown()).optional(),
   suppressFirstEpisodeIntro: z.unknown().optional(),
   analyzeSpecials: z.unknown().optional(),
+  experimentalProviders: z.unknown().optional(),
   exclusions: z.record(z.string(), z.unknown()).optional(),
   seasonOverrides: z.record(z.string(), z.unknown()).optional(),
 });
@@ -160,6 +161,9 @@ function normalizeSkipAnalysis(raw: SettingsInput): SkipAnalysisSettings {
     },
     suppressFirstEpisodeIntro: bool(value?.suppressFirstEpisodeIntro, false),
     analyzeSpecials: bool(value?.analyzeSpecials, false),
+    experimentalProviders: {
+      skipdb: (value?.experimentalProviders as { skipdb?: unknown } | undefined)?.skipdb === true,
+    },
     exclusions: {
       seriesIds: stringList(exclusions?.seriesIds),
       movieIds: stringList(exclusions?.movieIds),

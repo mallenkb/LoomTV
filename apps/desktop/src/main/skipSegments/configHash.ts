@@ -13,7 +13,7 @@ function canonical(value: unknown): unknown {
 
 export function selectionConfigHash(settings: SkipAnalysisSettings): string {
   const selection = {
-    detectorVersion: 'loom-skip-selection-v2',
+    detectorVersion: 'loom-skip-selection-v3',
     detectorConstants: {
       neighborRadius: 4,
       minimumPeerMatches: 2,
@@ -26,6 +26,7 @@ export function selectionConfigHash(settings: SkipAnalysisSettings): string {
       localOverlapRatio: 0.60,
       introWindow: { startRatio: 0, maximumMs: 600_000, durationRatio: 0.25 },
       recapWindow: { startRatio: 0, maximumMs: 180_000, durationRatio: 0.15 },
+      outroWindow: { fromEnd: true, maximumMs: 300_000 },
       creditsWindow: { fromEnd: true, maximumMs: 300_000 },
       previewWindow: { fromEnd: true, maximumMs: 120_000 },
       episodeVisualWindowMs: 300_000,

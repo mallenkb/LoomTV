@@ -35,3 +35,47 @@ export function shouldShowSkipPrompt(segment: SkipPromptSegment | null, markerEd
 export function skipPromptLabel(type: string, _episodic: boolean): string {
   return ({ intro: 'Intro', recap: 'Recap', outro: 'Outro', credits: 'Credits', preview: 'Preview' } as Record<string, string>)[type] || 'Skip';
 }
+
+export type SkipActionSegment = {
+  startMs: number;
+  endMs: number | null;
+  mediaDurationMs: number;
+};
+
+export function buildSkipAction(
+  segment: SkipActionSegment,
+  positionMs: number,
+  preRollMs = 500,
+): number | null {
+  const { startMs, endMs, mediaDurationMs } = segment;
+  if (!Number.isFinite(mediaDurationMs) || mediaDurationMs <= 0) return null;
+  if (!Number.isFinite(positionMs) || !Number.isFinite(startMs)) return null;
+  if (!Number.isFinite(preRollMs) || preRollMs < 0) return null;
+  if (startMs < 0) return null;
+  if (startMs >= mediaDurationMs) return null;
+  if (endMs !== null) {
+    if (!Number.isFinite(endMs)) return null;
+    if (endMs <= startMs) return null;
+    if (endMs > mediaDurationMs) return null;
+  }
+  const effectiveEndMs = endMs ?? mediaDurationMs;
+  if (positionMs < startMs || positionMs >= effectiveEndMs) return null;
+  const targetMs = endMs === null ? mediaDurationMs - preRollMs : endMs;
+  if (!Number.isFinite(targetMs)) return null;
+  if (!(targetMs > positionMs + 250)) return null;
+  if (!(targetMs >= 0 && targetMs < mediaDurationMs)) return null;
+  return targetMs;
+}
+
+export function pinVisibleTarget(
+  previousId: string | null,
+  previousTargetMs: number | null,
+  currentId: string | null,
+  freshTargetMs: number | null,
+): number | null {
+  if (currentId === null || currentId === undefined) return null;
+  if (previousId !== null && previousId === currentId && previousTargetMs !== null) {
+    return previousTargetMs;
+  }
+  return freshTargetMs;
+}

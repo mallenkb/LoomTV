@@ -329,6 +329,7 @@ export default function PlaybackSettingsSection({
                 <Toggle label="Auto-scan new or changed media" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => update({ analyzeNewMedia })} />
                 <Toggle label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => update({ analyzeSpecials })} />
                 <Toggle label="Suppress first-episode intros" checked={skipAnalysis.suppressFirstEpisodeIntro} onChange={(suppressFirstEpisodeIntro) => update({ suppressFirstEpisodeIntro })} />
+                <Toggle label="Enable experimental SkipDB provider" checked={skipAnalysis.experimentalProviders?.skipdb ?? false} onChange={(skipdb) => update({ experimentalProviders: { ...skipAnalysis.experimentalProviders, skipdb } })} />
               </div>
 
               <div>

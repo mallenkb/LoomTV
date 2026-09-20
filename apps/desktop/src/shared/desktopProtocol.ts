@@ -341,6 +341,9 @@ export interface SkipAnalysisSettings {
     paths: string[];
   };
   seasonOverrides: Record<string, SkipAnalysisMode>;
+  experimentalProviders?: {
+    skipdb?: boolean;
+  };
 }
 
 export type SkipAnalysisRunScope = {
@@ -572,7 +575,7 @@ export type StoredProgress = LanStoredProgress;
 export interface TrackPreference { enabled: boolean; index?: number; language?: string; title?: string; codec?: string; forced?: boolean }
 export interface PlaybackTrackPreferences { audio?: TrackPreference; subtitle?: TrackPreference }
 export type MediaSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
-export type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'chromaprint';
+export type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'skipdb' | 'chromaprint';
 export interface MediaSegment {
   id: string;
   type: MediaSegmentType;
@@ -590,6 +593,7 @@ export interface MediaSegment {
     startSnap?: 'chapter' | 'silence' | 'keyframe' | 'media-edge' | 'original';
     endSnap?: 'chapter' | 'silence' | 'keyframe' | 'media-edge' | 'original';
     confidenceComponents?: Record<string, number>;
+    fileVerified?: boolean;
     userDecision?: { status?: 'active' | 'rejected'; type?: MediaSegmentType };
   };
 }

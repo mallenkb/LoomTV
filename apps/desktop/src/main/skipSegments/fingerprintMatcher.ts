@@ -11,6 +11,15 @@ export type FingerprintMatch = {
   durationMs: number;
 };
 
+export const PUBLISH_CONFIDENCE = 0.90;
+export const REVIEW_CONFIDENCE = 0.80;
+
+export function classifyDetectionConfidence(confidence: number): 'active' | 'review' | 'discard' {
+  if (confidence >= PUBLISH_CONFIDENCE) return 'active';
+  if (confidence >= REVIEW_CONFIDENCE) return 'review';
+  return 'discard';
+}
+
 function popcount32(value: number): number {
   let next = value >>> 0;
   next -= (next >>> 1) & 0x55555555;

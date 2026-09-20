@@ -25,7 +25,7 @@ import {
 import { findFFmpeg, findFFprobe, findFpcalc } from '../mediaBinaries.ts';
 import type { EpisodeFile, MediaItem } from '../metadata/types';
 import type { ProbeMediaFileResult } from '../mediaProbeFile';
-import { bestFingerprintMatch, scoreFingerprintMatches, type FingerprintMatch, type FingerprintWindow } from './fingerprintMatcher.ts';
+import { bestFingerprintMatch, classifyDetectionConfidence, scoreFingerprintMatches, type FingerprintMatch, type FingerprintWindow } from './fingerprintMatcher.ts';
 import {
   detectMovieCreditIntervals,
   MOVIE_CREDIT_FRAME_HEIGHT,
@@ -140,11 +140,12 @@ function decodeFingerprint(value: string): FingerprintWindow {
   );
 }
 
-type FingerprintType = 'intro' | 'credits' | 'recap' | 'preview';
+type FingerprintType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
 
 const FINGERPRINT_WINDOW_VERSION: Record<FingerprintType, string> = {
   intro: 'head-max600000-ratio025-v1',
   recap: 'head-max180000-ratio015-v1',
+  outro: 'tail-max300000-v1',
   credits: 'tail-max300000-v1',
   preview: 'tail-max120000-v1',
 };
@@ -153,9 +154,13 @@ function fingerprintCacheVersion(type: FingerprintType): string {
   return `${FINGERPRINT_ALGORITHM_VERSION}:${FINGERPRINT_WINDOW_VERSION[type]}`;
 }
 
-function windowDetails(type: FingerprintType, durationMs: number): { startMs: number; durationMs: number } {
+export function windowDetails(type: FingerprintType, durationMs: number): { startMs: number; durationMs: number } {
   if (type === 'intro') return { startMs: 0, durationMs: Math.min(10 * 60_000, Math.floor(durationMs * 0.25)) };
   if (type === 'recap') return { startMs: 0, durationMs: Math.min(3 * 60_000, Math.floor(durationMs * 0.15)) };
+  if (type === 'outro') {
+    const outroDuration = Math.min(5 * 60_000, durationMs);
+    return { startMs: Math.max(0, durationMs - outroDuration), durationMs: outroDuration };
+  }
   const windowDuration = Math.min(type === 'preview' ? 2 * 60_000 : 5 * 60_000, durationMs);
   return { startMs: Math.max(0, durationMs - windowDuration), durationMs: windowDuration };
 }
@@ -438,7 +443,7 @@ export function createLocalSegmentAnalysis(deps: {
       saveSegmentAnalysisState(jobKey, mediaId, season, 'running', `Analyzing ${episodes.length} episodes`);
       try {
         const configured = settings();
-        const fingerprintTypes = (['intro', 'recap', 'credits', 'preview'] as const)
+        const fingerprintTypes = (['intro', 'recap', 'outro', 'credits', 'preview'] as const)
           .filter((type) => configured.enabledTypes[type]);
         const targetSet = targetRevisions ? new Set(targetRevisions) : null;
         const targetIndices = targetSet
@@ -525,9 +530,13 @@ export function createLocalSegmentAnalysis(deps: {
               const limits = configured.durationLimits[type];
               const conflicting = type === 'recap'
                 ? candidates.filter((candidate) => candidate.type === 'intro')
-                : type === 'preview'
-                  ? candidates.filter((candidate) => candidate.type === 'credits')
-                  : [];
+                : type === 'outro'
+                  ? []
+                  : type === 'credits'
+                    ? candidates.filter((candidate) => candidate.type === 'outro')
+                    : type === 'preview'
+                      ? candidates.filter((candidate) => candidate.type === 'credits' || candidate.type === 'outro')
+                      : [];
               const match = bestFingerprintMatch(target, other, {
                 minDurationMs: limits.minSeconds * 1000,
                 maxDurationMs: limits.maxSeconds * 1000,
@@ -582,11 +591,12 @@ export function createLocalSegmentAnalysis(deps: {
               endMs,
               confidence,
               source: 'chromaprint',
-              status: confidence >= 0.90 ? 'active' : 'review',
+              status: classifyDetectionConfidence(confidence) as 'active' | 'review',
               mediaDurationMs: episode.durationMs,
               updatedAt: new Date().toISOString(),
               analysisMetadata: {
                 detector: 'chromaprint',
+                fileVerified: false,
                 peerSupport: cluster.length,
                 originalStartMs,
                 originalEndMs: Math.min(episode.durationMs, originalStartMs + matchDurationMs),
@@ -611,7 +621,7 @@ export function createLocalSegmentAnalysis(deps: {
                 endMs: interval.endMs, confidence: interval.confidence, source: 'chromaprint', status: 'active',
                 mediaDurationMs: episode.durationMs, updatedAt: new Date().toISOString(),
                 analysisMetadata: {
-                  detector: 'blackframe', originalStartMs: interval.startMs, originalEndMs: interval.endMs,
+                  detector: 'blackframe', fileVerified: false, originalStartMs: interval.startMs, originalEndMs: interval.endMs,
                   startSnap: 'original', endSnap: 'original', confidenceComponents: { visual: interval.confidence },
                 },
               });
@@ -787,7 +797,7 @@ export function createLocalSegmentAnalysis(deps: {
         fileRevision: target.fileRevision, type, startMs: chapter.startMs, endMs: chapter.endMs,
         confidence: 0.98, source: 'chapter' as const, status: 'active' as const,
         mediaDurationMs: target.durationMs, updatedAt: new Date().toISOString(),
-        analysisMetadata: { detector: 'chapter' as const, startSnap: 'chapter' as const, endSnap: 'chapter' as const },
+        analysisMetadata: { detector: 'chapter' as const, fileVerified: true, startSnap: 'chapter' as const, endSnap: 'chapter' as const },
       }];
     });
     if (!shouldContinue()) throw new AnalysisInterruptedError();
@@ -805,7 +815,7 @@ export function createLocalSegmentAnalysis(deps: {
           fileRevision: target.fileRevision, type: 'credits' as const, startMs: interval.startMs,
           endMs: interval.endMs, confidence: interval.confidence, source: 'chromaprint' as const,
           status: 'active' as const, mediaDurationMs: target.durationMs, updatedAt: new Date().toISOString(),
-          analysisMetadata: { detector: 'blackframe' as const, originalStartMs: interval.startMs, originalEndMs: interval.endMs, startSnap: 'original' as const, endSnap: 'original' as const },
+          analysisMetadata: { detector: 'blackframe' as const, fileVerified: false, originalStartMs: interval.startMs, originalEndMs: interval.endMs, startSnap: 'original' as const, endSnap: 'original' as const },
         }];
       });
       if (shouldContinue()) replaceSegmentCandidatesForSource(fileRevision, 'chromaprint', visualCandidates);

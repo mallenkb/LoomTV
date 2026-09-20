@@ -49,6 +49,7 @@ const skipAnalysisSettingsSchema = z.object({
   durationLimits: durationLimitsSchema,
   suppressFirstEpisodeIntro: z.boolean(),
   analyzeSpecials: z.boolean(),
+  experimentalProviders: z.object({ skipdb: z.boolean().optional() }).optional(),
   exclusions: z.object({
     seriesIds: z.array(z.string()),
     movieIds: z.array(z.string()),

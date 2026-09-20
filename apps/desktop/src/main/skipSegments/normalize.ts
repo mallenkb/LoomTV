@@ -12,8 +12,13 @@ const SOURCE_PRIORITY: Record<MediaSegmentSource, number> = {
   chapter: 1,
   aniskip: 2,
   theintrodb: 2,
+  skipdb: 2,
   chromaprint: 3,
 };
+
+function sourceRank(source: MediaSegmentSource): number {
+  return SOURCE_PRIORITY[source] ?? Number.MAX_SAFE_INTEGER;
+}
 
 const TYPE_ORDER: Record<MediaSegmentType, number> = {
   recap: 0,
@@ -67,10 +72,17 @@ export function resolveCandidates(candidates: MediaSegmentCandidate[]): MediaSeg
   return [...byType.entries()]
     .flatMap(([type, values]) => {
       const ranked = values.sort((a, b) => {
-      const sourceOrder = SOURCE_PRIORITY[a.source] - SOURCE_PRIORITY[b.source];
+      const sourceOrder = sourceRank(a.source) - sourceRank(b.source);
       if (sourceOrder !== 0) return sourceOrder;
       if (a.source === 'aniskip' && b.source === 'theintrodb') return -1;
       if (a.source === 'theintrodb' && b.source === 'aniskip') return 1;
+      if (a.source === 'skipdb' && b.source !== 'skipdb') return 1;
+      if (b.source === 'skipdb' && a.source !== 'skipdb') return -1;
+      if (a.source === b.source) {
+        const aVerified = a.analysisMetadata?.fileVerified === true ? 0 : 1;
+        const bVerified = b.analysisMetadata?.fileVerified === true ? 0 : 1;
+        if (aVerified !== bVerified) return aVerified - bVerified;
+      }
       return b.updatedAt.localeCompare(a.updatedAt);
       });
       const winner = ranked[0];

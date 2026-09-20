@@ -353,6 +353,13 @@ impl Store {
             decision.insert("type".into(), Value::String(kind.into()));
         }
         metadata.insert("userDecision".into(), Value::Object(decision));
+        if let Some(status) = status {
+            if status == "active" {
+                metadata.insert("fileVerified".into(), Value::Bool(true));
+            } else if status == "rejected" {
+                metadata.insert("fileVerified".into(), Value::Bool(false));
+            }
+        }
         let metadata = serde_json::to_string(&Value::Object(metadata))?;
 
         let tx = self.db.transaction()?;
@@ -777,6 +784,10 @@ fn candidate_rank(left: &Candidate, right: &Candidate) -> Ordering {
                 Ordering::Less
             } else if left.source == "theintrodb" && right.source == "aniskip" {
                 Ordering::Greater
+            } else if (left.source == "aniskip" || left.source == "theintrodb") && right.source == "skipdb" {
+                Ordering::Less
+            } else if left.source == "skipdb" && (right.source == "aniskip" || right.source == "theintrodb") {
+                Ordering::Greater
             } else {
                 right.updated_at.cmp(&left.updated_at)
             }
@@ -787,7 +798,7 @@ fn source_order(source: &str) -> u8 {
     match source {
         "manual" => 0,
         "chapter" => 1,
-        "aniskip" | "theintrodb" => 2,
+        "aniskip" | "theintrodb" | "skipdb" => 2,
         "chromaprint" => 3,
         _ => 255,
     }
@@ -865,7 +876,7 @@ fn candidate_from_json(value: &Value) -> Result<Candidate> {
     let kind = required_segment_type(object.get("type"))?;
     let source = required_enum(
         object.get("source"),
-        &["manual", "chapter", "theintrodb", "aniskip", "chromaprint"],
+        &["manual", "chapter", "theintrodb", "aniskip", "skipdb", "chromaprint"],
         "source",
     )?;
     let status = required_enum(object.get("status"), SEGMENT_STATUSES, "status")?;
@@ -950,6 +961,10 @@ fn valid_analysis_metadata(raw: Option<&str>) -> Option<Value> {
             return None;
         }
         clean.insert("confidenceComponents".into(), value.clone());
+    }
+    if let Some(value) = source.get("fileVerified") {
+        value.as_bool()?;
+        clean.insert("fileVerified".into(), value.clone());
     }
     if let Some(value) = source.get("userDecision") {
         let decision = value.as_object()?;

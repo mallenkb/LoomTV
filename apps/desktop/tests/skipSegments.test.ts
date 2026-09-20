@@ -242,3 +242,82 @@ test('movie detector refuses ordinary ending footage without sustained credit ev
   const frames = Array.from({ length: 120 }, (_, index) => movieFrame('scene', index));
   assert.deepEqual(detectMovieCreditIntervals(Buffer.concat(frames.map((frame) => Buffer.from(frame))), 0, 120_000), []);
 });
+
+import { classifyDetectionConfidence } from '../src/main/skipSegments/fingerprintMatcher.ts';
+import fs from 'node:fs';
+
+function loadWindowDetails(): (type: string, durationMs: number) => { startMs: number; durationMs: number } {
+  // localAnalysis.ts pulls electron via database/mediaBinaries, so isolate the
+  // pure windowDetails export without importing the whole module.
+  const source = fs.readFileSync(new URL('../src/main/skipSegments/localAnalysis.ts', import.meta.url), 'utf8');
+  const marker = 'export function windowDetails';
+  const start = source.indexOf(marker);
+  assert.ok(start >= 0, 'windowDetails export missing');
+  // Signature contains a return-type object literal; skip it to reach the body.
+  const returnOpen = source.indexOf('{', start);
+  const returnClose = source.indexOf('}', returnOpen);
+  const bodyOpen = source.indexOf('{', returnClose);
+  assert.ok(bodyOpen > returnClose, 'windowDetails body missing');
+  let depth = 0;
+  let end = bodyOpen;
+  for (let index = bodyOpen; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) { end = index; break; }
+    }
+  }
+  const body = source.slice(bodyOpen + 1, end);
+  assert.ok(body.includes('outro'), 'windowDetails outro branch missing');
+  return new Function('type', 'durationMs', body) as (type: string, durationMs: number) => { startMs: number; durationMs: number };
+}
+
+test('windowDetails outro is tail bound and capped at 300000 ms', () => {
+  const windowDetails = loadWindowDetails();
+  const long = windowDetails('outro', 1_400_000);
+  assert.equal(long.durationMs, 300_000);
+  assert.equal(long.startMs, 1_100_000);
+  assert.equal(long.startMs + long.durationMs, 1_400_000);
+  const short = windowDetails('outro', 120_000);
+  assert.equal(short.durationMs, 120_000);
+  assert.equal(short.startMs, 0);
+});
+
+test('classifyDetectionConfidence boundaries 0.90 active, 0.80 review, 0.79 discard', () => {
+  assert.equal(classifyDetectionConfidence(0.90), 'active');
+  assert.equal(classifyDetectionConfidence(0.80), 'review');
+  assert.equal(classifyDetectionConfidence(0.79), 'discard');
+});
+
+test('bestFingerprintMatch excludeLeft suppresses a fully covered target already covered by existing pattern', () => {
+  const repeated = Array.from({ length: 300 }, (_, index) => (index * 2654435761) >>> 0);
+  const target = { frames: repeated, durationMs: 30_000, windowStartMs: 0 };
+  const other = { frames: repeated, durationMs: 30_000, windowStartMs: 0 };
+  const withoutExclusion = bestFingerprintMatch(target, other, {
+    minDurationMs: 15_000,
+    maxDurationMs: 120_000,
+    minSimilarity: 0.85,
+  });
+  assert.ok(withoutExclusion);
+  const fullyCovered = bestFingerprintMatch(target, other, {
+    minDurationMs: 15_000,
+    maxDurationMs: 120_000,
+    minSimilarity: 0.85,
+    excludeLeft: [{ startMs: 0, endMs: 30_000 }],
+  });
+  assert.equal(fullyCovered, null);
+});
+
+test('bestFingerprintMatch outro flavor excluding a credits interval', () => {
+  const repeated = Array.from({ length: 300 }, (_, index) => (index * 2654435761) >>> 0);
+  const durationMs = 300_000;
+  const target = { frames: repeated, durationMs, windowStartMs: 1_100_000 };
+  const other = { frames: repeated, durationMs, windowStartMs: 1_100_000 };
+  const creditsCovered = bestFingerprintMatch(target, other, {
+    minDurationMs: 15_000,
+    maxDurationMs: 300_000,
+    minSimilarity: 0.85,
+    excludeLeft: [{ startMs: 0, endMs: 300_000 }],
+  });
+  assert.equal(creditsCovered, null);
+});

@@ -206,3 +206,136 @@ export async function fetchAniSkipSegments(input: {
     return { kind: 'error' };
   }
 }
+
+export function skipDbLookupKey(
+  ids: MetadataProviderIds,
+  season?: number,
+  episode?: number,
+): string | null {
+  const imdbId = ids.imdbId?.trim();
+  if (!imdbId) return null;
+  return season === undefined || episode === undefined
+    ? `skipdb:imdb:${imdbId}:movie`
+    : `skipdb:imdb:${imdbId}:s${season}:e${episode}`;
+}
+
+const SKIPDB_ALLOWED_MATCHES = new Set(['exact', 'fuzzy', 'partial', 'close', 'none']);
+const SKIPDB_CONFIDENCE = 0.9;
+
+function skipDbIntervalMs(raw: unknown): { startMs?: number; endMs?: number | null } {
+  if (raw === null || raw === undefined) return {};
+  if (Array.isArray(raw)) {
+    const startMs = numberOrUndefined(raw[0]);
+    const endRaw = raw[1];
+    const endMs = endRaw === null || endRaw === undefined ? null : numberOrUndefined(endRaw);
+    return startMs === undefined || endMs === undefined ? {} : { startMs, endMs };
+  }
+  const value = asRecord(raw);
+  const startMs = numberOrUndefined(value.start_ms ?? value.startMs ?? value.start);
+  const endRaw = value.end_ms ?? value.endMs ?? value.end;
+  const endMs = endRaw === null || endRaw === undefined ? null : numberOrUndefined(endRaw);
+  if (startMs === undefined || endMs === undefined) return {};
+  return { startMs, endMs };
+}
+
+export async function fetchSkipDBSegments(input: {
+  ids: MetadataProviderIds;
+  season?: number;
+  episode?: number;
+  durationMs: number;
+  lookup?: SafeFetchOptions['lookup'];
+  requestImpl?: SafeFetchOptions['requestImpl'];
+}): Promise<ProviderLookupResult> {
+  const lookupKey = skipDbLookupKey(input.ids, input.season, input.episode);
+  if (!lookupKey || !input.ids.imdbId) return { kind: 'empty', segments: [] };
+
+  const url = new URL('https://api.skipdb.tv/api/segments');
+  url.searchParams.set('imdb_id', String(input.ids.imdbId));
+  if (input.season !== undefined && input.episode !== undefined) {
+    url.searchParams.set('season', String(input.season));
+    url.searchParams.set('episode', String(input.episode));
+  }
+  url.searchParams.set('duration', String(Math.max(1, Math.round(input.durationMs / 1000))));
+  url.searchParams.set('adjust', 'none');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await safeFetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'LoomTV/skip-markers' },
+      signal: controller.signal,
+    }, {
+      allowedHosts: ['api.skipdb.tv'],
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      maxBytes: MAX_RESPONSE_BYTES,
+      lookup: input.lookup,
+      requestImpl: input.requestImpl,
+    });
+    if (response.status === 404 || response.status === 204) return { kind: 'empty', segments: [] };
+    if (response.status === 429) return { kind: 'retry', retryAfterMs: retryAfterMs(response) };
+    if (!response.ok) return { kind: 'error' };
+    const payload = await responseJson(response);
+    // A null response means unknown, never confirmed absent. Treat it as
+    // empty (no usable intervals) rather than a confirmed negative that would
+    // erase existing markers.
+    if (payload === null) return { kind: 'empty', segments: [] };
+    const body = asRecord(payload);
+
+    const rawMatch = body.match;
+    if (rawMatch !== undefined && rawMatch !== null) {
+      const match = String(rawMatch).toLowerCase();
+      // Unknown match enums fail closed: an unrecognized alignment claim must
+      // never be trusted as usable timestamps.
+      if (!SKIPDB_ALLOWED_MATCHES.has(match)) return { kind: 'error' };
+      if (match === 'none') return { kind: 'empty', segments: [] };
+      // An exact match with adjust=none inside the shift window is not proof
+      // of alignment, so it never upgrades confidence below.
+    }
+
+    const adjusted = body.adjusted;
+    const offsetMs = numberOrUndefined(body.offset_ms ?? body.offsetMs) ?? 0;
+    // A nonzero offset with adjusted=false blocks close-runtime trust: the
+    // reported intervals belong to a shifted release. Never add offset_ms to
+    // timestamps; preserve the provider's original millisecond intervals and
+    // let duration compatibility decide emptiness.
+    const hasUnappliedOffset = adjusted === false && offsetMs !== 0;
+
+    const sourceDurationMs = numberOrUndefined(body.duration_ms ?? body.durationMs ?? body.runtime_ms)
+      ?? (() => {
+        const durationSeconds = numberOrUndefined(body.duration ?? body.runtime);
+        if (durationSeconds === undefined) return undefined;
+        return durationSeconds > 10000 ? durationSeconds : durationSeconds * 1000;
+      })();
+    if (!durationIsCompatible(sourceDurationMs, input.durationMs)) return { kind: 'empty', segments: [] };
+    void hasUnappliedOffset;
+
+    // The provider's 0.9 confidence baseline is optimistic. Store it as a
+    // providerScore only (ignored for ranking) and normalize with a fixed
+    // 0.90 confidence so SkipDB never outranks locally verified markers.
+    const segments: NormalizedSegmentInput[] = [];
+    for (const type of ['intro', 'recap', 'outro', 'preview'] as const) {
+      const raw = (body as Record<string, unknown>)[type];
+      // Null per-type means unknown, never confirmed absent: skip the type and
+      // let the fallback chain query the next provider for missing types.
+      if (raw === null || raw === undefined) continue;
+      const { startMs, endMs } = skipDbIntervalMs(raw);
+      if (startMs === undefined || endMs === undefined) continue;
+      if (endMs === null && (type === 'intro' || type === 'recap')) continue;
+      const normalized = normalizeSegment({
+        type,
+        startMs,
+        endMs,
+        source: 'skipdb',
+        confidence: SKIPDB_CONFIDENCE,
+      }, input.durationMs);
+      if (normalized) segments.push(normalized);
+    }
+    const deduplicated = deduplicateProviderSegments(segments, input.durationMs);
+    return deduplicated.length ? { kind: 'success', segments: deduplicated } : { kind: 'empty', segments: [] };
+  } catch (error) {
+    if ((error as Error)?.name !== 'AbortError') console.warn('[SkipDB] marker lookup failed:', error);
+    return { kind: 'error' };
+  } finally {
+    clearTimeout(timer);
+  }
+}

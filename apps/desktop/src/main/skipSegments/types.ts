@@ -5,11 +5,16 @@ export type MediaSegmentSource =
   | 'chapter'
   | 'theintrodb'
   | 'aniskip'
+  | 'skipdb'
   | 'chromaprint';
 
 type MediaSegmentCandidateStatus = 'active' | 'review' | 'rejected';
 export type SegmentAnalysisMetadata = {
   detector?: 'chromaprint' | 'blackframe' | 'chapter';
+  // True means boundaries and semantics were checked against this exact file
+  // revision, set only by exact-file detectors or explicit user verification,
+  // never by provider score or runtime proximity.
+  fileVerified?: boolean;
   peerSupport?: number;
   originalStartMs?: number;
   originalEndMs?: number | null;
@@ -70,7 +75,7 @@ export interface NormalizedSegmentInput {
 }
 
 export interface ProviderCacheEntry {
-  provider: 'theintrodb' | 'aniskip';
+  provider: 'theintrodb' | 'aniskip' | 'skipdb';
   lookupKey: string;
   durationBucket: number;
   status: 'success' | 'empty';

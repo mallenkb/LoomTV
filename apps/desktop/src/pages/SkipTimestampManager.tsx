@@ -37,6 +37,7 @@ export default function SkipTimestampManager({
     ? [0]
     : [...new Set((selectedItem?.episodeFiles || []).filter((file) => file.season === selectedSeason).map((file) => file.episode))].sort((a, b) => a - b), [selectedItem, selectedSeason]);
   const visible = segments.filter((segment) => `${segment.type} ${segment.source} ${segment.status}`.includes(filter.toLowerCase()));
+  const reviewSegments = visible.filter((segment) => segment.status === 'review');
   const excludedKey = `${selectedMediaId}:${selectedSeason}`;
   const seasonExcluded = settings.exclusions.seasons.includes(excludedKey);
 
@@ -93,6 +94,11 @@ export default function SkipTimestampManager({
 
   const updateCandidate = async (id: string, patch: { status?: ManagedMediaSegment['status']; type?: MediaSegmentType }) => {
     await desktopApi.updateManagedMediaSegment(id, patch);
+    await refresh();
+  };
+  const approveAllReview = async () => {
+    if (!reviewSegments.length) return;
+    await Promise.all(reviewSegments.map((segment) => desktopApi.updateManagedMediaSegment(segment.id, { status: 'active' })));
     await refresh();
   };
   const selectForEdit = (segment: ManagedMediaSegment) => setForm({
@@ -165,6 +171,10 @@ export default function SkipTimestampManager({
       </div>
 
       <input aria-label="Filter selected episode markers" value={filter} onChange={(event) => setFilter(event.target.value.toLowerCase())} placeholder="Filter markers by type, source, or state" className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-[var(--loom-muted)]">{reviewSegments.length} awaiting review</p>
+        <Button type="button" variant="outline" disabled={reviewSegments.length === 0} onClick={() => void approveAllReview()}>Approve all review</Button>
+      </div>
       <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{visible.map((segment) => <div key={segment.id} className="grid items-center gap-2 rounded-md border border-[var(--loom-border)] px-3 py-2 text-xs text-[var(--loom-text)] md:grid-cols-[95px_1fr_110px_auto]">
         <select value={segment.type} disabled={segment.source === 'manual'} aria-label={`Segment type for ${segment.type}`} onChange={(event) => void updateCandidate(segment.id, { type: event.target.value as MediaSegmentType })} className="rounded bg-black px-2 py-1 disabled:opacity-60">{TYPES.map((type) => <option key={type}>{type}</option>)}</select>
         <button type="button" onClick={() => selectForEdit(segment)} className="text-left"><span>{(segment.startMs / 1000).toFixed(1)}–{segment.endMs === null ? 'end' : (segment.endMs / 1000).toFixed(1)}s</span><span className="ml-2 text-[var(--loom-muted)]">{segment.source} · {Math.round(segment.confidence * 100)}%{segment.analysisMetadata?.detector ? ` · ${segment.analysisMetadata.detector}` : ''}</span></button>
