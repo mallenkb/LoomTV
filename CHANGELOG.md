@@ -6,7 +6,7 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ### [1.0.184](docs/releases/v1.0.184.md)
 
-Refreshes the desktop release metadata and updater package set. No behavior changes since 1.0.183.
+Uses the grey television mark for fallback art and refreshes the desktop release metadata.
 
 ### [1.0.183](docs/releases/v1.0.183.md)
 
