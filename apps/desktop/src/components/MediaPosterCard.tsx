@@ -4,6 +4,7 @@ import { Play } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
+import TelevisionPlaceholder from '@/components/TelevisionPlaceholder';
 import WatchedToggle from '@/components/WatchedToggle';
 import RatingBadge from '@/components/RatingBadge';
 import ContentRatingBadge from '@/components/ContentRatingBadge';
@@ -38,7 +39,6 @@ const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
 };
 
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
-const FALLBACK_ICON_CLASS = 'h-8 w-8 shrink-0 text-[var(--loom-accent)]';
 const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]';
 const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
 const PLAY_OVERLAY_CLASS = 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100';
@@ -138,7 +138,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
             <div className="h-full w-full bg-transparent" />
           ) : (
             <div className={FALLBACK_CLASS}>
-              <Play className={FALLBACK_ICON_CLASS} />
+              <TelevisionPlaceholder />
               <p className={FALLBACK_TEXT_CLASS}>{item.title}</p>
             </div>
           )}
