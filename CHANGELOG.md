@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.185](docs/releases/v1.0.185.md)
+
+Shows the television mark while picker artwork loads.
+
 ### [1.0.184](docs/releases/v1.0.184.md)
 
 Uses the grey television mark for fallback art and refreshes the desktop release metadata.
