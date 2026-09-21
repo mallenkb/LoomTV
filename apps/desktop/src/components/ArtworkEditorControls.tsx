@@ -3,6 +3,7 @@ import { FileText, FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, Re
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
+import TelevisionPlaceholder from '@/components/TelevisionPlaceholder';
 import { useToast } from '@/components/ToastProvider';
 import { desktopApi, type OfficialArtworkRefreshTarget, type OfficialMetadataApplyTarget, type OfficialMetadataCandidate } from '@/lib/desktopApi';
 import {
@@ -346,6 +347,7 @@ export default function ArtworkEditorControls({
   const [applyingCandidateId, setApplyingCandidateId] = useState('');
   const [metadataError, setMetadataError] = useState('');
   const [failedMetadataArtwork, setFailedMetadataArtwork] = useState<Set<string>>(() => new Set());
+  const [loadedMetadataArtwork, setLoadedMetadataArtwork] = useState<Set<string>>(() => new Set());
   const [metadataArtworkDimensions, setMetadataArtworkDimensions] = useState<Record<string, ArtworkDimensions>>({});
   const [visibleMetadataArtworkCount, setVisibleMetadataArtworkCount] = useState(METADATA_ARTWORK_BATCH_SIZE);
   const [artworkSaveError, setArtworkSaveError] = useState('');
@@ -1241,12 +1243,23 @@ export default function ArtworkEditorControls({
                       key={choice.id}
                       className={`group relative overflow-hidden rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] shadow-sm ${metadataApplyTarget === 'cover' ? 'aspect-[16/10]' : metadataApplyTarget === 'logo' ? 'aspect-[16/6]' : 'aspect-[2/3]'}`}
                     >
+                      {loadedMetadataArtwork.has(imageUrl) ? null : (
+                        <div className="absolute inset-0 grid place-items-center" aria-hidden="true">
+                          <TelevisionPlaceholder className="h-1/3 w-1/3 opacity-70" />
+                        </div>
+                      )}
                       <img
                         src={imageUrl}
                         alt={`${candidate.title} ${artworkLabel} from ${sourceLabel}`}
                         loading={index < METADATA_ARTWORK_BATCH_SIZE ? 'eager' : 'lazy'}
                         onLoad={(event) => {
                           const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+                          setLoadedMetadataArtwork((current) => {
+                            if (current.has(imageUrl)) return current;
+                            const next = new Set(current);
+                            next.add(imageUrl);
+                            return next;
+                          });
                           setMetadataArtworkDimensions((current) => {
                             const existing = current[imageUrl];
                             if (existing?.width === width && existing.height === height) return current;
