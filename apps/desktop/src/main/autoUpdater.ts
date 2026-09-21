@@ -19,11 +19,6 @@ import { z } from 'zod';
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
 const UPDATE_RELEASE_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`;
-class LegacyMacUpdateError extends Error {
-  constructor() {
-    super('This installation uses manual updates. Download LoomTV from the official releases page and replace the app in Applications.');
-  }
-}
 const execFileAsync = promisify(execFile);
 const githubReleaseSchema = z.object({
   tag_name: z.string().optional(),
@@ -156,7 +151,6 @@ function updateFailureMessage(error: unknown, stage: UpdateFailureStage): string
   const rawMessage = error instanceof Error ? error.message : String(error);
   console.error(`[updates] ${stage} failed:`, error);
 
-  if (error instanceof LegacyMacUpdateError) return error.message;
   if (/code.?sign|signature|publisher|bundle identifier|checksum|sha512/i.test(rawMessage)) {
     return 'The downloaded update could not be verified and was not installed.';
   }
@@ -353,18 +347,26 @@ async function getMacAppPublisherIdentity(appPath: string, label: string): Promi
   };
 }
 
-async function getTrustedMacPublisher(runningAppPath: string): Promise<MacAppPublisherIdentity> {
-  await verifyMacAppSignature(runningAppPath, 'Installed LoomTV app');
-  const identity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
-  if (identity.adHoc || !identity.teamIdentifier) throw new LegacyMacUpdateError();
-  return identity;
+async function getMacAppIdentity(appPath: string, label: string): Promise<MacAppPublisherIdentity> {
+  await verifyMacAppSignature(appPath, label);
+  return getMacAppPublisherIdentity(appPath, label);
 }
 
 async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
-  const runningIdentity = await getTrustedMacPublisher(runningAppPath);
+  const runningIdentity = await getMacAppIdentity(runningAppPath, 'Installed LoomTV app');
 
   await verifyMacAppSignature(sourceAppPath, 'Downloaded update app');
   const sourceIdentity = await getMacAppPublisherIdentity(sourceAppPath, 'Downloaded update app');
+
+  // Ad-hoc builds carry no publisher identity, so they can only update to
+  // another ad-hoc build of the same bundle. The zip checksum, deep
+  // signature verification, and single-bundle checks above still apply.
+  // Any trust-level change in either direction stays rejected below.
+  if (runningIdentity.adHoc || sourceIdentity.adHoc) {
+    if (runningIdentity.adHoc && sourceIdentity.adHoc
+      && sourceIdentity.bundleIdentifier === runningIdentity.bundleIdentifier) return;
+    throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
+  }
 
   if (sourceIdentity.bundleIdentifier !== runningIdentity.bundleIdentifier) {
     throw new Error(
@@ -836,7 +838,7 @@ export async function installDownloadedUpdate() {
   if (process.platform === 'darwin') {
     try {
       const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-      await getTrustedMacPublisher(runningAppPath);
+      await getMacAppIdentity(runningAppPath, 'Installed LoomTV app');
       if (!downloadedUpdateFilePath) throw new Error('The downloaded update archive is missing; its publisher cannot be verified.');
       installMacUpdate = await prepareMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
     } catch (error) {
@@ -844,7 +846,6 @@ export async function installDownloadedUpdate() {
       return setUpdateState({
         status: 'error',
         releaseUrl: UPDATE_RELEASE_URL,
-        ...(error instanceof LegacyMacUpdateError ? { manualDownload: true, supported: false } : {}),
         message: updateFailureMessage(error, 'install'),
         checkedAt: new Date().toISOString(),
       });
@@ -1015,13 +1016,7 @@ export async function checkForUpdates(): Promise<UpdateState> {
   updateCheckPromise = (async () => {
     if (process.platform === 'darwin') {
       const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-      try {
-        await getTrustedMacPublisher(runningAppPath);
-      } catch (error) {
-        if (!(error instanceof LegacyMacUpdateError)) throw error;
-        setUpdateState({ manualDownload: true, supported: false, releaseUrl: UPDATE_RELEASE_URL });
-        return checkLatestGitHubRelease().then(() => undefined);
-      }
+      await getMacAppIdentity(runningAppPath, 'Installed LoomTV app');
     }
     return autoUpdater.checkForUpdates();
   })()

@@ -271,16 +271,27 @@ async function assertPreflightFailure(fixture: ReturnType<typeof updaterFixture>
   assert.equal(await fixture.api.installDownloadedUpdate(), state);
 }
 
-test('legacy ad-hoc install offers manual download without draining cleanup', async () => {
-  for (const downloaded of [adHocIdentity, 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=OTHER12345']) {
-    const fixture = updaterFixture({ installed: adHocIdentity, downloaded });
-    fixture.download();
-    await assertPreflightFailure(fixture, /manual updates/);
-    assert.equal(fixture.api.getUpdateState().manualDownload, true);
-    assert.equal(fixture.api.getUpdateState().supported, false);
-    assert.ok(fixture.calls.some(({ args }) => args.includes('--display')));
-    assert.ok(!fixture.calls.some(({ file }) => file === '/usr/bin/ditto'));
-  }
+test('ad-hoc to ad-hoc install with the same bundle runs the full helper flow', async () => {
+  const fixture = updaterFixture({ installed: adHocIdentity, downloaded: adHocIdentity });
+  fixture.download();
+  const state = await fixture.api.installDownloadedUpdate();
+  assert.equal(state.status, 'installing');
+  assert.equal(fixture.api.isUpdateInstalling(), true);
+  assert.equal(fixture.api.getUpdateState().manualDownload, undefined);
+  assert.ok(fixture.calls.some(({ args }) => args.includes('--display')));
+  assert.ok(fixture.calls.some(({ args }) => args.includes('--verify')));
+  assert.ok(!fixture.calls.some(({ args }) => args.includes('-R')));
+  assert.ok(fixture.calls.some(({ file }) => file === '/usr/bin/ditto'));
+  assert.deepEqual(fixture.cleanups, ['transcodes', 'native playback', 'discovery', 'media server', 'update timer']);
+  assert.deepEqual(fixture.effects, ['write-helper', 'spawn', 'commit', 'quit']);
+  assert.equal(fixture.timers.length, 1);
+});
+
+test('ad-hoc install rejects a trust-level change without draining cleanup', async () => {
+  const fixture = updaterFixture({ installed: adHocIdentity, downloaded: 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=OTHER12345' });
+  fixture.download();
+  await assertPreflightFailure(fixture, /could not be verified and was not installed/);
+  assert.ok(fixture.calls.some(({ file }) => file === '/usr/bin/ditto'));
 });
 
 test('verified Developer ID install drains cleanup only after preflight and never uses Squirrel', async () => {
@@ -306,7 +317,6 @@ test('verified Developer ID install drains cleanup only after preflight and neve
 });
 
 for (const [label, options] of [
-  ['ad-hoc update', { downloaded: adHocIdentity }],
   ['different publisher', { downloaded: 'Identifier=com.mallenkb.loommediaserver\nTeamIdentifier=OTHER12345' }],
   ['different bundle', { downloaded: 'Identifier=wrong.app\nTeamIdentifier=ABCDE12345' }],
   ['Apple signing requirement', { rejectRequirement: true }],
@@ -462,18 +472,16 @@ test('update install shutdown force-closes active media server connections', asy
 });
 
 
-test('ad-hoc update checks offer official manual downloads without starting automatic downloads', async () => {
+test('ad-hoc update checks run the automatic check instead of forcing manual downloads', async () => {
   const f = updaterFixture({ installed: adHocIdentity });
   let automaticChecks = 0;
   f.autoUpdater.checkForUpdates = async () => { automaticChecks++; return undefined; };
   const state = await f.api.checkForUpdates();
-  assert.equal(state.status, 'available');
-  assert.equal(state.manualDownload, true);
-  assert.equal(state.supported, false);
-  assert.equal(state.releaseUrl, 'https://github.com/mallenkb/LoomTV/releases/latest');
-  assert.match(state.message ?? '', /replace the app in Applications/);
-  assert.equal(automaticChecks, 0);
+  assert.equal(state.status, 'checking');
+  assert.equal(state.manualDownload, undefined);
+  assert.equal(state.supported, true);
+  assert.equal(automaticChecks, 1);
   assert.deepEqual(f.cleanups, []);
   await f.api.checkForUpdates();
-  assert.equal(automaticChecks, 0);
+  assert.equal(automaticChecks, 2);
 });
