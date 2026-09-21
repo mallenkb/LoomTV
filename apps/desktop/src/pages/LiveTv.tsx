@@ -1,6 +1,7 @@
 import { useParams } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Play, Tv } from 'lucide-react';
+import { AlertTriangle, Play } from 'lucide-react';
+import TelevisionPlaceholder from '@/components/TelevisionPlaceholder';
 import LibrarySearch from '@/components/LibrarySearch';
 import ThemeFilterDropdown from '@/components/ThemeFilterDropdown';
 import { ChannelGridShimmer } from '@/components/ContentShimmer';
@@ -93,7 +94,7 @@ function ChannelCard({
               className="h-full w-full object-contain p-1"
             />
           ) : (
-            <Tv className="h-5 w-5 text-[var(--loom-muted)]" aria-hidden="true" />
+            <TelevisionPlaceholder className="h-8 w-8 shrink-0 opacity-80" />
           )}
         </div>
         <div className="min-w-0 flex-1">
@@ -345,7 +346,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
           <ChannelGridShimmer />
         ) : channels.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--loom-panel-border)] px-6 py-14 text-center">
-            <Tv className="mx-auto mb-3 h-8 w-8 text-[var(--loom-faint)]" aria-hidden="true" />
+            <TelevisionPlaceholder className="mx-auto mb-3 h-12 w-12 opacity-80" />
             <p className="text-sm text-[var(--loom-muted)]">
               {debouncedQuery || group || subcategory || geoFilter !== 'all'
                 ? 'No channels match that search.'

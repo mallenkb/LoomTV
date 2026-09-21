@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { Play } from 'lucide-react';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
+import TelevisionPlaceholder from '@/components/TelevisionPlaceholder';
 import ContentRatingBadge from '@/components/ContentRatingBadge';
 import WatchedToggle from '@/components/WatchedToggle';
 import RatingBadge from '@/components/RatingBadge';
@@ -31,7 +32,7 @@ function artworkSources(item: StremioPluginCatalogItem): string[] {
 function fallbackArtwork(title: string) {
   return (
     <div className={FALLBACK_CLASS}>
-      <Play className="h-8 w-8 shrink-0 text-[var(--loom-accent)]" />
+      <TelevisionPlaceholder />
       <p className={FALLBACK_TEXT_CLASS}>{title}</p>
     </div>
   );
