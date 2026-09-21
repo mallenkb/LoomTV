@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.184](docs/releases/v1.0.184.md)
+
+Refreshes the desktop release metadata and updater package set. No behavior changes since 1.0.183.
+
 ### [1.0.183](docs/releases/v1.0.183.md)
 
 Restores in-app macOS automatic updates and restart for ad-hoc installations.
