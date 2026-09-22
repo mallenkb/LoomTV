@@ -28,7 +28,7 @@ Loom
 └── Settings
 ```
 
-Only implemented and configured sections should appear in navigation. The current Electron delivery order is Photos, Music, Audiobooks, Books, then Comics and manga. Tauri is outside this work.
+Only implemented and configured sections should appear in navigation. The current Electron delivery order is Photos, Music, Audiobooks, Books, then Comics and manga.
 
 A library has a name, a media type, and one or more source folders. Loom preserves the folder hierarchy on disk. Albums, playlists, and collections are database groupings and do not move original files.
 

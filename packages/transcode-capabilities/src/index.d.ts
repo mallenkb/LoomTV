@@ -51,7 +51,5 @@ export interface ProbeOptions {
   ) => string | Buffer | void;
 }
 
-export const TRANSCODE_BACKENDS: readonly TranscodeBackend[];
 export function probeTranscodeCapabilities(ffmpegPath: string | null | undefined, options?: ProbeOptions): TranscodeCapabilities;
 export function clearTranscodeCapabilityCache(): void;
-export function backendEncoder(capabilities: TranscodeCapabilities | null | undefined, backend: TranscodeBackend, codec?: TranscodeCodec): string | null;

@@ -8,8 +8,8 @@ external MPV fallback. No native playback success is claimed by this draft.
 
 This draft leaves the pre-existing `../bridge.m` untouched.
 
-`bridge.m` is a macOS render-API bridge with a C ABI intended for both Electron
-and Tauri. It loads libmpv directly with `dlopen`; it contains no player-process
+`bridge.m` is a macOS render-API bridge with a C ABI intended for Electron.
+It loads libmpv directly with `dlopen`; it contains no player-process
 launch path. It uses the installed upstream `mpv/client.h` and `mpv/render_gl.h`
 headers rather than a handwritten copy of their ABI.
 
@@ -59,8 +59,7 @@ The shared LibVLC and MPV renderer adapters now use NativeSessionLease. This
 serializes startup/replacement, filters state by session ID, bounds early state
 storage, cancels superseded queued starts, and reclaims late start replies after
 close. Disposal is idempotent, waits for outstanding calls, retries a failed stop
-once, and reports persistent cleanup failure. These renderer changes apply to
-both Electron and Tauri because they share the same React source.
+once, and reports persistent cleanup failure.
 
 LibVLC still requires a composited host. A partial successful reply with the wrong
 surface is stopped instead of leaked. Delayed seeks and metadata probes are
@@ -83,20 +82,19 @@ the repository-wide desktop tsconfig. It strictly typechecked NativeSessionLease
 The second command ran 49 tests: 29 lease tests and 20 tests exercising the actual
 renderer adapter classes against a mocked desktop transport. The suite includes
 1,000 load/dispose iterations. All 49 passed. It does not test libmpv, LibVLC,
-Electron, Tauri, an actual media file, audio output, GPU rendering or process RSS.
+Electron, an actual media file, audio output, GPU rendering or process RSS.
 
 The repository test command discovers the two new `.test.ts` entrypoints. Their
 case files use the existing TypeScript dependency to transpile the renderer
 classes for isolated transport tests.
 
 Not run: full desktop typechecking, full repository test suite, Electron build,
-Rust checks, Tauri build, native bridge compilation, packaged-app execution or
+Rust checks, native bridge compilation, packaged-app execution or
 manual playback. No performance or memory improvement is claimed.
 
 ## Work still required before enabling libmpv
 
-1. Implement and connect the Electron worker adapter and Rust/Tauri adapter to
-   this C ABI. Preserve source authorization, profile/remote scope checks and
+1. Implement and connect the Electron worker adapter to this C ABI. Preserve source authorization, profile/remote scope checks and
    the high-level command allowlist. Delete the executable launch/socket path.
 2. Reuse the existing LibVLC native child hosts and viewport/fullscreen updates.
    Match startup pre-warm scheduling and measure first-play and repeat-play time.

@@ -34,27 +34,6 @@ export function PosterGridShimmer({
   );
 }
 
-export function LandscapeGridShimmer({ count = 12 }: { count?: number }) {
-  return (
-    <div
-      className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-x-4 gap-y-7"
-      role="status"
-      aria-label="Loading content"
-    >
-      {Array.from({ length: count }, (_, index) => (
-        <div key={index} className="min-w-0">
-          <ShimmerBlock className="aspect-[16/10] rounded-2xl" />
-          <div className="px-1 pt-3">
-            <ShimmerBlock className="h-4 w-4/5" />
-            <ShimmerBlock className="mt-2 h-3 w-2/5" />
-            <ShimmerBlock className="mt-2 h-3 w-1/3" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function ChannelGridShimmer({ count = 12 }: { count?: number }) {
   return (
     <div

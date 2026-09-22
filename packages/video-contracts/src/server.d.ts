@@ -44,7 +44,6 @@ export interface CanonicalBackupEnvelope {
 export type LegacyProfileKind = 'owner' | 'standard' | 'kid' | 'guest';
 export const LEGACY_PROFILE_KIND_MAP: Readonly<Record<LegacyProfileKind, ProfileKind>>;
 export function migrateLegacyProfileKind(value: unknown): ProfileKind;
-export function compareIdentityEvidence(leftKind: IdentityEvidenceKind | string, rightKind: IdentityEvidenceKind | string): number;
 
 /** Exactly one account has the owner role. Credentials never enter client DTOs. */
 export interface AccountCredential {

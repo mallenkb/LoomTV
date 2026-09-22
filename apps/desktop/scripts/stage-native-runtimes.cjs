@@ -196,21 +196,44 @@ function sourceFor(root, target, engine) {
   return path.join(root, target.label, engine);
 }
 
-function copyPayloadDeref(source, destination, sourceRoot) {
+// LoomTV embeds libvlc without starting any VLC interface, so VLC's own GUIs
+// and its Lua web control interface never load. Leaving them out keeps unused
+// code, including a bundled web server UI, out of every installer.
+const UNUSED_RUNTIME_PATHS = Object.freeze({
+  libvlc: Object.freeze([
+    'lua/http',
+    'plugins/gui',
+    'VLC.app/Contents/MacOS/share/lua/http',
+  ]),
+});
+
+function isUnusedRuntimePath(engine, relativePath) {
+  return (UNUSED_RUNTIME_PATHS[engine] || [])
+    .some((prefix) => relativePath === prefix || relativePath.startsWith(`${prefix}/`));
+}
+
+function copyPayloadDeref(source, destination, sourceRoot, skip = () => false, relativePath = '') {
+  if (relativePath && skip(relativePath)) return;
   const stats = fs.lstatSync(source);
   if (stats.isSymbolicLink()) {
     const resolved = fs.realpathSync(source);
     if (!isWithin(sourceRoot, resolved)) {
       throw new Error(`Native runtime symlink escapes its source root: ${source}`);
     }
-    copyPayloadDeref(resolved, destination, sourceRoot);
+    copyPayloadDeref(resolved, destination, sourceRoot, skip, relativePath);
     return;
   }
 
   if (stats.isDirectory()) {
     fs.mkdirSync(destination, { recursive: true, mode: stats.mode & 0o7777 });
     for (const entry of fs.readdirSync(source)) {
-      copyPayloadDeref(path.join(source, entry), path.join(destination, entry), sourceRoot);
+      copyPayloadDeref(
+        path.join(source, entry),
+        path.join(destination, entry),
+        sourceRoot,
+        skip,
+        relativePath ? `${relativePath}/${entry}` : entry,
+      );
     }
     return;
   }
@@ -300,7 +323,7 @@ function stagePayload(source, destination, engine, target, sourceMode) {
     // Native app bundles commonly use symlinks for versioned dylibs. They are
     // accepted only when they resolve within the explicitly supplied source
     // root, then copied as ordinary files into the deterministic payload.
-    copyPayloadDeref(source, temporaryPayload, source);
+    copyPayloadDeref(source, temporaryPayload, source, (relativePath) => isUnusedRuntimePath(engine, relativePath));
     fs.writeFileSync(
       path.join(temporaryPayload, MARKER_NAME),
       `${JSON.stringify({

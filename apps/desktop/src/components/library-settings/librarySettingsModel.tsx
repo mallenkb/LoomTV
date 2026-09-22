@@ -11,14 +11,7 @@ import {
   TVNavSolidIcon,
 } from '@/components/Sidebar';
 
-export const LIBRARY_KINDS = [
-  'movies',
-  'tvShows',
-  'anime',
-  'others',
-] as const;
-
-export type LibraryKind = (typeof LIBRARY_KINDS)[number];
+export type LibraryKind = 'movies' | 'tvShows' | 'anime' | 'others';
 
 export type LibraryIconComponent = ComponentType<{ className?: string }>;
 

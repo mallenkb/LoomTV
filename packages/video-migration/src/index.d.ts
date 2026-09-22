@@ -23,9 +23,7 @@ export function opaqueFingerprint(value: string): string;
 
 export const QUICK_HASH_WINDOW_BYTES: number;
 export const RELINK_EVIDENCE_ORDER: readonly ['content-sha256', 'filesystem-id', 'quick-hash'];
-export function strongestEvidenceKind(kinds: Iterable<string>): string | null;
 
-export const DESKTOP_DATABASE_FILENAME: 'loomtv.sqlite';
 export const CANONICAL_STATE_FILENAME: 'loomtv-canonical.sqlite';
 export function canonicalStatePath(dataDir: string): string;
 export function migrationReportFileName(migrationId: string, dryRun: boolean): string;

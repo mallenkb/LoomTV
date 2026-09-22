@@ -18,7 +18,6 @@ export default defineConfig([
       '**/ios/**',
       '**/Pods/**',
       '**/release-evidence/**',
-      '**/src-tauri/**',
       '**/target/**',
     ],
   },
@@ -106,37 +105,6 @@ export default defineConfig([
   {
     basePath: 'apps/tv',
     files: ['**/*.{ts,tsx}'],
-    extends: [
-      js.configs.recommended,
-      tseslint.configs.recommended,
-    ],
-    languageOptions: {
-      globals: {
-        ...globals.browser,
-        ...globals.node,
-      },
-      parserOptions: {
-        ecmaFeatures: { jsx: true },
-        sourceType: 'module',
-      },
-    },
-    plugins: {
-      'react-hooks': reactHooks,
-    },
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        caughtErrorsIgnorePattern: '^_',
-      }],
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'error',
-    },
-  },
-  {
-    basePath: 'apps/desktop-tauri',
-    files: ['src/**/*.{ts,tsx}', 'vite.config.ts'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,

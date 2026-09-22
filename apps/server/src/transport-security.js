@@ -6,7 +6,7 @@ function configurationError(message) {
 }
 
 /** @param {unknown} host */
-export function isLoopbackBindHost(host) {
+function isLoopbackBindHost(host) {
   const normalized = String(host || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   if (normalized === 'localhost' || normalized === '::1') return true;
   if (net.isIP(normalized) === 4) return normalized.startsWith('127.');

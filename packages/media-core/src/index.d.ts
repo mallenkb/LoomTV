@@ -3,12 +3,9 @@ export type ProfileType = 'owner' | 'standard' | 'kid' | 'guest';
 
 export const MEDIA_CORE_CONTRACT_VERSION: 3;
 export const VIDEO_EXTENSIONS: readonly string[];
-export const TRANSCODE_CODECS: readonly TranscodeCodec[];
-export const PROFILE_TYPES: readonly ProfileType[];
 
 export function isVideoFilePath(filePath: string): boolean;
 export function createMediaItemId(filePath: string): string;
-export function normalizeTranscodeCodec(value: unknown, fallback?: TranscodeCodec): TranscodeCodec;
 
 export interface PlaybackProfileInput {
   codec?: unknown;

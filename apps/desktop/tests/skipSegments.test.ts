@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bestFingerprintMatch, scoreFingerprintMatches } from '../src/main/skipSegments/fingerprintMatcher.ts';
+import { bestFingerprintMatch, classifyDetectionConfidence, scoreFingerprintMatches } from '../src/main/skipSegments/fingerprintMatcher.ts';
 import {
   detectMovieCreditIntervals,
   MOVIE_CREDIT_FRAME_HEIGHT,
@@ -243,7 +243,6 @@ test('movie detector refuses ordinary ending footage without sustained credit ev
   assert.deepEqual(detectMovieCreditIntervals(Buffer.concat(frames.map((frame) => Buffer.from(frame))), 0, 120_000), []);
 });
 
-import { classifyDetectionConfidence } from '../src/main/skipSegments/fingerprintMatcher.ts';
 import fs from 'node:fs';
 
 function loadWindowDetails(): (type: string, durationMs: number) => { startMs: number; durationMs: number } {

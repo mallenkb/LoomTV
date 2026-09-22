@@ -175,7 +175,7 @@ function seasonNumberFromText(value: string | undefined, fallback: number): numb
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-export function omdbSeasonEpisodeMetadata(
+function omdbSeasonEpisodeMetadata(
   metadata: OMDbSeasonResponse | null | undefined,
   requestedSeason: number,
 ): EpisodeMeta[] {

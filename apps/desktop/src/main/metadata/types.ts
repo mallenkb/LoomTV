@@ -5,15 +5,12 @@ import type {
   WireLocalMediaDetails,
   WireLocalMediaTrack,
   WireMediaItem,
-  WireSubtitleRecord,
 } from '../../shared/desktopProtocol.ts';
 
 export type LocalMediaTrack = WireLocalMediaTrack;
 export type LocalMediaDetails = WireLocalMediaDetails;
 export type EpisodeMeta = WireEpisodeMeta;
 export type EpisodeFile = WireEpisodeFile;
-export type SubtitleRecord = WireSubtitleRecord;
-export type ContentRatingSource = LanContentRating['source'];
 export type ContentRating = LanContentRating;
 export type ProviderRatings = LanProviderRatings;
 export type StreamingOfferType = NonNullable<LanStreamingProvider['offerTypes']>[number];

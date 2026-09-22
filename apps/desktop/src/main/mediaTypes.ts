@@ -1,5 +1,3 @@
-export type MediaBackend = 'html5' | 'hls';
-
 export interface MediaTrack {
   index: number;
   type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';

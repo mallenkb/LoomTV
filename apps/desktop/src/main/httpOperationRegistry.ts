@@ -119,7 +119,6 @@ export const httpOperations = {
   lanTrackPreferencesSave: operation({ method: 'POST', path: '/api/v2/playback-track-preferences', owner: 'playback', scope: 'playback:write', requestSchema: lanPlaybackTrackPreferencesSaveRequestSchema }),
 } as const;
 
-export type HttpOperationName = keyof typeof httpOperations;
 
 const parser = <TSchema extends z.ZodType>(schema: TSchema) => (
   body: unknown,

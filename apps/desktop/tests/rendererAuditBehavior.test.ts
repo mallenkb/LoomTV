@@ -5,7 +5,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { runInNewContext } from 'node:vm';
 import * as ts from 'typescript';
 import { z } from 'zod';
-import { isEditableShortcutTarget, isPlayerControlTarget } from '../src/components/VideoPlayer/playerControls.ts';
+import { isEditableShortcutTarget, isPlayerControlTarget, isSliderShortcutTarget } from '../src/components/VideoPlayer/playerControls.ts';
 
 type Node = { type: unknown; props: Record<string, unknown> };
 type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
@@ -245,7 +245,7 @@ test('remote profile polling refreshes personal state without overwriting pendin
   assert.equal(cleared, true);
 });
 
-test('player window handlers defer controls and Escape to the topmost modal', () => {
+test('player window handlers keep seeking above modals and defer the rest', () => {
   const source = readFileSync(new URL('../src/components/VideoPlayer.tsx', import.meta.url), 'utf8');
   const start = source.indexOf('    const ownsShortcut =');
   const end = source.indexOf('    return () => {', start);
@@ -269,7 +269,7 @@ test('player window handlers defer controls and Escape to the topmost modal', ()
     runInNewContext(compiled, {
       window: { addEventListener: (name: string, handler: (event: KeyboardEvent) => void) => handlers.set(name, handler) },
       document, containerRef: { current: surface }, isTopmostModalContent: () => topmost,
-      isEditableShortcutTarget, isPlayerControlTarget,
+      isEditableShortcutTarget, isPlayerControlTarget, isSliderShortcutTarget,
       playerStateRef: { current: 'playing' }, togglePlay: () => { toggles++; },
       resetSurfaceDoubleClickGuard: () => undefined, seekTo: () => { seeks++; }, playbackPositionRef: { current: 0 },
     });
@@ -287,13 +287,14 @@ test('player window handlers defer controls and Escape to the topmost modal', ()
     topmost = false;
     assert.equal(send(' '), false);
     assert.equal(send('Escape'), false);
+    assert.equal(send('ArrowRight'), true);
     topmost = true;
     assert.equal(send('Escape'), false);
     assert.equal(send(' '), true);
     assert.equal(send(' ', surface, 'keyup'), true);
     assert.equal(send('ArrowRight'), true);
     assert.equal(toggles, 1);
-    assert.equal(seeks, 1);
+    assert.equal(seeks, 2);
   } finally {
     if (original) Object.defineProperty(globalThis, 'Element', original);
     else Reflect.deleteProperty(globalThis, 'Element');

@@ -1,5 +1,4 @@
 import type { MediaSessionAdapterCandidate } from './service.ts';
-import type { MediaSessionAdapterKind } from '../../shared/mediaControlProtocol.ts';
 import { createMacOsMediaSessionAdapter } from './macosMediaPlayerAdapter.ts';
 import { createWindowsSmtcAdapter } from './windowsSmtcAdapter.ts';
 import { createLinuxMprisAdapter } from './linuxMprisAdapter.ts';
@@ -17,13 +16,6 @@ import { createLinuxMprisAdapter } from './linuxMprisAdapter.ts';
  * are only touched inside `start`. A platform with no adapter, or an adapter
  * that fails to start, leaves system media controls off and playback untouched.
  */
-
-export function platformMediaSessionKind(platform: string): MediaSessionAdapterKind {
-  if (platform === 'darwin') return 'macos-mediaplayer';
-  if (platform === 'win32') return 'windows-smtc';
-  if (platform === 'linux') return 'linux-mpris';
-  return 'unsupported';
-}
 
 export type MediaSessionAdapterEnvironment = {
   platform: string;

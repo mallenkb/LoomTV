@@ -48,6 +48,3 @@ export function iptvSearchTerms(query: string): string[] {
   return Array.from(new Set(normalized.split(' '))).slice(0, IPTV_SEARCH_MAX_TERMS);
 }
 
-export function matchesIptvSearch(searchText: string, query: string): boolean {
-  return iptvSearchTerms(query).every((term) => searchText.includes(term));
-}

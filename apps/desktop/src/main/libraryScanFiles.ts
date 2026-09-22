@@ -91,53 +91,9 @@ function matchingSubtitleFilesForVideo(directory: string, videoFileName: string)
   }
 }
 
-export function getLibraryFolderSignature(folderPath: string): { signature: string; fileCount: number } | null {
-  if (!fs.existsSync(folderPath)) return null;
-
-  const hash = createHash('sha256');
-  const stack = [folderPath];
-  let fileCount = 0;
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined) break;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (isMacSidecarFile(entry.name)) continue;
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (!isVideoFileName(entry.name) && !isSubtitleFileName(entry.name) && !isImageFileName(entry.name)) continue;
-      try {
-        const stats = fs.statSync(fullPath);
-        hash.update(path.relative(folderPath, fullPath));
-        hash.update('\0');
-        hash.update(String(stats.size));
-        hash.update('\0');
-        hash.update(String(Math.round(stats.mtimeMs)));
-        hash.update('\0');
-        fileCount += 1;
-      } catch {
-        // A later scan will pick up files that disappear during traversal.
-      }
-    }
-  }
-
-  return { signature: `${fileCount}:${hash.digest('hex')}`, fileCount };
-}
-
 /**
  * Startup scans run in Electron's main process, so the recursive filesystem
- * walk must yield while the OS reads each directory and file. The synchronous
- * variant remains available for small, deterministic callers and tests.
+ * walk must yield while the OS reads each directory and file.
  */
 export async function getLibraryFolderSignatureAsync(
   folderPath: string,

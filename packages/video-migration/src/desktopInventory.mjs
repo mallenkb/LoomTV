@@ -15,8 +15,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { migrationError } from './errors.mjs';
 import { opaqueFingerprint } from './redaction.mjs';
 
-export const DESKTOP_DATABASE_FILENAME = 'loomtv.sqlite';
-
 function tableExists(database, table) {
   return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
 }

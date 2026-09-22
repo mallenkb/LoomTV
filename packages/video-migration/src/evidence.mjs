@@ -9,22 +9,12 @@
 
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { IDENTITY_EVIDENCE_STRENGTH, identityEvidenceStrength } from '@loom-media-server/video-contracts';
 
 /** Head and tail window used by the quick hash. */
 export const QUICK_HASH_WINDOW_BYTES = 64 * 1024;
 
 /** Evidence kinds the bridge is allowed to reconnect on, strongest first. */
 export const RELINK_EVIDENCE_ORDER = Object.freeze(['content-sha256', 'filesystem-id', 'quick-hash']);
-
-export function strongestEvidenceKind(kinds) {
-  let best = null;
-  for (const kind of kinds) {
-    if (!IDENTITY_EVIDENCE_STRENGTH[kind]) continue;
-    if (!best || identityEvidenceStrength(kind) > identityEvidenceStrength(best)) best = kind;
-  }
-  return best;
-}
 
 async function readWindow(handle, position, length) {
   if (length <= 0) return Buffer.alloc(0);

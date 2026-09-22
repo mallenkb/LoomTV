@@ -10,7 +10,6 @@ import type {
   LanProviderRatings,
   LanStreamingProvider,
   LanPlaybackCapabilities,
-  LanPlaybackPlan,
   LanPlaybackPlanResponse,
   LanProfileListEntry,
   LanProfileListKind,
@@ -24,7 +23,6 @@ import type {
 import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 
 export type PlaybackCapabilities = LanPlaybackCapabilities;
-export type PlaybackPlan = LanPlaybackPlan;
 export type PlaybackPlanResponse = LanPlaybackPlanResponse;
 
 export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';

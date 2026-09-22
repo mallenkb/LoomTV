@@ -1539,14 +1539,18 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
         // Resolve and authorize the capability before selecting a fixed provider
         // rendition. The client cannot substitute an upstream host or path.
+        const originalSourceUrl = sourceUrl;
         sourceUrl = smallerTmdbArtwork(sourceUrl, reqUrl.searchParams.get('width'));
-        const sendArtwork = (cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>) => {
+        const sendArtwork = (
+          cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>,
+          cacheControl = LAN_IMAGE_CACHE_CONTROL,
+        ) => {
           if (!canWriteResponse(res)) return;
           if (cachedArtwork.cachePath) {
             res.writeHead(200, cachedArtworkResponseHeaders(
               cachedArtwork.mimeType,
               cachedArtwork.byteLength,
-              isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
+              isCacheableImageRequest ? cacheControl : undefined,
             ));
             const stream = fs.createReadStream(cachedArtwork.cachePath);
             pipeResponse(stream, res);
@@ -1563,7 +1567,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           res.writeHead(200, cachedArtworkResponseHeaders(
             cachedArtwork.mimeType || decoded.mimeType,
             decoded.buffer.byteLength,
-            isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
+            isCacheableImageRequest ? cacheControl : undefined,
           ));
           res.end(decoded.buffer);
         };
@@ -1574,6 +1578,22 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         if (cachedArtwork) {
           sendArtwork(cachedArtwork);
           return;
+        }
+
+        // A missing smaller rendition must not make an already cached image
+        // wait on the provider. Return the original briefly, then prepare the
+        // smaller cache entry for the next visit.
+        if (sourceUrl !== originalSourceUrl) {
+          const originalArtwork = artworkOwnerId
+            ? getCachedPluginArtwork(artworkOwnerId, originalSourceUrl)
+            : getCachedArtwork(originalSourceUrl);
+          if (originalArtwork) {
+            sendArtwork(originalArtwork, 'private, max-age=60');
+            void (artworkOwnerId
+              ? cachePluginArtworkSource(artworkOwnerId, sourceUrl)
+              : cacheArtworkSource(sourceUrl)).catch(() => undefined);
+            return;
+          }
         }
 
         void (artworkOwnerId
@@ -1710,13 +1730,13 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               return;
             }
             try {
-              const proc = spawn(ffmpegPath, seekPreview ? [
+              const proc = spawn(ffmpegPath, [
                 '-nostdin', '-hide_banner', '-loglevel', 'error',
                 '-threads', '2', '-filter_threads', '1', ...args,
-              ] : args, { stdio: ['ignore', 'pipe', 'pipe'] });
+              ], { stdio: ['ignore', 'pipe', 'pipe'] });
               proc.once('exit', release);
-              const thumbnailTimeout = seekPreview ? setTimeout(() => proc.kill('SIGKILL'), 15_000) : undefined;
-              thumbnailTimeout?.unref();
+              const thumbnailTimeout = setTimeout(() => proc.kill('SIGKILL'), seekPreview ? 15_000 : 30_000);
+              thumbnailTimeout.unref();
               const chunks: Buffer[] = [];
               let outputBytes = 0;
               proc.stdout?.on('data', (chunk: Buffer) => {

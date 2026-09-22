@@ -162,7 +162,6 @@ export type {
   StreamingProvider,
   MpvAvailability,
   MpvCommand,
-  MpvPlaybackDiagnostics,
   MpvPlaybackState,
   MpvStartOptions,
   OfficialArtworkResult,
@@ -181,7 +180,6 @@ export type {
   ProfileRestrictions,
   ProfileSummary,
   ProfileTransferResult,
-  ProfileType,
   ProfileUpdateInput,
   RemoteLibraryConnection,
   RemoteLibraryRequest,
@@ -191,8 +189,6 @@ export type {
   StoredProgress,
   StreamUrlOptions,
   StreamUrlResult,
-  StremioPluginCatalogExtra,
-  StremioPluginCatalogDefinition,
   StremioPluginCatalogItem,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
@@ -203,12 +199,10 @@ export type {
   StremioPluginMetaResult,
   StremioPluginReview,
   StremioPluginSummary,
-  SubtitleStyleOptions,
   TranscodeOptions,
   TranscodeSession,
   UpdateState,
 } from '../shared/desktopProtocol.ts';
-export type { MpvPlaybackTrack } from '../shared/desktopProtocol.ts';
 export type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 
 export type LibVlcSurface = 'composited-window' | 'unavailable';
@@ -220,7 +214,6 @@ export type LibVlcAvailability = MpvAvailability & {
 export type LibVlcPlaybackState = Omit<PlaybackState, 'sessionId'> & {
   sessionId?: string;
 };
-export type LibVlcStartOptions = PlaybackStartOptions;
 export type LibVlcStartResult = {
   ok: boolean;
   sessionId?: string;
@@ -245,16 +238,12 @@ export type DesktopBridgeApi = {
       pickLibraryFolder?: (currentPath?: string) => Promise<string | null>;
       removeLibraryFolder: (folderPath: string) => Promise<LibraryIndexPayload>;
       updateLibraryFolder?: (folderPath: string, nextFolderPath: string, kind: LibraryFolderKind) => Promise<LibraryIndexPayload>;
-      playMedia: (filePath: string) => Promise<boolean>;
       getStreamUrl: (filePath: string, options?: StreamUrlOptions) => Promise<StreamUrlResult>;
       getSubtitleUrl?: (filePath: string, streamOrdinal?: number) => Promise<{ url: string }>;
       getThumbnail: (filePath: string, time?: string, seekPreview?: boolean) => Promise<{ url: string }>;
-      getFileInfo: (filePath: string) => Promise<{ size: number; path: string; exists: boolean }>;
       getServerBase: () => Promise<string>;
       getRendererSession?: () => Promise<RendererSession>;
-      setFullscreen?: (enabled: boolean) => Promise<boolean>;
       setWindowChromeVisible?: (visible: boolean) => Promise<boolean>;
-      onFullscreenChanged?: (callback: (fullscreen: boolean) => void) => () => void;
       publishMediaSession?: (snapshot: MediaSessionSnapshot) => Promise<MediaSessionDiagnostics>;
       releaseMediaSession?: () => Promise<boolean>;
       onPlaybackSleepTimerReset?: (callback: () => void) => () => void;
@@ -296,7 +285,6 @@ export type DesktopBridgeApi = {
       getRemoteLibrarySession?: () => Promise<RemoteLibrarySessionState>;
       disconnectRemoteLibrary?: (revoke?: boolean) => Promise<boolean>;
       revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
-      setLocalNetworkDeviceName?: (name: string) => Promise<string>;
       getUnifiedDesktopServerState?: () => Promise<UnifiedDesktopServerState>;
       configureUnifiedDesktopOwner?: (input: { name: string; password: string }) => Promise<UnifiedDesktopServerState>;
       openUnifiedDesktopAdmin?: () => Promise<boolean>;
@@ -364,8 +352,6 @@ export type DesktopBridgeApi = {
       onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
       mpv?: {
         availability: () => Promise<MpvAvailability>;
-        chooseExecutable: () => Promise<MpvAvailability>;
-        resetExecutable: () => Promise<MpvAvailability>;
         refreshAvailability: () => Promise<MpvAvailability>;
         start: (filePath: string, options?: MpvStartOptions) => Promise<{ ok: boolean; sessionId?: string; surface?: 'composited-window' | 'external-window'; error?: string }>;
         command: (sessionId: string, command: MpvCommand) => Promise<boolean>;
@@ -385,7 +371,6 @@ export type DesktopBridgeApi = {
       };
       media?: {
         probe: (filePath: string) => Promise<ApiResult<unknown>>;
-        canDirectPlay: (filePath: string, backend?: 'html5' | 'hls') => Promise<ApiResult<boolean>>;
         getPlaybackPlan?: (filePath: string, capabilities?: PlaybackCapabilities) => Promise<PlaybackPlanResponse | null>;
         startTranscode: (filePath: string, options?: TranscodeOptions) => Promise<ApiResult<TranscodeSession>>;
         stopTranscode: (sessionId: string) => Promise<ApiResult<boolean>>;
@@ -996,14 +981,6 @@ const desktopTransport = {
     };
   },
 
-  async getFileInfo(filePath: string): Promise<{ size: number; path: string; exists: boolean }> {
-    if (window.desktopApi?.getFileInfo) return window.desktopApi.getFileInfo(filePath);
-    // The browser renderer cannot inspect host paths directly. Electron's
-    // bridge is the authoritative check; keep a conservative fallback for
-    // local web mode so it can continue using its existing stream route.
-    return { size: 0, path: filePath, exists: false };
-  },
-
   async getSubtitleUrl(filePath: string, streamOrdinal?: number): Promise<{ url: string }> {
     if (isRemoteDesktopMode()) {
       const parsed = isRemoteMediaSource(filePath) ? new URL(filePath) : null;
@@ -1029,14 +1006,6 @@ const desktopTransport = {
 
   async setWindowChromeVisible(visible: boolean): Promise<boolean> {
     return window.desktopApi?.setWindowChromeVisible?.(visible) ?? false;
-  },
-
-  async setFullscreen(enabled: boolean): Promise<boolean> {
-    return window.desktopApi?.setFullscreen?.(enabled) ?? false;
-  },
-
-  onFullscreenChanged(callback: (fullscreen: boolean) => void): () => void {
-    return window.desktopApi?.onFullscreenChanged?.(callback) || (() => undefined);
   },
 
   /**
@@ -1074,11 +1043,6 @@ const desktopTransport = {
   async revokePairedDevice(deviceId: string): Promise<LocalNetworkPairedDevice[]> {
     if (window.desktopApi?.revokePairedDevice) return window.desktopApi.revokePairedDevice(deviceId);
     return [];
-  },
-
-  async setLocalNetworkDeviceName(name: string): Promise<string> {
-    if (window.desktopApi?.setLocalNetworkDeviceName) return window.desktopApi.setLocalNetworkDeviceName(name);
-    return name;
   },
 
   async connectToLocalNetworkLibrary(baseUrl: string, code: string, certFingerprint?: string): Promise<RemoteLibraryConnection> {
@@ -1973,35 +1937,12 @@ const desktopTransport = {
     return () => undefined;
   },
 
-  async playMedia(filePath: string): Promise<boolean> {
-    if (window.desktopApi) return window.desktopApi.playMedia(filePath);
-    const response = await fetchJson('/api/play-media', okResultSchema, {
-      method: 'POST',
-      body: JSON.stringify({ filePath }),
-    });
-    return response.ok;
-  },
-
   mpv: {
     async availability(): Promise<MpvAvailability> {
       if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
         return { available: false, reason: 'mpv playback is available for local files in the desktop app.' };
       }
       return window.desktopApi.mpv.availability();
-    },
-
-    async chooseExecutable(): Promise<MpvAvailability> {
-      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
-        return { available: false, reason: 'mpv configuration is available in the local desktop app.' };
-      }
-      return window.desktopApi.mpv.chooseExecutable();
-    },
-
-    async resetExecutable(): Promise<MpvAvailability> {
-      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
-        return { available: false, reason: 'mpv configuration is available in the local desktop app.' };
-      }
-      return window.desktopApi.mpv.resetExecutable();
     },
 
     async refreshAvailability(): Promise<MpvAvailability> {
@@ -2098,13 +2039,6 @@ const desktopTransport = {
         method: 'POST',
         body: JSON.stringify({ filePath }),
       });
-    },
-
-    async canDirectPlay(filePath: string, backend: 'html5' | 'hls' = 'html5'): Promise<ApiResult<boolean>> {
-      if (isRemoteDesktopMode()) return { ok: true, data: backend === 'html5' };
-      if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
-      const probeResult = await this.probe(filePath);
-      return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };
     },
 
     async getPlaybackPlan(filePath: string, capabilities?: PlaybackCapabilities): Promise<PlaybackPlanResponse | null> {

@@ -1,6 +1,6 @@
 # Product roadmap
 
-The active Electron expansion order is Photos, Music, Audiobooks, Books, then Comics and manga. Start with photo folders, nested browsing, All photos, and viewing. See [Media library expansion](multimedia-execution-plan.md) for the execution plan. Tauri is outside this work.
+The active Electron expansion order is Photos, Music, Audiobooks, Books, then Comics and manga. Start with photo folders, nested browsing, All photos, and viewing. See [Media library expansion](multimedia-execution-plan.md) for the execution plan.
 
 The remaining sections track video and platform work alongside that expansion.
 

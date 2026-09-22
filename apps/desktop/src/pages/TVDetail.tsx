@@ -13,6 +13,7 @@ import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { WatchedSolidIcon } from '@/components/LoomIcons';
 import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
+import { artworkVariant } from '@/lib/artworkVariants';
 import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
@@ -824,6 +825,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     customArtwork.thumbnail || customArtwork.poster || '',
     posterSources(show, sourceArtwork, generatedArtwork),
   );
+  // The hero poster frame is 112px wide, so the original rendition would only
+  // cost decode memory.
+  const detailPosterSources = posterArtwork.map((source) => artworkVariant(source, 'w342'));
   const officialPosterArtwork = uniqueArtworkSources(
     show.posterCandidates,
     show.poster,
@@ -982,7 +986,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
           <div className="loom-detail-hero-identity flex min-w-0 flex-1 items-end gap-6">
           <SafeArtwork
-            src={posterArtwork}
+            src={detailPosterSources}
             placeholderSrc={fallbackThumbnails[0] || ''}
             alt={show.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
@@ -1342,10 +1346,11 @@ function EpisodeRow({
       <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded bg-[var(--loom-surface-3)]">
         {(thumbnailUrl || ep.still) && !imgError ? (
           <img
-            src={thumbnailUrl || ep.still}
+            src={thumbnailUrl || artworkVariant(ep.still, 'w300')}
             alt=""
             className="h-full w-full object-cover"
             loading="lazy"
+            decoding="async"
             onError={() => setImgError(true)}
           />
         ) : (

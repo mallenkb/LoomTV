@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createSetupRedirectGuard } from './setup-page.js';
 
 export const WEB_APP_PATH = '/app/';
-export const WEB_APP_HLS_PATH = '/app/hls.min.js';
+const WEB_APP_HLS_PATH = '/app/hls.min.js';
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_WEB_APP_HTML_PATH = path.resolve(MODULE_DIR, 'web-app.html');
 const require = createRequire(import.meta.url);

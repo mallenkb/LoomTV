@@ -4,9 +4,7 @@ import test from 'node:test';
 import {
   HLS_SEGMENT_SECONDS,
   HLS_WINDOW_SEGMENTS,
-  TRANSCODE_READY_SEGMENTS,
   buildEmbeddedSubtitleTextArgs,
-  buildEmbeddedSubtitleVttArgs,
   buildHlsArgs,
   buildVodPlaylist,
   frameAlignedSegmentSeconds,
@@ -82,8 +80,7 @@ test('frame-aligned windows keep -ss and -output_ts_offset on the fractional gri
   assert.ok(args.includes(`expr:gte(t,n_forced*${segmentSeconds})`));
 });
 
-test('HLS startup reports ready after the first segment for fast seek response', () => {
-  assert.equal(TRANSCODE_READY_SEGMENTS, 1);
+test('HLS segment defaults match the documented window', () => {
   assert.equal(HLS_SEGMENT_SECONDS, 2);
   assert.equal(HLS_WINDOW_SEGMENTS, 45);
 });
@@ -265,7 +262,7 @@ test('subtitle filter paths survive apostrophes and filter-special characters', 
 });
 
 test('embedded subtitle extraction emits a WebVTT stream from the selected subtitle ordinal', () => {
-  assert.deepEqual(buildEmbeddedSubtitleVttArgs('/media/movie.mkv', 2), [
+  assert.deepEqual(buildEmbeddedSubtitleTextArgs('/media/movie.mkv', 2, 'webvtt'), [
     '-nostdin',
     '-loglevel',
     'error',

@@ -361,13 +361,6 @@ function commandTarget(runtime: ObjcRuntime): CommandTarget {
   return sharedTarget;
 }
 
-/** Reset process-wide Objective-C state. Exported for tests only. */
-export function resetMacOsMediaSessionBridgeForTests(): void {
-  sharedRuntime = null;
-  sharedTarget = null;
-  activeDispatch = null;
-}
-
 export function createMacOsMediaSessionAdapter(
   options: MacOsMediaSessionAdapterOptions = {},
 ): MediaSessionAdapter {
@@ -629,11 +622,9 @@ export function createMacOsMediaSessionAdapter(
       if (!started || !runtime) return;
       lastSnapshot = snapshot;
       withAutoreleasePool(() => {
+        const enabled = new Set(enabledMacOsCommands(snapshot));
         for (const binding of COMMAND_BINDINGS) {
-          setCommandEnabled(
-            commandFor(binding.command),
-            snapshot.supportedCommands.includes(binding.requires),
-          );
+          setCommandEnabled(commandFor(binding.command), enabled.has(binding.command));
         }
         applyPreferredIntervals(snapshot);
         publishNowPlaying(snapshot);

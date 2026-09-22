@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import {
   extractSeasons,
-  getLibraryFolderSignature,
+  getLibraryFolderSignatureAsync,
   scanEpisodeFiles,
   seasonNumberFromDirectoryName,
 } from '../src/main/libraryScanFiles.ts';
@@ -119,7 +119,7 @@ test('episode scanning follows season folders, pairs subtitles, and skips extras
   }
 });
 
-test('library signatures include media assets but ignore macOS sidecars', () => {
+test('library signatures include media assets but ignore macOS sidecars', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'loomtv-signature-'));
   try {
     writeFileSync(path.join(root, 'Movie.mkv'), 'video');
@@ -128,7 +128,7 @@ test('library signatures include media assets but ignore macOS sidecars', () => 
     writeFileSync(path.join(root, '._Movie.mkv'), 'sidecar');
     writeFileSync(path.join(root, 'notes.txt'), 'ignored');
 
-    const signature = getLibraryFolderSignature(root);
+    const signature = await getLibraryFolderSignatureAsync(root);
     assert.equal(signature?.fileCount, 3);
     assert.match(signature?.signature || '', /^3:[a-f0-9]{64}$/);
   } finally {

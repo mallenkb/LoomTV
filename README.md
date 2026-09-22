@@ -155,7 +155,6 @@ Desktop build output goes to `apps/desktop/out/`. Electron Builder writes instal
 ```text
 apps/
   desktop/       Electron host, desktop UI, native playback, and packaging
-  desktop-tauri/ Tauri desktop port and native bridge
   server/        Main server, API, setup, hosted app, and admin UI
   mobile/        Expo app for iOS and Android
   tv/            Expo app for Android TV and Fire TV

@@ -94,25 +94,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: |
-            . -> target
             apps/desktop/native/scanner -> target
-
-      - name: Install Linux Rust dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev libdbus-1-dev libgtk-3-dev libxdo-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-
-      - name: Test core crate
-        working-directory: crates/loomtv-core
-        run: cargo test --locked -p loomtv-core
-
-      - name: Test playback crate
-        working-directory: crates/loomtv-playback
-        run: cargo test --locked -p loomtv-playback
-
-      - name: Test Tauri host crate
-        working-directory: apps/desktop-tauri/src-tauri
-        run: cargo test --locked -p loomtv-desktop-tauri
 
       - name: Test scanner workspace
         working-directory: apps/desktop/native/scanner
@@ -121,13 +103,8 @@ jobs:
       - name: Install Cargo audit
         run: cargo install cargo-audit --version 0.22.2 --locked
 
-      - name: Audit both Rust workspaces
-        shell: bash
-        run: |
-          audit_status=0
-          cargo audit --file Cargo.lock || audit_status=1
-          cargo audit --file apps/desktop/native/scanner/Cargo.lock || audit_status=1
-          exit "$audit_status"
+      - name: Audit the scanner Rust workspace
+        run: cargo audit --file apps/desktop/native/scanner/Cargo.lock
 
   container:
     name: Build and smoke test headless container

@@ -1,5 +1,3 @@
-import { SUBTITLE_DELAY_LIMIT_SECONDS } from './constants.ts';
-
 const BUFFERED_SEEK_TOLERANCE_SECONDS = 0.35;
 
 export function resolveEngineTrackId({
@@ -107,17 +105,34 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || Boolean(target.closest('[contenteditable="true"], [role="textbox"]'));
 }
 
+/**
+ * Targets where Left and Right keep their native meaning even though seeking
+ * otherwise bypasses focus guards: dropdowns and native sliders both move
+ * with arrows, and firing a seek on top would double-handle the keypress.
+ */
+export function isSliderShortcutTarget(target: EventTarget | null): boolean {
+  if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
+  return Boolean(target.closest('select, input[type="range"], [role="slider"]'));
+}
+
+/**
+ * Controls that must keep focus inside the player. Buttons give focus back
+ * so Space and the arrows stay on the shortcut path, but a field the user
+ * types into, a dropdown, a slider, or a color picker stops working if it
+ * loses focus the moment it gains it.
+ */
+export function keepsPlayerFocus(target: EventTarget | null): boolean {
+  if (isEditableShortcutTarget(target) || isSliderShortcutTarget(target)) return true;
+  return typeof HTMLInputElement !== 'undefined'
+    && target instanceof HTMLInputElement
+    && target.type === 'color';
+}
+
 export function isPlayerControlTarget(target: EventTarget | null): boolean {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
   return Boolean(target.closest(
     'button, input, select, textarea, a, [role="slider"], [data-player-control], .loom-player-controls, .player-side-panel',
   ));
-}
-
-export function clampSubtitleDelay(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  const clamped = Math.max(-SUBTITLE_DELAY_LIMIT_SECONDS, Math.min(SUBTITLE_DELAY_LIMIT_SECONDS, value));
-  return Math.round(clamped * 100) / 100;
 }
 
 export function isTimeBuffered(

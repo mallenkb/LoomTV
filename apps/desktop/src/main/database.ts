@@ -16,10 +16,12 @@ import type { LibraryData } from './appContracts.ts';
 import type { ProfileExportV1, StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
 import {
   createDatabaseArtworkRepository,
+  hashArtworkFile,
   type CachedArtwork,
   type FetchedArtworkBytes,
 } from './databaseArtworkRepository.ts';
 import { createDatabaseThumbnailRepository, type CachedThumbnail } from './databaseThumbnailRepository.ts';
+import { compactDatabaseIfWasteful, trimFreePages } from './databaseCompaction.ts';
 import {
   loadLibrary as loadLibraryRecord,
   remapLibraryMediaReferences as remapLibraryMediaReferencesRecord,
@@ -30,7 +32,6 @@ import {
 import {
   getMetadataRefreshState as getMetadataRefreshStateRecord,
   recordMetadataRefresh as recordMetadataRefreshRecord,
-  setMetadataRefreshCategoryLocked as setMetadataRefreshCategoryLockedRecord,
   type MetadataRefreshCategory,
 } from './databaseMetadataRefreshRepository.ts';
 import {
@@ -98,7 +99,6 @@ import {
   getProfilePreferences as getProfilePreferencesRecord,
   getProfileRestrictions as getProfileRestrictionsRecord,
   listProfiles as listProfileRecords,
-  profilePersonalDataCount as profilePersonalDataCountRecord,
   reorderProfiles as reorderProfileRecords,
   resetOwnerProfile as resetOwnerProfileRecord,
   saveProfilePreferences as saveProfilePreferencesRecord,
@@ -127,16 +127,11 @@ export type {
   ProfilePreferences,
   ProfileRecord,
   ProfileRestrictions,
-  ProfileType,
   ProfileUpdateInput,
 } from './databaseProfilesRepository.ts';
 export type { CachedArtwork, FetchedArtworkBytes } from './databaseArtworkRepository.ts';
 export type { StoredMediaFingerprint } from './databaseSegmentsRepository.ts';
-export type {
-  PersistedStremioAddonRecord,
-  PersistedStremioAddonSnapshot,
-  PersistedStremioInstallState,
-} from './databasePluginRepository.ts';
+export type { PersistedStremioAddonSnapshot } from './databasePluginRepository.ts';
 
 let db: BetterSqlite3.Database | null = null;
 let artworkRepository: ReturnType<typeof createDatabaseArtworkRepository> | null = null;
@@ -176,11 +171,32 @@ function getDb(): BetterSqlite3.Database {
   }
 }
 
+/**
+ * Compact a mostly-empty file once, then fold the WAL back into the database
+ * before the process exits. The handle stays open: late callbacks during quit
+ * may still write, and a closed handle would turn those into uncaught
+ * main-process errors.
+ */
+export function checkpointDatabaseForQuit(): void {
+  if (!db) return;
+  try {
+    compactDatabaseIfWasteful(db);
+  } catch (error) {
+    console.warn('[database] Quit compaction failed:', error);
+  }
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (error) {
+    console.warn('[database] Quit checkpoint failed:', error);
+  }
+}
+
 function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
   const timer = setTimeout(() => {
     if (db !== database) return;
     try {
       database.pragma('optimize');
+      trimFreePages(database);
       database.pragma('wal_checkpoint(PASSIVE)');
     } catch (error) {
       console.warn('[database] Idle maintenance failed:', error);
@@ -438,14 +454,6 @@ export function recordMetadataRefresh(
   recordMetadataRefreshRecord(getDb(), mediaId, category, result);
 }
 
-export function setMetadataRefreshCategoryLocked(
-  mediaId: string,
-  category: MetadataRefreshCategory,
-  locked: boolean,
-): void {
-  setMetadataRefreshCategoryLockedRecord(getDb(), mediaId, category, locked);
-}
-
 export function remapLibraryMediaReferences(aliases: ReadonlyMap<string, string>): void {
   remapLibraryMediaReferencesRecord(getDb(), aliases);
 }
@@ -649,10 +657,6 @@ export function getProfileLists(profileId: string, kind?: ProfileListKind): Prof
 
 export function setProfileListEntry(profileId: string, mediaId: string, kind: ProfileListKind, present: boolean): ProfileListEntry[] {
   return setProfileListEntryRecord(getDb(), profileId, mediaId, kind, present);
-}
-
-export function profilePersonalDataCount(profileId: string): number {
-  return profilePersonalDataCountRecord(getDb(), profileId);
 }
 
 export function resetOwnerProfile(): ProfileRecord {
@@ -918,18 +922,6 @@ export function undoManualSegmentCandidate(
   return getSegmentRepository().undoManualSegmentCandidate(fileRevision, type, candidateId);
 }
 
-export function reassociateManualSegmentCandidate(
-  candidateId: string,
-  fileRevision: string,
-  filePath: string,
-): MediaSegment[] {
-  return getSegmentRepository().reassociateManualSegmentCandidate(candidateId, fileRevision, filePath);
-}
-
-export function markManualSegmentCandidateForReview(candidateId: string): void {
-  getSegmentRepository().markManualSegmentCandidateForReview(candidateId);
-}
-
 export function getResolvedMediaSegments(fileRevision: string): MediaSegment[] {
   return getSegmentRepository().getResolvedMediaSegments(fileRevision);
 }
@@ -1032,9 +1024,6 @@ export function getSegmentAnalysisStates(mediaId?: string): Array<{
   return getSegmentRepository().getSegmentAnalysisStates(mediaId);
 }
 
-export function cleanupOrphanedAutomaticSegments(limit = 250): number {
-  return getSegmentRepository().cleanupOrphanedAutomaticSegments(limit);
-}
 export function saveProgress(profileId: string, filePath: string, position: number, duration: number): StoredProgress {
   return saveProgressRecord(getDb(), profileId, filePath, position, duration);
 }
@@ -1141,9 +1130,10 @@ function pluginArtworkObject(addonId: string, sourceUrl: string): PluginArtworkO
   `).get(addonId, sourceUrl) as PluginArtworkObjectRow | undefined;
   if (!row || row.mime_type !== 'image/png' || !fs.existsSync(row.cache_path)) return null;
   try {
-    const bytes = fs.readFileSync(row.cache_path);
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    if (bytes.byteLength !== row.byte_length || hash !== row.content_hash) throw new Error('integrity mismatch');
+    // Streams and remembers the digest per file version rather than reading
+    // the whole image into memory on every poster request.
+    const { byteLength, contentHash } = hashArtworkFile(row.cache_path);
+    if (byteLength !== row.byte_length || contentHash !== row.content_hash) throw new Error('integrity mismatch');
     getDb().prepare('UPDATE plugin_artwork_references SET updated_at = ? WHERE addon_id = ? AND source_url = ?')
       .run(Date.now(), addonId, sourceUrl);
     return row;

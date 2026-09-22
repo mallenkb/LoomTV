@@ -572,15 +572,6 @@ export function setProfileListEntry(
   return getProfileLists(database, profileId);
 }
 
-export function profilePersonalDataCount(database: BetterSqlite3.Database, profileId: string): number {
-  const tables = ['playback_progress', 'playback_track_preferences', 'profile_media_lists'] as const;
-  return tables.reduce((total, table) => total + parseDatabaseRow(
-    database.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE profile_id = ?`).get(profileId),
-    countRowSchema,
-    `${table} profile data count`,
-  ).n, 0);
-}
-
 export function resetOwnerProfile(database: BetterSqlite3.Database): ProfileRecord {
   const owner = getOwnerProfile(database);
   if (!owner) throw new Error('The Owner profile could not be found.');

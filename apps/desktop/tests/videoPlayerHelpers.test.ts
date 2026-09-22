@@ -3,7 +3,6 @@ import test from 'node:test';
 
 import { DEFAULT_SUBTITLE_STYLE, SUBTITLE_STYLE_KEY } from '../src/components/VideoPlayer/constants.ts';
 import {
-  clampSubtitleDelay,
   hasReachedInitialResumePosition,
   initialHlsStartPosition,
   initialStreamOffset,
@@ -14,6 +13,7 @@ import {
   transcodeSeekRestartOptions,
   isEditableShortcutTarget,
   isPlayerControlTarget,
+  keepsPlayerFocus,
   shouldRestartUnseekableDirectStream,
   shouldRestartTranscodedSubtitleStyle,
   shouldShowSubtitleOverlay,
@@ -84,17 +84,29 @@ test('only text entry keeps keys from universal player shortcuts', () => {
   assert.equal(isEditableShortcutTarget(editable as unknown as EventTarget), true);
 });
 
+test('player keeps focus on fields the user types into or adjusts', () => {
+  assert.equal(keepsPlayerFocus(new MockInputElement() as unknown as EventTarget), true);
+  assert.equal(keepsPlayerFocus(new MockTextAreaElement() as unknown as EventTarget), true);
+  // The select mock matches the dropdown selector through closest().
+  assert.equal(keepsPlayerFocus(new MockSelectElement(true) as unknown as EventTarget), true);
+  for (const type of ['range', 'color']) {
+    const control = new MockInputElement(type === 'range');
+    control.type = type;
+    assert.equal(keepsPlayerFocus(control as unknown as EventTarget), true);
+  }
+  for (const type of ['button', 'checkbox']) {
+    const control = new MockInputElement();
+    control.type = type;
+    assert.equal(keepsPlayerFocus(control as unknown as EventTarget), false);
+  }
+  assert.equal(keepsPlayerFocus(new MockElement() as unknown as EventTarget), false);
+  assert.equal(keepsPlayerFocus(null), false);
+});
+
 test('player control targets include buttons sliders links and side panels', () => {
   assert.equal(isPlayerControlTarget(new MockElement(true) as unknown as EventTarget), true);
   assert.equal(isPlayerControlTarget(new MockElement(false) as unknown as EventTarget), false);
   assert.equal(isPlayerControlTarget(null), false);
-});
-
-test('subtitle delay clamps to the player sync range', () => {
-  assert.equal(clampSubtitleDelay(90), 60);
-  assert.equal(clampSubtitleDelay(-90), -60);
-  assert.equal(clampSubtitleDelay(1.234), 1.23);
-  assert.equal(clampSubtitleDelay(Number.NaN), 0);
 });
 
 test('subtitle style persists visual settings and resets timing between player sessions', () => {

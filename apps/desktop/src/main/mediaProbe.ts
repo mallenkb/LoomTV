@@ -7,7 +7,7 @@ import {
   makeProbeCacheKey,
   setSharedProbeResult,
 } from './sharedProbeCache';
-import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
+import type { MediaTrack, ProbeResult } from './mediaTypes';
 import { parseFfprobeOutput } from './ffprobeValidation.ts';
 
 const execFileAsync = promisify(execFile);
@@ -123,18 +123,4 @@ async function probeUncachedMedia(filePath: string, cacheKey: string): Promise<P
     subtitleStreams: tracks.filter((track) => track.type === 'subtitle'),
     tracks,
   });
-}
-
-export function canDirectPlay(_filePath: string, _probeResult: ProbeResult, backend: MediaBackend): boolean {
-  if (backend === 'html5') {
-    const videoCodec = (_probeResult.videoCodec || '').toLowerCase();
-    const audioCodec = (_probeResult.audioCodec || '').toLowerCase();
-    const video = _probeResult.tracks.find((track) => track.type === 'video');
-    return videoCodec === 'h264'
-      && video?.pixelFormat === 'yuv420p'
-      && !String(video?.profile || '').toLowerCase().includes('10')
-      && ['aac', 'mp3'].includes(audioCodec);
-  }
-
-  return false;
 }

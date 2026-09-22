@@ -483,29 +483,6 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     return tx();
   }
 
-  function reassociateManualSegmentCandidate(
-    candidateId: string,
-    fileRevision: string,
-    filePath: string,
-  ): MediaSegment[] {
-    const database = getDb();
-    const tx = database.transaction(() => {
-      database.prepare(`
-        UPDATE media_segment_candidates SET file_revision = ?, file_path = ?, updated_at = ?
-        WHERE id = ? AND source = 'manual'
-      `).run(fileRevision, filePath, Date.now(), candidateId);
-      return refreshResolvedSegments(fileRevision, database);
-    });
-    return tx();
-  }
-
-  function markManualSegmentCandidateForReview(candidateId: string): void {
-    getDb().prepare(`
-      UPDATE media_segment_candidates SET status = 'review', updated_at = ?
-      WHERE id = ? AND source = 'manual' AND status != 'review'
-    `).run(Date.now(), candidateId);
-  }
-
   function refreshResolvedSegments(fileRevision: string, database = getDb()): MediaSegment[] {
     const candidates = parseDatabaseRows(
       database.prepare(`
@@ -886,8 +863,6 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     getSegmentAnalysisStates,
     getSegmentCandidates,
     getSegmentSourceCache,
-    markManualSegmentCandidateForReview,
-    reassociateManualSegmentCandidate,
     recoverRunningSegmentAnalysisJobs,
     requeueWaitingSegmentAnalysisJobs,
     resetAutomaticAnalysisData,

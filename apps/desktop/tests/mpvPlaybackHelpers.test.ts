@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import {
-  isLikelyNaturalMpvEof,
-  normalizeMpvTracks,
-  unexpectedMpvExitMessage,
-} from '../src/main/mpvPlaybackHelpers.ts';
+import { normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
 
 test('mpv tracks normalize embedded and authorized external subtitles', () => {
   const externalPath = path.resolve('/tmp/loomtv-example.en.srt');
@@ -57,22 +53,4 @@ test('mpv tracks normalize embedded and authorized external subtitles', () => {
       source: 'opensubtitles',
     },
   ]);
-});
-
-test('a clean mpv close is inferred as EOF only near the known duration', () => {
-  assert.equal(isLikelyNaturalMpvEof({ code: 0, position: 99, duration: 100 }), true);
-  assert.equal(isLikelyNaturalMpvEof({ code: 0, position: 50, duration: 100 }), false);
-  assert.equal(isLikelyNaturalMpvEof({ code: 1, position: 100, duration: 100 }), false);
-  assert.equal(isLikelyNaturalMpvEof({ code: 0, position: 100 }), false);
-});
-
-test('unexpected mpv exits retain actionable process diagnostics', () => {
-  assert.equal(
-    unexpectedMpvExitMessage({ code: 2, signal: null, stderr: 'decoder initialization failed' }),
-    'mpv exited unexpectedly (code 2): decoder initialization failed',
-  );
-  assert.equal(
-    unexpectedMpvExitMessage({ code: null, signal: 'SIGTERM' }),
-    'mpv exited unexpectedly (signal SIGTERM).',
-  );
 });

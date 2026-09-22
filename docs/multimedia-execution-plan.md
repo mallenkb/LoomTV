@@ -1,6 +1,6 @@
 # Media library expansion
 
-The agreed delivery order is Photos, Music, Audiobooks, Books, then Comics and manga. Implementation targets the Electron desktop app. Tauri, mobile, TV, and hosted-browser support are outside this expansion's current scope.
+The agreed delivery order is Photos, Music, Audiobooks, Books, then Comics and manga. Implementation targets the Electron desktop app. Mobile, TV, and hosted-browser support are outside this expansion's current scope.
 
 ## Storage and client boundaries
 

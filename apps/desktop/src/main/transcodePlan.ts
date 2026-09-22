@@ -12,10 +12,6 @@ import {
   type HardwareVideoEncoder,
 } from './transcodeFilters.ts';
 
-// Report the stream ready as soon as the first segment is written. With 2s
-// segments this still buffers ~2s before playback, but roughly halves the
-// time-to-first-frame after a start/seek restart versus waiting for two.
-export const TRANSCODE_READY_SEGMENTS = 1;
 export const HLS_SEGMENT_SECONDS = 2;
 export const HLS_WINDOW_SEGMENTS = 45;
 export const LOCAL_HLS_SEGMENT_SECONDS = 1;
@@ -39,10 +35,6 @@ export const HLS_SEGMENT_PROFILES: Readonly<Record<HlsSegmentProfile, {
 
 export function hlsSegmentProfileForScope(scope?: string): HlsSegmentProfile {
   return scope?.startsWith('lan:') ? 'lan-stable' : 'local-interactive';
-}
-
-export function buildEmbeddedSubtitleVttArgs(filePath: string, streamOrdinal: number): string[] {
-  return buildEmbeddedSubtitleTextArgs(filePath, streamOrdinal, 'webvtt');
 }
 
 export function buildEmbeddedSubtitleTextArgs(filePath: string, streamOrdinal: number, format: 'webvtt' | 'ass'): string[] {

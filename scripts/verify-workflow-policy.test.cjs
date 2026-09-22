@@ -319,7 +319,7 @@ test('release validation rejects a newer pending run despite an older successful
   }
 });
 
-test('Rust validation installs the repository toolchain and covers both workspaces', () => {
+test('Rust validation installs the repository toolchain and covers the scanner workspace', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'validate.yml'), 'utf8');
   const rust = YAML.parse(source).jobs.rust;
   assert.equal(rust['runs-on'], 'ubuntu-latest');
@@ -337,45 +337,22 @@ test('Rust validation installs the repository toolchain and covers both workspac
   assert.ok(installIndex >= 0 && cacheIndex > installIndex);
   assert.match(steps[cacheIndex].uses, /@[0-9a-f]{40}$/);
   assert.deepEqual(steps[cacheIndex].with.workspaces.trim().split('\n'), [
-    '. -> target', 'apps/desktop/native/scanner -> target',
+    'apps/desktop/native/scanner -> target',
   ]);
-  const dependenciesIndex = steps.findIndex((step) => step.name === 'Install Linux Rust dependencies');
-  const dependencies = steps[dependenciesIndex].run;
-  for (const dependency of ['build-essential', 'pkg-config', 'libssl-dev', 'libdbus-1-dev', 'libgtk-3-dev', 'libxdo-dev', 'libwebkit2gtk-4.1-dev', 'libayatana-appindicator3-dev', 'librsvg2-dev', 'patchelf']) {
-    assert.ok(dependencies.split(/\s+/).includes(dependency), dependency);
-  }
   const tests = steps.filter((step) => step.run?.startsWith('cargo test'));
   assert.deepEqual(tests.map((step) => [step['working-directory'], step.run]), [
-    ['crates/loomtv-core', 'cargo test --locked -p loomtv-core'],
-    ['crates/loomtv-playback', 'cargo test --locked -p loomtv-playback'],
-    ['apps/desktop-tauri/src-tauri', 'cargo test --locked -p loomtv-desktop-tauri'],
     ['apps/desktop/native/scanner', 'cargo test --locked -p loom-scanner'],
   ]);
   for (const step of tests) {
-    assert.ok(steps.indexOf(step) > dependenciesIndex);
+    assert.ok(steps.indexOf(step) > installIndex);
     assert.equal(step['continue-on-error'], undefined);
   }
   const auditInstallIndex = steps.findIndex((step) => step.run === 'cargo install cargo-audit --version 0.22.2 --locked');
-  const auditIndex = steps.findIndex((step) => step.name === 'Audit both Rust workspaces');
+  const auditIndex = steps.findIndex((step) => step.name === 'Audit the scanner Rust workspace');
   assert.ok(auditInstallIndex >= 0 && auditIndex > auditInstallIndex);
   const audit = steps[auditIndex];
   assert.equal(audit['continue-on-error'], undefined);
-  for (const failedLock of ['', 'Cargo.lock', 'apps/desktop/native/scanner/Cargo.lock']) {
-    const mock = `cargo() {
-      printf '%s\\n' "$*"
-      [[ "$1" == audit && "$2" == --file && "$#" == 3 ]] || return 2
-      [[ "$3" != "$FAILED_LOCK" ]]
-    }\n`;
-    const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', mock + audit.run], {
-      env: { ...process.env, FAILED_LOCK: failedLock },
-      encoding: 'utf8',
-    });
-    assert.ifError(run.error);
-    assert.equal(run.status, failedLock ? 1 : 0, run.stderr);
-    assert.deepEqual(run.stdout.trim().split('\n'), [
-      'audit --file Cargo.lock', 'audit --file apps/desktop/native/scanner/Cargo.lock',
-    ]);
-  }
+  assert.equal(audit.run.trim(), 'cargo audit --file apps/desktop/native/scanner/Cargo.lock');
 });
 
 const workspacePackagesFixture = new Map([

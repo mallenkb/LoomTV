@@ -7,7 +7,7 @@ import {
   type TranscodeCapabilities,
 } from '@loom-media-server/transcode-capabilities';
 
-export { appendH264EncoderOptions, type H264HardwareEncoder, type HardwareVideoEncoder } from './transcodeFilters.ts';
+export type { HardwareVideoEncoder } from './transcodeFilters.ts';
 import type { HardwareVideoEncoder } from './transcodeFilters.ts';
 
 let cachedFFmpegPath: string | null | undefined;

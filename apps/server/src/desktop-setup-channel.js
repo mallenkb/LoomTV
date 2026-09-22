@@ -12,7 +12,7 @@ import { isIP } from 'node:net';
  * loopback interface, which a LAN or reverse-proxy client cannot forge.
  */
 
-export const DESKTOP_SETUP_HEADER = 'x-loomtv-desktop-setup';
+const DESKTOP_SETUP_HEADER = 'x-loomtv-desktop-setup';
 const MIN_TOKEN_BYTES = 32;
 
 /** @param {unknown} value */

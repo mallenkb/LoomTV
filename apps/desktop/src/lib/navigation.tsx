@@ -15,7 +15,7 @@ export function stringifyDesktopSearch(search: Record<string, unknown>): string 
 
 // App links may originate in addon metadata or saved return locations. Parse
 // their query strings once at this boundary; TanStack owns all navigation.
-export function destination(to: string) {
+function destination(to: string) {
   const url = new URL(to, 'https://loomtv.local');
   const location = { search: Object.fromEntries(url.searchParams), hash: url.hash.slice(1) };
   const media = /^\/(movie|tv|anime)\/([^/]+)$/.exec(url.pathname);

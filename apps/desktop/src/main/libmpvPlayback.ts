@@ -56,7 +56,6 @@ function runtimeRoots(): string[] {
   if ((process as NodeJS.Process & { defaultApp?: boolean }).defaultApp) {
     roots.push(
       path.resolve(__dirname, '../../resources/mpv/lib'),
-      path.resolve(__dirname, '../../../desktop-tauri/src-tauri/resources/mpv/lib'),
     );
   }
   return [...new Set(roots)];

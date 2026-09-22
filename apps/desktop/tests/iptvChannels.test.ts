@@ -13,7 +13,7 @@ import {
   replaceIptvChannels,
   replaceIptvProgrammes,
 } from '../src/main/databaseIptvRepository.ts';
-import { iptvChannelSearchText, iptvSearchTerms, matchesIptvSearch } from '../src/shared/iptvSearch.ts';
+import { iptvChannelSearchText, iptvSearchTerms } from '../src/shared/iptvSearch.ts';
 import type { ParsedIptvChannel } from '../src/main/iptv/m3uPlaylist.ts';
 
 function createDatabase(): BetterSqlite3.Database {
@@ -58,8 +58,6 @@ test('search normalization folds accents and punctuation', () => {
   assert.equal(iptvChannelSearchText({ name: 'Canal+ Décalé', groupTitle: 'Cinéma' }), 'canal decale cinema');
   assert.deepEqual(iptvSearchTerms('  Sky   SPORTS  '), ['sky', 'sports']);
   assert.deepEqual(iptvSearchTerms('   '), []);
-  assert.ok(matchesIptvSearch('sky sports main event sports', 'sport main'));
-  assert.ok(!matchesIptvSearch('sky sports main event sports', 'sport cricket'));
 });
 
 test('channel search requires every term and can be combined with a group', () => {

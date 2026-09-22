@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  TRANSCODE_BACKENDS,
-  backendEncoder,
   clearTranscodeCapabilityCache,
   probeTranscodeCapabilities,
 } from '../src/index.mjs';
@@ -25,18 +23,6 @@ function fixtureRunner({ smokeSucceeds = true } = {}) {
   };
   return { calls, run };
 }
-
-test('the public backend registry is ordered and immutable', () => {
-  assert.deepEqual(TRANSCODE_BACKENDS, [
-    'videotoolbox',
-    'nvenc',
-    'qsv',
-    'vaapi',
-    'amf',
-    'rkmpp',
-  ]);
-  assert.equal(Object.isFrozen(TRANSCODE_BACKENDS), true);
-});
 
 test('a missing FFmpeg binary returns the fail-safe unavailable contract', () => {
   clearTranscodeCapabilityCache();
@@ -76,8 +62,6 @@ test('a successful hardware probe reports codecs, software fallbacks, and tone m
   assert.equal(videotoolbox.platformSupported, true);
   assert.equal(videotoolbox.device, 'system');
   assert.equal(videotoolbox.codecs.h264.verified, true);
-  assert.equal(backendEncoder(result, 'videotoolbox'), 'h264_videotoolbox');
-  assert.equal(backendEncoder(result, 'videotoolbox', 'hevc'), 'hevc_videotoolbox');
   assert.ok(fixture.calls.some((args) => args.includes('-allow_sw') && args.includes('0')));
 });
 
@@ -159,9 +143,4 @@ test('Windows QSV uses an implicit GPU and verifies each compiled encoder', () =
       '-vf', 'format=nv12,hwupload', '-an', '-c:v', encoder, '-f', 'null', '-',
     ]));
   }
-});
-
-test('backendEncoder returns null for absent capability data', () => {
-  assert.equal(backendEncoder(null, 'nvenc'), null);
-  assert.equal(backendEncoder({ backends: [] }, 'nvenc'), null);
 });

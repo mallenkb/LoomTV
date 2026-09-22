@@ -14,7 +14,7 @@ import {
   Star,
 } from '@phosphor-icons/react';
 
-export const OTHER_FOLDER_ICON_IDS = [
+const OTHER_FOLDER_ICON_IDS = [
   'folder',
   'archive',
   'clapperboard',

@@ -73,16 +73,6 @@ export declare function validatePluginManifest(
   options?: PluginManifestValidationOptions,
 ): LoomPluginManifest;
 
-export declare function installPluginManifest(
-  input: unknown,
-  options?: PluginManifestValidationOptions,
-): LoomPluginManifest;
-
-export declare function loadPluginManifest(
-  input: unknown,
-  options?: PluginManifestValidationOptions,
-): LoomPluginManifest;
-
 export * from './stremio-adapter';
 export * from './downstream';
 export * from './identity';

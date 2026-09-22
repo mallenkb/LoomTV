@@ -99,11 +99,6 @@ export function describeErrorForLog(error: unknown): string {
   return redactRequestSecrets(detail);
 }
 
-export function localAccessQuery(token: string): string {
-  const params = new URLSearchParams({ [LOCAL_ACCESS_QUERY_PARAM]: token });
-  return params.toString();
-}
-
 export function addLocalAccessToken(params: URLSearchParams, token: string): URLSearchParams {
   params.set(LOCAL_ACCESS_QUERY_PARAM, token);
   return params;

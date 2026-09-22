@@ -113,6 +113,7 @@
     "zod": "catalog:"
   },
   "build": {
+    "copyright": "Copyright © 2026 LoomTV",
     "appId": "com.mallenkb.loommediaserver",
     "productName": "LoomTV",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",

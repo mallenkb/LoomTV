@@ -4,6 +4,7 @@ import type { MediaItem } from '@/contexts/LibraryContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import RatingBadge from '@/components/RatingBadge';
 import { backdropSources, posterSources, routeArtworkState } from '@/lib/artwork';
+import { artworkVariant } from '@/lib/artworkVariants';
 import { mediaLink } from '@/components/MediaPosterCard.helpers';
 import type { StoredProgress } from '@/lib/desktopApi';
 
@@ -57,7 +58,7 @@ export default function ContinueWatchingCard({
     >
       <div className="relative aspect-video overflow-hidden rounded-2xl bg-[var(--loom-media-veil)] shadow-lg">
         <SafeArtwork
-          src={backdropSources(item)}
+          src={backdropSources(item).map((source) => artworkVariant(source, 'w780'))}
           alt={item.title}
           className="h-full w-full"
           imgClassName="object-cover transition-transform duration-500 group-hover:scale-105"

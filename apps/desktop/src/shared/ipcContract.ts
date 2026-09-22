@@ -89,7 +89,6 @@ export interface IpcContract {
   'libvlc:set-fullscreen-transition': { args: [transitioning: boolean, waitForFinalViewport?: boolean]; result: boolean };
   'libvlc:set-viewport': { args: [viewport: PlaybackViewport]; result: boolean };
   'window:set-chrome-visible': { args: [visible: boolean]; result: boolean };
-  'window:set-fullscreen': { args: [enabled: boolean]; result: boolean };
   'artwork:apply-official': { args: [mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget]; result: OfficialArtworkResult };
   'artwork:get': { args: [mediaId: string]; result: Record<string, string> };
   'artwork:import': { args: [entries: Record<string, Record<string, string>>]; result: boolean };
@@ -114,14 +113,11 @@ export interface IpcContract {
   'iptv:remove-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:refresh-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:list-channels': { args: [request: IptvChannelRequest]; result: IptvChannelPage };
-  'media:can-direct-play': { args: [filePath: string, backend?: 'html5' | 'hls']; result: ApiResult<boolean> };
   'media:ffmpeg-available': { args: []; result: { available: boolean; path: string | null } };
-  'media:get-file-info': { args: [filePath: string]; result: { size: number; path: string; exists: boolean } };
   'media:get-server-port': { args: []; result: number };
   'media:get-stream-url': { args: [filePath: string, options?: StreamUrlOptions]; result: StreamUrlResult };
   'media:get-subtitle-url': { args: [filePath: string, streamOrdinal?: number]; result: { url: string } };
   'media:get-thumbnail': { args: [filePath: string, time?: string, seekPreview?: boolean]; result: { url: string } };
-  'media:play': { args: [filePath: string]; result: boolean };
   'media:probe': { args: [filePath: string]; result: ApiResult<unknown> };
   'media:start-transcode': { args: [filePath: string, options?: TranscodeOptions]; result: ApiResult<TranscodeSession> };
   'media:stop-transcode': { args: [sessionId: string]; result: ApiResult<boolean> };
@@ -130,8 +126,6 @@ export interface IpcContract {
   'metadata:provider-request': { args: [request: MetadataProviderRequest]; result: unknown };
   'metadata:streaming-providers': { args: [mediaId: string]; result: StreamingProvider[] };
   'mpv:availability': { args: []; result: MpvAvailability };
-  'mpv:choose-executable': { args: []; result: MpvAvailability };
-  'mpv:reset-executable': { args: []; result: MpvAvailability };
   'mpv:refresh-availability': { args: []; result: MpvAvailability };
   'mpv:start': { args: [filePath: string, options?: MpvStartOptions]; result: { ok: boolean; sessionId?: string; surface?: 'composited-window' | 'external-window'; error?: string } };
   'mpv:command': { args: [sessionId: string, command: MpvCommand]; result: boolean };
@@ -142,7 +136,6 @@ export interface IpcContract {
   'network:remote-request': { args: [pathname: string, request?: RemoteLibraryRequest]; result: RemoteLibraryResponse };
   'network:remote-session': { args: []; result: RemoteLibrarySessionState };
   'network:revoke-paired-device': { args: [deviceId: string]; result: LocalNetworkPairedDevice[] };
-  'network:set-device-name': { args: [name: string]; result: string };
   'network:status': { args: []; result: LocalNetworkStatus };
   'playback-track-preferences:get': { args: [scope?: string]; result: PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> };
   'playback-track-preferences:save': { args: [scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string]; result: PlaybackTrackPreferences };
@@ -214,7 +207,6 @@ export interface IpcContract {
   'server:open-admin': { args: []; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };
   'shell:open-folder-path': { args: [filePath: string]; result: boolean };
-  'shell:show-item': { args: [filePath: string]; result: boolean };
   'updates:check': { args: []; result: UpdateState };
   'updates:get-state': { args: []; result: UpdateState };
   'updates:install': { args: []; result: UpdateState };
@@ -224,7 +216,6 @@ export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
   'libvlc:state': { args: [state: LibVlcPlaybackState] };
-  'window:fullscreen-changed': { args: [fullscreen: boolean] };
   'playback:sleep-timer-reset': { args: [] };
   'media-control:command': { args: [command: MediaSessionCommand, handledInMain: boolean] };
   'library:scan-progress': { args: [progress: import('./desktopProtocol.ts').LibraryScanProgress] };

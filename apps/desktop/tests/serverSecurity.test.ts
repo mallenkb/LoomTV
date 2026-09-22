@@ -7,7 +7,6 @@ import {
   allowedCorsOrigin,
   hasValidLocalAccessToken,
   isLoopbackAddress,
-  localAccessQuery,
   requestLanToken,
   timingSafeStringEqual,
 } from '../src/main/serverSecurity.ts';
@@ -52,7 +51,6 @@ test('local access helpers append stable token query parameters', () => {
   const params = addLocalAccessToken(new URLSearchParams({ path: '/tmp/movie.mkv' }), 'token-value');
   assert.equal(params.get('path'), '/tmp/movie.mkv');
   assert.equal(params.get(LOCAL_ACCESS_QUERY_PARAM), 'token-value');
-  assert.equal(localAccessQuery('token-value'), `${LOCAL_ACCESS_QUERY_PARAM}=token-value`);
 });
 
 test('timing safe comparison rejects mismatched values and lengths without throwing', () => {

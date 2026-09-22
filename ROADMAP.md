@@ -12,7 +12,7 @@ Electron media expansion now follows this order:
 4. Books
 5. Comics and manga
 
-The first implementation includes photo folders and viewing, plus separate Music, Audiobooks, Books, and Comics sections with local catalogs and basic players or readers. One SQLite file keeps separate tables for each domain. Tauri is outside this work. The [media execution plan](docs/multimedia-execution-plan.md) records format limits, remaining capabilities, and verification gaps.
+The first implementation includes photo folders and viewing, plus separate Music, Audiobooks, Books, and Comics sections with local catalogs and basic players or readers. One SQLite file keeps separate tables for each domain. The [media execution plan](docs/multimedia-execution-plan.md) records format limits, remaining capabilities, and verification gaps.
 
 The platform work below remains the background roadmap for video and server deployment.
 

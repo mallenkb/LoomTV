@@ -38,27 +38,3 @@ export function normalizeMpvTracks(
     }];
   });
 }
-
-export function isLikelyNaturalMpvEof(input: {
-  code: number | null;
-  position?: number;
-  duration?: number;
-  toleranceSeconds?: number;
-}): boolean {
-  const { code, position, duration, toleranceSeconds = 2 } = input;
-  return code === 0
-    && typeof position === 'number'
-    && typeof duration === 'number'
-    && duration > 0
-    && position >= duration - Math.max(0, toleranceSeconds);
-}
-
-export function unexpectedMpvExitMessage(input: {
-  code: number | null;
-  signal: NodeJS.Signals | null;
-  stderr?: string;
-}): string {
-  const exit = input.signal ? `signal ${input.signal}` : input.code === null ? 'unknown status' : `code ${input.code}`;
-  const detail = input.stderr?.trim();
-  return `mpv exited unexpectedly (${exit})${detail ? `: ${detail}` : '.'}`;
-}

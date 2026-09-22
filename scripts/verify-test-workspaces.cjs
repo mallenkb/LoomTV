@@ -9,7 +9,6 @@ const EXPECTED_TEST_WORKSPACES = Object.freeze([
   'apps/mobile',
   'apps/server',
   'apps/tv',
-  'apps/desktop-tauri',
   'packages/media-core',
   'packages/plugin-protocol',
   'packages/runtime-paths',

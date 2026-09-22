@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-export const TRANSCODE_BACKENDS = Object.freeze([
+const TRANSCODE_BACKENDS = Object.freeze([
   'videotoolbox',
   'nvenc',
   'qsv',
@@ -298,8 +298,4 @@ export function probeTranscodeCapabilities(ffmpegPath, options = {}) {
 
 export function clearTranscodeCapabilityCache() {
   capabilityCache.clear();
-}
-
-export function backendEncoder(capabilities, backend, codec = 'h264') {
-  return capabilities?.backends?.find((entry) => entry.id === backend)?.codecs?.[codec]?.encoder || null;
 }

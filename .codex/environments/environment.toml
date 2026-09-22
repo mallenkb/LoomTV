@@ -14,8 +14,3 @@ command = "vp run desktop:start"
 name = "Mobile App"
 icon = "test"
 command = "pnpm mobile:start"
-
-[[actions]]
-name = "Desktop App: Tauri"
-icon = "debug"
-command = "vp run desktop:tauri:dev"

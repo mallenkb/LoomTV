@@ -471,7 +471,6 @@ export interface IpcHandlerDependencies<
   getTranscodeCapabilities: (path: string | null) => TranscodeCapabilities;
   safeResult: <T>(fn: () => T | Promise<T>) => Promise<ApiResult<T>>;
   probeMedia: (filePath: string) => Promise<ProbeResult>;
-  canDirectPlay: (filePath: string, probe: ProbeResult, backend: 'html5' | 'hls') => boolean;
   startTranscode: (filePath: string, options: TranscodeOptions, serverBase: string) => Promise<TranscodeSession>;
   stopTranscode: (sessionId: string) => boolean;
   isTrustedSender: (event: IpcMainInvokeEvent) => boolean;
@@ -785,16 +784,6 @@ export function registerIpcHandlers<
     });
   }, z.tuple([nonEmptyString, nonEmptyString, libraryFolderKindSchema]));
 
-  handle('media:play', async (_event, filePath: string) => {
-    try {
-      deps.authorizeMediaPath(filePath);
-      deps.assertLocalMediaPath(filePath);
-      return false;
-    } catch {
-      return false;
-    }
-  }, z.tuple([nonEmptyString]));
-
   // ─── Live TV (IPTV) ────────────────────────────────────────────────────────
   // Reading channels is open to any signed-in profile; adding, editing, and
   // removing a provider is an owner action, like linking a library folder.
@@ -922,18 +911,6 @@ export function registerIpcHandlers<
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/api/thumbnail?${params.toString()}` };
   }, z.tuple([nonEmptyString, z.string().max(8192).optional(), z.boolean().optional()]));
 
-  handle('media:get-file-info', (_event, filePath: string) => {
-    try {
-      deps.authorizeMediaPath(filePath);
-      deps.assertLocalMediaPath(filePath);
-      const exists = fs.existsSync(filePath);
-      const size = exists ? fs.statSync(filePath).size : 0;
-      return { size, path: filePath, exists };
-    } catch {
-      return { size: 0, path: filePath, exists: false };
-    }
-  }, z.tuple([nonEmptyString]));
-
   handleNoArgs('settings:get', () => deps.settingsForRenderer());
 
   handleStremio('plugins:stremio:list', () => deps.listStremioPlugins(), z.tuple([]));
@@ -992,10 +969,6 @@ export function registerIpcHandlers<
   handleNoArgs('mpv:availability', () => libMpvAvailability());
 
   handleNoArgs('mpv:refresh-availability', () => libMpvAvailability(true));
-
-  handleNoArgs('mpv:choose-executable', () => libMpvAvailability());
-
-  handleNoArgs('mpv:reset-executable', () => libMpvAvailability());
 
   handle('mpv:start', (event, filePath, options) => {
     const requestedPath = String(filePath || '');
@@ -1099,88 +1072,6 @@ export function registerIpcHandlers<
     return true;
   }, z.tuple([z.boolean()]));
 
-  handle('window:set-fullscreen', async (event, enabled) => {
-    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
-    if (!ownerWindow || ownerWindow.isDestroyed()) return false;
-    const nextFullscreen = Boolean(enabled);
-    // This IPC route is retained as a compatibility fallback, but it must use
-    // macOS's normal fullscreen lifecycle. `setSimpleFullScreen` expands the
-    // window over the current desktop and bypasses the proven Loom player
-    // behavior, which made LibVLC feel like a second application.
-    const isFullscreen = () => ownerWindow.isFullScreen();
-    const setFullscreen = (value: boolean) => ownerWindow.setFullScreen(value);
-    if (isFullscreen() === nextFullscreen) {
-      if (!event.sender.isDestroyed()) event.sender.send('window:fullscreen-changed', nextFullscreen);
-      return true;
-    }
-    // Electron types on/once/removeListener as per-event overloads, so a union
-    // of event names matches none of them. Branch on the literal instead of
-    // casting, which keeps the listener signature checked.
-    const onceTransition = (listener: () => void): void => {
-      if (nextFullscreen) ownerWindow.once('enter-full-screen', listener);
-      else ownerWindow.once('leave-full-screen', listener);
-    };
-    const offTransition = (listener: () => void): void => {
-      if (nextFullscreen) ownerWindow.removeListener('enter-full-screen', listener);
-      else ownerWindow.removeListener('leave-full-screen', listener);
-    };
-    setLibVlcPlaybackFullscreenTransition(event.sender, true);
-    return await new Promise<boolean>((resolve) => {
-      let settled = false;
-      let pollTimer: ReturnType<typeof setTimeout> | null = null;
-      const finish = (changed: boolean) => {
-        if (settled) return;
-        // AppKit can deliver enter/leave-full-screen just before Electron's
-        // isFullScreen() value catches up. Do not resolve the renderer's
-        // readiness handshake until the state agrees with the requested
-        // transition; otherwise the native surface receives the opposite
-        // window geometry and playback can remain stuck after exit.
-        if (changed && !ownerWindow.isDestroyed() && isFullscreen() !== nextFullscreen) {
-          if (!pollTimer) {
-            pollTimer = setTimeout(() => {
-              pollTimer = null;
-              finish(true);
-            }, 16);
-            pollTimer.unref();
-          }
-          return;
-        }
-        settled = true;
-        clearTimeout(timeout);
-        if (pollTimer) clearTimeout(pollTimer);
-        offTransition(onTransition);
-        const actual = !ownerWindow.isDestroyed() && isFullscreen() === nextFullscreen;
-        setLibVlcPlaybackFullscreenTransition(event.sender, false, Boolean(changed && actual));
-        if (!event.sender.isDestroyed()) event.sender.send('window:fullscreen-changed', isFullscreen());
-        resolve(Boolean(changed && actual));
-      };
-      const onTransition = () => finish(true);
-      const poll = () => {
-        pollTimer = null;
-        if (ownerWindow.isDestroyed()) {
-          finish(false);
-          return;
-        }
-        if (isFullscreen() === nextFullscreen) {
-          finish(true);
-          return;
-        }
-        pollTimer = setTimeout(poll, 50);
-        pollTimer.unref();
-      };
-      const timeout = setTimeout(() => finish(false), 5_000);
-      timeout.unref();
-      onceTransition(onTransition);
-      try {
-        setFullscreen(nextFullscreen);
-        pollTimer = setTimeout(poll, 50);
-        pollTimer.unref();
-      } catch {
-        finish(false);
-      }
-    });
-  }, z.tuple([z.boolean()]));
-
   handleNoArgs('network:status', () => {
     const status = buildNetworkStatus(deps);
     return { ...status, deviceName: status.deviceName || os.hostname() };
@@ -1223,15 +1114,6 @@ export function registerIpcHandlers<
     deps.saveSettings({ ...settings, localNetworkPairedDevices: remaining });
     return remaining;
   }, z.tuple([nonEmptyString]));
-
-  handle('network:set-device-name', (_event, name: string) => {
-    deps.authorizeSettingsWrite();
-    const settings = deps.loadSettings();
-    const nextName = String(name || '').trim().slice(0, 80) || os.hostname();
-    deps.saveSettings({ ...settings, localNetworkDeviceName: nextName });
-    deps.syncLanAdvertisement();
-    return nextName;
-  }, z.tuple([nonEmptyString.max(80)]));
 
   handleNoArgs('profiles:list', () => deps.listProfiles());
   handleNoArgs('profiles:choose-avatar', () => deps.chooseProfileAvatar());
@@ -1430,7 +1312,6 @@ export function registerIpcHandlers<
     return true;
   };
   handle('shell:open-folder-path', (_event, filePath: string) => openFolderPath(filePath), z.tuple([nonEmptyString]));
-  handle('shell:show-item', (_event, filePath: string) => openFolderPath(filePath), z.tuple([nonEmptyString]));
   handleNoArgs('updates:get-state', () => deps.getUpdateState());
   handleNoArgs('updates:check', () => deps.checkForUpdates());
   handleNoArgs('updates:install', () => {
@@ -1445,15 +1326,6 @@ export function registerIpcHandlers<
     deps.authorizeMediaPath(filePath);
     return deps.probeMedia(filePath);
   }), z.tuple([nonEmptyString]));
-
-  handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
-    deps.safeResult(async () => {
-      deps.authorizeMediaPath(filePath);
-      if (backend === 'html5') return deps.browserPlaybackPlan(filePath).mode === 'direct';
-      const result = await deps.probeMedia(filePath);
-      return deps.canDirectPlay(filePath, result, backend);
-    }), z.tuple([nonEmptyString, z.enum(['html5', 'hls']).optional()]),
-  );
 
   handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
     deps.safeResult(async () => {

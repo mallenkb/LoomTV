@@ -24,15 +24,6 @@ export function parseProgressSavePayload(input = {}) {
 
 export const ACCOUNT_ROLES = Object.freeze(['owner', 'admin', 'user', 'viewer']);
 export const PROFILE_KINDS = Object.freeze(['adult', 'child', 'guest']);
-export const PLAYBACK_PLAN_MODES = Object.freeze(['direct', 'remux', 'transcode']);
-export const PLAYBACK_TRANSPORTS = Object.freeze(['http', 'hls']);
-export const MEDIA_SOURCE_STATES = Object.freeze(['online', 'offline', 'unreadable', 'missing']);
-export const IDENTITY_EVIDENCE_KINDS = Object.freeze([
-  'content-sha256',
-  'filesystem-id',
-  'quick-hash',
-  'legacy-path-hash',
-]);
 
 export const IDENTITY_EVIDENCE_STRENGTH = Object.freeze({
   'legacy-path-hash': 1,
@@ -222,27 +213,6 @@ export const LEGACY_ROUTE_ADAPTERS = freezeRecords([
   { source: '/hls/{sessionId}/*', destination: '/api/v1/media/{mediaId}/transcode', removal: 'after every prior client uses canonical HLS URLs' },
   { source: '/api/admin*', destination: '/api/v1 admin routes', removal: 'after the bundled admin client uses only /api/v1' },
   { source: '/api/media*', destination: '/api/v1/media* delivery handlers', removal: 'after all issued legacy playback capabilities expire' },
-]);
-
-export const LEGACY_MODEL_DESTINATIONS = freezeRecords([
-  { source: 'desktop LibraryData and headless roots/catalog', destination: 'LibraryRoot, CatalogItem, MediaSource, CatalogSnapshot', decision: 'migrate' },
-  { source: 'desktop WireMediaItem and headless catalog item', destination: 'CatalogItem plus one or more MediaSource records', decision: 'migrate' },
-  { source: 'desktop path-hash media id and headless path-hash id', destination: 'CatalogItem.id with MediaIdentityAlias entries', decision: 'preserve-and-alias' },
-  { source: 'desktop filePath progress keys', destination: 'WatchProgress keyed by profileId and mediaId', decision: 'resolve-and-migrate' },
-  { source: 'desktop ProfileRecord including owner profile', destination: 'ViewingProfile; owner profile becomes an adult profile owned by the owner account', decision: 'migrate' },
-  { source: 'headless owner and user records', destination: 'Account', decision: 'migrate' },
-  { source: 'desktop paired device tokens and headless account device allow-list', destination: 'Device and DeviceCredential', decision: 'migrate-or-repair' },
-  { source: 'desktop DeviceProfileSelection and headless selections', destination: 'ProfileSelection', decision: 'migrate' },
-  { source: 'desktop profile PIN credentials', destination: 'ViewingProfileCredential', decision: 'migrate-secret' },
-  { source: 'desktop profile preferences, restrictions, lists, and track preferences', destination: 'ProfilePreferences, ProfileRestrictions, ProfileListEntry, TrackPreference', decision: 'migrate' },
-  { source: 'headless authentication sessions', destination: 'AccountSession', decision: 'migrate-or-revoke' },
-  { source: 'desktop TranscodeSession and headless playback-session registry', destination: 'PlaybackSession and PlaybackDelivery', decision: 'adapter-only' },
-  { source: 'desktop ProbeResult and headless localMetadata', destination: 'MediaProbe with MediaTrack records', decision: 'migrate' },
-  { source: 'desktop TranscodeOptions and LAN playback capabilities', destination: 'PlaybackRequest and ClientCapabilities', decision: 'adapter-only' },
-  { source: 'desktop ApiResult, ProfileError, and StreamStartFailure', destination: 'ApiSuccess or ApiFailure with ApiError', decision: 'adapter-only' },
-  { source: 'desktop profile export v1', destination: 'migration import source only', decision: 'retire-after-import-window' },
-  { source: 'headless-client.json and headless-client.sqlite', destination: 'canonical persistence migration source', decision: 'retire-after-verified-migration' },
-  { source: 'headless-admin.json', destination: 'canonical account, root, catalog, session, and operational stores', decision: 'retire-after-verified-migration' },
 ]);
 
 /** @param {string} routeId */

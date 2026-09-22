@@ -23,8 +23,8 @@ export const VIDEO_EXTENSIONS = Object.freeze([
   '.webm', '.wmv',
 ]);
 
-export const TRANSCODE_CODECS = Object.freeze(['h264', 'hevc', 'av1']);
-export const PROFILE_TYPES = Object.freeze(['owner', 'standard', 'kid', 'guest']);
+const TRANSCODE_CODECS = Object.freeze(['h264', 'hevc', 'av1']);
+const PROFILE_TYPES = Object.freeze(['owner', 'standard', 'kid', 'guest']);
 
 const videoExtensionSet = new Set(VIDEO_EXTENSIONS);
 const transcodeCodecSet = new Set(TRANSCODE_CODECS);
@@ -46,7 +46,7 @@ export function createMediaItemId(filePath) {
   return createHash('sha256').update(path.resolve(String(filePath))).digest('hex').slice(0, 32);
 }
 
-export function normalizeTranscodeCodec(value, fallback = 'h264') {
+function normalizeTranscodeCodec(value, fallback = 'h264') {
   const codec = String(value || '').trim().toLowerCase();
   return transcodeCodecSet.has(codec) ? codec : fallback;
 }

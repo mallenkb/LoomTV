@@ -1,4 +1,0 @@
-# These LibVLC JSON templates must remain LF on Windows to match the runtime manifest.
-apps/desktop/resources/libvlc/win32/x64/lua/http/requests/browse.json -text
-apps/desktop/resources/libvlc/win32/x64/lua/http/requests/playlist.json -text
-apps/desktop/resources/libvlc/win32/x64/lua/http/requests/status.json -text

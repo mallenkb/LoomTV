@@ -1,6 +1,6 @@
 # Desktop TanStack migration
 
-The shared React desktop renderer now uses TanStack Router, Query, and Virtual. Both Electron and Tauri use the same renderer changes. The Rust backend, database format, and other applications are unchanged by this migration.
+The shared React desktop renderer now uses TanStack Router, Query, and Virtual. The Rust backend, database format, and other applications are unchanged by this migration.
 
 ## Navigation and data
 

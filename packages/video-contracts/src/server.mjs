@@ -1,5 +1,3 @@
-import { IDENTITY_EVIDENCE_STRENGTH } from './index.mjs';
-
 export const CANONICAL_BACKUP_ENVELOPE_FORMAT = 'loomtv-canonical-backup';
 export const CANONICAL_BACKUP_ENVELOPE_VERSION = 2;
 export const CANONICAL_STATE_SNAPSHOT_FORMAT = 'loomtv-canonical-state-v1';
@@ -34,15 +32,4 @@ export function migrateLegacyProfileKind(value) {
     });
   }
   return kind;
-}
-
-export function compareIdentityEvidence(leftKind, rightKind) {
-  const left = IDENTITY_EVIDENCE_STRENGTH[String(leftKind || '').trim().toLowerCase()];
-  const right = IDENTITY_EVIDENCE_STRENGTH[String(rightKind || '').trim().toLowerCase()];
-  if (!left || !right) {
-    throw Object.assign(new TypeError('Unknown media identity evidence kind.'), {
-      code: 'unknown_identity_evidence_kind',
-    });
-  }
-  return left - right;
 }

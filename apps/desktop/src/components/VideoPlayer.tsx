@@ -114,6 +114,8 @@ import {
   initialStreamOffset,
   isTimeBuffered,
   isPlayerControlTarget,
+  isSliderShortcutTarget,
+  keepsPlayerFocus,
   playbackProgressForExit,
   resolveEngineTrackId,
   resolveInitialPlaybackPosition,
@@ -3304,6 +3306,21 @@ export default function VideoPlayer({
     handleSurfaceDoubleClick(event);
   }, [resetSurfaceDoubleClickGuard, handleSurfaceDoubleClick]);
 
+  const handleRootFocusCapture = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    // Buttons and other plain controls give focus back so every keypress stays
+    // on the window shortcut path. Text fields, dropdowns, sliders, and color
+    // pickers keep focus, or the user could never type into or adjust them.
+    const target = event.target as HTMLElement | null;
+    if (
+      target
+      && target !== event.currentTarget
+      && typeof target.blur === 'function'
+      && !keepsPlayerFocus(target)
+    ) {
+      target.blur();
+    }
+  }, []);
+
   // Dismissing an open side panel must work from anywhere outside it, not only
   // from the video surface. The surface's own click handler never sees a press
   // on the macOS title drag strip, the letterboxed margins, or the control bar,
@@ -3466,6 +3483,20 @@ export default function VideoPlayer({
       && !isEditableShortcutTarget(event.target)
     );
     const onKey = (e: KeyboardEvent) => {
+      // Forward and back always seek while a video is playing, no matter which
+      // panel or control holds focus. Typing targets, dropdowns, and native
+      // sliders keep their own arrow behavior.
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing
+        && !isEditableShortcutTarget(e.target) && !isEditableShortcutTarget(document.activeElement)
+        && !isSliderShortcutTarget(e.target) && !isSliderShortcutTarget(document.activeElement)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (playerStateRef.current === 'error') return;
+        resetSurfaceDoubleClickGuard();
+        const step = e.shiftKey ? 30 : 10;
+        seekTo(playbackPositionRef.current + (e.key === 'ArrowRight' ? step : -step));
+        return;
+      }
       if (e.key === 'Escape' || !ownsShortcut(e)) return;
       if (isPlaybackSpace(e)) {
         e.preventDefault();
@@ -3475,18 +3506,13 @@ export default function VideoPlayer({
       }
       const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
       if (!hasCommandModifier && !e.isComposing
-        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)
+        && (e.key === 'ArrowUp' || e.key === 'ArrowDown')
         && !isEditableShortcutTarget(e.target)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         if (playerStateRef.current === 'error') return;
         resetSurfaceDoubleClickGuard();
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-          changeVolume(e.key === 'ArrowUp' ? 0.05 : -0.05);
-        } else {
-          const step = e.shiftKey ? 30 : 10;
-          seekTo(playbackPositionRef.current + (e.key === 'ArrowRight' ? step : -step));
-        }
+        changeVolume(e.key === 'ArrowUp' ? 0.05 : -0.05);
         return;
       }
       if (isEditableShortcutTarget(e.target) || e.isComposing) return;
@@ -3948,6 +3974,7 @@ export default function VideoPlayer({
       tabIndex={-1}
       data-modal-layer="video-player"
       onPointerDownCapture={handleRootPointerDownCapture}
+      onFocusCapture={handleRootFocusCapture}
       // Reveal the chrome from anywhere in the player, not just the video
       // surface. The surface excludes the letterboxed margins and sits under
       // the macOS drag band, so a pointer crossing those areas produced no
@@ -3964,6 +3991,11 @@ export default function VideoPlayer({
           font-size: ${subtitleCueFontSize}px;
           background-color: ${subtitleStyle.backgroundColor};
           text-shadow: ${subtitleCueShadow};
+        }
+        .loom-player-root *:focus:not(input):not(select):not(textarea),
+        .loom-player-root *:focus-visible:not(input):not(select):not(textarea) {
+          outline: none !important;
+          box-shadow: none !important;
         }`}
       </style>
       <div

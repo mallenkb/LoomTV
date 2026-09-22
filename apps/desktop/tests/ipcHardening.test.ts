@@ -93,7 +93,7 @@ test('record payloads reject excessive entries, oversized values, and cycles', (
   assert.equal(schema.safeParse({ first: cyclic }).success, false);
 });
 
-test('typed bridge routes libVLC and window calls and unsubscribes exact event handlers', async () => {
+test('typed bridge routes libVLC calls and unsubscribes exact event handlers', async () => {
   const calls: Array<[string, ...unknown[]]> = [];
   const listeners = new Map<string, Parameters<DesktopTransport['on']>[1]>();
   const transport: DesktopTransport = {
@@ -110,12 +110,10 @@ test('typed bridge routes libVLC and window calls and unsubscribes exact event h
   const bridge = createDesktopBridge(transport);
   await bridge.libvlc.start('/movie.mkv');
   await bridge.libvlc.setFullscreenTransition(true);
-  await bridge.setFullscreen(true);
   await bridge.setWindowChromeVisible(false);
   assert.deepEqual(calls, [
     ['libvlc:start', '/movie.mkv', {}],
     ['libvlc:set-fullscreen-transition', true, true],
-    ['window:set-fullscreen', true],
     ['window:set-chrome-visible', false],
   ]);
   const state = { sessionId: 'session', status: 'ready' };
@@ -123,12 +121,7 @@ test('typed bridge routes libVLC and window calls and unsubscribes exact event h
   const offState = bridge.libvlc.onState((value) => { received = value; });
   listeners.get('libvlc:state')?.({}, state);
   assert.equal(received, state);
-  let fullscreen = false;
-  const offFullscreen = bridge.onFullscreenChanged((value) => { fullscreen = value; });
-  listeners.get('window:fullscreen-changed')?.({}, true);
-  assert.equal(fullscreen, true);
   offState();
-  offFullscreen();
   assert.equal(listeners.size, 0);
 });
 
@@ -136,7 +129,7 @@ test('handler wiring retains sender checks and validates local access before pro
   const source = fs.readFileSync(new URL('../src/main/ipcHandlers.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /handleExperimental/);
   assert.match(source, /if \(!deps\.isTrustedSender\(event\)\) throw new Error\('Untrusted IPC sender\.'\)/);
-  const thumbnail = source.slice(source.indexOf("handle('media:get-thumbnail'"), source.indexOf("handle('media:get-file-info'"));
+  const thumbnail = source.slice(source.indexOf("handle('media:get-thumbnail'"), source.indexOf("handleNoArgs('settings:get'"));
   assert.ok(thumbnail.indexOf('deps.authorizeMediaPath(filePath)') < thumbnail.indexOf('deps.assertLocalMediaPath(filePath)'));
   assert.ok(thumbnail.indexOf('deps.assertLocalMediaPath(filePath)') < thumbnail.indexOf('new URLSearchParams'));
   const mpv = source.slice(source.indexOf("handle('mpv:start'"), source.indexOf("'mpv:command'"));
@@ -145,5 +138,4 @@ test('handler wiring retains sender checks and validates local access before pro
   assert.ok(reveal.indexOf('authorizeFolderReveal(resolvedTarget') < reveal.indexOf('fs.existsSync'));
   assert.ok(reveal.indexOf('authorizeFolderReveal(parent') < reveal.indexOf('existingTarget = parent'));
   assert.throws(() => parseIpcArguments('libvlc:command', ['session', { type: 'set-speed', speed: 4 }], z.tuple([z.string(), playbackCommandSchema])));
-  assert.throws(() => parseIpcArguments('window:set-fullscreen', [true, 'extra'], z.tuple([z.boolean()])));
 });

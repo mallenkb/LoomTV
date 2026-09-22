@@ -25,9 +25,6 @@ export const DEFAULT_SKIP_FORWARD_SECONDS = 15;
 export const TRANSCODE_SEEK_DEBOUNCE_MS = 260;
 // Safety net: release the scrubber "hold" if a restart never reports playback.
 export const TRANSCODE_SEEK_HOLD_TIMEOUT_MS = 8000;
-export const SUBTITLE_DELAY_STEP_SECONDS = 0.5;
-export const SUBTITLE_DELAY_FINE_STEP_SECONDS = 0.1;
-export const SUBTITLE_DELAY_LIMIT_SECONDS = 60;
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   delaySeconds: 0,

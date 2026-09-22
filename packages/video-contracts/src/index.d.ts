@@ -226,8 +226,6 @@ export interface PlaybackTrackPreferences {
 
 export type MediaSourceState = 'online' | 'offline' | 'unreadable' | 'missing';
 export type IdentityEvidenceKind = 'content-sha256' | 'filesystem-id' | 'quick-hash' | 'legacy-path-hash';
-export const MEDIA_SOURCE_STATES: readonly MediaSourceState[];
-export const IDENTITY_EVIDENCE_KINDS: readonly IdentityEvidenceKind[];
 export const IDENTITY_EVIDENCE_STRENGTH: Readonly<Record<IdentityEvidenceKind, 1 | 2 | 3 | 4>>;
 export function identityEvidenceStrength(kind: IdentityEvidenceKind | string): 1 | 2 | 3 | 4;
 
@@ -454,8 +452,6 @@ export interface PlaybackRequest {
 
 export type PlaybackPlanMode = 'direct' | 'remux' | 'transcode';
 export type PlaybackTransport = 'http' | 'hls';
-export const PLAYBACK_PLAN_MODES: readonly PlaybackPlanMode[];
-export const PLAYBACK_TRANSPORTS: readonly PlaybackTransport[];
 
 export interface PlaybackPlan {
   contractVersion: 1;
@@ -575,11 +571,3 @@ export interface LegacyRouteAdapter {
   removal: string;
 }
 export const LEGACY_ROUTE_ADAPTERS: readonly LegacyRouteAdapter[];
-
-export type LegacyModelDecision = 'migrate' | 'preserve-and-alias' | 'resolve-and-migrate' | 'migrate-or-repair' | 'migrate-secret' | 'migrate-or-revoke' | 'adapter-only' | 'retire-after-import-window' | 'retire-after-verified-migration';
-export interface LegacyModelDestination {
-  source: string;
-  destination: string;
-  decision: LegacyModelDecision;
-}
-export const LEGACY_MODEL_DESTINATIONS: readonly LegacyModelDestination[];

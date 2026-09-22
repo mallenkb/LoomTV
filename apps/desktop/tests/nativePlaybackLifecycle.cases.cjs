@@ -14,7 +14,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 // Execute the actual engine classes with a fake desktop transport. The native
-// libraries, Electron and Tauri are deliberately not involved in these tests.
+// libraries and Electron are deliberately not involved in these tests.
 function compile(name, dependencies) {
   const filename = path.join(directory, `${name}.ts`);
   const result = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {

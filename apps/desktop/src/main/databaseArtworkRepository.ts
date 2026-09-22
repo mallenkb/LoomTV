@@ -50,10 +50,28 @@ const artworkCacheEntryRowSchema = z.object({
 });
 const artworkCachePathRowSchema = artworkCacheEntryRowSchema.pick({ source_url: true, cache_path: true });
 
-function hashArtworkFile(filePath: string): { byteLength: number; contentHash: string } {
+type ArtworkFileDigest = { byteLength: number; contentHash: string };
+
+// Grids request the same posters on every render, and each read used to hash
+// the whole file again on the main thread. Remember the digest per file
+// version instead. Any rewrite, replacement, or utimes() call changes the
+// inode or ctime, and ctime cannot be set back without root, so a changed
+// file is always hashed again.
+const MAX_VERIFIED_ARTWORK_FILES = 2_048;
+const verifiedArtworkFiles = new Map<string, ArtworkFileDigest & { identity: string }>();
+
+export function hashArtworkFile(filePath: string): ArtworkFileDigest {
   const fd = fs.openSync(filePath, 'r');
   try {
-    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(fs.fstatSync(fd).size, 256 * 1024)));
+    const stat = fs.fstatSync(fd);
+    const identity = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    const known = verifiedArtworkFiles.get(filePath);
+    if (known?.identity === identity) {
+      verifiedArtworkFiles.delete(filePath);
+      verifiedArtworkFiles.set(filePath, known);
+      return { byteLength: known.byteLength, contentHash: known.contentHash };
+    }
+    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(stat.size, 256 * 1024)));
     const hash = createHash('sha256');
     let byteLength = 0;
     let read: number;
@@ -61,7 +79,14 @@ function hashArtworkFile(filePath: string): { byteLength: number; contentHash: s
       hash.update(buffer.subarray(0, read));
       byteLength += read;
     }
-    return { byteLength, contentHash: hash.digest('hex') };
+    const digest = { byteLength, contentHash: hash.digest('hex') };
+    verifiedArtworkFiles.delete(filePath);
+    if (verifiedArtworkFiles.size >= MAX_VERIFIED_ARTWORK_FILES) {
+      const oldest = verifiedArtworkFiles.keys().next().value;
+      if (oldest !== undefined) verifiedArtworkFiles.delete(oldest);
+    }
+    verifiedArtworkFiles.set(filePath, { ...digest, identity });
+    return digest;
   } finally {
     fs.closeSync(fd);
   }

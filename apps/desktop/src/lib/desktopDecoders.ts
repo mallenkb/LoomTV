@@ -65,11 +65,6 @@ export const desktopProfilePreferencesSchema = lanProfilePreferencesSchema;
 export const desktopProfileListSchema = z.array(lanProfileListEntrySchema);
 export const desktopProgressMapSchema = z.record(z.string(), lanStoredProgressSchema);
 export const desktopStoredProgressSchema = lanStoredProgressSchema;
-export const desktopProgressResultSchema = z.union([
-  desktopProgressMapSchema,
-  desktopStoredProgressSchema,
-  z.null(),
-]);
 export const desktopErrorPayloadSchema = lanErrorPayloadSchema;
 export const okResultSchema = z.object({ ok: z.boolean() });
 export const resourceIdResultSchema = z.object({ resourceId: z.string().min(1) });

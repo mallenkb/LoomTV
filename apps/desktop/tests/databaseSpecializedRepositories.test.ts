@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import BetterSqlite3 from 'better-sqlite3';
 import type { LibraryData } from '../src/main/appContracts.ts';
-import { createDatabaseArtworkRepository } from '../src/main/databaseArtworkRepository.ts';
+import { createDatabaseArtworkRepository, hashArtworkFile } from '../src/main/databaseArtworkRepository.ts';
 import { migrateDatabase } from '../src/main/databaseMigrations.ts';
 import {
   listProfileStremioAccess,
@@ -213,4 +213,24 @@ test('artwork repository persists custom artwork and maintains the disk cache th
   assert.ok(repository.getCachedArtwork(secondUrl)?.cachePath);
   assert.equal(first?.cachePath ? fs.existsSync(first.cachePath) : true, false);
   assert.deepEqual(fetched, [firstUrl, secondUrl]);
+});
+
+test('artwork file digests are reused per file version and recomputed after any rewrite', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-artwork-digest-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'poster.png');
+  const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+  const original = Buffer.from('original poster bytes');
+  fs.writeFileSync(filePath, original);
+  assert.deepEqual(hashArtworkFile(filePath), { byteLength: original.byteLength, contentHash: sha256(original) });
+  assert.deepEqual(hashArtworkFile(filePath), { byteLength: original.byteLength, contentHash: sha256(original) });
+
+  // Same length and a restored mtime still change ctime, so tampering is caught.
+  const { mtime } = fs.statSync(filePath);
+  const tampered = Buffer.from('tampered poster bytes');
+  assert.equal(tampered.byteLength, original.byteLength);
+  fs.writeFileSync(filePath, tampered);
+  fs.utimesSync(filePath, mtime, mtime);
+  assert.deepEqual(hashArtworkFile(filePath), { byteLength: tampered.byteLength, contentHash: sha256(tampered) });
 });

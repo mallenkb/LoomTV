@@ -77,16 +77,3 @@ export function recordMetadataRefresh(
       locked = COALESCE(?, media_metadata_refresh_state.locked)
   `).run(mediaId, category, result.refreshedAt ?? null, attemptedAt, result.error ?? null, locked, locked);
 }
-
-export function setMetadataRefreshCategoryLocked(
-  database: BetterSqlite3.Database,
-  mediaId: string,
-  category: MetadataRefreshCategory,
-  locked: boolean,
-): void {
-  database.prepare(`
-    INSERT INTO media_metadata_refresh_state (media_id, category, refreshed_at, attempted_at, last_error, locked)
-    VALUES (?, ?, NULL, 0, NULL, ?)
-    ON CONFLICT(media_id, category) DO UPDATE SET locked = excluded.locked
-  `).run(mediaId, category, locked ? 1 : 0);
-}

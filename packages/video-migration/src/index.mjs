@@ -17,8 +17,7 @@
 
 export { MIGRATION_ERROR_CODES, MigrationBridgeError, isMigrationBridgeError, migrationError } from './errors.mjs';
 export { assertRedacted, assertReportFields, locatorFingerprint, opaqueFingerprint } from './redaction.mjs';
-export { QUICK_HASH_WINDOW_BYTES, RELINK_EVIDENCE_ORDER, strongestEvidenceKind } from './evidence.mjs';
-export { DESKTOP_DATABASE_FILENAME } from './desktopInventory.mjs';
+export { QUICK_HASH_WINDOW_BYTES, RELINK_EVIDENCE_ORDER } from './evidence.mjs';
 export { migrationReportFileName } from './reportStore.mjs';
 export { CANONICAL_STATE_FILENAME, canonicalStatePath } from './canonicalMarker.mjs';
 export { rollbackCanonicalMigration, rollbackInstructions } from './rollback.mjs';

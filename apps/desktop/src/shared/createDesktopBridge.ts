@@ -55,7 +55,7 @@ export interface DesktopTransport {
   removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
 }
 
-/** Both shells use the same argument defaults, event transforms, and result mapping. */
+/** Builds the renderer bridge over any IPC transport, so tests can use a fake one. */
 export function createDesktopBridge(electronIpcRenderer: DesktopTransport) {
 const ipcRenderer = {
   invoke<C extends IpcInvokeChannel>(channel: C, ...args: IpcContract[C]['args']): Promise<IpcContract[C]['result']> {
@@ -95,7 +95,6 @@ const desktopApi = {
   pickLibraryFolder: (currentPath?: string) => ipcRenderer.invoke('library:pick-folder', currentPath),
   removeLibraryFolder: (folderPath: string) => ipcRenderer.invoke('library:remove-folder', folderPath),
   updateLibraryFolder: (folderPath: string, nextFolderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others') => ipcRenderer.invoke('library:update-folder', folderPath, nextFolderPath, kind),
-  playMedia: (filePath: string) => ipcRenderer.invoke('media:play', filePath),
   getStreamUrl: (filePath: string, options?: {
     startSeconds?: number;
     videoTrackIndex?: number;
@@ -113,16 +112,9 @@ const desktopApi = {
   }) => ipcRenderer.invoke('media:get-stream-url', filePath, options || {}),
   getSubtitleUrl: (filePath: string, streamOrdinal?: number) => ipcRenderer.invoke('media:get-subtitle-url', filePath, streamOrdinal),
   getThumbnail: (filePath: string, time?: string, seekPreview?: boolean) => ipcRenderer.invoke('media:get-thumbnail', filePath, time, seekPreview),
-  getFileInfo: (filePath: string) => ipcRenderer.invoke('media:get-file-info', filePath),
   getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port) => `http://127.0.0.1:${port}`),
   getRendererSession: () => ipcRenderer.invoke('renderer:session'),
-  setFullscreen: (enabled: boolean) => ipcRenderer.invoke('window:set-fullscreen', enabled),
   setWindowChromeVisible: (visible: boolean) => ipcRenderer.invoke('window:set-chrome-visible', visible),
-  onFullscreenChanged: (callback: (fullscreen: boolean) => void) => {
-    const handler = (_: unknown, fullscreen: boolean) => callback(fullscreen);
-    ipcRenderer.on('window:fullscreen-changed', handler);
-    return () => ipcRenderer.removeListener('window:fullscreen-changed', handler);
-  },
   publishMediaSession: (snapshot: MediaSessionSnapshot): Promise<MediaSessionDiagnostics> =>
     ipcRenderer.invoke('media-control:publish', snapshot),
   releaseMediaSession: () => ipcRenderer.invoke('media-control:release'),
@@ -211,7 +203,6 @@ const desktopApi = {
   getRemoteLibrarySession: () => ipcRenderer.invoke('network:remote-session'),
   disconnectRemoteLibrary: (revoke?: boolean) => ipcRenderer.invoke('network:remote-disconnect', revoke),
   revokePairedDevice: (deviceId: string) => ipcRenderer.invoke('network:revoke-paired-device', deviceId),
-  setLocalNetworkDeviceName: (name: string) => ipcRenderer.invoke('network:set-device-name', name),
   getUnifiedDesktopServerState: () => ipcRenderer.invoke('server:unified-state'),
   configureUnifiedDesktopOwner: (input: { name: string; password: string }) => ipcRenderer.invoke('server:configure-owner', input),
   openUnifiedDesktopAdmin: () => ipcRenderer.invoke('server:open-admin'),
@@ -287,16 +278,7 @@ const desktopApi = {
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
   clearAppData: () => ipcRenderer.invoke('database:clear'),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
-  openFolderPath: async (filePath: string) => {
-    try {
-      return await ipcRenderer.invoke('shell:open-folder-path', filePath);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("No handler registered for 'shell:open-folder-path'")) {
-        return ipcRenderer.invoke('shell:show-item', filePath);
-      }
-      throw error;
-    }
-  },
+  openFolderPath: (filePath: string) => ipcRenderer.invoke('shell:open-folder-path', filePath),
   getUpdateState: () => ipcRenderer.invoke('updates:get-state'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),
@@ -308,8 +290,6 @@ const desktopApi = {
 
   mpv: {
     availability: () => ipcRenderer.invoke('mpv:availability'),
-    chooseExecutable: () => ipcRenderer.invoke('mpv:choose-executable'),
-    resetExecutable: () => ipcRenderer.invoke('mpv:reset-executable'),
     refreshAvailability: () => ipcRenderer.invoke('mpv:refresh-availability'),
     start: (filePath: string, options?: MpvStartOptions) => ipcRenderer.invoke('mpv:start', filePath, options || {}),
     command: (sessionId: string, command: MpvCommand) => ipcRenderer.invoke('mpv:command', sessionId, command),
@@ -342,7 +322,6 @@ const desktopApi = {
 
   media: {
     probe: (filePath: string) => ipcRenderer.invoke('media:probe', filePath),
-    canDirectPlay: (filePath: string, backend: 'html5' | 'hls' = 'html5') => ipcRenderer.invoke('media:can-direct-play', filePath, backend),
     startTranscode: (filePath: string, options?: TranscodeOptions) =>
       ipcRenderer.invoke('media:start-transcode', filePath, options || {}),
     stopTranscode: (sessionId: string) => ipcRenderer.invoke('media:stop-transcode', sessionId),

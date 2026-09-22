@@ -4,7 +4,7 @@ Status: the scanner and memory/performance follow-ups are implemented for Electr
 
 ## Scope
 
-The Electron scanner has its own Rust crate at `native/scanner`, including an independent Cargo workspace and lockfile. It does not depend on Tauri or playback crates. The worker receives an approved root, file extensions and the current filename-year cutoff. It does not receive credentials, open the catalog or modify media.
+The Electron scanner has its own Rust crate at `native/scanner`, including an independent Cargo workspace and lockfile. The worker receives an approved root, file extensions and the current filename-year cutoff. It does not receive credentials, open the catalog or modify media.
 
 TypeScript still owns media IDs, classification, probe precedence, metadata providers, artwork, reconciliation and catalog writes. Both discovery engines expose filename hints, subtitle association keys and local file facts through the inventory. TypeScript now computes hints when classification or subtitle matching requests them. Cache checks and file validation read only file facts. Rust continues to supply hints in its discovery messages. TypeScript joins those keys into one lookup per directory; it does not reread a directory or compare every subtitle with every video. Rust calculates the complete folder signature before reporting completion. The existing subtitle prefix collision was corrected: episode 1 no longer matches episode 10, and matching ignores case.
 

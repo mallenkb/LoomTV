@@ -180,7 +180,3 @@ export function releaseAllMediaSessions(): void {
   controller.releaseAll();
 }
 
-/** Current adapter selection, for diagnostics and the runtime smoke check. */
-export function mediaSessionDiagnostics(): MediaSessionDiagnostics {
-  return controller.diagnostics();
-}

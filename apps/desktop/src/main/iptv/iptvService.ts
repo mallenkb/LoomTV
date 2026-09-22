@@ -270,4 +270,3 @@ export function createIptvService(deps: IptvServiceDependencies) {
   };
 }
 
-export type IptvService = ReturnType<typeof createIptvService>;

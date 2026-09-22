@@ -379,16 +379,6 @@ export function validatePluginManifest(input, options = {}) {
   });
 }
 
-/** Install boundary alias: validate before persistence or registration. */
-export function installPluginManifest(input, options = {}) {
-  return validatePluginManifest(input, options);
-}
-
-/** Load boundary alias: validate again when a persisted declaration is used. */
-export function loadPluginManifest(input, options = {}) {
-  return validatePluginManifest(input, options);
-}
-
 export class PluginManifestValidationError extends Error {
   constructor(issues) {
     const normalizedIssues = Object.freeze(issues.map((entry) => Object.freeze({ ...entry })));

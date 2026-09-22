@@ -148,7 +148,7 @@ const SIGNS_ONLY_SUBTITLE_PATTERNS = [
   /\btypesett?ing\b/,
 ];
 
-export function isSignsOnlySubtitleTrack(track: MediaTrack): boolean {
+function isSignsOnlySubtitleTrack(track: MediaTrack): boolean {
   const title = normalizeTrackField(track.title);
   if (!title) return false;
   // "Signs & Songs" qualifies, but "Full (incl. signs)" is a dialogue track.
@@ -377,7 +377,7 @@ export function transcodeErrorMessage(error: unknown): string {
   return 'Unable to start transcoding fallback';
 }
 
-export { activeSubtitleText, cleanSubtitleCueText, parseVttCues } from './subtitleCues';
+export { activeSubtitleText, parseVttCues } from './subtitleCues';
 export type { SubtitleCue } from './subtitleCues';
 
 const BITMAP_SUBTITLE_CODECS = [

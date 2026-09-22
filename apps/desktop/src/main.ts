@@ -39,7 +39,6 @@ import {
 import { findFFmpeg, getTranscodeCapabilities } from './main/mediaBinaries';
 import {
   assertLocalMediaPath,
-  canDirectPlay,
   probeMedia,
 } from './main/mediaProbe';
 import type { ApiResult } from './main/mediaTypes';
@@ -206,6 +205,7 @@ import {
   resetAutomaticAnalysisData,
   loadMetadataOfflineModeFromDatabase,
   migrateLegacyCredentialStorage,
+  checkpointDatabaseForQuit,
 } from './main/database';
 import {
   broadcastProfilesChanged,
@@ -307,12 +307,9 @@ import type {
 } from './main/appContracts.ts';
 export type {
   AppSettings,
-  LanPairedDevice,
   LibraryData,
-  LibraryFolderGroups,
   LibraryFolderKind,
 } from './main/appContracts.ts';
-export type { OfficialMetadataCandidate } from './main/officialMetadataService.ts';
 
 type MediaItem = MetadataMediaItem;
 
@@ -2113,7 +2110,6 @@ registerIpcHandlers<LibraryData, AppSettings>({
   getTranscodeCapabilities,
   safeResult,
   probeMedia,
-  canDirectPlay,
   startTranscode,
   stopTranscode,
   isTrustedSender: (event) => {
@@ -2471,4 +2467,10 @@ app.on('before-quit', (event) => {
     }
     clear();
   }
+});
+
+// before-quit may be cancelled (scanner shutdown, update install). will-quit
+// runs only once quitting is certain, so fold the WAL in here.
+app.on('will-quit', () => {
+  checkpointDatabaseForQuit();
 });

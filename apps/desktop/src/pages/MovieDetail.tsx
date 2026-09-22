@@ -11,6 +11,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
+import { artworkVariant } from '@/lib/artworkVariants';
 import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { EXPLORE_ITEM_UPDATED_EVENT, getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import { loadCustomArtwork } from '@/lib/customArtwork';
@@ -376,6 +377,9 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     sourceArtwork,
     fallbackThumbnails,
   );
+  // The hero poster frame is 112px wide, so the original rendition would only
+  // cost decode memory.
+  const detailPosterSources = posterArtwork.map((source) => artworkVariant(source, 'w342'));
   const officialPosterArtwork = uniqueArtworkSources(movie.posterCandidates, movie.poster, sourceArtwork?.posterCandidates, sourceArtwork?.poster);
   const officialCoverArtwork = uniqueArtworkSources(movie.backdropCandidates, movie.backdrop, sourceArtwork?.backdropCandidates, sourceArtwork?.backdrop);
   const playerLogoArtwork = uniqueArtworkSources(customArtwork.logo || '', logoSources(movie, sourceArtwork));
@@ -478,7 +482,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           <div className="loom-detail-hero-identity flex min-w-0 flex-1 items-end gap-6">
           <SafeArtwork
             key={posterKey}
-            src={posterArtwork}
+            src={detailPosterSources}
             placeholderSrc={fallbackThumbnails[0] || ''}
             alt={movie.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"

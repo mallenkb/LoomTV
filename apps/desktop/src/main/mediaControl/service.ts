@@ -1,5 +1,6 @@
 import {
   isMediaSessionDiscontinuity,
+  normalizeMediaSessionCommand,
   normalizeMediaSessionSnapshot,
   resolveSeekPosition,
   supportsMediaSessionCommand,
@@ -123,7 +124,12 @@ export function createMediaSessionController(
     ...(startFailureReason ? { reason: startFailureReason } : {}),
   });
 
-  const routeCommand = (command: MediaSessionCommand) => {
+  const routeCommand = (input: MediaSessionCommand) => {
+    // Adapters build commands from platform callbacks. A NaN position or a
+    // zero rate from a misbehaving OS integration is dropped here, before it
+    // can reach an engine or the player.
+    const command = normalizeMediaSessionCommand(input);
+    if (!command) return;
     const target = owner;
     const snapshot = published;
     if (!target || !snapshot) return;
