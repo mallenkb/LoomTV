@@ -223,6 +223,8 @@ export interface IpcEventContract {
   'profiles:changed': { args: [event: import('./desktopProtocol.ts').ProfilesChangedEvent] };
   'updates:state': { args: [state: UpdateState] };
   'mpv:state': { args: [state: MpvPlaybackState] };
+  /** Main asks the renderer to drop Blink caches while the app is idle or hidden. */
+  'app:trim-memory': { args: [] };
 }
 
 export type IpcEventChannel = keyof IpcEventContract;

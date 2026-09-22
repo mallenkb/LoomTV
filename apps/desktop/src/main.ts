@@ -31,7 +31,9 @@ import {
   describeErrorForLog,
 } from './main/serverSecurity';
 import { isTrustedIpcSender } from './main/trustedIpcSender.ts';
-import { initializePlaybackPowerMonitoring, releaseAllMediaSessions } from './main/systemMediaKeys.ts';
+import { initializePlaybackPowerMonitoring, isMediaSessionPlaying, releaseAllMediaSessions } from './main/systemMediaKeys.ts';
+import { createIdleMemoryTrimmer, IDLE_POLL_INTERVAL_MS } from './main/idleMemoryTrim.ts';
+import { clearSharedProbeCache } from './main/sharedProbeCache';
 import {
   destroyLanDiscovery,
   discoverLanPeers,
@@ -59,7 +61,7 @@ import { isTrustedRendererHttpOrigin } from './main/rendererHttpAccess';
 import { rendererConnectSources } from './main/rendererSecurityPolicy.ts';
 import { MEDIA_PROTOCOL_SCHEMES, mediaSchemePrivileges } from './main/loomtvProtocol.ts';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
-import { refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
+import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
 import {
   registerResource,
@@ -2468,6 +2470,31 @@ app.on('before-quit', (event) => {
     clear();
   }
 });
+
+// Return cache memory while the window is hidden or the user is away. Nothing
+// is trimmed while a player is open or media plays.
+const idleMemoryTrimmer = createIdleMemoryTrimmer({
+  idleSeconds: () => powerMonitor.getSystemIdleTime(),
+  isPlaybackActive: () => hasNativePlaybackSession() || isMediaSessionPlaying(),
+  isWindowVisible: () => {
+    const window = getMainWindow();
+    return Boolean(window && !window.isDestroyed() && window.isVisible() && !window.isMinimized());
+  },
+  trim: () => {
+    clearSharedProbeCache();
+    const window = getMainWindow();
+    if (window && !window.isDestroyed()) window.webContents.send('app:trim-memory');
+  },
+});
+app.on('browser-window-created', (_event, window) => {
+  window.on('hide', idleMemoryTrimmer.windowHidden);
+  window.on('minimize', idleMemoryTrimmer.windowHidden);
+  window.on('show', idleMemoryTrimmer.windowShown);
+  window.on('restore', idleMemoryTrimmer.windowShown);
+});
+app.whenReady().then(() => {
+  setInterval(idleMemoryTrimmer.poll, IDLE_POLL_INTERVAL_MS).unref();
+}).catch(() => undefined);
 
 // before-quit may be cancelled (scanner shutdown, update install). will-quit
 // runs only once quitting is certain, so fold the WAL in here.

@@ -88,6 +88,11 @@ export function syncNativePlaybackDisplaySleep(
   reconcileDisplaySleepBlocker();
 }
 
+/** True while any player is loading or playing and holding the display awake. */
+export function hasNativePlaybackSession(): boolean {
+  return playbackSessions.size > 0;
+}
+
 /** Apply a newly saved timeout to playback already in progress. */
 export function refreshNativePlaybackDisplaySleepTimeout(): void {
   const timeoutMinutes = configuredTimeoutMinutes();

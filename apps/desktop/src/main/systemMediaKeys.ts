@@ -160,6 +160,11 @@ export function publishMediaSessionSnapshot(
   return diagnostics;
 }
 
+/** True while the published media session reports playback. */
+export function isMediaSessionPlaying(): boolean {
+  return controller.snapshot()?.state === 'playing';
+}
+
 /** Release the session held by this renderer, if it holds it. */
 export function releaseMediaSession(webContents: WebContents): boolean {
   const released = controller.release(webContents.id);

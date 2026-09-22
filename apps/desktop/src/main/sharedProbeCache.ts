@@ -122,6 +122,12 @@ function touchEntry(cacheKey: string, entry: SharedProbeCacheEntry, now: number)
   sharedProbeCache.set(cacheKey, entry);
 }
 
+/** Drop every cached probe. Used when the app goes idle; entries refill on demand. */
+export function clearSharedProbeCache(): void {
+  sharedProbeCache.clear();
+  sharedProbeCacheBytes = 0;
+}
+
 export function getSharedProbeResult<T>(
   cacheKey: string | null,
   variant: ProbeCacheVariant,
