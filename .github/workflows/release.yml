@@ -101,7 +101,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in {1..40}; do
+          # Validation includes the desktop package smoke matrix, which can
+          # legitimately take longer than ten minutes on a busy runner.
+          for attempt in {1..80}; do
             validation="$(gh run list \
               --repo "$GITHUB_REPOSITORY" \
               --workflow validate.yml \
@@ -129,7 +131,7 @@ jobs:
               echo "Latest Validate push run on main for $RELEASE_SHA did not succeed." >&2
               exit 1
             fi
-            echo "Waiting for Validate push run on main for $RELEASE_SHA (attempt ${attempt}/40)."
+            echo "Waiting for Validate push run on main for $RELEASE_SHA (attempt ${attempt}/80)."
             sleep 15
           done
           echo "Timed out waiting for Validate push run on main for $RELEASE_SHA." >&2
