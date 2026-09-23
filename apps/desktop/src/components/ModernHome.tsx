@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from '@/lib/navigation';
 import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -6,6 +6,7 @@ import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/L
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import MediaPosterCard from '@/components/MediaPosterCard';
+import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import ProviderMark from '@/components/ProviderMark';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaRail from '@/components/MediaRail';
@@ -27,6 +28,7 @@ import { mediaFormatLabel } from '@/shared/mediaFormat';
 import WatchedToggle from '@/components/WatchedToggle';
 import MediaTechnicalBadges from '@/components/MediaTechnicalBadges';
 import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
+import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
 import {
   HERO_ACTION_DIVIDER_CLASS,
   HERO_ACTION_FIRST_SEGMENT_CLASS,
@@ -413,6 +415,7 @@ type HeroProps = {
 
 function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWatched, activeIndex, itemCount, mode, onSelect, onHoverChange }: HeroProps) {
   const prefersReducedMotion = useReducedMotion();
+  const artworkSuspended = useArtworkSuspended();
   const { showProviderRatingBadges } = useTheme();
   const metadataGenres = item.genres.slice(0, 2);
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
@@ -455,8 +458,10 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
   const heroThumbnailRequestRef = useRef('');
   const generatedHeroArtworkRef = useRef('');
   const heroThumbnailGenerationRef = useRef(0);
+  const artworkSuspendedRef = useRef(artworkSuspended);
+  artworkSuspendedRef.current = artworkSuspended;
   const requestHeroThumbnail = useCallback(() => {
-    if (!heroFilePath || generatedHeroArtworkRef.current || heroThumbnailRequestRef.current === heroFilePath) return;
+    if (artworkSuspendedRef.current || !heroFilePath || generatedHeroArtworkRef.current || heroThumbnailRequestRef.current === heroFilePath) return;
     heroThumbnailRequestRef.current = heroFilePath;
     const generation = heroThumbnailGenerationRef.current;
     void desktopApi.getThumbnail(heroFilePath, '00:03:00')
@@ -475,15 +480,17 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
     generatedHeroArtworkRef.current = '';
     setGeneratedHeroArtwork('');
     heroThumbnailRequestRef.current = '';
-    if (heroArtworkSources.length === 0) requestHeroThumbnail();
   }, [heroArtworkSources.length, heroFilePath, requestHeroThumbnail]);
+  useEffect(() => {
+    if (!artworkSuspended && heroArtworkSources.length === 0) requestHeroThumbnail();
+  }, [artworkSuspended, heroArtworkSources.length, requestHeroThumbnail]);
   const resolvedHeroArtwork = useMemo(
     () => backdropSources(item, undefined, generatedHeroArtwork ? [generatedHeroArtwork] : []),
     [generatedHeroArtwork, item],
   );
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => setLogoFailed(false), [heroLogoSources, item.id]);
-  const showsHeroLogo = heroLogoSources.length > 0 && !logoFailed;
+  const showsHeroLogo = !artworkSuspended && heroLogoSources.length > 0 && !logoFailed;
   const artworkTransition = prefersReducedMotion
     ? { duration: 0 }
     : { duration: 0.8, ease: [0.22, 1, 0.36, 1] as const };
@@ -799,18 +806,6 @@ function ContinueWatchingRail({
   );
 }
 
-/**
- * Number of cards in the first visual row, derived from where the cards wrap.
- * Reading it from layout rather than the grid template keeps arrow navigation
- * correct at every window width.
- */
-function gridColumnCount(cards: HTMLElement[]): number {
-  if (cards.length === 0) return 1;
-  const firstRowTop = cards[0].offsetTop;
-  const columns = cards.findIndex((card) => card.offsetTop > firstRowTop);
-  return columns === -1 ? cards.length : columns;
-}
-
 type SearchResultsProps = {
   items: MediaItem[];
   query: string;
@@ -823,52 +818,24 @@ type SearchResultsProps = {
 };
 
 function SearchResults({ items, query, from, isLoading, overlay = false, gridRef, onExitTop }: SearchResultsProps) {
-  const internalGridRef = useRef<HTMLDivElement | null>(null);
-  const grid = gridRef || internalGridRef;
-
-  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const container = grid.current;
-    if (!container) return;
-    const cards = Array.from(container.querySelectorAll<HTMLAnchorElement>('a[href]'));
-    const current = cards.indexOf(document.activeElement as HTMLAnchorElement);
-    if (current === -1) return;
-
-    const columns = gridColumnCount(cards);
-    let next: number;
-    switch (event.key) {
-      case 'ArrowRight': next = Math.min(current + 1, cards.length - 1); break;
-      case 'ArrowLeft': next = Math.max(current - 1, 0); break;
-      case 'ArrowDown': next = Math.min(current + columns, cards.length - 1); break;
-      case 'ArrowUp':
-        if (current < columns) {
-          event.preventDefault();
-          onExitTop?.();
-          return;
-        }
-        next = current - columns;
-        break;
-      case 'Home': next = 0; break;
-      case 'End': next = cards.length - 1; break;
-      default: return;
-    }
-    event.preventDefault();
-    cards[next]?.focus();
-  };
-
   return (
     <main className={overlay ? 'w-full pb-10 pt-10' : 'loom-modern-content-frame page-bottom-safe px-[var(--loom-frame-inset)] pb-10 pt-28'}>
       <h1 className={overlay ? 'text-2xl font-bold tracking-tight' : 'text-3xl font-bold tracking-tight'}>Search results</h1>
       <p className="mt-2 text-sm text-[var(--loom-muted)]" aria-live="polite">{items.length} {items.length === 1 ? 'title' : 'titles'} matching “{query}”</p>
-      <div ref={grid} onKeyDown={moveFocus} className="mt-8 grid grid-cols-[repeat(auto-fill,minmax(180px,200px))] justify-between gap-5">
-        {items.map((item) => (
-          <MediaPosterCard
-            key={item.id}
-            item={item}
-            from={from}
-            variant="home"
-            metaLine={mediaMetaLine(item)}
-          />
-        ))}
+      <div ref={gridRef} className="mt-8">
+        <VirtualPosterGrid
+          items={items}
+          keyboardNavigation
+          onExitTop={onExitTop}
+          renderItem={(item) => (
+            <MediaPosterCard
+              item={item}
+              from={from}
+              variant="movies"
+              metaLine={mediaMetaLine(item)}
+            />
+          )}
+        />
       </div>
       {!isLoading && items.length === 0 && <p className="py-20 text-center text-[var(--loom-muted)]">No local matches found</p>}
     </main>

@@ -13,12 +13,9 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
 import { formatTime, seekAccessibilityText } from './helpers';
 import type { ControlTab } from './types';
 import SeekHoverPreview from './SeekHoverPreview';
-
-const VOLUME_ACK_TIMEOUT_MS = 1_200;
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 
@@ -102,84 +99,8 @@ export default function PlayerControlBar({
   toggleFullscreen,
 }: PlayerControlBarProps) {
   const engineVolume = clampVolume(volume);
-  const engineVolumeRef = useRef(engineVolume);
-  const engineMutedRef = useRef(muted);
-  const volumeInputRef = useRef<HTMLInputElement | null>(null);
-  const lastAudibleVolumeRef = useRef(engineVolume > 0 ? engineVolume : 1);
-  const pendingVolumeRef = useRef<number | null>(null);
-  const pendingMutedRef = useRef<boolean | null>(null);
-  const pendingAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [displayVolume, setDisplayVolume] = useState(engineVolume);
-  const [displayMuted, setDisplayMuted] = useState(muted || engineVolume === 0);
-
-  engineVolumeRef.current = engineVolume;
-  engineMutedRef.current = muted;
-  if (engineVolume > 0) lastAudibleVolumeRef.current = engineVolume;
-
-  const scheduleAckFallback = () => {
-    if (pendingAckTimerRef.current) clearTimeout(pendingAckTimerRef.current);
-    pendingAckTimerRef.current = setTimeout(() => {
-      pendingAckTimerRef.current = null;
-      pendingVolumeRef.current = null;
-      pendingMutedRef.current = null;
-      setDisplayVolume(engineVolumeRef.current);
-      setDisplayMuted(engineMutedRef.current || engineVolumeRef.current === 0);
-    }, VOLUME_ACK_TIMEOUT_MS);
-  };
-
-  useEffect(() => {
-    const pendingVolume = pendingVolumeRef.current;
-    if (pendingVolume === null) {
-      setDisplayVolume(engineVolume);
-    } else if (Math.abs(engineVolume - pendingVolume) < 0.001) {
-      pendingVolumeRef.current = null;
-      setDisplayVolume(engineVolume);
-    }
-  }, [engineVolume]);
-
-  useEffect(() => {
-    const pendingMuted = pendingMutedRef.current;
-    if (pendingMuted === null) {
-      setDisplayMuted(muted || engineVolume === 0);
-    } else if (muted === pendingMuted) {
-      pendingMutedRef.current = null;
-      setDisplayMuted(muted || engineVolume === 0);
-    }
-  }, [engineVolume, muted]);
-
-  useEffect(() => () => {
-    if (pendingAckTimerRef.current) clearTimeout(pendingAckTimerRef.current);
-  }, []);
-
-  const handleVolumeChange: React.ChangeEventHandler<HTMLInputElement> = (event) => {
-    const nextVolume = clampVolume(Number.parseFloat(event.currentTarget.value));
-    const nextMuted = nextVolume === 0;
-    if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume;
-    pendingVolumeRef.current = nextVolume;
-    pendingMutedRef.current = nextMuted;
-    setDisplayVolume(nextVolume);
-    setDisplayMuted(nextMuted);
-    scheduleAckFallback();
-    handleVolume(event);
-  };
-
-  const handleMuteClick = () => {
-    if (volumeIsMuted && displayVolume === 0 && volumeInputRef.current) {
-      const restoredVolume = Math.max(0.1, lastAudibleVolumeRef.current);
-      const input = volumeInputRef.current;
-      input.value = String(restoredVolume);
-      handleVolumeChange({ currentTarget: input, target: input } as React.ChangeEvent<HTMLInputElement>);
-      return;
-    }
-    const nextMuted = !(displayMuted || displayVolume === 0);
-    pendingMutedRef.current = nextMuted;
-    setDisplayMuted(nextMuted);
-    scheduleAckFallback();
-    toggleMute();
-  };
-
-  const volumeIsMuted = displayMuted || displayVolume === 0;
-  const visibleVolume = volumeIsMuted ? 0 : displayVolume;
+  const volumeIsMuted = muted || engineVolume === 0;
+  const visibleVolume = volumeIsMuted ? 0 : engineVolume;
 
   return (
     <div
@@ -298,7 +219,7 @@ export default function PlayerControlBar({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleMuteClick}
+            onClick={toggleMute}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
             title={volumeIsMuted ? 'Unmute (M)' : 'Mute (M)'}
             aria-label={volumeIsMuted ? 'Unmute' : 'Mute'}
@@ -307,13 +228,12 @@ export default function PlayerControlBar({
             {volumeIsMuted ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
           </button>
           <input
-            ref={volumeInputRef}
             type="range"
             min={0}
             max={1}
             step={0.05}
             value={visibleVolume}
-            onChange={handleVolumeChange}
+            onChange={handleVolume}
             onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
             aria-label="Volume"

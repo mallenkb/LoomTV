@@ -43,6 +43,7 @@ import {
   type DesktopLibraryMode,
 } from './lib/remoteDesktop';
 import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
+import { ArtworkSuspensionContext } from './contexts/ArtworkSuspensionContext';
 import { isIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { buildExternalPlaybackReference } from './shared/externalPlayback.ts';
 
@@ -550,6 +551,7 @@ function AppShell({
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
       {appStartupReady && !homeReady && <StartupSplash />}
+      <ArtworkSuspensionContext.Provider value={Boolean(nowPlaying)}>
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
       <Sidebar />
       <div
@@ -584,6 +586,7 @@ function AppShell({
         </motion.div>
       </main>
       </div>
+      </ArtworkSuspensionContext.Provider>
       {nowPlaying && (
         <ErrorBoundary
           title="Playback stopped unexpectedly"
@@ -612,9 +615,11 @@ function AppShell({
           />
         </ErrorBoundary>
       )}
+      <ArtworkSuspensionContext.Provider value={Boolean(nowPlaying)}>
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
         <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
       </div>
+      </ArtworkSuspensionContext.Provider>
       {librarySetupVisible && <FirstRunLibrarySetup onComplete={dismissLibrarySetup} onSkip={dismissLibrarySetup} />}
     </div>
     </LibraryFilterVisibilityContext.Provider>

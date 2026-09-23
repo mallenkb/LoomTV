@@ -414,6 +414,19 @@ const BROWSER_LOCAL_SESSION_KEY = 'loomtv:browser-local-session-token.v1';
 let resolvedServerBase: string | null = null;
 let resolvedLocalAccessToken: string | null = null;
 let remoteCatalogCache: { identity: string; etag: string; index: LibraryIndexPayload } | null = null;
+let remoteCatalogGeneration = 0;
+
+function clearRemoteCatalogCache(): void {
+  remoteCatalogGeneration += 1;
+  remoteCatalogCache = null;
+}
+
+function remoteCatalogIdentity(): string {
+  const session = getRemoteDesktopSession();
+  return session
+    ? `${session.baseUrl}:${session.deviceId}:${session.selectedProfileId || 'profile:none'}:${session.selectionRevision || 0}`
+    : 'remote:none';
+}
 
 function browserLocalSessionToken(): string | null {
   if (typeof window === 'undefined' || window.desktopApi) return null;
@@ -831,14 +844,16 @@ function browserMediaSessionDiagnostics(): MediaSessionDiagnostics {
 const desktopTransport = {
   async getLibraryIndex(): Promise<LibraryIndexPayload | null> {
     if (isRemoteDesktopMode()) {
-      const session = getRemoteDesktopSession();
-      const identity = session
-        ? `${session.baseUrl}:${session.deviceId}:${session.selectedProfileId || 'profile:none'}:${session.selectionRevision || 0}`
-        : 'remote:none';
+      const identity = remoteCatalogIdentity();
+      if (remoteCatalogCache && remoteCatalogCache.identity !== identity) clearRemoteCatalogCache();
+      const generation = remoteCatalogGeneration;
       const cached = remoteCatalogCache?.identity === identity ? remoteCatalogCache : null;
       const response = await remoteRequest('/api/v2/library/index', {
         headers: cached?.etag ? { 'If-None-Match': cached.etag } : {},
       });
+      if (generation !== remoteCatalogGeneration || !isRemoteDesktopMode() || remoteCatalogIdentity() !== identity) {
+        throw new DOMException('Remote catalog request was superseded.', 'AbortError');
+      }
       if (response.status === 304 && cached) return cached.index;
       if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
       if (!response.ok) {
@@ -846,6 +861,9 @@ const desktopTransport = {
         throw new Error(response.status === 401 ? 'Pairing was revoked on the host.' : 'Could not load the shared catalog.');
       }
       const index = remoteLibraryIndexSources(await readJsonResponse(response, desktopLibraryIndexSchema, 'Library index'));
+      if (generation !== remoteCatalogGeneration || !isRemoteDesktopMode() || remoteCatalogIdentity() !== identity) {
+        throw new DOMException('Remote catalog request was superseded.', 'AbortError');
+      }
       const etag = response.headers.get('ETag') || '';
       remoteCatalogCache = { identity, etag, index };
       updateRemoteDesktopSession({
@@ -1092,15 +1110,18 @@ const desktopTransport = {
   },
 
   activateRemoteLibrary(connection: RemoteLibraryConnection): void {
+    clearRemoteCatalogCache();
     saveRemoteDesktopSession(connection);
     setDesktopLibraryMode('remote');
   },
 
   useThisComputerAsHost(): void {
+    clearRemoteCatalogCache();
     setDesktopLibraryMode('host');
   },
 
   returnToDesktopOnboarding(): void {
+    clearRemoteCatalogCache();
     clearDesktopLibraryMode();
   },
 
@@ -1136,6 +1157,7 @@ const desktopTransport = {
   },
 
   disconnectRemoteDesktop(): void {
+    clearRemoteCatalogCache();
     void window.desktopApi?.disconnectRemoteLibrary?.(false);
     clearRemoteDesktopSession();
     setDesktopLibraryMode('host');

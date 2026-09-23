@@ -33,6 +33,7 @@ function uniqueValues(existing: string[] | undefined, fresh: string[] | undefine
 function isGenericEpisodeTitle(title: string | undefined, episodeNumber: number): boolean {
   const normalized = title?.trim().toLowerCase() || '';
   return !normalized
+    || /^(?:file:\/\/|[a-z]:[\\/]|[\\/])/.test(normalized)
     || normalized === `episode ${episodeNumber}`
     || normalized === `ep ${episodeNumber}`
     || normalized === `episode ${String(episodeNumber).padStart(2, '0')}`
@@ -385,7 +386,9 @@ function mergeEpisodes(existing: EpisodeMeta[], incoming: EpisodeMeta[]): Episod
       ? {
         ...episode,
         ...current,
-        title: current.title || episode.title,
+        title: isGenericEpisodeTitle(current.title, episode.number) && !isGenericEpisodeTitle(episode.title, episode.number)
+          ? episode.title
+          : current.title || episode.title,
         summary: current.summary || episode.summary,
         still: current.still || episode.still,
         rating: current.rating || episode.rating,

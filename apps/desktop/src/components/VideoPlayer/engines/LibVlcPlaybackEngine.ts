@@ -22,9 +22,10 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   readonly kind = 'libvlc' as const;
   readonly surface = 'composited-window' as const;
   private readonly lease: NativeSessionLease<PlaybackStartOptions, LibVlcPlaybackState>;
-  private readonly volumeController = new PlaybackVolumeController(async (volume, muted) => {
-    await this.command({ type: 'set-volume', volume });
-    await this.command({ type: 'set-muted', muted });
+  private readonly volumeController = new PlaybackVolumeController(async (volume, muted, changes) => {
+    if (muted && changes.muted) await this.command({ type: 'set-muted', muted });
+    if (changes.volume) await this.command({ type: 'set-volume', volume });
+    if (!muted && changes.muted) await this.command({ type: 'set-muted', muted });
   });
   private lastState: LibVlcPlaybackState | null = null;
   private nativeTracks: PlaybackTrack[] = [];

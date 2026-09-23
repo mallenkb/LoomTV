@@ -17,7 +17,7 @@ import { artworkVariant } from '@/lib/artworkVariants';
 import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
-import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
+import { cleanEpisodeTitleForDisplay, episodeCode, episodeTitleFromFilePath } from '@/lib/episodeTitles';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import { EXPLORE_ITEM_UPDATED_EVENT, getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
@@ -28,6 +28,7 @@ import { normalizeAnimeCast } from '@/shared/animeCast';
 import DetailHeroActions from '@/components/DetailHeroActions';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
+import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -48,8 +49,11 @@ function epCode(season: number, episode: number): string {
   return episodeCode(season, episode);
 }
 
-function episodeTitleDisplay(title: string | undefined, seriesTitle: string, season: number, episode: number): string {
-  return cleanEpisodeTitleForDisplay(title, seriesTitle, season, episode);
+function episodeTitleDisplay(title: string | undefined, seriesTitle: string, season: number, episode: number, filePath?: string): string {
+  const metadataTitle = cleanEpisodeTitleForDisplay(title, seriesTitle, season, episode);
+  return metadataTitle === `Episode ${episode}`
+    ? episodeTitleFromFilePath(filePath, seriesTitle, season, episode)
+    : metadataTitle;
 }
 
 function formatShortMinutes(seconds: number): string {
@@ -1266,7 +1270,7 @@ function EpisodeRow({
   durationHint?: number;
   progressTick: number;
 }) {
-  const [imgError, setImgError] = useState(false);
+  const artworkSuspended = useArtworkSuspended();
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const rowRef = useRef<HTMLButtonElement | null>(null);
   const [isNearViewport, setIsNearViewport] = useState(false);
@@ -1289,14 +1293,15 @@ function EpisodeRow({
   }, [ep.still]);
 
   useEffect(() => {
-    let cancelled = false;
-    setImgError(false);
     setThumbnailUrl(null);
+  }, [ep.still, filePath]);
 
+  useEffect(() => {
+    let cancelled = false;
     // Most metadata rows already have a still. Avoid spawning FFmpeg/IPC work
     // for those rows; generate a fallback only when an artwork-less row is
     // close to the viewport.
-    if (!isNearViewport || !filePath || ep.still) return () => {
+    if (artworkSuspended || !isNearViewport || !filePath || ep.still || thumbnailUrl) return () => {
       cancelled = true;
     };
 
@@ -1311,10 +1316,10 @@ function EpisodeRow({
     return () => {
       cancelled = true;
     };
-  }, [ep.still, filePath, isNearViewport]);
+  }, [artworkSuspended, ep.still, filePath, isNearViewport, thumbnailUrl]);
 
   const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
-  const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
+  const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number, filePath || undefined);
   const episodeAirDate = formatEpisodeAirDate(ep.airDate);
   const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
   const progress = getProgressState(filePath, durationHint);
@@ -1344,20 +1349,14 @@ function EpisodeRow({
       {/* Thumbnail. Watch state lives here rather than in a right-hand column:
           the still is what the eye lands on when scanning a season. */}
       <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded bg-[var(--loom-surface-3)]">
-        {(thumbnailUrl || ep.still) && !imgError ? (
-          <img
-            src={thumbnailUrl || artworkVariant(ep.still, 'w300')}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="lazy"
-            decoding="async"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
+        <SafeArtwork
+          src={thumbnailUrl || artworkVariant(ep.still, 'w300')}
+          alt=""
+          className="h-full w-full"
+          fallback={<div className="flex h-full w-full items-center justify-center">
             <span className="font-mono text-xs text-[var(--loom-faint)]">{epLabel}</span>
-          </div>
-        )}
+          </div>}
+        />
         {!progress.watched && (
           <div
             className={`absolute inset-0 flex items-center justify-center transition-[opacity,background-color] ${isResumable

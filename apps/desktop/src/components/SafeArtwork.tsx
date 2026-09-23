@@ -1,8 +1,11 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
 
 // Warm nearby artwork without decoding several offscreen rails on every page
 // mount. Distant artwork releases its decoded image resource.
 const ARTWORK_PRELOAD_MARGIN = '256px 400px';
+const MAX_LOCAL_ARTWORK_RETRIES = 2;
+const LOCAL_ARTWORK_PATHS = new Set(['/api/cached-artwork', '/api/thumbnail', '/api/local-image', '/api/custom-artwork']);
 const artworkVisibilityCallbacks = new Map<Element, (visible: boolean) => void>();
 let artworkObserver: IntersectionObserver | null = null;
 
@@ -36,11 +39,20 @@ interface SafeArtworkProps {
   onError?: () => void;
   priority?: boolean;
   naturalSize?: boolean;
+  onNearViewportChange?: (near: boolean) => void;
 }
 
 function normalizeSources(src: string | string[]): string[] {
   const sources = Array.isArray(src) ? src : [src];
   return Array.from(new Set(sources.filter(Boolean)));
+}
+
+function isLocalArtworkSource(source: string): boolean {
+  try {
+    return LOCAL_ARTWORK_PATHS.has(new URL(source, window.location.href).pathname);
+  } catch {
+    return false;
+  }
 }
 
 export default function SafeArtwork({
@@ -53,7 +65,9 @@ export default function SafeArtwork({
   onError,
   priority = false,
   naturalSize = false,
+  onNearViewportChange,
 }: SafeArtworkProps) {
+  const artworkSuspended = useArtworkSuspended();
   const [sourceIndex, setSourceIndex] = useState(0);
   const [loadedSource, setLoadedSource] = useState('');
   const [isNearViewport, setIsNearViewport] = useState(
@@ -62,11 +76,17 @@ export default function SafeArtwork({
   const artworkRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const failedSourcesRef = useRef<Set<string>>(new Set());
+  const localRetryCountRef = useRef(0);
   const sources = useMemo(() => normalizeSources(src), [src]);
   const sourceKey = JSON.stringify(sources);
+  const hasFailedLocalSource = sources.some((source) => failedSourcesRef.current.has(source) && isLocalArtworkSource(source));
   const currentSource = sources[sourceIndex] || '';
   const sourceLoaded = loadedSource === currentSource;
-  const shouldRenderImage = priority || isNearViewport;
+  const shouldRenderImage = !artworkSuspended && (priority || isNearViewport);
+
+  useEffect(() => {
+    onNearViewportChange?.(priority || isNearViewport);
+  }, [isNearViewport, onNearViewportChange, priority]);
 
   useEffect(() => {
     const artwork = artworkRef.current;
@@ -81,7 +101,19 @@ export default function SafeArtwork({
   useEffect(() => {
     setSourceIndex(0);
     failedSourcesRef.current = new Set();
+    localRetryCountRef.current = 0;
   }, [sourceKey]);
+
+  useEffect(() => {
+    if (!shouldRenderImage || sourceIndex < sources.length || localRetryCountRef.current >= MAX_LOCAL_ARTWORK_RETRIES) return;
+    if (!hasFailedLocalSource) return;
+    const timeout = window.setTimeout(() => {
+      localRetryCountRef.current += 1;
+      failedSourcesRef.current = new Set();
+      setSourceIndex(0);
+    }, 1_000 * (localRetryCountRef.current + 1));
+    return () => window.clearTimeout(timeout);
+  }, [hasFailedLocalSource, shouldRenderImage, sourceIndex, sourceKey, sources.length]);
 
   useLayoutEffect(() => {
     const image = imageRef.current;

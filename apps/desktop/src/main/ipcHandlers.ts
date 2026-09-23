@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
-import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue } from 'electron';
+import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue, WebContents } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,6 +63,8 @@ import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
 
 const finiteNumber = z.number().finite();
 const nonEmptyString = z.string().max(8192).trim().min(1).max(8192);
+const MAX_RENDERER_PLAYBACK_LEASES_PER_OWNER = 16;
+const playbackActivityKeySchema = z.string().trim().min(1).max(200);
 const mediaSessionSnapshotSchema = z.object({
   sessionId: z.string().max(200),
   state: z.enum(['playing', 'paused', 'stopped']),
@@ -548,6 +550,25 @@ export function registerIpcHandlers<
   TSettings extends NetworkSettings & IpcResult<'settings:get'>,
 >(deps: IpcHandlerDependencies<TLibraryData, TSettings>): void {
   const folderMutations = createLibraryFolderMutations(deps);
+  const rendererPlaybackLeases = new Map<number, Set<string>>();
+  const scopedPlaybackLeaseKey = (ownerId: number, key: string) => `renderer:${ownerId}:${key}`;
+  const releaseRendererPlaybackLeases = (ownerId: number, destroyed = false): void => {
+    const keys = rendererPlaybackLeases.get(ownerId);
+    if (!keys) return;
+    for (const key of keys) deps.setPlaybackActivityLease(scopedPlaybackLeaseKey(ownerId, key), false);
+    keys.clear();
+    if (destroyed) rendererPlaybackLeases.delete(ownerId);
+  };
+  const watchPlaybackLeaseOwner = (owner: WebContents): Set<string> => {
+    const existing = rendererPlaybackLeases.get(owner.id);
+    if (existing) return existing;
+    const keys = new Set<string>();
+    rendererPlaybackLeases.set(owner.id, keys);
+    owner.on('did-navigate', () => releaseRendererPlaybackLeases(owner.id));
+    owner.on('render-process-gone', () => releaseRendererPlaybackLeases(owner.id));
+    owner.once('destroyed', () => releaseRendererPlaybackLeases(owner.id, true));
+    return keys;
+  };
   const handle = <C extends IpcInvokeChannel>(
     channel: C,
     listener: (
@@ -1193,10 +1214,21 @@ export function registerIpcHandlers<
   // The FFmpeg activity lease governs transcoder scheduling only. System media
   // ownership is published separately on `media-control:publish` so neither can
   // silently move the other.
-  handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
-    deps.setPlaybackActivityLease(key, Boolean(active), label);
+  handle('playback:activity', (event, key: string, active: boolean, label?: string) => {
+    const owner = event.sender;
+    if (owner.isDestroyed()) return false;
+    const keys = rendererPlaybackLeases.get(owner.id);
+    const scopedKey = scopedPlaybackLeaseKey(owner.id, key);
+    if (active) {
+      if (!keys?.has(key) && (keys?.size ?? 0) >= MAX_RENDERER_PLAYBACK_LEASES_PER_OWNER) return false;
+      const ownedKeys = watchPlaybackLeaseOwner(owner);
+      deps.setPlaybackActivityLease(scopedKey, true, label);
+      ownedKeys.add(key);
+    } else if (keys?.delete(key)) {
+      deps.setPlaybackActivityLease(scopedKey, false);
+    }
     return true;
-  }, z.tuple([nonEmptyString, z.boolean(), z.string().max(8192).optional()]));
+  }, z.tuple([playbackActivityKeySchema, z.boolean(), z.string().max(8192).optional()]));
 
   handle('media-control:publish', (event, snapshot) =>
     publishMediaSessionSnapshot(event.sender, snapshot), z.tuple([mediaSessionSnapshotSchema]));

@@ -243,12 +243,48 @@ export function sanitizeArtworkBytesWithDecoder(bytes: Buffer, contentType: stri
 }
 
 const ARTWORK_WORKER_TIMEOUT_MS = 5_000;
+// Reserve decoded RGBA pixels across workers. One maximum-sized image uses the
+// entire 128 MB budget; smaller images can decode alongside each other.
+const MAX_ACTIVE_ARTWORK_DECODE_PIXELS = MAX_ARTWORK_PIXELS;
+const MAX_QUEUED_ARTWORK_DECODES = 32;
+let activeArtworkDecodePixels = 0;
+const waitingArtworkDecodes: Array<{ pixels: number; start: () => void }> = [];
+
+function startWaitingArtworkDecodes(): void {
+  while (waitingArtworkDecodes.length > 0
+    && activeArtworkDecodePixels + waitingArtworkDecodes[0].pixels <= MAX_ACTIVE_ARTWORK_DECODE_PIXELS) {
+    waitingArtworkDecodes.shift()?.start();
+  }
+}
+
+function runWithArtworkDecodeBudget<T>(pixels: number, task: () => Promise<T>): Promise<T> {
+  if (waitingArtworkDecodes.length >= MAX_QUEUED_ARTWORK_DECODES) {
+    return Promise.reject(new Error('Artwork rejected: decoder queue is full'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    waitingArtworkDecodes.push({
+      pixels,
+      start: () => {
+        activeArtworkDecodePixels += pixels;
+        void Promise.resolve()
+          .then(task)
+          .then(resolve, reject)
+          .finally(() => {
+            activeArtworkDecodePixels -= pixels;
+            startWaitingArtworkDecodes();
+          });
+      },
+    });
+    startWaitingArtworkDecodes();
+  });
+}
+
 const ARTWORK_WORKER_SOURCE = String.raw`
   const { parentPort, workerData } = require('node:worker_threads');
   const { nativeImage } = require('electron');
   const fail = (message) => parentPort.postMessage({ ok: false, error: message });
   try {
-    const input = Buffer.from(workerData.bytes);
+    const input = Buffer.from(workerData.bytes.buffer, workerData.bytes.byteOffset, workerData.bytes.byteLength);
     const decoded = nativeImage.createFromBuffer(input);
     if (decoded.isEmpty()) throw new Error('image decoder returned an empty image');
     const size = decoded.getSize();
@@ -291,8 +327,8 @@ const ARTWORK_WORKER_SOURCE = String.raw`
  */
 export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Promise<SanitizedArtwork> {
   const inspection = inspectArtworkBytes(bytes, contentType);
-  const input = Uint8Array.from(bytes);
-  return new Promise<SanitizedArtwork>((resolve, reject) => {
+  return runWithArtworkDecodeBudget(inspection.width * inspection.height, () => new Promise<SanitizedArtwork>((resolve, reject) => {
+    const input = Uint8Array.from(bytes);
     const worker = new Worker(ARTWORK_WORKER_SOURCE, {
       eval: true,
       workerData: {
@@ -304,6 +340,7 @@ export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Pro
         maxPixels: MAX_ARTWORK_PIXELS,
         maxOutputBytes: MAX_ARTWORK_OUTPUT_BYTES,
       },
+      transferList: [input.buffer],
       resourceLimits: {
         maxOldGenerationSizeMb: 64,
         maxYoungGenerationSizeMb: 16,
@@ -316,8 +353,11 @@ export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Pro
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      callback();
-      void worker.terminate();
+      // terminate() resolves when the worker exits. Keep its pixel reservation
+      // and the fetch admission slot until native decode memory is gone.
+      void worker.terminate().then(callback, (error: unknown) => {
+        reject(new Error(`Artwork rejected: decoder termination failed: ${String(error)}`));
+      });
     };
     const timeout = setTimeout(() => {
       finish(() => reject(new Error('Artwork rejected: decoder exceeded the time limit')));
@@ -346,9 +386,12 @@ export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Pro
     });
     worker.once('error', (error) => finish(() => reject(new Error(`Artwork rejected: ${error.message}`))));
     worker.once('exit', (code) => {
-      if (code !== 0) finish(() => reject(new Error('Artwork rejected: decoder process exited unexpectedly')));
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error(`Artwork rejected: decoder exited without a result (${code})`));
     });
-  });
+  }));
 }
 
 const negativeArtworkCache = new Map<string, number>();

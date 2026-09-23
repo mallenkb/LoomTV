@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.187](docs/releases/v1.0.187.md)
+
+Improves desktop playback reliability, artwork loading, library reconciliation, and accessibility.
+
 ### [1.0.186](docs/releases/v1.0.186.md)
 
 Returns cache memory when idle or hidden, never during playback.

@@ -145,7 +145,7 @@ function durableArtworkSources(sources?: string[]): string[] {
 // Only used for newly decoded database records owned by loadLibrary.
 function finalizeLoadedItem(
   item: MediaItem,
-  custom: Map<string, Map<string, string>>,
+  custom: Map<string, Set<string>>,
 ): MediaItem {
   const next = item;
   const itemCustom = custom.get(item.id);
@@ -167,10 +167,10 @@ function finalizeLoadedItem(
   delete next.lastPlayed;
 
   if (itemCustom) {
-    const cover = itemCustom.get('cover');
-    const poster = itemCustom.get('poster');
-    const thumbnail = itemCustom.get('thumbnail');
-    const logo = itemCustom.get('logo');
+    const cover = itemCustom.has('cover');
+    const poster = itemCustom.has('poster');
+    const thumbnail = itemCustom.has('thumbnail');
+    const logo = itemCustom.has('logo');
     if (cover) {
       const coverReference = customArtworkReference(item.id, 'cover');
       next.backdrop = coverReference;
@@ -206,7 +206,7 @@ export function hasLibraryData(database: BetterSqlite3.Database): boolean {
 
 export function loadLibrary(
   database: BetterSqlite3.Database,
-  custom: Map<string, Map<string, string>>,
+  custom: Map<string, Set<string>>,
 ): LibraryData | null {
   if (!hasLibraryData(database)) return null;
 

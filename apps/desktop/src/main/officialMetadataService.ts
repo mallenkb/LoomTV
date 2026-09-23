@@ -88,7 +88,7 @@ export type OfficialMetadataServiceDependencies = {
     category: MetadataRefreshCategory,
     result: { refreshedAt?: number; error?: string; locked?: boolean },
   ) => void;
-  cacheArtworkNow: (library: LibraryData) => Promise<void>;
+  cacheArtworkNow: (library: LibraryData, changedItem?: MediaItem) => Promise<void>;
   loadSettings: () => AppSettings;
   getMetadataApiKey: typeof import('./settings.ts').getMetadataApiKey;
   localTitleFromPath: (filePath?: string) => string | null;
@@ -155,6 +155,7 @@ function applyOfficialSeasons(
 function isGenericEpisodeTitle(value: string | undefined, episodeNumber: number): boolean {
   const normalized = value?.trim().toLowerCase() || '';
   if (!normalized) return true;
+  if (/^(?:file:\/\/|[a-z]:[\\/]|[\\/])/.test(normalized)) return true;
   return normalized === `episode ${episodeNumber}`
     || normalized === `ep ${episodeNumber}`
     || normalized === `episode ${String(episodeNumber).padStart(2, '0')}`
@@ -1161,7 +1162,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       : applyTarget === 'episodes'
         ? ['episodes']
         : ['artwork']);
-    if (applyPoster || applyCover || applyLogo) await cacheArtworkNow(library);
+    if (applyPoster || applyCover || applyLogo) await cacheArtworkNow(library, target);
 
     return {
       thumbnail: target.poster || '',
@@ -1295,7 +1296,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       lockMetadataCategories(mediaId, refreshMetadata
         ? ['core', 'cast', 'artwork', 'ratings', 'episodes']
         : ['artwork']);
-      await cacheArtworkNow(library);
+      await cacheArtworkNow(library, target);
     }
 
     if (refreshTarget === 'poster') {
@@ -1430,7 +1431,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const changed = JSON.stringify(target) !== before;
       if (changed) {
         saveLibraryItem(target);
-        if (needs('artwork') || needs('episodes') || needs('cast')) await cacheArtworkNow(library);
+        if (needs('artwork') || needs('episodes') || needs('cast')) await cacheArtworkNow(library, target);
       }
       const observedCategories = [...new Set([
         ...metadataRefreshCategories.filter((category) => !metadataCategoryIsLocked(mediaId, category)),
@@ -1545,7 +1546,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const changed = JSON.stringify(target) !== before;
       if (changed) {
         saveLibraryItem(target);
-        if (refreshes('artwork') || refreshes('cast') || refreshes('episodes')) await cacheArtworkNow(library);
+        if (refreshes('artwork') || refreshes('cast') || refreshes('episodes')) await cacheArtworkNow(library, target);
       }
       recordMetadataCategories(mediaId, categories, { refreshedAt: Date.now() });
       return changed;
@@ -1664,7 +1665,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         ...officialArtworkOnly(target.logoCandidates || []),
       );
       saveLibraryItem(target);
-      void cacheArtworkNow(library).catch((error) => {
+      void cacheArtworkNow(library, target).catch((error) => {
         console.error('playback logo artwork cache error:', error);
       });
     }

@@ -23,7 +23,7 @@ import {
 import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
 import { isIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
-import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
+import { cleanEpisodeTitleForDisplay, looksLikeGenericEpisodeTitle } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
   getPlayableStartPosition,
@@ -341,6 +341,9 @@ export default function VideoPlayer({
   // Native engine session id. The main process needs it to run a media command
   // against the running LibVLC or mpv player without a renderer round trip.
   const [nativeSessionId, setNativeSessionId] = useState<string | null>(null);
+  const [nativeDecoder, setNativeDecoder] = useState<{
+    sessionId: string; hardware?: boolean; name?: string;
+  } | null>(null);
   // Set by a system stop command. It releases the media session without closing
   // the player, and clears again the moment playback resumes, which is how
   // LoomTV takes the session back after another app has held it.
@@ -415,6 +418,15 @@ export default function VideoPlayer({
   const [volumeIndicatorVisible, setVolumeIndicatorVisible] = useState(false);
   const [volumeIndicatorPercent, setVolumeIndicatorPercent] = useState(100);
   const volumeCommandRef = useRef<number | null>(null);
+  const muteCommandRef = useRef<{ muted: boolean; until: number } | null>(null);
+  const lastAudibleVolumeRef = useRef(1);
+  // The volume and mute the viewer chose. Whichever engine starts next reads
+  // it, so a fallback, the next episode, or the HLS player never comes up
+  // audible while the controls say muted.
+  const audioIntentRef = useRef({ volume: 1, muted: false });
+  useEffect(() => {
+    audioIntentRef.current = { volume, muted };
+  }, [volume, muted]);
   const volumeIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showVolumeIndicator = useCallback((value: number) => {
     if (volumeIndicatorTimerRef.current) clearTimeout(volumeIndicatorTimerRef.current);
@@ -428,6 +440,7 @@ export default function VideoPlayer({
   }, []);
   useEffect(() => {
     setVolumeIndicatorVisible(false);
+    muteCommandRef.current = null;
     return () => {
       if (volumeIndicatorTimerRef.current) clearTimeout(volumeIndicatorTimerRef.current);
       volumeIndicatorTimerRef.current = null;
@@ -780,7 +793,30 @@ export default function VideoPlayer({
   const selectedSubtitleCueCodec = selectedSubtitleCueDetails.codec;
   const selectedSubtitleCueExternalUrl = selectedSubtitleCueDetails.externalUrl;
 
-  const groupedEpisodes = useMemo(() => groupEpisodesBySeason(episodes), [episodes]);
+  const [hydratedEpisodes, setHydratedEpisodes] = useState<typeof episodes>([]);
+  useEffect(() => {
+    if (!mediaId || episodes.length === 0) return;
+    let cancelled = false;
+    void desktopApi.getLibraryItem(mediaId)
+      .then((result) => {
+        if (!cancelled && result?.item.id === mediaId) setHydratedEpisodes(result.item.episodes || []);
+      })
+      .catch((error) => console.warn('Could not load episode names:', error));
+    return () => { cancelled = true; };
+  }, [episodes.length, mediaId]);
+
+  const displayEpisodes = useMemo(() => {
+    if (hydratedEpisodes.length === 0) return episodes;
+    const names = new Map(hydratedEpisodes.map((episode) => [`${episode.season}-${episode.number}`, episode.title]));
+    return episodes.map((episode) => {
+      const savedTitle = names.get(`${episode.season}-${episode.number}`);
+      return savedTitle && !looksLikeGenericEpisodeTitle(savedTitle, title, episode.number)
+        ? { ...episode, title: savedTitle }
+        : episode;
+    });
+  }, [episodes, hydratedEpisodes, title]);
+
+  const groupedEpisodes = useMemo(() => groupEpisodesBySeason(displayEpisodes), [displayEpisodes]);
 
   const displayEpisodeTitle = useCallback((season: number, episode: number, rawTitle?: string, filePath?: string): string => {
     const metadataTitle = cleanEpisodeTitleForDisplay(rawTitle, title, season, episode);
@@ -1338,6 +1374,13 @@ export default function VideoPlayer({
   const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
     if (state.sessionId) setNativeSessionId(state.sessionId);
+    if (state.diagnostics) {
+      const hardware = state.diagnostics.hardwareDecode;
+      const name = state.diagnostics.hardwareDecoder;
+      setNativeDecoder((previous) => previous?.sessionId === state.sessionId
+        && previous.hardware === hardware && previous.name === name
+        ? previous : { sessionId: state.sessionId, hardware, name });
+    }
 
     const now = performance.now();
     const seekGuard = nativeSeekGuardRef.current;
@@ -1382,13 +1425,27 @@ export default function VideoPlayer({
     }
 
     if (typeof state.paused === 'boolean' && !suppressSeekSnapshot) {
-      setPaused(state.paused);
+      // Native state can briefly report the old playing flag after a user
+      // pause. Keep the controls and pause artwork in sync with that intent.
+      setPaused(state.paused || userPausedRef.current);
       if (state.paused && playbackPositionRef.current > 10 && playbackDurationRef.current > 0) {
         void savePlaybackProgress(filePath, playbackPositionRef.current, playbackDurationRef.current);
       }
     }
-    if (typeof state.volume === 'number') setVolume(Math.max(0, Math.min(1, state.volume)));
-    if (typeof state.muted === 'boolean') setMuted(state.muted);
+    if (typeof state.volume === 'number') {
+      const nextVolume = Math.max(0, Math.min(1, state.volume));
+      if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume;
+      if (volumeCommandRef.current === null || Math.abs(nextVolume - volumeCommandRef.current) < 0.001) {
+        setVolume(nextVolume);
+      }
+    }
+    if (typeof state.muted === 'boolean') {
+      const pending = muteCommandRef.current;
+      if (!pending || state.muted === pending.muted || Date.now() >= pending.until) {
+        muteCommandRef.current = null;
+        setMuted(state.muted);
+      }
+    }
     if (typeof state.speed === 'number') setPlaybackRate(state.speed);
 
     if (state.tracks) {
@@ -1620,9 +1677,15 @@ export default function VideoPlayer({
         return;
       }
       void (async () => {
-        if (failedEngineKind === 'libvlc' && await MpvPlaybackEngine.available().catch(() => false)) {
+        // Whichever native engine fails, try the other one before the HLS
+        // transcode path, which costs an FFmpeg process and loses instant
+        // track switching.
+        const FallbackNativeEngine = failedEngineKind === 'libvlc'
+          ? MpvPlaybackEngine
+          : failedEngineKind === 'mpv' ? LibVlcPlaybackEngine : null;
+        if (FallbackNativeEngine && await FallbackNativeEngine.available().catch(() => false)) {
           nativeAutoplayIssuedRef.current = false;
-          const fallbackEngine = new MpvPlaybackEngine(handleNativePlaybackState);
+          const fallbackEngine = new FallbackNativeEngine(handleNativePlaybackState);
           if (!playbackEngineRef.current && playerActiveRef.current) {
             playbackEngineRef.current = fallbackEngine;
             try {
@@ -1631,6 +1694,8 @@ export default function VideoPlayer({
                 startSeconds: fallbackPosition,
                 audioDelay: audioDelayRef.current,
                 subtitleDelay: 0,
+                volume: audioIntentRef.current.volume,
+                muted: audioIntentRef.current.muted,
                 subtitleStyle: {
                   fontSize: Math.round(style.fontSize * style.scale),
                   color: style.fontColor,
@@ -1651,14 +1716,14 @@ export default function VideoPlayer({
               });
               if (loaded && playerActiveRef.current && playbackEngineRef.current === fallbackEngine) {
                 setNativePlaybackActive(true);
-                setNativeEngineKind('mpv');
+                setNativeEngineKind(fallbackEngine.kind);
                 document.documentElement.classList.add('loom-native-active');
-                setStatusMessage('Opening with libmpv…');
+                setStatusMessage(fallbackEngine.kind === 'mpv' ? 'Opening with libmpv…' : 'Opening with LibVLC…');
                 setErrorMessage(null);
                 return;
               }
             } catch (error) {
-              console.warn('[player] MPV fallback after LibVLC failure could not start.', error);
+              console.warn(`[player] ${fallbackEngine.kind} fallback after ${failedEngineKind} failure could not start.`, error);
             }
             if (playbackEngineRef.current === fallbackEngine) playbackEngineRef.current = null;
             await fallbackEngine.destroy();
@@ -1876,6 +1941,7 @@ export default function VideoPlayer({
         // them directly. Availability checks and ffprobe only duplicated work
         // and delayed the first frame.
         const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = isLocalFile
+          // LibVLC first, libmpv as the native fallback, then HLS.
           ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
           : isIptvStream
             ? [LibVlcPlaybackEngine]
@@ -1893,6 +1959,8 @@ export default function VideoPlayer({
               startSeconds: requestedStartPosition,
               audioDelay: audioDelayRef.current,
               subtitleDelay: 0,
+              volume: audioIntentRef.current.volume,
+              muted: audioIntentRef.current.muted,
               subtitleStyle: {
                 fontSize: Math.round(initialSubtitleStyle.fontSize * initialSubtitleStyle.scale),
                 color: initialSubtitleStyle.fontColor,
@@ -2054,8 +2122,9 @@ export default function VideoPlayer({
     }
     setErrorMessage(null);
     userPausedRef.current = pendingSwap?.wasPaused ?? userPausedRef.current;
-    video.volume = pendingSwap?.volume ?? video.volume;
-    video.muted = pendingSwap?.muted ?? video.muted;
+    // While a native engine played, mute changes never reached this element.
+    video.volume = pendingSwap?.volume ?? audioIntentRef.current.volume;
+    video.muted = pendingSwap?.muted ?? audioIntentRef.current.muted;
     video.playbackRate = pendingSwap?.playbackRate ?? video.playbackRate;
 
     const completePendingSwap = () => {
@@ -2281,6 +2350,8 @@ export default function VideoPlayer({
 
     const onVolumeChange = () => {
       setVolume(video.volume);
+      if (video.volume > 0) lastAudibleVolumeRef.current = video.volume;
+      muteCommandRef.current = null;
       setMuted(video.muted);
     };
 
@@ -2962,6 +3033,8 @@ export default function VideoPlayer({
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
     volumeCommandRef.current = v;
+    muteCommandRef.current = { muted: v === 0, until: Date.now() + 1500 };
+    if (v > 0) lastAudibleVolumeRef.current = v;
     showVolumeIndicator(v);
     setVolume(v);
     setMuted(v === 0);
@@ -2977,13 +3050,30 @@ export default function VideoPlayer({
   }, [showVolumeIndicator]);
 
   const toggleMute = useCallback(() => {
-    showVolumeIndicator(muted ? volume : 0);
-    if (playbackEngineRef.current) {
-      void playbackEngineRef.current.setMuted(!muted);
+    const nextMuted = !(muteCommandRef.current?.muted ?? (muted || volume === 0));
+    const restoredVolume = !nextMuted && volume === 0 ? lastAudibleVolumeRef.current : volume;
+    muteCommandRef.current = { muted: nextMuted, until: Date.now() + 1500 };
+    setMuted(nextMuted);
+    if (restoredVolume !== volume) {
+      volumeCommandRef.current = restoredVolume;
+      setVolume(restoredVolume);
+    }
+    showVolumeIndicator(nextMuted ? 0 : restoredVolume);
+    const engine = playbackEngineRef.current;
+    if (engine) {
+      if (restoredVolume !== volume) void engine.setVolume(restoredVolume);
+      void engine.setMuted(nextMuted).catch(() => {
+        if (muteCommandRef.current?.muted !== nextMuted) return;
+        muteCommandRef.current = null;
+        setMuted(!nextMuted);
+        showVolumeIndicator(nextMuted ? restoredVolume : 0);
+      });
       return;
     }
     const video = videoRef.current;
-    if (video) video.muted = !video.muted;
+    if (!video) return;
+    if (restoredVolume !== volume) video.volume = restoredVolume;
+    video.muted = nextMuted;
   }, [muted, volume, showVolumeIndicator]);
 
   const restartForTrackChange = useCallback(() => {
@@ -3228,6 +3318,8 @@ export default function VideoPlayer({
       ?? (playbackEngineRef.current ? volume : videoRef.current?.volume ?? volume);
     const nextVolume = Math.min(100, Math.max(0, Math.round(currentVolume * 100) + Math.round(delta * 100))) / 100;
     volumeCommandRef.current = nextVolume;
+    muteCommandRef.current = { muted: nextVolume === 0, until: Date.now() + 1500 };
+    if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume;
     showVolumeIndicator(nextVolume);
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
@@ -3483,6 +3575,16 @@ export default function VideoPlayer({
       && !isEditableShortcutTarget(event.target)
     );
     const onKey = (e: KeyboardEvent) => {
+      // M also works when the volume button or slider has keyboard focus.
+      if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey
+        && !e.isComposing && !e.defaultPrevented && isTopmostModalContent(containerRef.current)
+        && !isEditableShortcutTarget(e.target) && !isEditableShortcutTarget(document.activeElement)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        resetSurfaceDoubleClickGuard();
+        if (!e.repeat && playerStateRef.current !== 'error') toggleMute();
+        return;
+      }
       // Forward and back always seek while a video is playing, no matter which
       // panel or control holds focus. Typing targets, dropdowns, and native
       // sliders keep their own arrow behavior.
@@ -3581,13 +3683,6 @@ export default function VideoPlayer({
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
           runMediaSessionCommand({ type: 'nextItem' });
-          break;
-        case 'm':
-        case 'M':
-          if (hasCommandModifier) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          toggleMute();
           break;
         case 'Backspace':
           if (e.metaKey || e.ctrlKey || e.altKey) break;
@@ -3693,7 +3788,11 @@ export default function VideoPlayer({
         : streamUrl
           ? 'Direct stream'
           : 'Preparing',
-    hardwareDecode: nativePlaybackActive ? 'Native engine managed' : 'Chromium managed',
+    hardwareDecode: !nativePlaybackActive ? 'Chromium managed'
+      : nativeDecoder?.sessionId !== nativeSessionId || nativeDecoder.hardware === undefined
+        ? 'Decoder status unavailable'
+        : nativeDecoder.hardware ? `${nativeDecoder.name || 'Hardware'} decoding`
+          : 'Software decoding',
     encodeBackend: streamIsTranscoded ? 'Host transcoder' : 'Not used',
     note: streamIsTranscoded ? 'HLS backend details are reported by the host transcoder.' : undefined,
   };
@@ -3807,17 +3906,17 @@ export default function VideoPlayer({
 
   const currentEpLabel = useMemo(() => {
     if (!hasEpisodes) return null;
-    const ep = episodes.find((item) => item.season === currentSeason && item.number === currentEpisode);
+    const ep = displayEpisodes.find((item) => item.season === currentSeason && item.number === currentEpisode);
     const file = episodeFiles.find((item) => item.season === currentSeason && item.episode === currentEpisode);
     const label = displayEpisodeTitle(currentSeason, currentEpisode, ep?.title, file?.filePath);
     return label !== `Episode ${currentEpisode}`
       ? `${epCode(currentSeason, currentEpisode)} – ${label}`
       : epCode(currentSeason, currentEpisode);
-  }, [currentEpisode, currentSeason, displayEpisodeTitle, episodeFiles, episodes, hasEpisodes]);
+  }, [currentEpisode, currentSeason, displayEpisodeTitle, displayEpisodes, episodeFiles, hasEpisodes]);
 
   const currentEpisodeMeta = useMemo(() =>
-    episodes.find((item) => item.season === currentSeason && item.number === currentEpisode),
-  [currentEpisode, currentSeason, episodes]);
+    displayEpisodes.find((item) => item.season === currentSeason && item.number === currentEpisode),
+  [currentEpisode, currentSeason, displayEpisodes]);
 
   const pauseEpisodeTitle = useMemo(() => {
     if (!hasEpisodes) return '';
@@ -3983,7 +4082,7 @@ export default function VideoPlayer({
       onPointerMove={handlePointerMove}
       ref={containerRef}
       >
-      <h1 id="loom-player-title" className="sr-only">Playing {title}</h1>
+      <h1 id="loom-player-title" className="sr-only">Playing {title}{currentEpLabel ? `, ${currentEpLabel}` : ''}</h1>
       <p id="loom-player-description" className="sr-only">Playback controls, episode selection, subtitle settings, and close controls.</p>
       <style>
         {`video::cue {
@@ -4102,7 +4201,7 @@ export default function VideoPlayer({
         </div>
 
         <PauseOverlay
-          visible={paused && playerState === 'ready'}
+          visible={paused && playerState !== 'error' && (nativePlaybackActive || playerState === 'ready')}
           title={title}
           logoSources={pauseLogoSources}
           hasEpisodes={hasEpisodes}

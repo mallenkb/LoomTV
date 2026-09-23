@@ -155,11 +155,11 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       aria-current={isCurrent ? 'true' : undefined}
       data-shared-highlight-item
       data-shared-highlight-id={`${episode.season}-${episode.number}`}
-      className={`group relative z-10 flex w-full ${sourceMode ? 'items-center' : 'items-start'} gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
+      className={`group relative z-10 flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
         ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
     >
       {isCurrent && (
-        <span className="pointer-events-none absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-[var(--loom-accent)]" />
+        <span className="pointer-events-none absolute inset-y-2 right-1 w-0.5 rounded-l-full bg-[var(--loom-accent)]" />
       )}
 
       <span className="relative block w-32 shrink-0 overflow-hidden rounded-lg">
@@ -201,7 +201,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
         )}
       </span>
 
-      <span className={`min-w-0 flex-1 ${sourceMode ? '' : 'pt-0.5'}`}>
+      <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
           <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
             {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}

@@ -15,6 +15,7 @@ import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.
 import { resetProgress, useProgressSnapshot } from '@/lib/progress';
 import { matchesLibraryFilter } from '@/lib/libraryFilters';
 import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
+import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
 
 type MediaPosterCardVariant = 'home' | 'movies' | 'tv' | 'others';
 
@@ -48,7 +49,8 @@ function fileNameForItem(item: MediaItem): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() || item.title;
 }
 
-export function usePosterArtwork(item: MediaItem, fallbackFilePath: string, preferGenerated = false) {
+export function usePosterArtwork(item: MediaItem, fallbackFilePath: string, preferGenerated = false, nearViewport = true) {
+  const artworkSuspended = useArtworkSuspended();
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
   const baseImageSources = useMemo(() => posterSources(item), [item]);
   const generatedSources = useMemo(
@@ -77,7 +79,10 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string, pref
 
   useEffect(() => {
     setFallbackThumbnail('');
-    if (!fallbackFilePath || (!preferGenerated && baseImageSources.length > 0)) return;
+  }, [baseImageSources.length, fallbackFilePath, preferGenerated]);
+
+  useEffect(() => {
+    if (artworkSuspended || !nearViewport || !fallbackFilePath || fallbackThumbnail || (!preferGenerated && baseImageSources.length > 0)) return;
 
     let isMounted = true;
     void desktopApi.getThumbnail(fallbackFilePath, preferGenerated ? '00:00:00' : '00:03:00')
@@ -91,7 +96,7 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string, pref
     return () => {
       isMounted = false;
     };
-  }, [baseImageSources.length, fallbackFilePath, preferGenerated]);
+  }, [artworkSuspended, baseImageSources.length, fallbackFilePath, fallbackThumbnail, nearViewport, preferGenerated]);
 
   return { imageSources, cardSources, routeArtwork };
 }
@@ -103,7 +108,8 @@ const MediaPosterCard = memo(function MediaPosterCard({
   metaLine = '',
   onPlay,
 }: MediaPosterCardProps) {
-  const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item), variant === 'others');
+  const [nearViewport, setNearViewport] = useState(false);
+  const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item), variant === 'others', nearViewport);
   const isImage = variant === 'others' && item.format?.toLowerCase() === 'image';
   const displayTitle = variant === 'others' ? fileNameForItem(item) : item.title;
   const { watchedKeys, setWatchedEntries } = useProfiles();
@@ -126,7 +132,8 @@ const MediaPosterCard = memo(function MediaPosterCard({
         : 'loom-poster-frame relative aspect-[2/3] min-h-0 shrink-0 overflow-hidden rounded-lg transition-all duration-200'}>
         <SafeArtwork
           src={cardSources}
-        alt={displayTitle}
+          onNearViewportChange={setNearViewport}
+          alt={displayTitle}
           className={variant === 'others'
             ? 'flex h-full w-full items-center justify-center bg-transparent'
             : 'h-full w-full transition-transform group-hover:scale-105'}

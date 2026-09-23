@@ -1,4 +1,4 @@
-import { cleanEpisodeTitleForDisplay, episodeCode } from '../../lib/episodeTitles.ts';
+import { episodeCode, episodeTitleFromFilePath } from '../../lib/episodeTitles.ts';
 import { getProgressState } from '../../lib/progress.ts';
 import { desktopApi } from '../../lib/desktopApi.ts';
 import {
@@ -16,17 +16,7 @@ import type {
 } from './types';
 
 export function cleanEpisodeTitle(raw: string, season: number, episode: number): string {
-  if (!raw) return `Episode ${episode}`;
-  const officialTitle = cleanEpisodeTitleForDisplay(raw, undefined, season, episode);
-  if (officialTitle !== `Episode ${episode}`) return officialTitle;
-  let s = raw;
-  s = s.replace(new RegExp(`^.*?[Ss]0*${season}\\s*[Ee]0*${episode}\\s*[-–_.\\s]*`, ''), '');
-  s = s.replace(
-    /[\s._-]*(?:\[|\()?(?:2160p|1080p|720p|480p|4K|BluRay|BDRip|WEB-DL|WEBRip|HDTV|AMZN|NF|DSNP|x264|x265|H\.264|H\.265|HEVC|AAC|AC3|DTS|SAMPA)\b.*$/i,
-    '',
-  );
-  s = s.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return s || `Episode ${episode}`;
+  return episodeTitleFromFilePath(raw, undefined, season, episode);
 }
 
 export function epCode(season: number, episode: number): string {

@@ -193,7 +193,7 @@ LM_EXPORT void *loom_mpv_create(const char *path, char *error, size_t capacity) 
             "time-pos", "duration", "pause", "volume", "mute", "speed", "track-list",
             "video-params", "hwdec-current", "frame-drop-count", "decoder-frame-drop-count",
             "demuxer-cache-duration", "paused-for-cache", "video-codec", "estimated-vf-fps",
-            "eof-reached"
+            "eof-reached", "current-ao"
         };
         for (size_t i = 0; i < sizeof(properties) / sizeof(properties[0]); ++i) {
             code = engine->api.mpv_observe_property(engine->player, i + 1, properties[i], MPV_FORMAT_NODE);

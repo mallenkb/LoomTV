@@ -1604,12 +1604,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               sendArtwork(fetchedArtwork);
               return;
             }
-            res.writeHead(502);
-            res.end('Artwork is unavailable from the desktop server.');
+            if (!canWriteResponse(res)) return;
+            res.writeHead(503, { 'Retry-After': '1', 'Cache-Control': 'no-store' });
+            res.end('Artwork is temporarily unavailable.');
           })
           .catch(() => {
-            res.writeHead(502);
-            res.end('Artwork is unavailable from the desktop server.');
+            if (!canWriteResponse(res)) return;
+            res.writeHead(503, { 'Retry-After': '1', 'Cache-Control': 'no-store' });
+            res.end('Artwork is temporarily unavailable.');
           });
         return;
       }

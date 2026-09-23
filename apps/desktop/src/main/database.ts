@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch.ts';
+import { runBoundedArtworkFetch } from './artworkFetchAdmission.ts';
 import { decryptLocalSecret, encryptLocalSecret, isLocalSecretCiphertext, localSecretStorage } from './localSecretStorage.ts';
 import {
   artworkNegativeCacheAllows,
@@ -431,7 +432,7 @@ export function saveCachedThumbnail(cacheKey: string, bytes: Buffer, mimeType = 
 export function loadLibraryFromDatabase(): LibraryData | null {
   // The library payload is profile-neutral: viewer recency is derived from the
   // selected profile's progress by each client, never baked into the catalog.
-  return loadLibraryRecord(getDb(), getCustomArtworkMap());
+  return loadLibraryRecord(getDb(), getCustomArtworkTargets());
 }
 
 export function saveLibraryToDatabase(data: LibraryData): void {
@@ -1046,8 +1047,8 @@ export function getCustomArtworkData(mediaId: string, target: string): { dataUrl
 export function importCustomArtwork(entries: Record<string, Record<string, string>>): void {
   getArtworkRepository().importCustomArtwork(entries);
 }
-function getCustomArtworkMap(): Map<string, Map<string, string>> {
-  return getArtworkRepository().getCustomArtworkMap();
+function getCustomArtworkTargets(): Map<string, Set<string>> {
+  return getArtworkRepository().getCustomArtworkTargets();
 }
 export function getCachedArtwork(sourceUrl: string): CachedArtwork | null {
   return getArtworkRepository().getCachedArtwork(sourceUrl);
@@ -1217,16 +1218,19 @@ export async function cachePluginArtworkSource(addonId: string, sourceUrl: strin
   const pending = pendingPluginArtwork.get(pendingKey);
   if (pending) return pending;
   const request = (async () => {
-    const response = await safeFetch(sourceUrl, {}, {
-      timeoutMs: 20_000,
-      maxBytes: 5 * 1024 * 1024,
-      retries: 1,
-      maxRedirects: 1,
+    const sanitized = await runBoundedArtworkFetch(async () => {
+      const response = await safeFetch(sourceUrl, {}, {
+        timeoutMs: 20_000,
+        maxBytes: 5 * 1024 * 1024,
+        retries: 1,
+        maxRedirects: 1,
+      });
+      if (!response.ok) return null;
+      const mimeType = response.headers.get('content-type')?.split(';')[0] || '';
+      if (!mimeType.startsWith('image/')) return null;
+      return sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType);
     });
-    if (!response.ok) return null;
-    const mimeType = response.headers.get('content-type')?.split(';')[0] || '';
-    if (!mimeType.startsWith('image/')) return null;
-    const sanitized = await sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType);
+    if (!sanitized) return null;
     enforcePluginArtworkQuota(addonId, sanitized.byteLength, sourceUrl);
 
     const cachePath = path.join(pluginArtworkCacheDirectory(), `${sanitized.contentHash}.png`);

@@ -17,9 +17,10 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
   // Do not claim in-window composition until the native host confirms it.
   surface: PlaybackEngineSurface = 'external-window';
   private readonly lease: NativeSessionLease<MpvStartOptions, PlaybackEngineState>;
-  private readonly volumeController = new PlaybackVolumeController(async (volume, muted) => {
-    await this.command({ type: 'set-volume', volume });
-    await this.command({ type: 'set-muted', muted });
+  private readonly volumeController = new PlaybackVolumeController(async (volume, muted, changes) => {
+    if (muted && changes.muted) await this.command({ type: 'set-muted', muted });
+    if (changes.volume) await this.command({ type: 'set-volume', volume });
+    if (!muted && changes.muted) await this.command({ type: 'set-muted', muted });
   });
   private lastState: PlaybackEngineState | null = null;
   private seekTimer: ReturnType<typeof setTimeout> | null = null;

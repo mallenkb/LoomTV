@@ -10,7 +10,8 @@ import type {
   MpvStartOptions,
 } from '../shared/desktopProtocol.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
-import { finiteNumber, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
+import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { finiteNumber, mpvColor, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
 import {
   createNativeViewHost,
   loadKoffi,
@@ -154,6 +155,10 @@ export function libMpvRuntimeSummary(): string {
     : `[playback] native libmpv unavailable — ${availability.reason}`;
 }
 
+const PRESENTATION_COMMANDS: ReadonlySet<MpvCommand['type']> = new Set([
+  'set-video-aspect', 'set-video-crop', 'set-video-rotation', 'set-subtitle-style',
+]);
+
 function commandList(command: MpvCommand): unknown[][] {
   switch (command.type) {
     case 'set-paused': return [['set_property', 'pause', command.paused]];
@@ -168,16 +173,25 @@ function commandList(command: MpvCommand): unknown[][] {
     case 'set-subtitle-delay': return [['set_property', 'sub-delay', command.seconds]];
     case 'set-audio-delay': return [['set_property', 'audio-delay', command.seconds]];
     case 'set-video-aspect': return [['set_property', 'video-aspect-override', command.aspect ?? '-1']];
-    case 'set-video-crop': return [['set_property', 'video-crop', command.crop ?? 'no']];
+    // mpv clears the crop with an empty value; "no" is rejected.
+    case 'set-video-crop': return [['set_property', 'video-crop', command.crop ?? '']];
     case 'set-video-rotation': return [['set_property', 'video-rotate', command.degrees]];
-    case 'set-subtitle-style': return [
-      ['set_property', 'sub-font-size', command.fontSize],
-      ['set_property', 'sub-color', command.color],
-      ['set_property', 'sub-border-color', command.borderColor],
-      ['set_property', 'sub-border-size', command.borderWidth],
-      ['set_property', 'sub-back-color', command.backgroundColor],
-      ['set_property', 'sub-pos', command.position],
-    ];
+    case 'set-subtitle-style': {
+      // Saved styles can hold CSS colors such as "transparent" or rgba().
+      // Convert them, and leave out any mpv cannot represent rather than let
+      // one rejected color end the whole playback session.
+      const colors = [
+        ['sub-color', mpvColor(command.color)],
+        ['sub-border-color', mpvColor(command.borderColor)],
+        ['sub-back-color', mpvColor(command.backgroundColor)],
+      ] as const;
+      return [
+        ['set_property', 'sub-font-size', command.fontSize],
+        ...colors.flatMap(([name, value]) => (value ? [['set_property', name, value]] : [])),
+        ['set_property', 'sub-border-size', command.borderWidth],
+        ['set_property', 'sub-pos', command.position],
+      ];
+    }
   }
 }
 
@@ -190,20 +204,31 @@ class LibMpvSession {
   private readonly onOwnerDestroyed = () => this.stop();
   private request = 0;
   private stopped = false;
+  private local4kCacheLimited = false;
   private state: MpvPlaybackState = { sessionId: this.id, status: 'starting' };
   private diagnostics: MpvPlaybackDiagnostics = {};
   private readonly subtitleSources: Map<string, 'sidecar' | 'opensubtitles'>;
   private afterLoad: unknown[][];
+  // Mute acts on the audio output, after mpv's ~200 ms buffer, so M is instant
+  // both ways. The soft \`mute\` property is applied before that buffer, which
+  // let a fifth of a second of sound play after M; it is used only until an
+  // output exists. Both output controls are LoomTV's own, never system volume:
+  // avfoundation implements ao-mute, and coreaudio only ao-volume on its
+  // private audio unit.
+  private desiredMuted = false;
+  private softMuted = false;
 
   constructor(
     private readonly runtime: Runtime,
     private readonly owner: WebContents,
     private readonly ownerWindow: BrowserWindow,
-    source: string,
+    private readonly source: string,
     options: MpvStartOptions,
     private readonly onStopped: (session: LibMpvSession) => void,
   ) {
     this.subtitleSources = new Map((options.subtitleFiles || []).map((file) => [path.resolve(file.path), file.source]));
+    this.desiredMuted = options.muted === true;
+    this.softMuted = this.desiredMuted;
     this.afterLoad = [
       ['set_property', 'volume', Math.max(0, Math.min(1, options.volume ?? 1)) * 100],
       ['set_property', 'mute', options.muted === true],
@@ -270,7 +295,16 @@ class LibMpvSession {
     if (message.event === 'bridge-error') return this.fail(message.error || 'The libmpv renderer failed.');
     if (message.event === 'file-loaded') {
       const commands = this.afterLoad.splice(0);
-      for (const command of commands) this.send(command);
+      // These are preferences layered on a file that already opened. One that
+      // mpv rejects is logged and skipped, never a reason to abandon native
+      // playback for the transcoded fallback.
+      for (const command of commands) {
+        try {
+          this.send(command);
+        } catch (error) {
+          console.warn(`[playback] libmpv skipped ${String(command[1] ?? command[0])}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       this.emit({ status: 'ready', paused: false });
       return;
     }
@@ -285,16 +319,43 @@ class LibMpvSession {
     else if (message.name === 'duration') this.emit({ duration: finiteNumber(message.data) });
     else if (message.name === 'pause') this.emit({ paused: message.data === true });
     else if (message.name === 'volume') this.emit({ volume: finiteNumber(message.data) === undefined ? undefined : Number(message.data) / 100 });
-    else if (message.name === 'mute') this.emit({ muted: message.data === true });
+    // The soft mute no longer carries the viewer's choice; report that choice.
+    else if (message.name === 'mute') this.emit({ muted: this.desiredMuted });
+    else if (message.name === 'current-ao') {
+      // A new audio output starts at full volume: after an audio track change
+      // or a device switch, carry the mute over to it.
+      if (typeof message.data === 'string' && message.data && this.desiredMuted
+        && this.muteOutput(true) && this.softMuted
+        && this.trySend(['set_property', 'mute', false])) {
+        this.softMuted = false;
+      }
+    }
     else if (message.name === 'speed') this.emit({ speed: finiteNumber(message.data) });
     else if (message.name === 'track-list') this.emit({ tracks: normalizeMpvTracks(message.data, this.subtitleSources) });
     else if (message.name === 'video-params' && message.data && typeof message.data === 'object') {
       const params = message.data as Record<string, unknown>;
-      this.emit({ videoWidth: finiteNumber(params.w), videoHeight: finiteNumber(params.h) });
-    } else if (message.name === 'hwdec-current') this.updateDiagnostics({
-      hardwareDecoder: typeof message.data === 'string' ? message.data : undefined,
-      hardwareDecode: typeof message.data === 'string' && message.data !== 'no',
-    });
+      const width = finiteNumber(params.w);
+      const height = finiteNumber(params.h);
+      this.emit({ videoWidth: width, videoHeight: height });
+      if (!this.local4kCacheLimited && path.isAbsolute(this.source)
+        && ((width ?? 0) > 2560 || (height ?? 0) > 1440)) {
+        this.local4kCacheLimited = true;
+        // Bound compressed packet retention for local 4K files. Decoder frame
+        // pools, rendering quality, and exact seek behavior remain engine-owned.
+        this.send(['set_property', 'demuxer-max-bytes', 64 * 1024 * 1024]);
+        this.send(['set_property', 'demuxer-max-back-bytes', 16 * 1024 * 1024]);
+        recordPlaybackDiagnostic('mpv.local4k.packetBudgetBytes', 80 * 1024 * 1024);
+      }
+    } else if (message.name === 'hwdec-current') {
+      const decoder = typeof message.data === 'string' && message.data ? message.data : undefined;
+      if (decoder !== this.diagnostics.hardwareDecoder) {
+        recordPlaybackDiagnostic('mpv.decoder', decoder || 'unknown');
+      }
+      this.updateDiagnostics({
+        hardwareDecoder: decoder,
+        hardwareDecode: decoder === undefined ? undefined : decoder !== 'no',
+      });
+    }
     else if (message.name === 'frame-drop-count') this.updateDiagnostics({ frameDrops: finiteNumber(message.data) });
     else if (message.name === 'decoder-frame-drop-count') this.updateDiagnostics({ decoderFrameDrops: finiteNumber(message.data) });
     else if (message.name === 'demuxer-cache-duration') this.updateDiagnostics({ bufferSeconds: finiteNumber(message.data) });
@@ -328,9 +389,52 @@ class LibMpvSession {
     }
   }
 
+  private trySend(command: unknown[]): boolean {
+    try { return this.send(command); } catch { return false; }
+  }
+
+  /** Mute or unmute at the audio output. False when no output control exists yet. */
+  private muteOutput(muted: boolean): boolean {
+    if (this.trySend(['set_property', 'ao-mute', muted])) {
+      // Undo an earlier ao-volume mute in case the output changed type.
+      if (!muted) this.trySend(['set_property', 'ao-volume', 100]);
+      return true;
+    }
+    return this.trySend(['set_property', 'ao-volume', muted ? 0 : 100]);
+  }
+
+  private applyMute(muted: boolean): boolean {
+    this.desiredMuted = muted;
+    this.emit({ muted });
+    const appliedAtOutput = this.muteOutput(muted);
+    try {
+      // Without an audio output yet, or to clear a mute set at startup, fall
+      // back to the soft property. Either failing still fails closed.
+      if (!appliedAtOutput || (!muted && this.softMuted)) {
+        this.send(['set_property', 'mute', muted]);
+        this.softMuted = muted;
+      }
+      return true;
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : 'libmpv rejected the mute command.');
+      return false;
+    }
+  }
+
   command(command: MpvCommand): boolean {
+    if (command.type === 'set-muted') return this.applyMute(command.muted);
     try { return commandList(command).every((entry) => this.send(entry)); }
-    catch (error) { this.fail(error instanceof Error ? error.message : 'libmpv rejected a playback command.'); return false; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'libmpv rejected a playback command.';
+      // A rejected display preference leaves the video playing as it was.
+      // Transport and track commands still fail closed.
+      if (PRESENTATION_COMMANDS.has(command.type)) {
+        console.warn(`[playback] libmpv skipped ${command.type}: ${message}`);
+        return false;
+      }
+      this.fail(message);
+      return false;
+    }
   }
 
   setViewport(owner: WebContents, viewport: PlaybackViewport): boolean {

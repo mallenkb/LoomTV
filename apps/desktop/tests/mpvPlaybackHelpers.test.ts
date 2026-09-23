@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
+import { mpvColor, normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
 
 test('mpv tracks normalize embedded and authorized external subtitles', () => {
   const externalPath = path.resolve('/tmp/loomtv-example.en.srt');
@@ -53,4 +53,17 @@ test('mpv tracks normalize embedded and authorized external subtitles', () => {
       source: 'opensubtitles',
     },
   ]);
+});
+
+test('subtitle colors are converted to the #AARRGGBB form mpv accepts', () => {
+  assert.equal(mpvColor('#ffffff'), '#ffffffff');
+  assert.equal(mpvColor('#FFF'), '#ffffffff');
+  assert.equal(mpvColor('transparent'), '#00000000');
+  // CSS puts alpha last; mpv expects it first.
+  assert.equal(mpvColor('#000000cc'), '#cc000000');
+  assert.equal(mpvColor('rgba(0, 0, 0, 0.5)'), '#80000000');
+  assert.equal(mpvColor('rgb(255 128 0 / 50%)'), '#80ff8000');
+  assert.equal(mpvColor('rgb(255, 255, 255)'), '#ffffffff');
+  assert.equal(mpvColor('white'), null);
+  assert.equal(mpvColor('rgba(0, 0, 0, nope)'), null);
 });

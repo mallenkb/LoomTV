@@ -44,7 +44,7 @@ function PauseOverlay({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         >
           <motion.div
             className="absolute inset-0"
@@ -52,14 +52,14 @@ function PauseOverlay({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
           />
           <motion.div
             className="absolute bottom-32 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-36"
             initial={{ opacity: 0, y: 18, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.995 }}
-            transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
           >
             {logoSource ? (
               <img
@@ -84,6 +84,11 @@ function PauseOverlay({
                 {title}
               </h2>
             ) : null}
+            {!hasEpisodes && !isLiveStream && logoSource && (
+              <h2 className="mb-2 max-w-[min(46rem,84vw)] text-2xl font-semibold leading-tight drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-3xl">
+                {title}
+              </h2>
+            )}
             {(hasEpisodes || episodeTitle) && (
               <div className="flex max-w-3xl min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-white">
                 {hasEpisodes && (

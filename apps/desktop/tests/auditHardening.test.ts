@@ -113,6 +113,7 @@ function mpvFixture() {
   const timers = new Set<() => void>();
   const powers = new Set<string>();
   const states: string[] = [];
+  const sent: unknown[][] = [];
   const owner = Object.assign(new EventEmitter(), {
     isDestroyed: () => false,
     send: (_channel: string, state: { status: string }) => {
@@ -127,7 +128,13 @@ function mpvFixture() {
       engines++; allocated++; return allocated;
     },
     loom_mpv_attach: () => failure === 'attach' ? -1 : 0,
-    loom_mpv_command: () => failure === 'loadfile' || failure === 'command' ? -1 : 0,
+    loom_mpv_command: (_engine: unknown, _request: unknown, json: string) => {
+      const command = JSON.parse(json) as unknown[];
+      sent.push(command);
+      // 'no-output' models mpv before its audio output exists.
+      if (failure === 'no-output' && String(command[1]).startsWith('ao-')) return -1;
+      return failure === 'loadfile' || failure === 'command' ? -1 : 0;
+    },
     loom_mpv_poll_into: () => failure === 'poll' ? -1 : 0,
     loom_mpv_destroy: () => {
       engines--; destroyed++;
@@ -139,6 +146,7 @@ function mpvFixture() {
     electron: { BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false }) } },
     'node:fs': { existsSync: () => true },
     './mpvPlaybackHelpers.ts': { finiteNumber: Number, normalizeMpvTracks: () => [] },
+    './playbackDiagnostics.ts': { recordPlaybackDiagnostic: () => undefined },
     './libvlcPlayback.ts': {
       loadKoffi: () => koffi,
       createNativeViewHost: () => {
@@ -163,7 +171,7 @@ function mpvFixture() {
     assert.equal(powers.size, 0); assert.equal(owner.listenerCount('destroyed'), 0);
     assert.equal(allocated, destroyed);
   };
-  return { api, owner, start, empty, states, timers, setFailure: (value: string) => { failure = value; } };
+  return { api, owner, start, empty, states, timers, sent, setFailure: (value: string) => { failure = value; } };
 }
 
 for (const failure of ['create', 'host', 'attach', 'loadfile', 'emit']) {
@@ -196,4 +204,38 @@ test('libmpv repeated stop, replacement, owner destruction and native failures r
     else f.api.stopLibMpvPlayback();
     f.empty();
   }
+});
+
+test('a rejected libmpv display preference keeps the session playing', () => {
+  const f = mpvFixture();
+  const started = f.start();
+  assert.ok(started.sessionId);
+  f.setFailure('command');
+  assert.equal(f.api.commandLibMpvPlayback(started.sessionId, { type: 'set-video-crop', crop: null }), false);
+  assert.ok(!f.states.includes('error'));
+  f.setFailure('');
+  assert.equal(f.api.stopLibMpvPlayback(started.sessionId), true);
+  f.empty();
+});
+test('libmpv mutes at the audio output so M takes effect without buffered delay', () => {
+  const f = mpvFixture();
+  const started = f.start();
+  assert.ok(started.sessionId);
+  f.sent.length = 0;
+  assert.equal(f.api.commandLibMpvPlayback(started.sessionId, { type: 'set-muted', muted: true }), true);
+  // Output-level mute only: the soft mute sits behind mpv's audio buffer.
+  assert.deepEqual(f.sent, [['set_property', 'ao-mute', true]]);
+  f.sent.length = 0;
+  assert.equal(f.api.commandLibMpvPlayback(started.sessionId, { type: 'set-muted', muted: false }), true);
+  assert.deepEqual(f.sent, [['set_property', 'ao-mute', false], ['set_property', 'ao-volume', 100]]);
+
+  // Before an audio output exists, the soft mute carries the choice.
+  f.setFailure('no-output');
+  f.sent.length = 0;
+  assert.equal(f.api.commandLibMpvPlayback(started.sessionId, { type: 'set-muted', muted: true }), true);
+  assert.deepEqual(f.sent.at(-1), ['set_property', 'mute', true]);
+  assert.ok(!f.states.includes('error'));
+  f.setFailure('');
+  assert.equal(f.api.stopLibMpvPlayback(started.sessionId), true);
+  f.empty();
 });

@@ -5,6 +5,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
 import type { LibraryData } from './appContracts.ts';
 import { artworkCacheFileName, collectArtworkSourcesForCache } from './artworkCache.ts';
+import { runBoundedArtworkFetch } from './artworkFetchAdmission.ts';
 import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 import {
   assertArtworkStorageTarget,
@@ -34,6 +35,7 @@ type ArtworkRepositoryDependencies = {
 
 const customArtworkRowSchema = z.object({ target: z.string(), data_url: z.string() });
 const customArtworkMapRowSchema = customArtworkRowSchema.extend({ media_id: z.string() });
+const customArtworkTargetRowSchema = z.object({ media_id: z.string(), target: z.string() });
 const customArtworkDataRowSchema = z.object({ data_url: z.string(), updated_at: z.number().finite() });
 const cachedArtworkRowSchema = z.object({
   data_url: z.string(),
@@ -150,6 +152,20 @@ export function createDatabaseArtworkRepository(
     return result;
   }
 
+  function getCustomArtworkTargets(): Map<string, Set<string>> {
+    const result = new Map<string, Set<string>>();
+    for (const raw of database.prepare("SELECT media_id, target FROM custom_artwork WHERE data_url <> ''").iterate()) {
+      const row = parseDatabaseRow(raw, customArtworkTargetRowSchema, 'custom artwork target');
+      let targets = result.get(row.media_id);
+      if (!targets) {
+        targets = new Set();
+        result.set(row.media_id, targets);
+      }
+      targets.add(row.target);
+    }
+    return result;
+  }
+
   function getCachedArtwork(sourceUrl: string): CachedArtwork | null {
     const row = parseDatabaseRow(
       database.prepare('SELECT data_url, cache_path, mime_type, byte_length, content_hash FROM artwork_cache WHERE source_url = ?').get(sourceUrl),
@@ -237,7 +253,7 @@ export function createDatabaseArtworkRepository(
     if (pending) return pending;
 
     const request = (async () => {
-      const cached = await deps.fetchArtworkBytes(sourceUrl);
+      const cached = await runBoundedArtworkFetch(() => deps.fetchArtworkBytes(sourceUrl));
       if (!cached) return null;
 
       enforceQuota(cached.byteLength, sourceUrl);
@@ -322,6 +338,7 @@ export function createDatabaseArtworkRepository(
     getCustomArtwork,
     getCustomArtworkData,
     getCustomArtworkMap,
+    getCustomArtworkTargets,
     importCustomArtwork,
     saveCustomArtwork,
   };

@@ -9,15 +9,19 @@ const clampVolume = (volume: number): number => Math.max(0, Math.min(1, Number.i
 export default class PlaybackVolumeController {
   private volume = 1;
   private muted = false;
+  private appliedVolume = 1;
+  private appliedMuted = false;
   private lastAudibleVolume = 1;
   private dirty = false;
   private flushPromise: Promise<void> | null = null;
 
-  constructor(private readonly apply: (volume: number, muted: boolean) => Promise<void>) {}
+  constructor(private readonly apply: (volume: number, muted: boolean, changes: { volume: boolean; muted: boolean }) => Promise<void>) {}
 
   reset(volume = 1, muted = false): void {
     this.volume = clampVolume(volume);
     this.muted = muted || this.volume === 0;
+    this.appliedVolume = this.volume;
+    this.appliedMuted = this.muted;
     if (this.volume > 0) this.lastAudibleVolume = this.volume;
     this.dirty = false;
   }
@@ -53,7 +57,12 @@ export default class PlaybackVolumeController {
         this.dirty = false;
         const volume = this.volume;
         const muted = this.muted;
-        await this.apply(volume, muted);
+        const changes = { volume: volume !== this.appliedVolume, muted: muted !== this.appliedMuted };
+        if (changes.volume || changes.muted) {
+          await this.apply(volume, muted, changes);
+          this.appliedVolume = volume;
+          this.appliedMuted = muted;
+        }
       } while (this.dirty);
       resolve();
     } catch (error) {

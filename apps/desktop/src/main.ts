@@ -156,6 +156,7 @@ import { closeServerForUpdateInstall } from './main/updateInstall';
 import {
   backupDatabase,
   cacheLibraryArtwork,
+  cacheArtworkSource,
   removePluginArtworkForAddon,
   clearDatabase,
   clearAllGuestProfiles,
@@ -283,7 +284,7 @@ import {
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
 import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinator';
-import { setPlaybackActivityLease } from './main/ffmpegGovernor';
+import { isPlaybackActivityActive, setPlaybackActivityLease } from './main/ffmpegGovernor';
 import {
   createLibraryScanFilesAsync,
 } from './main/libraryScanFiles';
@@ -1273,13 +1274,33 @@ function compactLibraryItemForLocalNetwork(
   );
 }
 
-let artworkCacheQueue: Promise<void> = Promise.resolve();
+let artworkCacheQueue: Promise<void> | null = null;
+let pendingArtworkSources: string[] | null = null;
 
-async function cacheArtworkNow(data: LibraryData): Promise<void> {
-  const sources = collectArtworkSourcesForCache(data);
-  artworkCacheQueue = artworkCacheQueue
-    .catch(() => undefined)
-    .then(() => cacheLibraryArtwork(sources));
+async function cacheArtworkNow(data: LibraryData, changedItem?: MediaItem): Promise<void> {
+  if (changedItem) {
+    // An item refresh must not prune or rescan the entire library cache.
+    const sources = collectArtworkSourcesForCache({ movies: [changedItem] });
+    for (const source of sources) await cacheArtworkSource(source);
+    return;
+  }
+  // Keep only the latest full-library snapshot while a pass is in flight.
+  pendingArtworkSources = collectArtworkSourcesForCache(data);
+  if (!artworkCacheQueue) {
+    artworkCacheQueue = Promise.resolve().then(async () => {
+      try {
+        let failure: unknown;
+        let failed = false;
+        while (pendingArtworkSources) {
+          const sources = pendingArtworkSources;
+          pendingArtworkSources = null;
+          try { await cacheLibraryArtwork(sources); }
+          catch (error) { failure = error; failed = true; }
+        }
+        if (failed) throw failure;
+      } finally { artworkCacheQueue = null; }
+    });
+  }
   await artworkCacheQueue;
 }
 
@@ -1600,10 +1621,14 @@ function applyAppIcon() {
 
   app.setName('LoomTV');
 
-  if (process.platform === 'darwin' && app.dock) {
+  // Packaged builds show the bundle's icon.icns. Setting a dock icon from the
+  // 1024px PNG kept a 32 MB bitmap resident in the main process, so only dev
+  // launches (which would otherwise show Electron's icon) set one, at 512px:
+  // still sharp with Dock magnification, a quarter of the memory.
+  if (process.platform === 'darwin' && app.dock && !app.isPackaged) {
     const icon = nativeImage.createFromPath(iconPath);
     if (!icon.isEmpty()) {
-      app.dock.setIcon(icon);
+      app.dock.setIcon(icon.resize({ width: 512, quality: 'best' }));
     }
   }
 }
@@ -2475,7 +2500,7 @@ app.on('before-quit', (event) => {
 // is trimmed while a player is open or media plays.
 const idleMemoryTrimmer = createIdleMemoryTrimmer({
   idleSeconds: () => powerMonitor.getSystemIdleTime(),
-  isPlaybackActive: () => hasNativePlaybackSession() || isMediaSessionPlaying(),
+  isPlaybackActive: () => isPlaybackActivityActive() || hasNativePlaybackSession() || isMediaSessionPlaying(),
   isWindowVisible: () => {
     const window = getMainWindow();
     return Boolean(window && !window.isDestroyed() && window.isVisible() && !window.isMinimized());
