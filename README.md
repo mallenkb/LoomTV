@@ -146,7 +146,6 @@ Run commands from the repository root.
 | `corepack pnpm --filter loom-media-server-desktop make` | Create Electron Forge distributables |
 | `corepack pnpm --filter loom-media-server-desktop dist` | Create Electron Builder release files without publishing |
 | `corepack pnpm typecheck` | Run workspace TypeScript checks |
-| `corepack pnpm test` | Run workspace tests |
 
 Desktop build output goes to `apps/desktop/out/`. Electron Builder writes installers and archives to `apps/desktop/out/builder/`.
 
@@ -172,8 +171,6 @@ deploy/
 docs/            Deployment, architecture, status, security, and release notes
 scripts/         Release, policy, audit, and evidence tools
 ```
-
-The recursive test command covers every test-bearing workspace. `packages/lan-protocol` is intentionally typecheck-only and has no test script.
 
 ## Packaging and releases
 

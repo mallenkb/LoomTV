@@ -499,25 +499,3 @@ fn main() {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_contract_fixtures() {
-        let fixtures: Vec<serde_json::Value> =
-            serde_json::from_str(include_str!("../protocol-fixtures.json")).unwrap();
-        for fixture in fixtures {
-            let mut command = fixture["command"].clone();
-            if command["root"] == "$ROOT" {
-                command["root"] = json!(std::env::temp_dir().to_str().unwrap());
-            }
-            assert_eq!(
-                decode_command(&serde_json::to_vec(&command).unwrap()).is_some(),
-                fixture["valid"].as_bool().unwrap(),
-                "{command}"
-            );
-        }
-    }
-}

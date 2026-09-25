@@ -78,6 +78,11 @@ const ipcRenderer = {
 // ─── desktopApi — existing library/media/settings surface ────────────────────
 
 const desktopApi = {
+  onMemoryTrim: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('app:trim-memory', handler);
+    return () => ipcRenderer.removeListener('app:trim-memory', handler);
+  },
   getLibrary: () => ipcRenderer.invoke('library:get'),
   getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
   getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),

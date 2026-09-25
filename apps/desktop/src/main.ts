@@ -32,8 +32,8 @@ import {
 } from './main/serverSecurity';
 import { isTrustedIpcSender } from './main/trustedIpcSender.ts';
 import { initializePlaybackPowerMonitoring, isMediaSessionPlaying, releaseAllMediaSessions } from './main/systemMediaKeys.ts';
-import { createIdleMemoryTrimmer, IDLE_POLL_INTERVAL_MS } from './main/idleMemoryTrim.ts';
-import { clearSharedProbeCache } from './main/sharedProbeCache';
+import { createIdleMemoryTrimmer, IDLE_POLL_INTERVAL_MS, IDLE_TRIM_AFTER_SECONDS } from './main/idleMemoryTrim.ts';
+import { trimSharedProbeCache } from './main/sharedProbeCache';
 import {
   destroyLanDiscovery,
   discoverLanPeers,
@@ -426,6 +426,8 @@ const SCAN_CACHE_VERSION = 16;
 let libraryMutationVersion = 0;
 const activeScans = new Set<AbortController>();
 let cachedLibrary: LibraryData | null = null;
+let libraryLastReadAt = 0;
+const desktopPlaybackLeases = new Set<string>();
 
 function advanceLibraryMutationVersion(): void {
   libraryMutationVersion++;
@@ -1140,6 +1142,7 @@ function loadLibraryUncached(): LibraryData {
 }
 
 function loadLibrary(): LibraryData {
+  libraryLastReadAt = Date.now();
   if (!cachedLibrary) cachedLibrary = loadLibraryUncached();
   return cachedLibrary;
 }
@@ -2101,6 +2104,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
   eraseManagedMediaSegments: (request) => ({ removed: eraseAutomaticSegmentCandidates(request.mediaId, request.season, request.episode) }),
   setPlaybackActivityLease: (key, active, label) => {
     setPlaybackActivityLease(key, active, label);
+    if (active) desktopPlaybackLeases.add(key);
+    else desktopPlaybackLeases.delete(key);
+    idleMemoryTrimmer.playbackChanged();
     if (!active) void analysisCoordinator.tick();
   },
   getLocalSegmentAnalysisStatus: analysisCoordinator.status,
@@ -2496,29 +2502,51 @@ app.on('before-quit', (event) => {
   }
 });
 
-// Return cache memory while the window is hidden or the user is away. Nothing
-// is trimmed while a player is open or media plays.
+// Trim cold data at lifecycle transitions. Keep the catalog during playback:
+// authorization and seek previews must not rehydrate it on the seek path.
+function releaseInactiveLibrarySnapshot(): void {
+  if (cachedLibrary && activeScans.size === 0
+    && !isPlaybackActivityActive() && !hasNativePlaybackSession() && !isMediaSessionPlaying()
+    && Date.now() - libraryLastReadAt >= IDLE_TRIM_AFTER_SECONDS * 1_000) {
+    cachedLibrary = null;
+  }
+}
+
 const idleMemoryTrimmer = createIdleMemoryTrimmer({
   idleSeconds: () => powerMonitor.getSystemIdleTime(),
   isPlaybackActive: () => isPlaybackActivityActive() || hasNativePlaybackSession() || isMediaSessionPlaying(),
-  isWindowVisible: () => {
+  isPlayerOpen: () => desktopPlaybackLeases.size > 0,
+  isWindowActive: () => {
     const window = getMainWindow();
     return Boolean(window && !window.isDestroyed() && window.isVisible() && !window.isMinimized());
   },
-  trim: () => {
-    clearSharedProbeCache();
+  trim: (reason) => {
+    if (activeScans.size === 0) {
+      trimSharedProbeCache();
+      if (reason !== 'playback') releaseInactiveLibrarySnapshot();
+    }
     const window = getMainWindow();
     if (window && !window.isDestroyed()) window.webContents.send('app:trim-memory');
   },
 });
 app.on('browser-window-created', (_event, window) => {
-  window.on('hide', idleMemoryTrimmer.windowHidden);
-  window.on('minimize', idleMemoryTrimmer.windowHidden);
-  window.on('show', idleMemoryTrimmer.windowShown);
-  window.on('restore', idleMemoryTrimmer.windowShown);
+  window.on('hide', idleMemoryTrimmer.windowInactive);
+  window.on('minimize', idleMemoryTrimmer.windowInactive);
+  window.on('show', idleMemoryTrimmer.windowActive);
+  window.on('restore', idleMemoryTrimmer.windowActive);
 });
 app.whenReady().then(() => {
-  setInterval(idleMemoryTrimmer.poll, IDLE_POLL_INTERVAL_MS).unref();
+  const timer = setInterval(() => {
+    idleMemoryTrimmer.poll();
+    // App inactivity is independent of typing in another application. The
+    // renderer keeps its compact catalog, selected details and scroll state.
+    releaseInactiveLibrarySnapshot();
+  }, IDLE_POLL_INTERVAL_MS);
+  timer.unref();
+  app.once('will-quit', () => {
+    clearInterval(timer);
+    idleMemoryTrimmer.dispose();
+  });
 }).catch(() => undefined);
 
 // before-quit may be cancelled (scanner shutdown, update install). will-quit

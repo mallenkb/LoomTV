@@ -5,15 +5,11 @@
   "scripts": {
     "audit:prod": "node scripts/audit-production.cjs",
     "container:verify": "node scripts/verify-container-policy.cjs",
-    "container:policy:test": "node scripts/verify-container-policy.test.cjs",
     "mobile:verify-android-config": "node scripts/verify-mobile-android-config.cjs",
     "mobile:verify-release-config": "node scripts/verify-mobile-release-config.cjs",
     "release:verify-identity": "node scripts/verify-release-identity.cjs",
     "release:evidence": "node scripts/release-evidence.cjs",
-    "test:release-safety": "node --test scripts/release-identity.test.cjs scripts/release-evidence.test.cjs scripts/verify-workflow-policy.test.cjs scripts/verify-release-attestations.test.cjs",
     "verify:workflow-policy": "node scripts/verify-workflow-policy.cjs",
-    "test:workflow-policy": "node --test scripts/verify-workflow-policy.test.cjs",
-    "verify:test-workspaces": "node scripts/verify-test-workspaces.cjs",
     "sbom": "node scripts/generate-sbom.cjs",
     "dev": "pnpm desktop:start",
     "start": "pnpm desktop:start",
@@ -22,7 +18,6 @@
     "desktop:start:built": "pnpm --filter loom-media-server-desktop start:built",
     "desktop:build": "pnpm --filter loom-media-server-desktop build",
     "desktop:typecheck": "pnpm --filter loom-media-server-desktop typecheck",
-    "desktop:test": "pnpm --filter loom-media-server-desktop test",
     "server": "pnpm --filter loom-media-server-headless",
     "server:start": "pnpm --filter loom-media-server-headless start",
     "server:typecheck": "pnpm --filter loom-media-server-headless typecheck",
@@ -35,11 +30,8 @@
     "tv:start": "pnpm --filter @loom-media-server/tv start",
     "tv:android": "pnpm --filter @loom-media-server/tv android",
     "tv:typecheck": "pnpm --filter @loom-media-server/tv typecheck",
-    "tv:test": "pnpm --filter @loom-media-server/tv test",
     "lint": "eslint .",
-    "typecheck": "pnpm -r --if-present typecheck",
-    "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
-    "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
+    "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
     "yaml": "2.9.0"

@@ -51,7 +51,7 @@ function approximateBytes(value: unknown, seen = new WeakSet<object>(), budget =
   }
   return bytes;
 }
-export function trimQueryCache(): void {
+export function trimQueryCache({ maxBytes = 8 * 1024 * 1024, maxEntries = 160 } = {}): void {
   if (trimming) return;
   trimming = true;
   try {
@@ -69,8 +69,8 @@ export function trimQueryCache(): void {
       // again for each eviction in a burst of completed native reads.
       if (count > limit) cache.remove(query);
     }
-    const remaining = cache.getAll().length;
-    let excess = Math.max(0, remaining - 160);
+    const remaining = idle.filter(query => cache.get(query.queryHash) === query).length;
+    let excess = Math.max(0, remaining - maxEntries);
     for (const query of idle) {
       if (excess <= 0) break;
       if (cache.get(query.queryHash) !== query) continue;
@@ -83,7 +83,7 @@ export function trimQueryCache(): void {
       cache.get(query.queryHash) === query ? sizes.get(query.queryHash) || 0 : 0
     ), 0);
     for (const query of idle) {
-      if (bytes <= 8 * 1024 * 1024) break;
+      if (bytes <= maxBytes) break;
       if (cache.get(query.queryHash) !== query) continue;
       bytes -= sizes.get(query.queryHash) || 0;
       cache.remove(query);

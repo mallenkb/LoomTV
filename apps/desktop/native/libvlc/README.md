@@ -20,11 +20,6 @@ bash apps/desktop/native/libvlc/build-videotoolbox-fix.sh \
 rustc --edition=2021 apps/desktop/native/libvlc/verify-videotoolbox.rs \
   -o /tmp/verify-videotoolbox
 /tmp/verify-videotoolbox /absolute/patched/VLC.app /absolute/4k-video.mkv 30
-
-clang -std=c11 -Wall -Wextra -Werror \
-  apps/desktop/native/libvlc/test-videotoolbox-4k-gate.c \
-  -o /tmp/verify-videotoolbox-4k-gate
-/tmp/verify-videotoolbox-4k-gate
 ```
 
 The probe requires VideoToolbox and counts displayed and lost pictures with dummy video output. It does not measure the desktop application's total memory. Compare its output and decoder logs with the unmodified plugin, then check 1080p and 1440p fixtures to confirm their original decoder behavior. The containing application needs signing after the plugin is staged.

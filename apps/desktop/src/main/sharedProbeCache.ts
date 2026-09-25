@@ -128,6 +128,15 @@ export function clearSharedProbeCache(): void {
   sharedProbeCacheBytes = 0;
 }
 
+/** Retain recent probes for reopening details and seeking, evict cold results. */
+export function trimSharedProbeCache(maxBytes = 8 * 1024 * 1024): void {
+  pruneExpired(Date.now());
+  for (const [key, entry] of sharedProbeCache) {
+    if (sharedProbeCacheBytes <= maxBytes) break;
+    removeEntry(key, entry);
+  }
+}
+
 export function getSharedProbeResult<T>(
   cacheKey: string | null,
   variant: ProbeCacheVariant,

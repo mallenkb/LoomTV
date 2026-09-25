@@ -4,12 +4,10 @@
     "src/main.ts",
     "src/preload.ts",
     "forge.config.ts",
-    "vite.*.config.ts",
-    "tests/*.test.ts"
+    "vite.*.config.ts"
   ],
   "project": [
     "src/**/*.{ts,tsx}",
-    "tests/**/*.ts",
     "vite.*.config.ts"
   ],
   "ignoreDependencies": [

@@ -364,10 +364,6 @@ function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
   const pluginPath = pluginPathForLibrary(runtime.libraryPath);
   if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;
   try {
-    // Git checkouts and macOS signing do not preserve the mtimes embedded in
-    // VLC's plugins.dat. Let the one process-wide instance scan its plugins
-    // once during LoomTV's startup splash instead of validating a stale cache
-    // every time the user presses Play.
     return nativeHandle(runtime.api.newInstance(
       LIBVLC_INSTANCE_ARGUMENTS.length,
       LIBVLC_INSTANCE_ARGUMENTS,

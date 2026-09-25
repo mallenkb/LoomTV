@@ -57,7 +57,6 @@ From the workspace root:
 
 ```sh
 pnpm typecheck
-pnpm test
 pnpm desktop:build
 pnpm --filter @loom-media-server/tv verify:config
 pnpm verify:workflow-policy

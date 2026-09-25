@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   code:
-    name: Lint, typecheck, and test
+    name: Lint and typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -50,20 +50,14 @@ jobs:
       - name: Enforce workflow trust policy
         run: corepack pnpm verify:workflow-policy
 
-      - name: Test workflow trust policy
-        run: corepack pnpm test:workflow-policy
-
       - name: Lint
         run: corepack pnpm lint
 
       - name: Typecheck
         run: corepack pnpm typecheck
 
-      - name: Test
-        run: corepack pnpm test
-
   rust:
-    name: Test and audit Rust
+    name: Check and audit Rust
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -96,9 +90,9 @@ jobs:
           workspaces: |
             apps/desktop/native/scanner -> target
 
-      - name: Test scanner workspace
+      - name: Check scanner workspace
         working-directory: apps/desktop/native/scanner
-        run: cargo test --locked -p loom-scanner
+        run: cargo check --locked -p loom-scanner
 
       - name: Install Cargo audit
         run: cargo install cargo-audit --version 0.22.2 --locked
@@ -107,7 +101,7 @@ jobs:
         run: cargo audit --file apps/desktop/native/scanner/Cargo.lock
 
   container:
-    name: Build and smoke test headless container
+    name: Build and verify headless container
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

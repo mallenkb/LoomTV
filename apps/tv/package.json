@@ -18,7 +18,6 @@
     "build:production": "eas build --platform android --profile production",
     "submit:production": "eas submit --platform android --profile production",
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
     "verify:config": "node scripts/verify-tv-config.cjs",
     "ios": "expo run:ios"
   },

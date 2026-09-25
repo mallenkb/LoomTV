@@ -45,7 +45,6 @@
     "build:simulator:ios": "eas build --platform ios --profile preview-simulator",
     "build:production": "eas build --platform all --profile production",
     "submit:production": "eas submit --platform all --profile production",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

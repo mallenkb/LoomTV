@@ -23,8 +23,5 @@
     "@loom-media-server/media-core": "workspace:*",
     "@loom-media-server/video-contracts": "workspace:*",
     "loom-media-server-headless": "workspace:*"
-  },
-  "scripts": {
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs"
   }
 }

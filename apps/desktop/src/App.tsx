@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { queryClient } from './lib/queryClient';
+import { queryClient, trimQueryCache } from './lib/queryClient';
 import { useLocation, parseDesktopSearch, stringifyDesktopSearch } from './lib/navigation';
 import { MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
@@ -398,6 +398,10 @@ function AppShell({
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  useEffect(() => window.desktopApi?.onMemoryTrim?.(() => {
+    // Keep recent details for Back and never cancel active or in-flight reads.
+    trimQueryCache({ maxBytes: 4 * 1024 * 1024, maxEntries: 64 });
+  }), []);
   const [librarySetupOpen, setLibrarySetupOpen] = useState(showFirstRunLibrarySetup);
   const dismissLibrarySetup = useCallback(() => {
     setLibrarySetupOpen(false);

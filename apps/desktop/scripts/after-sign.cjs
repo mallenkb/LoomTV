@@ -3,6 +3,8 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
+const { generateLibVlcPluginCache } = require('./generate-libvlc-plugin-cache.cjs');
+
 const execFileAsync = promisify(execFile);
 
 async function macSigningIdentity(appPath) {
@@ -74,11 +76,33 @@ async function resignAdHocMpvBundles(appPath) {
   }
 }
 
+// Signing rewrote every VLC plugin, so VLC's shipped plugins.dat no longer
+// matches and VLC would dlopen all of them at startup. Rebuild it against the
+// signed files. Only the host architecture can be loaded to do this.
+function regenerateLibVlcPluginCaches(appPath) {
+  const root = path.join(appPath, 'Contents', 'Resources', 'libvlc', 'darwin');
+  if (!fs.existsSync(root)) return false;
+  let regenerated = false;
+  for (const arch of fs.readdirSync(root)) {
+    const runtimeRoot = path.join(root, arch);
+    if (!fs.existsSync(path.join(runtimeRoot, 'lib', 'libvlc.dylib'))) continue;
+    if (arch !== process.arch) {
+      console.warn(`[libvlc] Skipping the ${arch} plugin cache on a ${process.arch} host; VLC will load its plugins without it.`);
+      continue;
+    }
+    generateLibVlcPluginCache(runtimeRoot);
+    regenerated = true;
+  }
+  return regenerated;
+}
+
 exports.default = async function afterSign(context) {
   if (context.electronPlatformName !== 'darwin') return;
 
   const appPath = findAppBundle(context.appOutDir, context.packager.appInfo.productFilename);
   const teamIdentifier = await macSigningIdentity(appPath);
+  // Developer ID builds are already notarized here, so the bundle can't
+  // change. VLC falls back to loading its plugins without the cache there.
   if (teamIdentifier && !/^(?:not set|none|-|unknown)$/i.test(teamIdentifier)) return;
 
   console.log(`[mac-signing] Applying consistent ad-hoc signature to ${appPath}`);
@@ -93,4 +117,13 @@ exports.default = async function afterSign(context) {
   await execFileAsync('/usr/bin/codesign', [
     '--verify', '--deep', '--strict', '--verbose=2', appPath,
   ]);
+
+  // The plugins are now final. Write the cache, then reseal only the outer
+  // bundle so the plugin signatures and mtimes the cache records stay intact.
+  if (regenerateLibVlcPluginCaches(appPath)) {
+    await execFileAsync('/usr/bin/codesign', ['--force', '--sign', '-', appPath]);
+    await execFileAsync('/usr/bin/codesign', [
+      '--verify', '--deep', '--strict', '--verbose=2', appPath,
+    ]);
+  }
 };

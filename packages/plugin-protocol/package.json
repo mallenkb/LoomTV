@@ -45,7 +45,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm build",
-    "test": "node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

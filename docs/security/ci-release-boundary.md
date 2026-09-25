@@ -21,7 +21,6 @@ The repository enforces the file-level portion of these invariants with:
 
 ```sh
 corepack pnpm verify:workflow-policy
-corepack pnpm test:workflow-policy
 ```
 
 ## Required GitHub repository configuration
@@ -38,7 +37,7 @@ These settings are external to Git and must be verified in repository settings a
 
 ## Validation evidence
 
-For a pull request, confirm the workflow summary shows a read-only `GITHUB_TOKEN`, no environment approval prompt, and no protected secrets. The workflow-policy tests include negative fixtures for write permissions, secret references and inheritance, publishing commands, `pull_request_target`, `workflow_run`, indirect desktop publishing, and unpinned reusable workflows.
+For a pull request, confirm the workflow summary shows a read-only `GITHUB_TOKEN`, no environment approval prompt, and no protected secrets. Review the workflow policy check for write permissions, secret references and inheritance, publishing commands, `pull_request_target`, `workflow_run`, indirect desktop publishing, and unpinned reusable workflows.
 
 Before the first production release, create a disposable annotated protected test tag from a validated `main` commit. Confirm that every signing and publishing job pauses for the `production-release` approval, that the macOS and Windows final-archive gates run, that each build job creates GitHub/SLSA attestations, and that the draft contains the complete evidence set before publication. Cancel the run and remove the test tag. Perform this check before storing production signing credentials in the environment.
 

@@ -228,6 +228,7 @@ export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION_
   : packageJson.version || 'dev';
 
 export type DesktopBridgeApi = {
+      onMemoryTrim?: (callback: () => void) => () => void;
       getLibrary: () => Promise<LibraryPayload>;
       getLibraryIndex?: () => Promise<LibraryIndexPayload>;
       getLibraryItem?: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;

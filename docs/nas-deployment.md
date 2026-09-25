@@ -248,8 +248,8 @@ certificate advisory is published. In one focused change:
 2. Choose a UTC Debian snapshot at or after that base image's publication and
    verify both the `debian` and `debian-security` snapshot `InRelease` files.
 3. Update both pinned `FROM` references and both Debian snapshot URLs together,
-   review the apt package delta, run `corepack pnpm run container:verify` and
-   `corepack pnpm run container:policy:test`, then build both target platforms.
+   review the apt package delta, run `corepack pnpm run container:verify`,
+   then build both target platforms.
 4. Publish a new LoomTV release image; resolve its registry digest and update
    production Compose deployments to that digest. Keep the previous digest for
    rollback.

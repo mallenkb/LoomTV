@@ -16,4 +16,4 @@ Imports accept thumbnail, poster, cover, and logo targets, up to 512 rows and 64
 
 Changing media, choosing another local file, or closing the editor cancels pending file preparation and suppresses stale results. Metadata operations also check whether their selection is still current after awaiting work. These checks cannot undo a database write or external callback that already started.
 
-Regression coverage lives in `apps/desktop/tests/secureSettings.test.ts` and `apps/desktop/tests/artworkInputValidation.test.ts`, with repository coverage in the existing database test files. These tests do not exercise the operating system keychain, browser image decoder, or graphical interface.
+The automated regression tests for these checks were removed. The operating system keychain, browser image decoder, and graphical interface require separate runtime verification.

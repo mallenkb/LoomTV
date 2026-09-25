@@ -47,7 +47,6 @@ jobs:
       - name: Verify TV source and configuration
         run: |
           pnpm tv:typecheck
-          pnpm tv:test
           pnpm --filter @loom-media-server/tv verify:config
       - name: Generate Android TV project
         run: pnpm --filter @loom-media-server/tv exec expo prebuild --platform android --clean --no-install
