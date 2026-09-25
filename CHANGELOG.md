@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.190](docs/releases/v1.0.190.md)
+
+Adds horizontal trackpad scrubbing to desktop video playback.
+
 ### [1.0.189](docs/releases/v1.0.189.md)
 
 Reduces desktop memory use and restores LibVLC's plugin cache for ad-hoc macOS builds.

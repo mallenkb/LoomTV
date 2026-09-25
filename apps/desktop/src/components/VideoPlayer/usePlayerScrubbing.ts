@@ -3,6 +3,29 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackEngine } from './engines/PlaybackEngine';
 
 const NATIVE_SCRUB_PREVIEW_INTERVAL_MS = 80;
+// A trackpad swipe ends with momentum events; commit once they stop.
+const WHEEL_SCRUB_COMMIT_MS = 220;
+const WHEEL_LINE_PIXELS = 16;
+
+/**
+ * Seconds of media per pixel of horizontal trackpad travel. Finer on short
+ * episodes, capped so a swipe across a two-hour film still moves minutes,
+ * not the whole film.
+ */
+export function wheelScrubSecondsPerPixel(duration: number): number {
+  return Math.min(1, Math.max(0.1, duration / 2400));
+}
+
+// Leave two-finger swipes alone over panels that scroll themselves, such as
+// the episode list or the subtitle settings.
+function startsInScrollableRegion(target: EventTarget | null, root: HTMLElement): boolean {
+  for (let node = target instanceof Element ? target : null; node && node !== root; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowX) && node.scrollWidth > node.clientWidth) return true;
+    if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) return true;
+  }
+  return false;
+}
 
 type PlaybackSnapshotUpdater = (
   position: number,
@@ -11,7 +34,11 @@ type PlaybackSnapshotUpdater = (
 ) => void;
 
 type PlayerScrubbingInput = {
+  containerRef: React.RefObject<HTMLElement | null>;
   duration: number;
+  /** False for live streams, which have no timeline to scrub. */
+  wheelScrubEnabled: boolean;
+  onWheelScrubActivity: () => void;
   isScrubbingRef: React.RefObject<boolean>;
   playbackEngineRef: React.RefObject<PlaybackEngine | null>;
   playbackPositionRef: React.RefObject<number>;
@@ -22,7 +49,10 @@ type PlayerScrubbingInput = {
 };
 
 export function usePlayerScrubbing({
+  containerRef,
   duration,
+  wheelScrubEnabled,
+  onWheelScrubActivity,
   isScrubbingRef,
   playbackEngineRef,
   playbackPositionRef,
@@ -171,6 +201,90 @@ export function usePlayerScrubbing({
     scrubTimeHudRef,
     seekTo,
     updatePlaybackSnapshot,
+  ]);
+
+  // Two-finger horizontal swipe scrubs the timeline, as in VLC; a vertical
+  // swipe does nothing. With macOS
+  // natural scrolling, fingers moving right report a negative deltaX, which
+  // moves forward. Frames preview through the same throttled native seeks as
+  // dragging the bar, and the final position is committed once the swipe and
+  // its momentum have stopped.
+  // seekTo and duration change while a video plays. Read them through a ref
+  // so a change mid-swipe doesn't re-register the listener and drop the swipe.
+  const wheelScrubLatestRef = useRef({ duration, seekTo, updatePlaybackSnapshot, onWheelScrubActivity });
+  wheelScrubLatestRef.current = { duration, seekTo, updatePlaybackSnapshot, onWheelScrubActivity };
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !wheelScrubEnabled) return;
+    const latest = wheelScrubLatestRef;
+    let pendingPosition: number | null = null;
+    let commitTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const endGesture = (commit: boolean) => {
+      if (commitTimer) clearTimeout(commitTimer);
+      commitTimer = null;
+      const target = pendingPosition;
+      pendingPosition = null;
+      if (target === null) return;
+      cancelNativePreview();
+      if (previewRafRef.current !== null) {
+        cancelAnimationFrame(previewRafRef.current);
+        previewRafRef.current = null;
+      }
+      if (commit) {
+        latest.current.updatePlaybackSnapshot(target, latest.current.duration, { forceReact: true });
+        latest.current.seekTo(target);
+      }
+      isScrubbingRef.current = false;
+      setIsScrubbing(false);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      const { duration } = latest.current;
+      // Ctrl+wheel is a pinch gesture, not a swipe.
+      if (event.ctrlKey || !duration) return;
+      if (pendingPosition === null) {
+        if (startsInScrollableRegion(event.target, container)) return;
+        // Vertical swipes over the video deliberately do nothing.
+        if (event.deltaX === 0 || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
+          event.preventDefault();
+          return;
+        }
+        // A drag on the progress bar owns scrubbing until it ends.
+        if (listenerCleanupRef.current) return;
+        pendingPosition = playbackPositionRef.current;
+        isScrubbingRef.current = true;
+        setIsScrubbing(true);
+      }
+      event.preventDefault();
+      const deltaPixels = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaX * WHEEL_LINE_PIXELS : event.deltaX;
+      pendingPosition = Math.min(duration, Math.max(0, pendingPosition - deltaPixels * wheelScrubSecondsPerPixel(duration)));
+      requestNativePreview(pendingPosition);
+      if (previewRafRef.current === null) {
+        previewRafRef.current = requestAnimationFrame(() => {
+          previewRafRef.current = null;
+          if (pendingPosition !== null) latest.current.updatePlaybackSnapshot(pendingPosition, duration, { forceReact: false });
+        });
+      }
+      latest.current.onWheelScrubActivity();
+      if (commitTimer) clearTimeout(commitTimer);
+      commitTimer = setTimeout(() => endGesture(true), WHEEL_SCRUB_COMMIT_MS);
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      endGesture(false);
+    };
+  }, [
+    cancelNativePreview,
+    containerRef,
+    isScrubbingRef,
+    playbackPositionRef,
+    requestNativePreview,
+    scopeKey,
+    wheelScrubEnabled,
   ]);
 
   const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
