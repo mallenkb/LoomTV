@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.192](docs/releases/v1.0.192.md)
+
+Refines desktop trackpad scrubbing and reduces query and thumbnail cache allocations.
+
 ### [1.0.191](docs/releases/v1.0.191.md)
 
 Removes unused desktop, mobile, and server APIs and dependencies.
