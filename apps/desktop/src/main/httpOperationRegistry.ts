@@ -67,6 +67,7 @@ const iptvChannelRequestSchema = z.object({
   sort: z.enum(['name-asc', 'name-desc', 'category']).optional(),
   limit: finiteNumber.positive().max(200).optional(),
   offset: finiteNumber.nonnegative().max(1_000_000).optional(),
+  verify: z.boolean().optional(),
 });
 
 type OperationDefinition<TSchema extends z.ZodType> = {

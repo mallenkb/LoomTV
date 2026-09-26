@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { cleanMediaTitle } from './metadata/helpers.ts';
 import { isConfidentAnimeSeasonMapping } from './animeSeasonMapping.ts';
+import { subtitleLanguageFromFileName } from './subtitleLanguage.ts';
 import { fetchJikanMetadata } from './metadata/jikan.ts';
 import type { JikanAnimeResult } from './metadata/jikan.ts';
 import type { OMDbResponse } from './metadata/omdb.ts';
@@ -18,8 +19,7 @@ export function createSubtitleRecords(basePath: string, subtitleFiles: string[])
   return subtitleFiles.map((f) => {
     const cleanedAssVariant = f.match(/\.loomtv-clean-(signs|dialogue|honorific)\.ass$/i)?.[1]?.toLowerCase();
     const openSubtitlesMatch = f.match(/\.opensubtitles\.([a-z]{2,3})\./i);
-    const lm = openSubtitlesMatch || f.match(/\[(\w{2,3})\]|\.([a-z]{2,3})\./i);
-    const lang = lm ? (lm[1] || lm[2] || 'en') : 'en';
+    const lang = subtitleLanguageFromFileName(f);
     const source = openSubtitlesMatch ? 'opensubtitles' as const : 'sidecar' as const;
     return {
       lang: lang.toLowerCase(),

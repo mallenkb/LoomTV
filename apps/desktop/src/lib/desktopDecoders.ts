@@ -89,6 +89,15 @@ export const iptvSourceIconSchema = z.enum([
   'religious',
   'weather',
 ]);
+const iptvSourceHealthSchema = z.object({
+  verified: nonNegativeNumber,
+  failed: nonNegativeNumber,
+  pending: nonNegativeNumber,
+  checking: z.boolean(),
+  checked: nonNegativeNumber,
+  total: nonNegativeNumber,
+  checkedAt: nonNegativeNumber,
+});
 export const iptvSourceSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -101,6 +110,8 @@ export const iptvSourceSummarySchema = z.object({
   skippedMalformed: nonNegativeNumber,
   refreshedAt: nonNegativeNumber,
   refreshError: z.string(),
+  refreshWarning: z.string(),
+  health: iptvSourceHealthSchema,
 });
 export const iptvSourceListSchema = z.array(iptvSourceSummarySchema);
 const iptvChannelCountSchema = z.object({ name: z.string(), channelCount: nonNegativeNumber });
@@ -125,6 +136,7 @@ export const iptvChannelPageSchema = z.object({
   subcategories: z.array(iptvChannelCountSchema),
   refreshedAt: nonNegativeNumber,
   refreshError: z.string(),
+  health: iptvSourceHealthSchema,
 });
 
 export const stremioCatalogItemSchema = z.object({

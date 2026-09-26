@@ -22,6 +22,8 @@ export type IptvSourceRecord = {
   skippedMalformed: number;
   refreshedAt: number;
   refreshError: string;
+  refreshWarning: string;
+  healthCheckedAt: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -69,6 +71,8 @@ const sourceRowSchema = z.object({
   skipped_malformed: z.number().int(),
   refreshed_at: z.number().int(),
   refresh_error: z.string(),
+  refresh_warning: z.string(),
+  health_checked_at: z.number().int(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
 });
@@ -107,6 +111,8 @@ function toSourceRecord(row: z.output<typeof sourceRowSchema>): IptvSourceRecord
     skippedMalformed: row.skipped_malformed,
     refreshedAt: row.refreshed_at,
     refreshError: row.refresh_error,
+    refreshWarning: row.refresh_warning,
+    healthCheckedAt: row.health_checked_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -235,6 +241,8 @@ export function recordIptvRefresh(
     skippedMalformed?: number;
     epgUrl?: string;
     error?: string;
+    /** A problem that did not stop the refresh, such as an unreachable guide. */
+    warning?: string;
   },
 ): IptvSourceRecord | null {
   const existing = getIptvSource(database, sourceId);
@@ -250,6 +258,7 @@ export function recordIptvRefresh(
         epg_url = @epgUrl,
         refreshed_at = @refreshedAt,
         refresh_error = @error,
+        refresh_warning = @warning,
         updated_at = @now
       WHERE id = @sourceId
     `)
@@ -264,10 +273,24 @@ export function recordIptvRefresh(
       // stale the channels on screen actually are.
       refreshedAt: outcome.error ? existing.refreshedAt : now,
       error: outcome.error || '',
+      // A failed refresh keeps the previous warning; it says nothing new
+      // about the guide.
+      warning: outcome.error ? existing.refreshWarning : outcome.warning || '',
       now,
     });
   return getIptvSource(database, sourceId);
 }
+
+/**
+ * Only channels whose latest full check passed are listed: the stream loaded,
+ * a segment decoded to real picture or sound, and nothing has failed since.
+ * New, failing, and unverifiable channels stay out of every list and count;
+ * their rows remain so a stream that starts working appears on its own.
+ */
+const VISIBLE_CHANNEL = `EXISTS (
+  SELECT 1 FROM iptv_stream_health h
+  WHERE h.stream_url = c.stream_url AND h.status = 'ok' AND h.analyzed_at >= h.checked_at
+)`;
 
 /**
  * Build the WHERE fragment for a channel query. Every search term must appear
@@ -276,7 +299,7 @@ export function recordIptvRefresh(
  */
 function channelFilter(request: IptvChannelQuery): { clause: string; parameters: Record<string, string> } {
   const parameters: Record<string, string> = { sourceId: request.sourceId };
-  const clauses = ['c.source_id = @sourceId'];
+  const clauses = ['c.source_id = @sourceId', VISIBLE_CHANNEL];
 
   const group = request.group?.trim();
   if (group) {
@@ -377,8 +400,8 @@ export function listIptvGroups(
   const rows = database
     .prepare(`
       SELECT group_title, COUNT(*) AS channel_count
-      FROM iptv_channels
-      WHERE source_id = ? AND group_title <> ''
+      FROM iptv_channels c
+      WHERE c.source_id = ? AND c.group_title <> '' AND ${VISIBLE_CHANNEL}
       GROUP BY group_title
       ORDER BY group_title COLLATE NOCASE ASC
     `)
@@ -410,6 +433,7 @@ export function listIptvSubcategories(
       FROM iptv_channels c
       WHERE c.source_id = @sourceId
         AND instr(';' || lower(replace(c.group_title, ' ', '')) || ';', ';' || @group || ';') > 0
+        AND ${VISIBLE_CHANNEL}
       GROUP BY group_title
       ORDER BY group_title COLLATE NOCASE ASC
     `)
@@ -441,4 +465,125 @@ export function getIptvChannelStreamUrl(
     .get(sourceId, channelId);
   if (!row) return null;
   return parseDatabaseRow(row, z.object({ stream_url: z.string() }), 'IPTV stream URL').stream_url;
+}
+
+export type IptvStreamHealthStatus = 'ok' | 'dead' | 'blank';
+
+export type IptvStreamHealthRecord = {
+  streamUrl: string;
+  status: IptvStreamHealthStatus | null;
+  failures: number;
+  hidden: boolean;
+  checkedAt: number;
+  analyzedAt: number;
+};
+
+const streamHealthRowSchema = z.object({
+  stream_url: z.string(),
+  status: z.enum(['ok', 'dead', 'blank']).nullable(),
+  failures: z.number().int().nullable(),
+  hidden: z.number().int().nullable(),
+  checked_at: z.number().int().nullable(),
+  analyzed_at: z.number().int().nullable(),
+});
+
+/**
+ * Streams in a source that are due a health check: never checked, last checked
+ * before `dueBefore`, failing but not yet confirmed (a transient failure is
+ * settled on the very next run), or reachable but never fully verified.
+ */
+export function listIptvStreamsDueForHealthCheck(
+  database: BetterSqlite3.Database,
+  sourceId: string,
+  dueBefore: number,
+): IptvStreamHealthRecord[] {
+  const rows = database
+    .prepare(`
+      SELECT DISTINCT c.stream_url, h.status, h.failures, h.hidden, h.checked_at, h.analyzed_at
+      FROM iptv_channels c
+      LEFT JOIN iptv_stream_health h ON h.stream_url = c.stream_url
+      WHERE c.source_id = @sourceId
+        AND (
+          h.stream_url IS NULL
+          OR h.checked_at < @dueBefore
+          OR (h.status <> 'ok' AND h.hidden = 0)
+          OR (h.status = 'ok' AND h.analyzed_at < h.checked_at)
+        )
+      ORDER BY c.position ASC
+    `)
+    .all({ sourceId, dueBefore });
+  return parseDatabaseRows(rows, streamHealthRowSchema, 'IPTV stream health').map((row) => ({
+    streamUrl: row.stream_url,
+    status: row.status,
+    failures: row.failures ?? 0,
+    hidden: row.hidden === 1,
+    checkedAt: row.checked_at ?? 0,
+    analyzedAt: row.analyzed_at ?? 0,
+  }));
+}
+
+export function recordIptvStreamHealth(
+  database: BetterSqlite3.Database,
+  entry: {
+    streamUrl: string;
+    status: IptvStreamHealthStatus;
+    reason: string;
+    failures: number;
+    hidden: boolean;
+    checkedAt: number;
+    analyzedAt: number;
+  },
+): void {
+  database
+    .prepare(`
+      INSERT INTO iptv_stream_health (stream_url, status, reason, failures, hidden, checked_at, analyzed_at)
+      VALUES (@streamUrl, @status, @reason, @failures, @hidden, @checkedAt, @analyzedAt)
+      ON CONFLICT(stream_url) DO UPDATE SET
+        status = excluded.status,
+        reason = excluded.reason,
+        failures = excluded.failures,
+        hidden = excluded.hidden,
+        checked_at = excluded.checked_at,
+        analyzed_at = excluded.analyzed_at
+    `)
+    .run({ ...entry, reason: entry.reason.slice(0, 300), hidden: entry.hidden ? 1 : 0 });
+}
+
+const healthCountRowSchema = z.object({
+  total: z.number().int(),
+  verified: z.number().int().nullable(),
+  failed: z.number().int().nullable(),
+});
+
+/** Verified, failed, and not-yet-verified channel counts for one source. */
+export function countIptvChannelHealth(
+  database: BetterSqlite3.Database,
+  sourceId: string,
+): { verified: number; failed: number; pending: number } {
+  const row = database
+    .prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN h.status = 'ok' AND h.analyzed_at >= h.checked_at THEN 1 ELSE 0 END) AS verified,
+        SUM(CASE WHEN h.status IS NOT NULL AND h.status <> 'ok' THEN 1 ELSE 0 END) AS failed
+      FROM iptv_channels c
+      LEFT JOIN iptv_stream_health h ON h.stream_url = c.stream_url
+      WHERE c.source_id = ?
+    `)
+    .get(sourceId);
+  const counts = parseDatabaseRow(row, healthCountRowSchema, 'IPTV channel health count');
+  const verified = counts.verified ?? 0;
+  const failed = counts.failed ?? 0;
+  return { verified, failed, pending: Math.max(counts.total - verified - failed, 0) };
+}
+
+export function recordIptvHealthCheck(database: BetterSqlite3.Database, sourceId: string, checkedAt: number): void {
+  database.prepare('UPDATE iptv_sources SET health_checked_at = ? WHERE id = ?').run(checkedAt, sourceId);
+}
+
+/** Drop health rows for streams no source lists any more. */
+export function pruneIptvStreamHealth(database: BetterSqlite3.Database): void {
+  database
+    .prepare('DELETE FROM iptv_stream_health WHERE stream_url NOT IN (SELECT stream_url FROM iptv_channels)')
+    .run();
 }

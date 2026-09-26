@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
+import { subtitleLanguageFromFileName } from './subtitleLanguage.ts';
 import { parseRequiredJson, unknownRecordSchema } from './runtimeValidation.ts';
 
 // Ledger-versioned migrations begin with the profiles rebuild. The
@@ -25,6 +26,18 @@ export const IPTV_GEO_BLOCKED_MIGRATION_VERSION = 13;
 export const IPTV_SOURCE_ICONS_MIGRATION_VERSION = 14;
 /** v15 widens media_segment_candidates source check to include skipdb. */
 export const SKIPDB_SOURCE_MIGRATION_VERSION = 15;
+/**
+ * v18 records per-stream IPTV health so dead and blank channels stay hidden.
+ * Development databases already carry unrelated v16/v17 rows, so this step
+ * checks for its own table and column instead of trusting the version alone.
+ */
+export const IPTV_STREAM_HEALTH_MIGRATION_VERSION = 18;
+/** v19 records media file renames so a batch can be undone. */
+export const MEDIA_RENAME_LOG_MIGRATION_VERSION = 19;
+/** v20 re-reads stored sidecar subtitle languages with the trailing-tag parser. */
+export const SUBTITLE_LANGUAGE_REPAIR_MIGRATION_VERSION = 20;
+/** v21 journals rename batches in flight so an interrupted one is reversed at startup. */
+export const MEDIA_RENAME_JOURNAL_MIGRATION_VERSION = 21;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -368,6 +381,10 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateIptvGeoBlocked(database);
   migrateIptvSourceIcons(database);
   migrateSkipDbSource(database);
+  migrateIptvStreamHealth(database);
+  migrateMediaRenameLog(database);
+  migrateSubtitleLanguages(database);
+  migrateMediaRenameJournal(database);
 }
 
 /**
@@ -501,6 +518,144 @@ function migrateSkipDbSource(database: BetterSqlite3.Database): void {
     }
     database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
       .run(SKIPDB_SOURCE_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * Health is keyed by stream URL rather than channel row: a refresh replaces a
+ * source's channel rows wholesale, and a dead stream must stay hidden when the
+ * provider's next playlist lists it again.
+ */
+function migrateIptvStreamHealth(database: BetterSqlite3.Database): void {
+  const hasTable = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'iptv_stream_health'").get();
+  const sourceColumns = database.prepare('PRAGMA table_info(iptv_sources)').all() as { name: string }[];
+  const hasColumn = (name: string) => sourceColumns.some((column) => column.name === name);
+  if (hasTable && hasColumn('health_checked_at') && hasColumn('refresh_warning')) return;
+
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS iptv_stream_health (
+        stream_url TEXT PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('ok', 'dead', 'blank')),
+        reason TEXT NOT NULL DEFAULT '',
+        failures INTEGER NOT NULL DEFAULT 0,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        checked_at INTEGER NOT NULL,
+        analyzed_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_iptv_stream_health_hidden
+        ON iptv_stream_health(hidden, stream_url);
+      CREATE INDEX IF NOT EXISTS idx_iptv_channels_stream
+        ON iptv_channels(stream_url);
+    `);
+    ensureColumn(database, 'iptv_sources', 'health_checked_at', 'INTEGER NOT NULL DEFAULT 0');
+    // A guide that fails to load no longer fails the refresh; its message is
+    // kept apart from refresh_error so the channels still count as updated.
+    ensureColumn(database, 'iptv_sources', 'refresh_warning', "TEXT NOT NULL DEFAULT ''");
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(IPTV_STREAM_HEALTH_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * A rename batch keeps the exact operations it performed so it can be undone
+ * in reverse. An undone file is locked against the name it was given, so the
+ * same wrong match cannot rename it again; a corrected match (a different
+ * target name) is allowed through.
+ */
+function migrateMediaRenameLog(database: BetterSqlite3.Database): void {
+  const hasTable = (name: string) => database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  if (hasTable('media_rename_batches') && hasTable('media_rename_locks')) return;
+
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS media_rename_batches (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        undone_at INTEGER NOT NULL DEFAULT 0,
+        operations_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS media_rename_locks (
+        file_path TEXT PRIMARY KEY,
+        rejected_name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(MEDIA_RENAME_LOG_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * Subtitle languages used to come from the first dotted 2-3 letter word in a
+ * file name, so `Avatar.The.Last.Airbender...en.srt` was stored as "the".
+ * Re-read every stored sidecar record once with the corrected parser; a scan
+ * would only fix them for folders it actually re-reads.
+ */
+function migrateSubtitleLanguages(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(SUBTITLE_LANGUAGE_REPAIR_MIGRATION_VERSION)) return;
+
+  const repair = (json: string): string | null => {
+    let records: Array<{ lang?: string; label?: string; url?: string; source?: string }>;
+    try {
+      records = JSON.parse(json);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(records)) return null;
+    let changed = false;
+    for (const record of records) {
+      const encoded = record.url?.match(/[?&]path=([^&#]*)/)?.[1];
+      if (!encoded) continue;
+      let fileName: string;
+      try {
+        fileName = decodeURIComponent(encoded.replace(/\+/g, ' '));
+      } catch {
+        continue;
+      }
+      const lang = subtitleLanguageFromFileName(fileName);
+      if (lang === record.lang) continue;
+      record.lang = lang;
+      if (!record.label?.startsWith('Cleaned ')) record.label = lang.toUpperCase();
+      changed = true;
+    }
+    return changed ? JSON.stringify(records) : null;
+  };
+
+  database.transaction(() => {
+    for (const table of ['media_items', 'episode_files']) {
+      const rows = database.prepare(`SELECT rowid, subtitles_json FROM ${table} WHERE subtitles_json <> '[]'`).all() as Array<{ rowid: number; subtitles_json: string }>;
+      const update = database.prepare(`UPDATE ${table} SET subtitles_json = ? WHERE rowid = ?`);
+      for (const row of rows) {
+        const next = repair(row.subtitles_json);
+        if (next) update.run(next, row.rowid);
+      }
+    }
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(SUBTITLE_LANGUAGE_REPAIR_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * A rename batch writes its steps here before touching the disk and removes
+ * the row in the same transaction that updates the library. A row found at
+ * startup is a batch that never finished; its completed steps are reversed.
+ */
+function migrateMediaRenameJournal(database: BetterSqlite3.Database): void {
+  if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_rename_journal'").get()) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS media_rename_journal (
+        id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('apply', 'undo')),
+        operations_json TEXT NOT NULL,
+        completed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(MEDIA_RENAME_JOURNAL_MIGRATION_VERSION, Date.now());
   })();
 }
 

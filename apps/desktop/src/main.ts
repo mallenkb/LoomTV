@@ -82,6 +82,7 @@ import {
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
+import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
   createWindow,
@@ -180,6 +181,7 @@ import {
   getProfilePreferences,
   getProfileRestrictions,
   getIptvDatabase,
+  getMediaRenameDatabase,
   getStremioAddonConfigurationState,
   importCustomArtwork,
   importProfileData,
@@ -1747,9 +1749,66 @@ const stremioPluginReviewForRenderer = (review: Parameters<typeof stremioPluginR
 
 // Live TV sources are provider state, not library state: they are refreshed on
 // demand from the provider's own playlist rather than by the folder scanner.
-const iptvService = createIptvService({ getDatabase: getIptvDatabase });
+const iptvService = createIptvService({ getDatabase: getIptvDatabase, findFFmpeg });
+
+// Renaming files to their matched names. The executor moves every path-,
+// ID-, and revision-keyed record with the files and refuses to run while a
+// scan could be writing the same library.
+const mediaRenameExecutor = createRenameExecutor({
+  getDatabase: getMediaRenameDatabase,
+  loadLibrary,
+  saveLibraryMutation,
+  remapMediaIds: remapLibraryMediaReferences,
+  isScanRunning: () => activeScans.size > 0,
+  libraryRoots: (data) => flattenLibraryFolders(normalizeLibraryFolderGroups(data)),
+});
+
+function mediaRenameBatchForRenderer(batch: RenameBatchRecord) {
+  const videos = batch.operations.filter((operation) => operation.role === 'video');
+  return {
+    id: batch.id,
+    createdAt: batch.createdAt,
+    undoneAt: batch.undoneAt,
+    videoCount: videos.length,
+    folderCount: batch.operations.filter((operation) => operation.role === 'folder').length,
+    examples: videos.slice(0, 3).map((operation) => ({
+      fromName: path.basename(operation.from),
+      toName: path.basename(operation.to),
+    })),
+  };
+}
+
+const mediaRenameHandlers = {
+  previewMediaRenames: () => {
+    const plan = mediaRenameExecutor.plan();
+    return {
+      entries: plan.entries.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        mediaType: entry.mediaType,
+        mediaTitle: entry.mediaTitle,
+        label: entry.label,
+        fromName: path.basename(entry.from),
+        toName: path.basename(entry.to),
+        folder: path.dirname(entry.from),
+        ...(entry.kind === 'file' && path.dirname(entry.to) !== path.dirname(entry.from)
+          ? { moveToFolder: path.basename(path.dirname(entry.to)), createsFolder: Boolean(entry.createFolder) }
+          : {}),
+        sidecars: entry.sidecars.map((sidecar) => ({ fromName: path.basename(sidecar.from), toName: path.basename(sidecar.to) })),
+      })),
+      skipped: plan.skipped.map((skip) => ({ mediaTitle: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason })),
+    };
+  },
+  applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
+  listMediaRenames: () => mediaRenameExecutor.history().map(mediaRenameBatchForRenderer),
+  undoMediaRename: (batchId: string) => {
+    mediaRenameExecutor.undo(batchId);
+    return mediaRenameExecutor.history().map(mediaRenameBatchForRenderer);
+  },
+};
 
 registerIpcHandlers<LibraryData, AppSettings>({
+  ...mediaRenameHandlers,
   getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
   showOpenFolderDialog,
@@ -2376,6 +2435,14 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('Saved pairing migration will retry on the next launch:', describeErrorForLog(error));
   }
+  // A rename batch the app was killed in the middle of is put back before
+  // anything reads the library, so files and records agree again.
+  try {
+    const recovered = mediaRenameExecutor.recoverInterrupted();
+    if (recovered) console.warn(`[rename] Reversed ${recovered} rename batch(es) that were interrupted before finishing.`);
+  } catch (error) {
+    console.warn('Interrupted rename recovery will retry on the next launch:', describeErrorForLog(error));
+  }
 
   // ── loomtv:// media protocol handlers ───────────────────────────────────────
   // Translates loomtv://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>
@@ -2427,6 +2494,7 @@ app.whenReady().then(async () => {
   void startBackgroundServices().catch((error) => {
     console.error('Loom background startup failed:', error);
   });
+  iptvService.startHealthChecks();
 }).catch((error) => {
   console.error('Failed to start Loom Media Server:', error);
   // A failed startup must not remain as a headless process holding the single

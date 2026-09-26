@@ -29,6 +29,7 @@ interface PlaybackMeta {
 const playbackProcesses = new Map<ChildProcess, PlaybackMeta>();
 const playbackActivityLeases = new Map<string, { label: string; touchedAt: number }>();
 const analysisProcesses = new Set<ChildProcess>();
+const analysisRequests = new Set<AbortController>();
 let lastPlaybackActivityAt = 0;
 let analysisInterruptionEpoch = 0;
 
@@ -42,6 +43,8 @@ function killProcess(proc: ChildProcess): void {
 
 function interruptAnalysis(): void {
   analysisInterruptionEpoch += 1;
+  for (const controller of analysisRequests) controller.abort();
+  analysisRequests.clear();
   for (const proc of [...analysisProcesses]) killProcess(proc);
   analysisProcesses.clear();
 }
@@ -90,6 +93,13 @@ export function registerAnalysisProcess(proc: ChildProcess): void {
   const forget = () => analysisProcesses.delete(proc);
   proc.once('exit', forget);
   proc.once('error', forget);
+}
+
+/** Cancel background network work alongside analysis processes during playback. */
+export function registerAnalysisRequest(controller: AbortController): () => void {
+  if (isPlaybackActivityActive()) controller.abort();
+  else analysisRequests.add(controller);
+  return () => { analysisRequests.delete(controller); };
 }
 
 export function isPlaybackActivityActive(): boolean {

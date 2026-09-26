@@ -108,6 +108,9 @@ export function createIptvStreamProxy(resolveChannelUrl: (sourceId: string, chan
   ): Promise<void> => {
     try {
       const range = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
+      // Relative playlist entries resolve against where the provider
+      // redirected us, not the channel's original address.
+      let finalUrl = upstreamUrl;
       const response = await safeFetch(upstreamUrl, {
         method: req.method === 'HEAD' ? 'HEAD' : 'GET',
         headers: {
@@ -120,10 +123,11 @@ export function createIptvStreamProxy(resolveChannelUrl: (sourceId: string, chan
         maxRedirects: 4,
         retries: 1,
         operation: 'iptv.stream',
+        onFinalUrl: (url) => { finalUrl = url; },
       });
       const body = Buffer.from(await response.arrayBuffer());
       const contentType = response.headers.get('content-type') || '';
-      const playlist = response.ok && isHlsPlaylist(upstreamUrl, contentType, body);
+      const playlist = response.ok && isHlsPlaylist(finalUrl, contentType, body);
       if (!playlist) {
         res.writeHead(response.status, responseHeaders(response, body.byteLength, false));
         res.end(req.method === 'HEAD' ? undefined : body);
@@ -131,7 +135,7 @@ export function createIptvStreamProxy(resolveChannelUrl: (sourceId: string, chan
       }
 
       const credentialQuery = forwardedCredentialQuery(reqUrl);
-      const rewritten = rewriteHlsPlaylist(body.toString('utf8'), upstreamUrl, (resourceUrl) => {
+      const rewritten = rewriteHlsPlaylist(body.toString('utf8'), finalUrl, (resourceUrl) => {
         const token = registerResource(resourceUrl);
         return `/iptv/resource/${token}${credentialQuery ? `?${credentialQuery}` : ''}`;
       });

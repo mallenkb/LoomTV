@@ -21,6 +21,11 @@ export type SafeFetchOptions = {
   operation?: string;
   provider?: string;
   cacheStatus?: CacheStatus;
+  /**
+   * Called with the URL that produced the returned response, after redirects.
+   * Relative references in the body (HLS playlists) resolve against it.
+   */
+  onFinalUrl?: (url: string) => void;
 };
 
 function isPrivateIpv4(address: string): boolean {
@@ -195,16 +200,27 @@ async function pinnedHttpsRequest(url: URL, init: RequestInit, address: string, 
       response.on('end', () => {
         if (settled) return;
         settled = true;
-        const responseHeaders = new Headers();
-        for (const [name, value] of Object.entries(response.headers)) {
-          if (Array.isArray(value)) for (const entry of value) responseHeaders.append(name, entry);
-          else if (value !== undefined) responseHeaders.set(name, value);
+        // Response() throws for a status outside 200-599 and for a body on a
+        // null-body status (204, 205, 304). This runs in an event handler,
+        // where a throw would crash the main process, so it must reject.
+        try {
+          const status = response.statusCode || 0;
+          const responseHeaders = new Headers();
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (Array.isArray(value)) for (const entry of value) responseHeaders.append(name, entry);
+            else if (value !== undefined) responseHeaders.set(name, value);
+          }
+          const nullBody = status === 204 || status === 205 || status === 304;
+          resolve(new Response(nullBody ? null : Buffer.concat(chunks), {
+            status,
+            statusText: response.statusMessage || '',
+            headers: responseHeaders,
+          }));
+        } catch (error) {
+          reject(error instanceof RangeError
+            ? new Error(`Provider answered an invalid HTTP status (${response.statusCode}).`)
+            : error);
         }
-        resolve(new Response(Buffer.concat(chunks), {
-          status: response.statusCode || 0,
-          statusText: response.statusMessage || '',
-          headers: responseHeaders,
-        }));
       });
       response.on('error', (error) => {
         if (settled) return;
@@ -290,7 +306,7 @@ function stripRedirectSensitiveHeaders(headers: HeadersInit | undefined): Header
 }
 
 type SafeFetchTransportOptions = Required<Pick<SafeFetchOptions, 'timeoutMs' | 'maxBytes' | 'retries' | 'maxRedirects'>>
-  & Pick<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl'>;
+  & Pick<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl' | 'onFinalUrl'>;
 
 async function fetchAttempt(input: string | URL, init: RequestInit, options: SafeFetchTransportOptions): Promise<Response> {
   let url = new URL(input.toString());
@@ -298,7 +314,9 @@ async function fetchAttempt(input: string | URL, init: RequestInit, options: Saf
   let body = init.body;
   let headers: HeadersInit | undefined = init.headers;
   for (let redirects = 0; redirects <= options.maxRedirects; redirects += 1) {
+    init.signal?.throwIfAborted();
     const address = await assertSafeUrl(url, options.allowedHosts, options.lookup || (dns.lookup as LookupImplementation));
+    init.signal?.throwIfAborted();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
     const abort = () => controller.abort();
@@ -310,9 +328,11 @@ async function fetchAttempt(input: string | URL, init: RequestInit, options: Saf
         address,
         options.maxBytes,
       );
-      if (response.status < 300 || response.status >= 400) return await boundedResponse(response, options.maxBytes);
-      const location = response.headers.get('location');
-      if (!location) return await boundedResponse(response, options.maxBytes);
+      if (response.status < 300 || response.status >= 400 || !response.headers.get('location')) {
+        options.onFinalUrl?.(url.toString());
+        return await boundedResponse(response, options.maxBytes);
+      }
+      const location = response.headers.get('location') as string;
       if (redirects === options.maxRedirects) throw new Error('Provider redirected too many times.');
       const nextUrl = new URL(location, url);
       if (nextUrl.origin !== url.origin) {
@@ -346,6 +366,7 @@ export async function safeFetch(input: string | URL, init: RequestInit = {}, opt
     maxRedirects: options.maxRedirects ?? 3,
     lookup: options.lookup,
     requestImpl: options.requestImpl,
+    onFinalUrl: options.onFinalUrl,
   };
   const method = (init.method || 'GET').toUpperCase();
   const mayRetry = method === 'GET' || method === 'HEAD';

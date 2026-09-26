@@ -14,6 +14,8 @@ import { normalizeIptvLogoUrl } from '@/shared/iptvLogoUrl';
 
 const CHANNEL_PAGE_SIZE = 120;
 const SEARCH_DEBOUNCE_MS = 250;
+/** How often the page picks up newly verified channels while a check runs. */
+const VERIFY_POLL_MS = 15_000;
 const ALL_GROUPS = '';
 const ALL_SUBCATEGORIES = '';
 const SORT_OPTIONS: ReadonlyArray<{ value: IptvChannelSort; label: string }> = [
@@ -152,6 +154,9 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const requestTokenRef = useRef(0);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  // The first load of each source asks the main process to re-verify its
+  // stale streams; later loads (paging, filters, polling) only read.
+  const verifyRequestedForRef = useRef('');
 
   const isModern = theme.homeStyle === 'modern';
 
@@ -176,6 +181,8 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
     if (!sourceId) return;
     const token = ++requestTokenRef.current;
     if (offset > 0) setIsPaging(true);
+    const verify = verifyRequestedForRef.current !== sourceId;
+    verifyRequestedForRef.current = sourceId;
     try {
       const result = await desktopApi.listIptvChannels({
         sourceId,
@@ -186,6 +193,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
         sort,
         limit: CHANNEL_PAGE_SIZE,
         offset,
+        verify,
       });
       if (token !== requestTokenRef.current) return;
       setPage(result);
@@ -205,6 +213,32 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
   useEffect(() => {
     void loadChannels(0);
   }, [loadChannels]);
+
+  // Channels appear only once verified, so while a check runs the first page
+  // is re-read to pick up new passes. Past the first page the list is left
+  // alone rather than yanked from under the scroll position; it reloads once
+  // the check finishes.
+  const isVerifying = page?.health.checking ?? false;
+  const listIsFirstPage = channels.length <= CHANNEL_PAGE_SIZE;
+  const wasVerifyingRef = useRef(false);
+  useEffect(() => {
+    if (wasVerifyingRef.current && !isVerifying) void loadChannels(0);
+    wasVerifyingRef.current = isVerifying;
+    if (!isVerifying) return undefined;
+    const timer = window.setInterval(() => {
+      if (listIsFirstPage) {
+        void loadChannels(0);
+        return;
+      }
+      desktopApi.listIptvSources()
+        .then((sources) => {
+          const source = sources.find((entry) => entry.id === sourceId);
+          if (source) setPage((current) => (current ? { ...current, health: source.health } : current));
+        })
+        .catch(() => undefined);
+    }, VERIFY_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [isVerifying, listIsFirstPage, loadChannels, sourceId]);
 
   const groupOptions = useMemo(
     () => [{ name: ALL_GROUPS, channelCount: page?.total ?? 0 }, ...(page?.groups || [])],
@@ -336,6 +370,19 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
           </div>
         ) : null}
 
+        {page?.health.checking ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-4 rounded-xl border border-[var(--loom-panel-border)] px-4 py-3 text-sm text-[var(--loom-muted)]"
+          >
+            {page.health.total > 0
+              ? `Verifying channels: ${page.health.checked.toLocaleString()} of ${page.health.total.toLocaleString()} checked.`
+              : 'Waiting to verify channels.'}
+            {' '}Only channels that play are shown, and more appear as they pass.
+          </div>
+        ) : null}
+
         {loadError ? (
           <div role="alert" className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {loadError}
@@ -350,7 +397,11 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
             <p className="text-sm text-[var(--loom-muted)]">
               {debouncedQuery || group || subcategory || geoFilter !== 'all'
                 ? 'No channels match that search.'
-                : "This source has no channels yet. It will populate after the provider's next playlist sync."}
+                : page?.health.checking
+                  ? 'No channels have been verified yet. They appear here as they pass.'
+                  : page && page.health.pending + page.health.failed > 0
+                    ? 'None of this source\'s channels are playing right now.'
+                    : "This source has no channels yet. It will populate after the provider's next playlist sync."}
             </p>
           </div>
         ) : (

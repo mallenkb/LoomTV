@@ -30,6 +30,9 @@ import type {
   MediaSegmentRequest,
   MediaSegmentResponse,
   MediaSegmentType,
+  MediaRenameApplyResult,
+  MediaRenameBatch,
+  MediaRenamePreview,
   MetadataApiKeys,
   MetadataKeyTestResult,
   MetadataProviderRequest,
@@ -107,6 +110,10 @@ export interface IpcContract {
   'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };
   'library:update-folder': { args: [folderPath: string, nextFolderPath: string, kind: LibraryFolderKind]; result: LibraryIndexPayload };
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
+  'library:rename-preview': { args: []; result: MediaRenamePreview };
+  'library:rename-apply': { args: [entryIds: string[]]; result: MediaRenameApplyResult };
+  'library:rename-history': { args: []; result: MediaRenameBatch[] };
+  'library:rename-undo': { args: [batchId: string]; result: MediaRenameBatch[] };
   'iptv:list-sources': { args: []; result: IptvSourceSummary[] };
   'iptv:add-source': { args: [input: IptvSourceInput]; result: IptvSourceSummary[] };
   'iptv:update-source': { args: [sourceId: string, patch: IptvSourcePatch]; result: IptvSourceSummary[] };

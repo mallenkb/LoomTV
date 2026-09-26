@@ -29,6 +29,9 @@ import type {
   IptvSourceInput,
   IptvSourcePatch,
   IptvSourceSummary,
+  MediaRenameApplyResult,
+  MediaRenameBatch,
+  MediaRenamePreview,
   LocalNetworkPairedDevice,
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -257,6 +260,10 @@ export type DesktopBridgeApi = {
       updateIptvSource?: (sourceId: string, patch: IptvSourcePatch) => Promise<IptvSourceSummary[]>;
       removeIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
       refreshIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
+      previewMediaRenames?: () => Promise<MediaRenamePreview>;
+      applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
+      listMediaRenames?: () => Promise<MediaRenameBatch[]>;
+      undoMediaRename?: (batchId: string) => Promise<MediaRenameBatch[]>;
       listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
@@ -1348,6 +1355,27 @@ const desktopTransport = {
       method: 'DELETE',
       body: JSON.stringify({ sourceId }),
     });
+  },
+
+  // Renaming files needs the desktop app itself; there is no LAN route for it.
+  async previewMediaRenames(): Promise<MediaRenamePreview> {
+    if (!window.desktopApi?.previewMediaRenames) throw new Error('Renaming files is only available in the desktop app.');
+    return window.desktopApi.previewMediaRenames();
+  },
+
+  async applyMediaRenames(entryIds: string[]): Promise<MediaRenameApplyResult> {
+    if (!window.desktopApi?.applyMediaRenames) throw new Error('Renaming files is only available in the desktop app.');
+    return window.desktopApi.applyMediaRenames(entryIds);
+  },
+
+  async listMediaRenames(): Promise<MediaRenameBatch[]> {
+    if (!window.desktopApi?.listMediaRenames) return [];
+    return window.desktopApi.listMediaRenames();
+  },
+
+  async undoMediaRename(batchId: string): Promise<MediaRenameBatch[]> {
+    if (!window.desktopApi?.undoMediaRename) throw new Error('Renaming files is only available in the desktop app.');
+    return window.desktopApi.undoMediaRename(batchId);
   },
 
   async refreshIptvSource(sourceId: string): Promise<IptvSourceSummary[]> {

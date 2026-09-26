@@ -467,6 +467,14 @@ export function getIptvDatabase(): BetterSqlite3.Database {
   return getDb();
 }
 
+/**
+ * Renaming media files rewrites path-, ID-, and revision-keyed rows across
+ * several tables in one transaction, so it also takes the connection.
+ */
+export function getMediaRenameDatabase(): BetterSqlite3.Database {
+  return getDb();
+}
+
 function secureSettingsPersistence() {
   const database = getDb();
   return createSecureSettingsPersistence({

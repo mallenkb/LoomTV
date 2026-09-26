@@ -264,6 +264,7 @@ const iptvChannelRequestSchema = z.object({
   sort: z.enum(['name-asc', 'name-desc', 'category']).optional(),
   limit: finiteNumber.positive().max(200).optional(),
   offset: finiteNumber.nonnegative().max(1_000_000).optional(),
+  verify: z.boolean().optional(),
 });
 
 const stremioExtraSchema = z.record(
@@ -358,6 +359,10 @@ export interface IpcHandlerDependencies<
   updateIptvSource: (sourceId: string, patch: IpcContract['iptv:update-source']['args'][1]) => IpcResult<'iptv:update-source'>;
   removeIptvSource: (sourceId: string) => IpcResult<'iptv:remove-source'>;
   refreshIptvSource: (sourceId: string) => Promise<IpcResult<'iptv:refresh-source'>>;
+  previewMediaRenames: () => IpcResult<'library:rename-preview'>;
+  applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
+  listMediaRenames: () => IpcResult<'library:rename-history'>;
+  undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
   listIptvChannels: (request: IpcContract['iptv:list-channels']['args'][0]) => IpcResult<'iptv:list-channels'>;
   resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
   loadSettings: () => TSettings;
@@ -829,6 +834,24 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.refreshIptvSource(sourceId);
   }, z.tuple([iptvSourceIdSchema]));
+
+  // Renaming touches files on disk, so every step is an owner-only settings write.
+  handleNoArgs('library:rename-preview', () => {
+    deps.authorizeSettingsWrite();
+    return deps.previewMediaRenames();
+  });
+  handle('library:rename-apply', (_event, entryIds) => {
+    deps.authorizeSettingsWrite();
+    return deps.applyMediaRenames(entryIds);
+  }, z.tuple([z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(20_000)]));
+  handleNoArgs('library:rename-history', () => {
+    deps.authorizeSettingsWrite();
+    return deps.listMediaRenames();
+  });
+  handle('library:rename-undo', (_event, batchId) => {
+    deps.authorizeSettingsWrite();
+    return deps.undoMediaRename(batchId);
+  }, z.tuple([z.string().uuid()]));
 
   handle('iptv:list-channels', (_event, request) => deps.listIptvChannels(request), z.tuple([iptvChannelRequestSchema]));
 

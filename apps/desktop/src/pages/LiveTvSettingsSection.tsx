@@ -19,8 +19,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The live TV request failed.';
 }
 
+/** How often the list re-reads while a background channel check is running. */
+const HEALTH_POLL_MS = 5000;
+
 function describeSource(source: IptvSourceSummary): string {
-  const parts = [`${source.channelCount.toLocaleString()} channels`];
+  const parts = [`${source.health.verified.toLocaleString()} verified channels`];
   if (source.programmeCount > 0) parts.push(`${source.programmeCount.toLocaleString()} guide entries`);
   if (source.refreshedAt > 0) parts.push(`updated ${new Date(source.refreshedAt).toLocaleString()}`);
   return parts.join(' · ');
@@ -110,6 +113,17 @@ export default function LiveTvSettingsSection() {
       });
     return () => { mounted = false; };
   }, []);
+
+  // A refresh returns before its channel check finishes; keep re-reading so
+  // the hidden count and the checking notice settle without a manual reload.
+  const healthChecking = sources.some((source) => source.health.checking);
+  useEffect(() => {
+    if (!healthChecking) return undefined;
+    const timer = window.setInterval(() => {
+      desktopApi.listIptvSources().then(applySources).catch(() => undefined);
+    }, HEALTH_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [applySources, healthChecking]);
 
   const handleAdd = useCallback(async () => {
     const url = playlistUrl.trim();
@@ -433,6 +447,29 @@ export default function LiveTvSettingsSection() {
                       <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-300">
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         {source.skippedInsecure.toLocaleString()} channels were skipped because they stream over plain HTTP.
+                      </p>
+                    ) : null}
+                    {source.health.checking ? (
+                      <p className="mt-1 text-xs text-[var(--loom-muted)]">
+                        {source.health.total > 0
+                          ? `Verifying channels: ${source.health.checked.toLocaleString()} of ${source.health.total.toLocaleString()} checked.`
+                          : 'Waiting to verify channels.'}
+                      </p>
+                    ) : null}
+                    {source.health.failed > 0 ? (
+                      <p className="mt-1 text-xs text-[var(--loom-muted)]">
+                        {source.health.failed.toLocaleString()} channels are hidden because they are offline, blocked, or show a blank picture. They come back if they start working.
+                      </p>
+                    ) : null}
+                    {source.health.pending > 0 ? (
+                      <p className="mt-1 text-xs text-[var(--loom-muted)]">
+                        {source.health.pending.toLocaleString()} channels are hidden until they are verified.
+                      </p>
+                    ) : null}
+                    {source.refreshWarning && !source.refreshError ? (
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-300">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        {source.refreshWarning}
                       </p>
                     ) : null}
                     {source.refreshError ? (

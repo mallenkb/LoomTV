@@ -900,6 +900,73 @@ export type IptvSourceIconId =
   | 'religious'
   | 'weather';
 
+/** One proposed rename in the preview: a video (with its sidecars) or a folder. */
+export interface MediaRenamePreviewEntry {
+  id: string;
+  kind: 'file' | 'folder';
+  mediaType: 'movie' | 'tv' | 'anime';
+  mediaTitle: string;
+  /** "Movie", "S01E03", "Season folder", "Show folder", or "Movie folder". */
+  label: string;
+  fromName: string;
+  toName: string;
+  /** The folder the item is in now. */
+  folder: string;
+  /** Set when the file moves: the name of the folder it moves into. */
+  moveToFolder?: string;
+  /** The destination folder is created by this rename. */
+  createsFolder?: boolean;
+  /** Subtitles, .nfo, and thumbnails that are renamed along with a video. */
+  sidecars: { fromName: string; toName: string }[];
+}
+
+export interface MediaRenameSkip {
+  mediaTitle: string;
+  fileName: string;
+  reason: string;
+}
+
+export interface MediaRenamePreview {
+  entries: MediaRenamePreviewEntry[];
+  skipped: MediaRenameSkip[];
+}
+
+/** A past rename batch, newest first, for the undo list. */
+export interface MediaRenameBatch {
+  id: string;
+  createdAt: number;
+  /** Zero until the batch is undone. */
+  undoneAt: number;
+  videoCount: number;
+  folderCount: number;
+  examples: { fromName: string; toName: string }[];
+}
+
+export interface MediaRenameApplyResult {
+  renamed: number;
+  batchId: string;
+}
+
+/**
+ * Where a source's channels stand after verification. Only `verified`
+ * channels are listed anywhere; the others are kept but not shown.
+ */
+export interface IptvSourceHealth {
+  /** Channels whose latest full check passed. */
+  verified: number;
+  /** Channels whose latest check failed: offline, refused, blank, or unverifiable. */
+  failed: number;
+  /** Channels not verified yet. */
+  pending: number;
+  /** A check of this source is queued or running. */
+  checking: boolean;
+  /** Streams finished so far in the running check, out of `total`; both zero when idle. */
+  checked: number;
+  total: number;
+  /** When the last check of this source started. */
+  checkedAt: number;
+}
+
 /** One added provider: an M3U playlist plus the XMLTV guide that annotates it. */
 export interface IptvSourceSummary {
   id: string;
@@ -915,6 +982,9 @@ export interface IptvSourceSummary {
   skippedMalformed: number;
   refreshedAt: number;
   refreshError: string;
+  /** Set when the refresh succeeded but part of it (the guide) did not. */
+  refreshWarning: string;
+  health: IptvSourceHealth;
 }
 
 export interface IptvSourceInput {
@@ -957,6 +1027,8 @@ export interface IptvChannelRequest {
   sort?: IptvChannelSort;
   limit?: number;
   offset?: number;
+  /** Re-verify the source's stale streams; sent when its page opens. */
+  verify?: boolean;
 }
 
 export interface IptvChannelPage {
@@ -971,4 +1043,5 @@ export interface IptvChannelPage {
   subcategories: readonly { name: string; channelCount: number }[];
   refreshedAt: number;
   refreshError: string;
+  health: IptvSourceHealth;
 }
