@@ -150,6 +150,12 @@ const desktopApi = {
   applyMediaRenames: (entryIds: string[]) => ipcRenderer.invoke('library:rename-apply', entryIds),
   listMediaRenames: () => ipcRenderer.invoke('library:rename-history'),
   undoMediaRename: (batchId: string) => ipcRenderer.invoke('library:rename-undo', batchId),
+  mediaRenameStatus: () => ipcRenderer.invoke('library:rename-status'),
+  onLibraryFilesOrganized: (callback: (result: { renamed: number }) => void) => {
+    const handler = (_: unknown, result: { renamed: number }) => callback(result);
+    ipcRenderer.on('library:files-organized', handler);
+    return () => ipcRenderer.removeListener('library:files-organized', handler);
+  },
   listIptvChannels: (request: IptvChannelRequest) => ipcRenderer.invoke('iptv:list-channels', request),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   listStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:list'),

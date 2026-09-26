@@ -372,16 +372,29 @@ function performOnDisk(operations: readonly LoggedOperation[], onStep: (complete
   }
 }
 
+/** A file changed more recently than this is left for a later automatic run. */
+const RECENT_CHANGE_MS = 10 * 60 * 1000;
+
 export function createRenameExecutor(deps: RenameExecutorDeps) {
   const lockedTargets = (): Map<string, string> => new Map(
     (deps.getDatabase().prepare('SELECT file_path, rejected_name FROM media_rename_locks').all() as Array<{ file_path: string; rejected_name: string }>)
       .map((row) => [row.file_path, row.rejected_name.toLowerCase()]),
   );
 
-  function plan(): RenamePlan {
+  function plan(options: { automatic?: boolean } = {}): RenamePlan {
     const data = deps.loadLibrary();
     const locks = lockedTargets();
+    const now = Date.now();
     return planRenames({
+      ...(options.automatic ? {
+        isRecentlyModified: (filePath: string) => {
+          try {
+            return now - fs.statSync(filePath).mtimeMs < RECENT_CHANGE_MS;
+          } catch {
+            return true;
+          }
+        },
+      } : {}),
       // A movie that shares a folder with others gets a folder of its own.
       movieFolders: true,
       sameDrive: onSameDrive,
@@ -541,6 +554,17 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
      * library and disk first, so an entry that no longer applies is dropped
      * rather than acted on from a stale preview.
      */
+    /**
+     * The automatic run after a sync: every change that passes all checks, as
+     * one undoable batch through the same journal as a reviewed apply. Files
+     * changed in the last few minutes wait. Null when there is nothing to do.
+     */
+    applyAutomatic(): { batchId: string; renamed: number } | null {
+      const entries = plan({ automatic: true }).entries;
+      if (entries.length === 0) return null;
+      return this.apply(entries.map((entry) => entry.id));
+    },
+
     apply(entryIds: readonly string[]): { batchId: string; renamed: number } {
       const wanted = new Set(entryIds);
       const entries = plan().entries.filter((entry) => wanted.has(entry.id));

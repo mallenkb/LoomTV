@@ -58,6 +58,11 @@ export type RenamePlannerInput = {
   sameDrive: (left: string, right: string) => boolean;
   /** Give a movie that shares a folder with others a folder of its own. */
   movieFolders?: boolean;
+  /**
+   * Automatic runs only: true for a file changed moments ago, which may still
+   * be downloading or seeding. Such a file waits for a later sync.
+   */
+  isRecentlyModified?: (filePath: string) => boolean;
 };
 
 const SIDECAR_EXTENSIONS = new Set(['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx', '.sup', '.nfo', '.jpg', '.jpeg', '.png', '.webp']);
@@ -414,6 +419,9 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const name = path.basename(filePath);
     const moving = targetDirectory !== directory;
     if (!(list(directory) || []).includes(name)) return skip('The file is no longer where the library expects it.');
+    if (input.isRecentlyModified?.(filePath)) {
+      return skip('The file changed in the last few minutes and may still be downloading, so it waits for the next sync.');
+    }
     const base = withinLimit(newBase);
     const target = `${base}${path.extname(name).toLowerCase()}`;
     if (target === name && !moving) return 'unchanged';

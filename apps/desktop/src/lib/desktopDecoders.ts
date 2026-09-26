@@ -219,6 +219,7 @@ export const settingsPayloadSchema = z.object({
   metadataApiKeys: z.record(z.string(), z.string()).optional(),
   metadataOfflineMode: z.boolean().optional(),
   autoSyncIntervalHours: finiteNumber.optional(),
+  organizeFilesAfterSync: z.enum(['ask', 'auto', 'off']).optional(),
   playbackSkipBackSeconds: finiteNumber.optional(),
   playbackSkipForwardSeconds: finiteNumber.optional(),
   playbackDisplaySleepTimeoutMinutes: finiteNumber.optional(),

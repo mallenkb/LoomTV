@@ -33,6 +33,7 @@ import type {
   MediaRenameApplyResult,
   MediaRenameBatch,
   MediaRenamePreview,
+  MediaRenameStatus,
   MetadataApiKeys,
   MetadataKeyTestResult,
   MetadataProviderRequest,
@@ -114,6 +115,7 @@ export interface IpcContract {
   'library:rename-apply': { args: [entryIds: string[]]; result: MediaRenameApplyResult };
   'library:rename-history': { args: []; result: MediaRenameBatch[] };
   'library:rename-undo': { args: [batchId: string]; result: MediaRenameBatch[] };
+  'library:rename-status': { args: []; result: MediaRenameStatus };
   'iptv:list-sources': { args: []; result: IptvSourceSummary[] };
   'iptv:add-source': { args: [input: IptvSourceInput]; result: IptvSourceSummary[] };
   'iptv:update-source': { args: [sourceId: string, patch: IptvSourcePatch]; result: IptvSourceSummary[] };
@@ -232,6 +234,7 @@ export interface IpcEventContract {
   'mpv:state': { args: [state: MpvPlaybackState] };
   /** Main requests unused UI cache cleanup after playback starts or during inactivity. */
   'app:trim-memory': { args: [] };
+  'library:files-organized': { args: [result: { renamed: number }] };
 }
 
 export type IpcEventChannel = keyof IpcEventContract;

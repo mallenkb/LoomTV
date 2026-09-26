@@ -363,6 +363,7 @@ export interface IpcHandlerDependencies<
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
   listMediaRenames: () => IpcResult<'library:rename-history'>;
   undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
+  mediaRenameStatus: () => IpcResult<'library:rename-status'>;
   listIptvChannels: (request: IpcContract['iptv:list-channels']['args'][0]) => IpcResult<'iptv:list-channels'>;
   resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
   loadSettings: () => TSettings;
@@ -847,6 +848,10 @@ export function registerIpcHandlers<
   handleNoArgs('library:rename-history', () => {
     deps.authorizeSettingsWrite();
     return deps.listMediaRenames();
+  });
+  handleNoArgs('library:rename-status', () => {
+    deps.authorizeSettingsWrite();
+    return deps.mediaRenameStatus();
   });
   handle('library:rename-undo', (_event, batchId) => {
     deps.authorizeSettingsWrite();

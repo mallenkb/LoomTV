@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.195](docs/releases/v1.0.195.md)
+
+Adds optional automatic file organization after library sync, with undoable changes and protection for recently modified files.
+
 ### [1.0.194](docs/releases/v1.0.194.md)
 
 Keeps automatic desktop update downloads in the background without an interrupting dialog.

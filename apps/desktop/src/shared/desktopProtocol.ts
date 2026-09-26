@@ -293,6 +293,12 @@ export interface SettingsPayload {
   metadataApiKeys?: MetadataApiKeys;
   metadataOfflineMode?: boolean;
   autoSyncIntervalHours?: number;
+  /**
+   * After a library sync: "ask" shows how many files can be renamed and waits
+   * for review, "auto" applies every change that passes all checks, "off"
+   * does neither. Defaults to "ask".
+   */
+  organizeFilesAfterSync?: 'ask' | 'auto' | 'off';
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
   /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
@@ -940,6 +946,16 @@ export interface MediaRenameBatch {
   videoCount: number;
   folderCount: number;
   examples: { fromName: string; toName: string }[];
+}
+
+/** The "Organize files" row in Library sync. */
+export interface MediaRenameStatus {
+  mode: 'ask' | 'auto' | 'off';
+  /** Files the preview would rename or move right now. */
+  pendingFiles: number;
+  lastBatch: MediaRenameBatch | null;
+  /** When the last automatic run failed, why. */
+  lastAutomaticError: string;
 }
 
 export interface MediaRenameApplyResult {

@@ -36,6 +36,7 @@ const settingsInputSchema = z.looseObject({
   appThemeColor: z.unknown().optional(),
   appThemeMode: z.unknown().optional(),
   autoSyncIntervalHours: z.unknown().optional(),
+  organizeFilesAfterSync: z.unknown().optional(),
   otherFolderIcon: z.unknown().optional(),
   localNetworkDeviceId: z.unknown().optional(),
   localNetworkDeviceName: z.unknown().optional(),
@@ -212,6 +213,9 @@ function normalizeSettings(input: unknown): AppSettings {
     autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
       ? autoSyncIntervalHours
       : 72,
+    organizeFilesAfterSync: raw.organizeFilesAfterSync === 'auto' || raw.organizeFilesAfterSync === 'off'
+      ? raw.organizeFilesAfterSync
+      : 'ask',
     otherFolderIcon: typeof raw.otherFolderIcon === 'string' ? raw.otherFolderIcon : 'folder',
     playbackSkipBackSeconds: Number.isFinite(Number(raw.playbackSkipBackSeconds)) && Number(raw.playbackSkipBackSeconds) > 0
       ? Number(raw.playbackSkipBackSeconds)

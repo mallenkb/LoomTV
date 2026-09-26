@@ -747,6 +747,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; if (timer) clearTimeout(timer); unsubscribe(); };
   }, [applyScanProgress, loadPrimaryCatalog]);
 
+  // Automatic organizing after a sync renames files and re-derives their
+  // media IDs, so the catalog on screen has to be re-read.
+  useEffect(() => desktopApi.onLibraryFilesOrganized(() => {
+    void loadPrimaryCatalog().catch((error) => console.warn('Could not reload the library after organizing files:', error));
+  }), [loadPrimaryCatalog]);
+
   useEffect(() => {
     let cancelled = false;
 

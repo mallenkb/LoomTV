@@ -32,6 +32,7 @@ import type {
   MediaRenameApplyResult,
   MediaRenameBatch,
   MediaRenamePreview,
+  MediaRenameStatus,
   LocalNetworkPairedDevice,
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -264,6 +265,8 @@ export type DesktopBridgeApi = {
       applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
       listMediaRenames?: () => Promise<MediaRenameBatch[]>;
       undoMediaRename?: (batchId: string) => Promise<MediaRenameBatch[]>;
+      mediaRenameStatus?: () => Promise<MediaRenameStatus>;
+      onLibraryFilesOrganized?: (callback: (result: { renamed: number }) => void) => () => void;
       listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
@@ -1371,6 +1374,16 @@ const desktopTransport = {
   async listMediaRenames(): Promise<MediaRenameBatch[]> {
     if (!window.desktopApi?.listMediaRenames) return [];
     return window.desktopApi.listMediaRenames();
+  },
+
+  async mediaRenameStatus(): Promise<MediaRenameStatus | null> {
+    if (!window.desktopApi?.mediaRenameStatus) return null;
+    return window.desktopApi.mediaRenameStatus();
+  },
+
+  /** Automatic organizing after a sync renamed files; the library should be re-read. */
+  onLibraryFilesOrganized(callback: (result: { renamed: number }) => void): () => void {
+    return window.desktopApi?.onLibraryFilesOrganized?.(callback) ?? (() => undefined);
   },
 
   async undoMediaRename(batchId: string): Promise<MediaRenameBatch[]> {

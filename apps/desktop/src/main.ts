@@ -1444,6 +1444,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   advanceLibraryMutationVersion();
   warmSkipSegmentsAfterScan(data);
   reconcileSkipAnalysisAfterScan(previous, data);
+  scheduleAutomaticOrganize();
   if (scanCommits.get(data)?.backgroundMetadataRefresh) {
     void refreshIncompleteMetadataQueue(loadLibrary()).then(() => refreshDisplayMetadataQueue(loadLibrary()))
       .catch((error) => console.warn('[metadata] Background refresh after scan failed:', error));
@@ -1805,7 +1806,52 @@ const mediaRenameHandlers = {
     mediaRenameExecutor.undo(batchId);
     return mediaRenameExecutor.history().map(mediaRenameBatchForRenderer);
   },
+  mediaRenameStatus: () => {
+    const lastBatch = mediaRenameExecutor.history(1)[0];
+    return {
+      mode: loadSettings().organizeFilesAfterSync || 'ask',
+      pendingFiles: mediaRenameExecutor.plan().entries.filter((entry) => entry.kind === 'file').length,
+      lastBatch: lastBatch ? mediaRenameBatchForRenderer(lastBatch) : null,
+      lastAutomaticError,
+    };
+  },
 };
+
+// "Organize files after sync" set to automatic: once a scan has saved, apply
+// every change that passes all checks. It never runs during playback or a
+// scan, waiting until both are idle; a failure is reported in the Library
+// sync card and leaves the library as it was.
+const AUTO_ORGANIZE_DELAY_MS = 5000;
+const AUTO_ORGANIZE_RETRY_MS = 60_000;
+let autoOrganizeTimer: ReturnType<typeof setTimeout> | null = null;
+let lastAutomaticError = '';
+
+function scheduleAutomaticOrganize(delayMs = AUTO_ORGANIZE_DELAY_MS): void {
+  if ((loadSettings().organizeFilesAfterSync || 'ask') !== 'auto') return;
+  if (autoOrganizeTimer) clearTimeout(autoOrganizeTimer);
+  autoOrganizeTimer = setTimeout(runAutomaticOrganize, delayMs);
+  autoOrganizeTimer.unref?.();
+}
+
+function runAutomaticOrganize(): void {
+  autoOrganizeTimer = null;
+  if ((loadSettings().organizeFilesAfterSync || 'ask') !== 'auto') return;
+  if (isPlaybackActivityActive() || activeScans.size > 0) {
+    scheduleAutomaticOrganize(AUTO_ORGANIZE_RETRY_MS);
+    return;
+  }
+  try {
+    const result = mediaRenameExecutor.applyAutomatic();
+    lastAutomaticError = '';
+    if (!result) return;
+    console.info(`[rename] Organized ${result.renamed} file(s) after sync.`);
+    const window = getMainWindow();
+    if (window && !window.isDestroyed()) window.webContents.send('library:files-organized', { renamed: result.renamed });
+  } catch (error) {
+    lastAutomaticError = error instanceof Error ? error.message : String(error);
+    console.warn('[rename] Automatic organize after sync failed:', describeErrorForLog(error));
+  }
+}
 
 registerIpcHandlers<LibraryData, AppSettings>({
   ...mediaRenameHandlers,

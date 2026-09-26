@@ -24,7 +24,7 @@ import type { LibraryFolderSection, LibraryFolderStatus } from '@/pages/Settings
 import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
 import { otherFolderGroupForFolder, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import AddLibraryWizard, { type WizardFolder } from './AddLibraryWizard';
-import RenameFilesCard from './RenameFilesCard';
+import OrganizeFilesSection from './OrganizeFilesSection';
 import {
   LIBRARY_TYPE_DEFINITIONS,
   LibraryTypeIcon,
@@ -629,10 +629,9 @@ export default function LibrarySettingsPanel({
             <Button type="button" onClick={() => void runAction('movies', async () => { refreshMetadata(); await refreshLibrary(); })} disabled={anyScanning} variant="outline">Refresh metadata</Button>
             <Button type="button" onClick={() => void runAction('movies', async () => { fullRescanLibrary(); await refreshLibrary(); })} disabled={anyScanning} variant="outline">Full rescan</Button>
           </div>
+          <OrganizeFilesSection disabled={anyScanning} />
         </CardContent>
       </Card>
-
-      <RenameFilesCard disabled={anyScanning} />
 
       <Card className="settings-panel">
         <CardHeader className="gap-1"><CardTitle className="text-base text-white">Data management</CardTitle><CardDescription className="text-[var(--loom-muted)]">Back up the database or clear this device's local Loom data.</CardDescription></CardHeader>
