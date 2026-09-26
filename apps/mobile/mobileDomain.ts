@@ -1,21 +1,15 @@
 import type {
   LanApiResult,
-  LanHlsSession,
-  LanCastMember,
   LanEpisodeFile,
   LanEpisodeMeta,
   LanLibraryCard,
   LanLibraryIndexPayload,
-  LanLibraryItemDetailsPayload,
   LanLibraryPayload,
   LanLocalMediaDetails,
   LanLocalMediaTrack,
   LanMediaItem,
   LanActiveProfile,
-  LanClientConfig,
-  LanPairResponse,
   LanProfileListEntry,
-  LanProfilePreferences,
   LanProfileSummary,
   LanProviderRatings,
   LanStoredProgress,
@@ -33,7 +27,6 @@ export type LocalMediaDetails = LanLocalMediaDetails;
 export type SubtitleRecord = LanSubtitleRecord;
 export type EpisodeMeta = LanEpisodeMeta;
 export type EpisodeFile = LanEpisodeFile;
-export type CastMember = LanCastMember;
 
 type MobileMediaIdentity = Pick<LanMediaItem, 'id' | 'type' | 'title' | 'filePath'>;
 type MobileMediaMetadata = Partial<Omit<LanMediaItem, keyof MobileMediaIdentity>>;
@@ -48,7 +41,6 @@ const MOBILE_RECONNECT_MAX_DELAY_MS = 10_000;
 export const MOBILE_DETAIL_ITEM_CACHE_LIMIT = 24;
 
 export type MobileLibraryIndexPayload = LanLibraryIndexPayload<LanLibraryCard>;
-export type MobileLibraryItemDetailsPayload = LanLibraryItemDetailsPayload<MediaItem>;
 
 export function mobileDetailCacheKey(profileId: string, revision: number, mediaId: string): string {
   return `${profileId || 'profile:none'}:${revision}:${mediaId}`;
@@ -131,7 +123,6 @@ export function rememberMobileDetailItem(cache: Map<string, MediaItem>, item: Me
 }
 
 export type LibraryPayload = LanLibraryPayload<MediaItem>;
-export type PairResponse = LanPairResponse<LibraryPayload>;
 
 export function normalizeCertFingerprint(value: unknown): string {
   const normalized = typeof value === 'string'
@@ -173,7 +164,6 @@ export type DiscoveredHost = {
 
 export type MobileThemeSettings = { appThemeMode?: string; appThemeColor?: string; appDarkTheme?: string };
 export type ApiResult<T> = LanApiResult<T>;
-export type HlsSession = LanHlsSession;
 
 export type OfficialArtworkResponse = {
   thumbnail?: string;
@@ -262,6 +252,4 @@ export function mobileMediaSegmentLabel(type: string, _movie: boolean): string {
 export type StoredProgress = LanStoredProgress;
 export type MobileProfile = LanProfileSummary;
 export type MobileActiveProfile = LanActiveProfile;
-export type MobileProfilePreferences = LanProfilePreferences;
 export type MobileProfileListEntry = LanProfileListEntry;
-export type MobileClientConfig = LanClientConfig;

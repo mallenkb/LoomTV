@@ -5,7 +5,6 @@ import { registerDefaultSessionRequestHeaderRule } from './requestHeaderPolicy.t
 
 const DESKTOP_SETUP_HEADER = 'x-loomtv-desktop-setup';
 
-let mainWindow: BrowserWindow | null = null;
 let setupWindow: BrowserWindow | null = null;
 let canonicalOrigin = '';
 let desktopSetupToken = '';
@@ -33,17 +32,6 @@ function iconPath(): string | undefined {
     path.join(app.getAppPath(), 'resources', name),
     path.join(__dirname, '../resources', name),
   ].find((candidate) => fs.existsSync(candidate));
-}
-
-function allowedHostedUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.origin === canonicalOrigin
-      && (url.pathname === '/app' || url.pathname.startsWith('/app/') || url.pathname === '/admin'
-        || url.pathname === '/admin/' || url.pathname === '/setup' || url.pathname === '/setup/');
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -83,10 +71,6 @@ function present(window: BrowserWindow): void {
 export function configureCanonicalWindow(origin: string): void {
   canonicalOrigin = new URL(origin).origin;
   installDesktopSetupChannel();
-}
-
-export function getCanonicalWindow(): BrowserWindow | null {
-  return mainWindow;
 }
 
 export function closeCanonicalSetupWindow(): void {
@@ -175,52 +159,4 @@ export function openCanonicalSetupWindow(onComplete: () => void): void {
     if (setupWindow === created) setupWindow = null;
   });
   void setupWindow.loadURL(target);
-}
-
-export function openCanonicalWindow(pathname = '/app/'): void {
-  if (!canonicalOrigin) throw new Error('The canonical desktop origin is not configured.');
-  const target = new URL(pathname, canonicalOrigin).toString();
-  if (!allowedHostedUrl(target)) throw new Error('The requested desktop route is not allowed.');
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    const current = mainWindow.webContents.getURL();
-    if (current !== target) void mainWindow.loadURL(target);
-    present(mainWindow);
-    return;
-  }
-
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 980,
-    minHeight: 680,
-    title: 'Loom',
-    show: false,
-    backgroundColor: '#090909',
-    ...(iconPath() ? { icon: iconPath() } : {}),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-
-  const rejectUnexpectedNavigation = (event: Electron.Event, url: string): void => {
-    if (!allowedHostedUrl(url)) event.preventDefault();
-  };
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  mainWindow.webContents.on('will-navigate', rejectUnexpectedNavigation);
-  mainWindow.webContents.on('will-redirect', rejectUnexpectedNavigation);
-  mainWindow.once('ready-to-show', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) present(mainWindow);
-  });
-  mainWindow.webContents.once('did-finish-load', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) present(mainWindow);
-  });
-  const created = mainWindow;
-  mainWindow.once('closed', () => {
-    if (mainWindow === created) mainWindow = null;
-  });
-  void mainWindow.loadURL(target);
 }

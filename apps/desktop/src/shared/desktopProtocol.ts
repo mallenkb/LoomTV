@@ -16,7 +16,6 @@ import type {
   LanProfilePreferences,
   LanProfileRestrictions,
   LanProfileSummary,
-  LanProfileType,
   LanStoredProgress,
   LanStreamOptions,
 } from '@loom-media-server/lan-protocol';
@@ -516,7 +515,6 @@ export type RemoteLibrarySessionState =
   | { status: 'none' }
   | { status: 'pairing-required'; reason: string };
 
-export type ProfileType = LanProfileType;
 export type ProfileSummary = LanProfileSummary;
 export type ActiveProfileState = LanActiveProfile;
 export type ProfilePreferences = LanProfilePreferences;

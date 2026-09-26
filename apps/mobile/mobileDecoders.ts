@@ -32,7 +32,6 @@ export const mobileErrorPayloadSchema = lanErrorPayloadSchema.refine(
 );
 export const mobileStoredProgressSchema = lanStoredProgressSchema;
 export const mobileProgressMapSchema = z.record(z.string(), lanStoredProgressSchema);
-export const mobileProfileSchema = lanProfileSummarySchema;
 export const mobileProfilesPayloadSchema = z.object({ profiles: z.array(lanProfileSummarySchema) });
 export const mobileActiveProfileSchema = lanActiveProfileSchema;
 export const mobileProfilePreferencesSchema = lanProfilePreferencesSchema;

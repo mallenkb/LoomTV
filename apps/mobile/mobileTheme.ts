@@ -34,12 +34,6 @@ const MOBILE_LIGHT_THEME: Pick<MobileThemeColors,
   muted: '#525252', faint: '#737373', themeLabel: 'Light',
 };
 
-export const DEFAULT_MOBILE_THEME: MobileThemeColors = {
-  ...MOBILE_ACCENTS.yellow,
-  ...MOBILE_DARK_THEME,
-  text: '#fafafa',
-};
-
 export function mobileThemeFromSettings(
   settings?: MobileThemeSettings,
   mode: ResolvedMobileThemeMode = 'dark',

@@ -50,13 +50,3 @@ export function migrationError(code, message, details = {}) {
 export function isMigrationBridgeError(value) {
   return value instanceof MigrationBridgeError;
 }
-
-/**
- * the canonical server's frozen migration API throws its own coded errors. Re-throw them unchanged
- * so the fail-closed contract stays the canonical server's, and only annotate where the bridge
- * knows which record produced it.
- */
-export function annotateFrozenError(error, details = {}) {
-  if (error && typeof error === 'object' && typeof error.code === 'string') Object.assign(error, details);
-  return error;
-}

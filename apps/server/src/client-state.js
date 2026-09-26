@@ -3,8 +3,6 @@ import { promisify } from 'node:util';
 import { canonicalProfileKind } from '@loom-media-server/video-contracts';
 import { migrateLegacyProfileKind } from '@loom-media-server/video-contracts/server';
 
-const LEGACY_STATE_FILENAME = 'headless-client.json';
-const STATE_FILENAME = 'headless-client.sqlite';
 const MAX_PROFILES = 32;
 const MAX_PROGRESS = 20_000;
 const MAX_NAME_LENGTH = 80;
@@ -694,6 +692,3 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     async close() {},
   };
 }
-
-export const headlessClientStateFilename = STATE_FILENAME;
-export const legacyHeadlessClientStateFilename = LEGACY_STATE_FILENAME;

@@ -208,13 +208,3 @@ export function killAllManagedFfmpeg(): void {
   interruptAnalysis();
   playbackActivityLeases.clear();
 }
-
-export function managedFfmpegCounts(): { playback: number; playbackLeases: number; analysis: number; tools: number; queuedTools: number } {
-  return {
-    playback: playbackProcesses.size,
-    playbackLeases: playbackActivityLeases.size,
-    analysis: analysisProcesses.size,
-    tools: activeToolCount,
-    queuedTools: toolWaiters.length,
-  };
-}

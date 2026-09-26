@@ -165,9 +165,6 @@ const COMMAND_BINDINGS: readonly CommandBinding[] = [
   },
 ];
 
-/** Exported so tests can assert the capability mapping without macOS. */
-export const MACOS_COMMAND_BINDINGS = COMMAND_BINDINGS;
-
 /**
  * Which MediaPlayer commands the snapshot enables.
  *

@@ -150,7 +150,7 @@ Remaining costs include filesystem stats, inventory writes and signature orderin
 
 ## Changed files
 
-Discovery and protocol live in `src/main/scanning/` and `native/scanner/`. The scan coordinator and catalog writes changed in `src/main.ts`, `src/main/databaseLibraryRepository.ts`, `src/main/databaseSegmentsRepository.ts`, `src/main/database.ts` and `src/main/ipcHandlers.ts`. Inventory consumers changed in `src/main/libraryScanFiles.ts`, `src/main/libraryScanner.ts`, `src/main/libraryScanConcurrency.ts`, `src/main/mediaProbeFile.ts`, `src/main/metadataItemBuilders.ts`, `src/main/artworkFinders.ts` and `src/main/fileClassification.ts`. Committed artwork normalization changed in `src/main/libraryProjections.ts`. Build and runtime checks changed in `forge.config.ts`, `package.json`, `scripts/build-scanner.cjs`, `scripts/ensure-update-config.cjs`, `scripts/verify-scanner.cjs` and `scripts/verify-packaged-runtime.cjs`. The scanner tests and benchmark scripts are in `tests/scanner*.test.ts`, `scripts/benchmark-scanner.ts`, `scripts/benchmark-scan-pipeline.ts`, `scripts/benchmark-scan-persistence.ts` and `scripts/benchmark-scan-projection.ts`.
+Discovery and protocol live in `src/main/scanning/` and `native/scanner/`. The scan coordinator and catalog writes changed in `src/main.ts`, `src/main/databaseLibraryRepository.ts`, `src/main/databaseSegmentsRepository.ts`, `src/main/database.ts` and `src/main/ipcHandlers.ts`. Inventory consumers changed in `src/main/libraryScanFiles.ts`, `src/main/libraryScanner.ts`, `src/main/libraryScanConcurrency.ts`, `src/main/mediaProbeFile.ts`, `src/main/metadataItemBuilders.ts`, `src/main/artworkFinders.ts` and `src/main/fileClassification.ts`. Committed artwork normalization changed in `src/main/libraryProjections.ts`. Build and runtime checks changed in `forge.config.ts`, `package.json`, `scripts/build-scanner.cjs`, `scripts/ensure-update-config.cjs`, `scripts/verify-scanner.cjs` and `scripts/verify-packaged-runtime.cjs`. The benchmark scripts are `scripts/benchmark-scanner.ts`, `scripts/benchmark-scan-pipeline.ts`, `scripts/benchmark-scan-persistence.ts` and `scripts/benchmark-scan-projection.ts`.
 
 ## Verification
 
@@ -188,7 +188,6 @@ LOOM_TEST_FFMPEG=/opt/homebrew/bin/ffmpeg LOOM_TEST_FFPROBE=/opt/homebrew/bin/ff
 node apps/desktop/scripts/benchmark-scanner.ts apps/desktop/docs/scanner-benchmarks/discovery-memory-macos-arm64.json
 node apps/desktop/scripts/benchmark-scan-pipeline.ts apps/desktop/docs/scanner-benchmarks/pipeline-memory-macos-arm64.json
 node apps/desktop/scripts/benchmark-scan-persistence.ts
-cargo test --locked --release --manifest-path apps/desktop/native/scanner/Cargo.toml
 cargo fmt --check --manifest-path apps/desktop/native/scanner/Cargo.toml
 cargo build --locked --release --manifest-path apps/desktop/native/scanner/Cargo.toml
 node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json
@@ -207,16 +206,13 @@ codesign --verify --deep --strict out/LoomTV-darwin-arm64/LoomTV.app
 codesign --verify --strict out/LoomTV-darwin-arm64/LoomTV.app/Contents/Resources/scanner/darwin-arm64/loom-scanner
 ```
 
-Database tests need the Node version of better-sqlite3. Use the existing `ensure-node-natives.cjs` helper before direct Node test commands. The normal application startup rebuilds for Electron. The process lifecycle uses asynchronous spawning and explicit closure, following [Electron performance guidance](https://www.electronjs.org/docs/latest/tutorial/performance) and the [Node child-process contract](https://nodejs.org/api/child_process.html).
-
-The valid-media test runs when `LOOM_TEST_FFMPEG` and `LOOM_TEST_FFPROBE` name available executables.
+The normal application startup rebuilds better-sqlite3 for Electron. The process lifecycle uses asynchronous spawning and explicit closure, following [Electron performance guidance](https://www.electronjs.org/docs/latest/tutorial/performance) and the [Node child-process contract](https://nodejs.org/api/child_process.html).
 
 Latest follow-up commands from the repository root:
 
 ```sh
-LOOM_TEST_FFMPEG=/opt/homebrew/bin/ffmpeg LOOM_TEST_FFPROBE=/opt/homebrew/bin/ffprobe node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test apps/desktop/tests/scanner*.test.ts apps/desktop/tests/libraryScanFiles.test.ts apps/desktop/tests/libraryScanner.test.ts apps/desktop/tests/databaseRepositories.test.ts apps/desktop/tests/libraryProjections.test.ts apps/desktop/tests/artworkCache.test.ts
 node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json
-corepack pnpm --dir apps/desktop exec eslint src/main.ts src/main/artworkCache.ts src/main/database.ts src/main/databaseArtworkRepository.ts src/main/libraryProjections.ts src/main/scanning/inventory.ts src/main/scanning/typescriptDiscovery.ts src/main/scanning/discover.ts src/main/scanning/quickScanCache.ts src/main/scanning/rustScannerClient.ts scripts/benchmark-scan-pipeline.ts scripts/benchmark-scan-projection.ts scripts/verify-scanner.cjs tests/artworkCache.test.ts tests/libraryProjections.test.ts tests/scannerDiscovery.test.ts tests/scannerQuickScan.test.ts
+corepack pnpm --dir apps/desktop exec eslint src/main.ts src/main/artworkCache.ts src/main/database.ts src/main/databaseArtworkRepository.ts src/main/libraryProjections.ts src/main/scanning/inventory.ts src/main/scanning/typescriptDiscovery.ts src/main/scanning/discover.ts src/main/scanning/quickScanCache.ts src/main/scanning/rustScannerClient.ts scripts/benchmark-scan-pipeline.ts scripts/benchmark-scan-projection.ts scripts/verify-scanner.cjs
 node apps/desktop/scripts/benchmark-scan-pipeline.ts apps/desktop/docs/scanner-benchmarks/pipeline-native-quick-macos-arm64.json
 node apps/desktop/scripts/benchmark-scan-projection.ts apps/desktop/docs/scanner-benchmarks/projection-second-pass-macos-arm64.json
 node apps/desktop/scripts/build-scanner.cjs

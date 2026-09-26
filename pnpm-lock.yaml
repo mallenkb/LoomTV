@@ -60,9 +60,6 @@ importers:
       '@loom-media-server/transcode-capabilities':
         specifier: workspace:*
         version: link:../../packages/transcode-capabilities
-      '@loom-media-server/video-contracts':
-        specifier: workspace:*
-        version: link:../../packages/video-contracts
       '@loom-media-server/video-migration':
         specifier: workspace:*
         version: link:../../packages/video-migration
@@ -199,9 +196,6 @@ importers:
       eslint-plugin-react-hooks:
         specifier: 7.1.1
         version: 7.1.1(eslint@10.7.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)
-      extract-zip:
-        specifier: 2.0.1
-        version: 2.0.1(supports-color@8.1.1)
       globals:
         specifier: 17.7.0
         version: 17.7.0

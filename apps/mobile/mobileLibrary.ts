@@ -40,10 +40,6 @@ export function needsTranscode(streamPath: string, meta?: LocalMediaDetails): bo
   return Boolean(audioCodec && !DIRECT_AUDIO_CODECS.some((codec) => audioCodec.includes(codec)));
 }
 
-export function shouldTranscode(item: MediaItem): boolean {
-  return needsTranscode(streamPathFor(item), item.localMetadata);
-}
-
 export function episodeCode(season: number, episode: number): string {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
