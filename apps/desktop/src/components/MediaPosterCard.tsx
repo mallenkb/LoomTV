@@ -12,10 +12,11 @@ import { posterSources, routeArtworkState, uniqueArtworkSources } from '@/lib/ar
 import { artworkVariant } from '@/lib/artworkVariants';
 import { desktopApi } from '@/lib/desktopApi';
 import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.helpers';
-import { resetProgress, useProgressSnapshot } from '@/lib/progress';
+import { getProgressState, resetProgress, useProgressSnapshot } from '@/lib/progress';
 import { matchesLibraryFilter } from '@/lib/libraryFilters';
-import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
+import { isLocalItemWatched, localEpisodeWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
+import { usePosterEpisodeUpdates } from '@/contexts/EpisodeUpdatesContext';
 
 type MediaPosterCardVariant = 'home' | 'movies' | 'tv' | 'others';
 
@@ -116,6 +117,17 @@ const MediaPosterCard = memo(function MediaPosterCard({
   const progress = useProgressSnapshot();
   const watchedByProgress = matchesLibraryFilter(item, 'watched', progress);
   const watched = watchedByProgress || isLocalItemWatched(item, watchedKeys);
+  const titleAge = item.addedAt ? Date.now() - item.addedAt : -1;
+  const recentlyAddedTitle = titleAge >= 0 && titleAge <= 7 * 24 * 60 * 60 * 1000;
+  const showNewlyAdded = recentlyAddedTitle && !watched;
+  const { newEpisodesByShow } = usePosterEpisodeUpdates();
+  const newEpisodeCount = (!recentlyAddedTitle && (item.type === 'tv' || item.type === 'anime') ? newEpisodesByShow.get(item.id) || [] : [])
+    .filter((episode) => {
+      const file = item.episodeFiles?.find((entry) => entry.season === episode.season && entry.episode === episode.episode);
+      if (!file || watchedKeys.has(localEpisodeWatchedKey(item.id, episode.season, episode.episode))) return false;
+      const episodeProgress = getProgressState(file.filePath, file.localMetadata?.durationSeconds);
+      return episodeProgress.position <= 0 && !episodeProgress.watched;
+    }).length;
   const watchedKeysForItem = localWatchedKeysForItem(item);
   const progressPaths = localProgressPathsForItem(item);
 
@@ -164,6 +176,11 @@ const MediaPosterCard = memo(function MediaPosterCard({
             </div>
           </>
         ) : null}
+        {variant !== 'others' && !watched && (showNewlyAdded || newEpisodeCount > 0) && (
+          <span className="pointer-events-none absolute inset-x-2 bottom-0 z-10 mx-auto w-fit rounded-t bg-red-600 px-3 py-1 text-center text-xs font-semibold text-white">
+            {showNewlyAdded ? 'Newly Added' : newEpisodeCount === 1 ? 'New Episode' : 'New Episodes'}
+          </span>
+        )}
       </div>
       <div className="mt-2 shrink-0 overflow-hidden text-left">
         <h4 className={variant === 'others'

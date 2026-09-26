@@ -1461,6 +1461,15 @@ function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): bool
   if (!commit || !isCurrentScanCommit(data, scanVersion, getDesktopActiveProfileId())) return false;
   const previous = loadLibrary();
   preserveLockedMetadata(previous, data);
+  const addedAtById = new Map(libraryItemsFor(previous).map((item) => [item.id, item.addedAt ?? 0]));
+  for (const [sourceId, targetId] of commit.aliases || []) {
+    const sourceAddedAt = addedAtById.get(sourceId);
+    if (sourceAddedAt === undefined) continue;
+    const targetAddedAt = addedAtById.get(targetId);
+    addedAtById.set(targetId, targetAddedAt === undefined ? sourceAddedAt : Math.min(sourceAddedAt, targetAddedAt));
+  }
+  const addedAtNow = Date.now();
+  for (const item of libraryItemsFor(data)) item.addedAt = addedAtById.get(item.id) ?? item.addedAt ?? addedAtNow;
   const durablePrevious = stripInlineArtworkFromLibrary(previous, true);
   const durableNext = stripInlineArtworkFromLibrary(data);
   const persistenceStarted = performance.now();
@@ -1811,7 +1820,7 @@ const mediaRenameHandlers = {
   },
   libraryEpisodeUpdates: async () => {
     const profileId = getDesktopActiveProfileId();
-    if (!profileId) return { shows: [], recentlyAdded: [] };
+    if (!profileId) return { shows: [] };
     const items = libraryItemsFor(filterLibraryForProfile(loadLibrary(), profileId));
     return computeEpisodeUpdates(items, {
       progress: getAllProgress(profileId),

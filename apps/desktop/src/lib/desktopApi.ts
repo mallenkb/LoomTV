@@ -1385,9 +1385,9 @@ const desktopTransport = {
     return window.desktopApi.listMediaRenames();
   },
 
-  /** New, upcoming, and missing episodes, plus recently added titles. */
+  /** New, upcoming, and missing episodes. */
   async libraryEpisodeUpdates(): Promise<LibraryEpisodeUpdates> {
-    if (!window.desktopApi?.libraryEpisodeUpdates) return { shows: [], recentlyAdded: [] };
+    if (!window.desktopApi?.libraryEpisodeUpdates) return { shows: [] };
     return window.desktopApi.libraryEpisodeUpdates();
   },
 

@@ -207,6 +207,8 @@ export type MpvCommand =
 export interface WireMediaItem {
   id: string;
   type: 'movie' | 'tv' | 'anime';
+  /** When this title first entered the library. Zero for titles predating this field. */
+  addedAt?: number;
   format?: string;
   title: string;
   year: number;
@@ -968,7 +970,6 @@ export interface LibraryShowUpdates {
 
 export interface LibraryEpisodeUpdates {
   shows: LibraryShowUpdates[];
-  recentlyAdded: Array<{ mediaId: string; title: string; type: 'movie' | 'tv' | 'anime'; addedAt: number; label: string }>;
 }
 
 /** Everything in the library that needs a look, for Settings > Library. */

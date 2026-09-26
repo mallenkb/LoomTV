@@ -10,7 +10,6 @@ import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import ProviderMark from '@/components/ProviderMark';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaRail from '@/components/MediaRail';
-import WhatsNewRails from '@/components/WhatsNewRails';
 import ContinueWatchingCard from '@/components/ContinueWatchingCard';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -102,10 +101,6 @@ export default function ModernHome() {
   const visibleMovies = useMemo(
     () => movies.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
     [activeFilter, listState, movies, progress],
-  );
-  const whatsNewItems = useMemo(
-    () => [...visibleMovies, ...visibleTVShows, ...visibleAnimeShows],
-    [visibleAnimeShows, visibleMovies, visibleTVShows],
   );
   const normalizedQuery = searchQuery(query);
   const currentRoute = `${location.pathname}${location.search}`;
@@ -342,7 +337,6 @@ export default function ModernHome() {
             {continueWatching.length > 0 && (
               <ContinueWatchingRail items={continueWatching} from={currentRoute} progress={progress} />
             )}
-            <WhatsNewRails items={whatsNewItems} from={currentRoute} variant="modern" />
             {visibleSavedItems.length > 0 && (
               <PosterRail title="My List" items={visibleSavedItems} from={currentRoute} />
             )}

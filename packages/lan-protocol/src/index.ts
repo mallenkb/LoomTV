@@ -27,6 +27,7 @@ export type LanLibraryPlaybackReference = {
 export type LanLibraryCard = {
   id: string;
   type: 'movie' | 'tv' | 'anime';
+  addedAt?: number;
   /** Canonical presentation format, e.g. Movie, TV, OVA, or ONA. */
   format?: string;
   title: string;

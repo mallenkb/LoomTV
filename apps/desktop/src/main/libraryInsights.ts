@@ -3,8 +3,8 @@ import type { MediaItem } from './metadata/types.ts';
 
 /**
  * What changed in the library and what needs attention, for the active
- * profile: new and upcoming episodes, missing episodes, recently added
- * titles, and the Library health report. Pure over its inputs so it can be
+ * profile: new and upcoming episodes, missing episodes, and the Library
+ * health report. Pure over its inputs so it can be
  * checked without Electron.
  */
 
@@ -20,7 +20,7 @@ export type ShowEpisodeUpdates = {
   mediaId: string;
   title: string;
   type: MediaItem['type'];
-  /** Episode files added in the last week that this profile has not watched. */
+  /** Episode files added in the last week that this profile has not started. */
   newEpisodes: EpisodeRef[];
   /** The next episode with a future air date. */
   nextAirs: EpisodeRef | null;
@@ -28,18 +28,8 @@ export type ShowEpisodeUpdates = {
   missing: EpisodeRef[];
 };
 
-export type RecentlyAddedEntry = {
-  mediaId: string;
-  title: string;
-  type: MediaItem['type'];
-  addedAt: number;
-  /** "S01E03" for an episode; empty for a movie. */
-  label: string;
-};
-
 export type EpisodeUpdates = {
   shows: ShowEpisodeUpdates[];
-  recentlyAdded: RecentlyAddedEntry[];
 };
 
 export type InsightInputs = {
@@ -53,9 +43,6 @@ export type InsightInputs = {
 };
 
 const NEW_EPISODE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const RECENTLY_ADDED_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
-const RECENTLY_ADDED_LIMIT = 30;
-const WATCHED_FRACTION = 0.9;
 
 export function localDate(ms: number): string {
   const date = new Date(ms);
@@ -63,9 +50,9 @@ export function localDate(ms: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function watched(progress: InsightInputs['progress'], filePath: string): boolean {
+function startedOrWatched(progress: InsightInputs['progress'], filePath: string): boolean {
   const entry = progress[filePath];
-  return Boolean(entry && (entry.watched || (entry.duration > 0 && entry.position / entry.duration >= WATCHED_FRACTION)));
+  return Boolean(entry && (entry.watched || entry.position > 0));
 }
 
 const episodeCode = (season: number, episode: number) => `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
@@ -73,35 +60,19 @@ const episodeCode = (season: number, episode: number) => `S${String(season).padS
 export function computeEpisodeUpdates(items: readonly MediaItem[], inputs: InsightInputs): EpisodeUpdates {
   const today = localDate(inputs.now);
   const shows: ShowEpisodeUpdates[] = [];
-  const recentlyAdded: RecentlyAddedEntry[] = [];
 
   for (const item of items) {
-    if (item.type === 'movie') {
-      const addedAt = inputs.addedAt(item.filePath);
-      if (addedAt && inputs.now - addedAt <= RECENTLY_ADDED_WINDOW_MS) {
-        recentlyAdded.push({ mediaId: item.id, title: item.title, type: item.type, addedAt, label: '' });
-      }
-      continue;
-    }
+    if (item.type === 'movie') continue;
 
     const files = item.episodeFiles || [];
     const metaTitle = new Map((item.episodes || []).map((episode) => [`${episode.season}:${episode.number}`, episode.title || '']));
     const newEpisodes: EpisodeRef[] = [];
-    let newestAdded = 0;
-    let newestFile: (typeof files)[number] | null = null;
     for (const file of files) {
       const addedAt = inputs.addedAt(file.filePath);
       if (!addedAt) continue;
-      if (addedAt > newestAdded) {
-        newestAdded = addedAt;
-        newestFile = file;
-      }
-      if (inputs.now - addedAt <= NEW_EPISODE_WINDOW_MS && !watched(inputs.progress, file.filePath)) {
+      if (inputs.now - addedAt <= NEW_EPISODE_WINDOW_MS && !startedOrWatched(inputs.progress, file.filePath)) {
         newEpisodes.push({ season: file.season, episode: file.episode, title: metaTitle.get(`${file.season}:${file.episode}`) || '', addedAt });
       }
-    }
-    if (newestFile && inputs.now - newestAdded <= RECENTLY_ADDED_WINDOW_MS) {
-      recentlyAdded.push({ mediaId: item.id, title: item.title, type: item.type, addedAt: newestAdded, label: episodeCode(newestFile.season, newestFile.episode) });
     }
 
     const have = new Set(files.map((file) => `${file.season}:${file.episode}`));
@@ -132,8 +103,7 @@ export function computeEpisodeUpdates(items: readonly MediaItem[], inputs: Insig
     }
   }
 
-  recentlyAdded.sort((left, right) => right.addedAt - left.addedAt);
-  return { shows, recentlyAdded: recentlyAdded.slice(0, RECENTLY_ADDED_LIMIT) };
+  return { shows };
 }
 
 export type LibraryHealthReport = {

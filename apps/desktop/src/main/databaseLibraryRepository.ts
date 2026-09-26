@@ -40,6 +40,7 @@ const nullableNumber = z.number().finite().nullable();
 const mediaItemRowSchema = z.object({
   id: z.string(),
   type: z.string(),
+  added_at: z.number().finite().nonnegative(),
   format: z.string(),
   title: z.string(),
   year: z.number().finite(),
@@ -284,6 +285,7 @@ export function loadLibrary(
     const item = finalizeLoadedItem({
       id: row.id,
       type: mediaTypeSchema.parse(row.type),
+      addedAt: row.added_at,
       format: row.format || undefined,
       title: row.title,
       year: row.year,
@@ -359,9 +361,14 @@ export function remapLibraryMediaReferences(
       WHERE media_id = ?
     `);
     const deleteMetadataRefreshState = database.prepare('DELETE FROM media_metadata_refresh_state WHERE media_id = ?');
+    const preserveAddedAt = database.prepare(`
+      UPDATE media_items SET added_at = MIN(added_at, (SELECT added_at FROM media_items WHERE id = ?))
+      WHERE id = ? AND EXISTS (SELECT 1 FROM media_items WHERE id = ?)
+    `);
 
     for (const [sourceId, targetId] of aliases) {
       if (!sourceId || !targetId || sourceId === targetId) continue;
+      preserveAddedAt.run(sourceId, targetId, sourceId);
       copyListEntries.run(targetId, sourceId);
       deleteListEntries.run(sourceId);
       copyCustomArtwork.run(targetId, sourceId);
@@ -377,6 +384,8 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
   const now = Date.now();
   const folderGroups = data.libraryFolderGroups || { movies: [], tvShows: [], anime: [], others: [] };
   const tx = database.transaction(() => {
+    const previousAddedAt = new Map((database.prepare('SELECT id, added_at FROM media_items').all() as Array<{ id: string; added_at: number }>)
+      .map((row) => [row.id, row.added_at]));
     database.exec('DELETE FROM episode_files; DELETE FROM episodes; DELETE FROM seasons; DELETE FROM media_items; DELETE FROM library_folders; DELETE FROM scan_cache;');
 
     const insertFolder = database.prepare('INSERT OR REPLACE INTO library_folders (path, kind, added_at) VALUES (?, ?, ?)');
@@ -388,10 +397,10 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
         id, type, format, title, year, poster, backdrop, logo, summary, rating, content_rating, trailer_url, runtime, season_count, episode_count, provider_ratings_json, file_path, file_size, last_played,
-        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, added_at, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
@@ -441,6 +450,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         jsonString(durableArtworkSources(item.backdropCandidates || [])),
         jsonString(durableArtworkSources(item.logoCandidates || [])),
         jsonString(item.contentRatings || {}),
+        previousAddedAt.get(item.id) ?? item.addedAt ?? now,
         now,
       );
 
@@ -525,10 +535,10 @@ function writeLibraryItem(database: BetterSqlite3.Database, item: MediaItem): vo
   itemStatement(database, `
     INSERT INTO media_items (
       id, type, format, title, year, poster, backdrop, logo, summary, rating, content_rating, trailer_url, runtime, season_count, episode_count, provider_ratings_json, file_path, file_size, last_played,
-      genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+      genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, added_at, updated_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       type = excluded.type,
@@ -596,6 +606,7 @@ function writeLibraryItem(database: BetterSqlite3.Database, item: MediaItem): vo
     jsonString(durableArtworkSources(item.backdropCandidates || [])),
     jsonString(durableArtworkSources(item.logoCandidates || [])),
     jsonString(item.contentRatings || {}),
+    item.addedAt ?? now,
     now,
   );
 

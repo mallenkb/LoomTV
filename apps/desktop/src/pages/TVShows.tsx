@@ -13,12 +13,17 @@ import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { availableSeasonCount } from '@/components/MediaPosterCard.helpers';
+import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
 
 interface TVShowsProps {
   kind?: 'series' | 'anime';
 }
 
 export default function TVShows({ kind = 'series' }: TVShowsProps) {
+  return <EpisodeUpdatesProvider><TVShowsContent kind={kind} /></EpisodeUpdatesProvider>;
+}
+
+function TVShowsContent({ kind = 'series' }: TVShowsProps) {
   const { state, addLibraryFolder } = useLibrary();
   const { isLoading, isScanning } = state;
   const sourceShows = kind === 'anime' ? state.animeShows : state.tvShows;

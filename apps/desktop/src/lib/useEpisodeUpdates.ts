@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react';
 import { desktopApi } from '@/lib/desktopApi';
 import type { LibraryEpisodeUpdates } from '@/shared/desktopProtocol';
 
-const EMPTY: LibraryEpisodeUpdates = { shows: [], recentlyAdded: [] };
+const EMPTY: LibraryEpisodeUpdates = { shows: [] };
 
 /**
- * New, upcoming, and missing episodes plus recently added titles for the
- * active profile. Re-read when the page mounts and after files are organized.
+ * New, upcoming, and missing episodes for the active profile. Re-read when
+ * the page mounts and after files are organized.
  */
-export function useEpisodeUpdates(): LibraryEpisodeUpdates {
+export function useEpisodeUpdates(enabled = true): LibraryEpisodeUpdates {
   const [updates, setUpdates] = useState<LibraryEpisodeUpdates>(EMPTY);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const load = () => {
       void desktopApi.libraryEpisodeUpdates()
@@ -20,7 +21,7 @@ export function useEpisodeUpdates(): LibraryEpisodeUpdates {
     load();
     const unsubscribe = desktopApi.onLibraryFilesOrganized(load);
     return () => { cancelled = true; unsubscribe(); };
-  }, []);
+  }, [enabled]);
   return updates;
 }
 

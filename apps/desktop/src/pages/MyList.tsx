@@ -18,8 +18,13 @@ import {
 } from '@/lib/watched';
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
+import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
 
 export default function MyList() {
+  return <EpisodeUpdatesProvider><MyListContent /></EpisodeUpdatesProvider>;
+}
+
+function MyListContent() {
   const { state } = useLibrary();
   const { lists, watchedKeys } = useProfiles();
   const location = useLocation();

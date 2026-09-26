@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.198](docs/releases/v1.0.198.md)
+
+Adds new-title and episode badges across desktop library pages, shares episode updates, and replaces native sidebar titles with delayed tooltips.
+
 ### [1.0.197](docs/releases/v1.0.197.md)
 
 Adds an in-player live channel list and programme guide, and runs stream health checks only while Live TV is open.

@@ -2,6 +2,7 @@ import { useParams } from '@tanstack/react-router';
 import { queryClient, queryScope } from '@/lib/queryClient';
 import VirtualEpisodeList from '@/components/VirtualEpisodeList';
 import ShowUpdatesPanel from '@/components/ShowUpdatesPanel';
+import { useEpisodeUpdates } from '@/lib/useEpisodeUpdates';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from '@/lib/navigation';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
@@ -27,7 +28,7 @@ import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import { normalizeAnimeCast } from '@/shared/animeCast';
 import DetailHeroActions from '@/components/DetailHeroActions';
-import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
+import { cacheWatchedDiscoverItem, discoverWatchedKey, localEpisodeWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
 import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
 
@@ -465,6 +466,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     : routeState?.stremioCatalogItem?.type === 'tv' ? 'tv' : 'series';
   const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover') || isRemoteStremioShow);
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(shouldOpenDetailsFirst ? 'details' : 'episodes');
+  const { shows: episodeUpdateShows } = useEpisodeUpdates(Boolean(show && mediaId) && activeDetailTab === 'episodes' && !shouldOpenDetailsFirst);
+  const showUpdates = episodeUpdateShows.find((entry) => entry.mediaId === mediaId);
   const metadataFetchKeyRef = useRef('');
 
   useEffect(() => {
@@ -714,6 +717,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     (show.episodes || [])
       .filter((e) => e.season === seasonNum)
       .sort((a, b) => a.number - b.number);
+
+  const newEpisodeKeys = new Set(
+    (showUpdates?.newEpisodes || []).map((episode) => `${episode.season}:${episode.episode}`),
+  );
 
   const findEpisodeFile = (season: number, episode: number): string | null =>
     show.episodeFiles?.find((ef) => ef.season === season && ef.episode === episode)?.filePath || null;
@@ -1095,7 +1102,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           role="tabpanel"
           aria-labelledby="detail-tab-episodes"
         >
-          {mediaId ? <ShowUpdatesPanel mediaId={mediaId} /> : null}
+          <ShowUpdatesPanel show={showUpdates} />
           {visibleSeasons.length === 0 ? (
             <p className="text-[var(--loom-muted)]">No season information available. Try scanning the library.</p>
           ) : (
@@ -1178,6 +1185,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                             seasonNum={season.number}
                             progressTick={progressTick}
                             durationHint={show.episodeFiles?.find((file) => file.season === season.number && file.episode === episode.number)?.localMetadata?.durationSeconds}
+                            isNew={newEpisodeKeys.has(`${season.number}:${episode.number}`) && !watchedKeys.has(localEpisodeWatchedKey(show.id, season.number, episode.number))}
                             onPlay={() => handlePlayEpisode(season.number, episode.number)}
                           />
                         )) : show.episodeFiles
@@ -1192,6 +1200,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                               seasonNum={season.number}
                               progressTick={progressTick}
                               durationHint={file.localMetadata?.durationSeconds}
+                              isNew={newEpisodeKeys.has(`${season.number}:${file.episode}`) && !watchedKeys.has(localEpisodeWatchedKey(show.id, season.number, file.episode))}
                               onPlay={() => onPlay && onPlay(file.filePath, show.title, file.subtitles || show.subtitles, playerEpisodes, show.episodeFiles, season.number, file.episode, show.id, playerArtwork)}
                             />
                           ))}
@@ -1263,6 +1272,7 @@ function EpisodeRow({
   seasonNum = 1,
   durationHint = 0,
   progressTick,
+  isNew = false,
 }: {
   ep: EpisodeMeta;
   seriesTitle: string;
@@ -1271,6 +1281,7 @@ function EpisodeRow({
   seasonNum?: number;
   durationHint?: number;
   progressTick: number;
+  isNew?: boolean;
 }) {
   const artworkSuspended = useArtworkSuspended();
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
@@ -1325,6 +1336,7 @@ function EpisodeRow({
   const episodeAirDate = formatEpisodeAirDate(ep.airDate);
   const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
   const progress = getProgressState(filePath, durationHint);
+  const showNewBadge = isNew && progress.position <= 0 && !progress.watched;
   const isResumable = progress.inProgress && !progress.watched;
   const remainingCopy = progress.duration > 0
     ? formatShortMinutes(Math.max(0, progress.duration - progress.position))
@@ -1346,7 +1358,7 @@ function EpisodeRow({
       data-shared-highlight-id={`${seasonNum}-${ep.number}`}
       className="group relative z-10 flex w-full items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
       onClick={onPlay}
-      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${episodeAirDate ? `. Released ${episodeAirDate}` : ''}${episodeRating > 0 ? `. Rating ${episodeRating.toFixed(1)} out of 10` : ''}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
+      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${showNewBadge ? '. New episode' : ''}${episodeAirDate ? `. Released ${episodeAirDate}` : ''}${episodeRating > 0 ? `. Rating ${episodeRating.toFixed(1)} out of 10` : ''}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
     >
       {/* Thumbnail. Watch state lives here rather than in a right-hand column:
           the still is what the eye lands on when scanning a season. */}
@@ -1359,6 +1371,14 @@ function EpisodeRow({
             <span className="font-mono text-xs text-[var(--loom-faint)]">{epLabel}</span>
           </div>}
         />
+        {showNewBadge && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-1.5 top-1.5 z-20 rounded-sm bg-[var(--loom-accent)] px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-[var(--loom-accent-foreground)] shadow"
+          >
+            NEW
+          </span>
+        )}
         {!progress.watched && (
           <div
             className={`absolute inset-0 flex items-center justify-center transition-[opacity,background-color] ${isResumable

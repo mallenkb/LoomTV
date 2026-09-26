@@ -387,6 +387,7 @@ function mediaItemFromCatalogCard(
   const item: MediaItem = {
     id: card.id,
     type: card.type,
+    addedAt: card.addedAt,
     format: card.format,
     title: card.title,
     year: card.year || 0,

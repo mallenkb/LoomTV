@@ -138,6 +138,7 @@ export const lanCastMemberSchema = z.object({
 export const lanMediaItemSchema = z.object({
   id: nonEmptyString,
   type: z.enum(['movie', 'tv', 'anime']),
+  addedAt: nonNegativeNumber.optional(),
   format: z.string().optional(),
   title: z.string(),
   year: finiteNumber,
@@ -197,6 +198,7 @@ export type LanMediaItem = z.output<typeof lanMediaItemSchema>;
 export const lanLibraryCardSchema = z.object({
   id: nonEmptyString,
   type: z.enum(['movie', 'tv', 'anime']),
+  addedAt: nonNegativeNumber.optional(),
   format: z.string().optional(),
   title: z.string(),
   year: finiteNumber.optional(),

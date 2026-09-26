@@ -96,6 +96,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       poster_candidates_json TEXT NOT NULL DEFAULT '[]',
       backdrop_candidates_json TEXT NOT NULL DEFAULT '[]',
       logo_candidates_json TEXT NOT NULL DEFAULT '[]',
+      added_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
 
@@ -358,6 +359,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   ensureColumn(database, 'media_items', 'runtime', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'media_items', 'season_count', 'INTEGER');
   ensureColumn(database, 'media_items', 'episode_count', 'INTEGER');
+  ensureColumn(database, 'media_items', 'added_at', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(database, 'episode_files', 'subtitles_json', "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, 'episode_files', 'thumbnail', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'episode_files', 'still', "TEXT NOT NULL DEFAULT ''");

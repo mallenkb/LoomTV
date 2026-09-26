@@ -220,6 +220,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     return {
       id: item.id,
       type: item.type,
+      addedAt: item.addedAt,
       format: item.format,
       title: item.title,
       year: item.year,
@@ -287,6 +288,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     return {
       id: item.id,
       type: item.type,
+      addedAt: item.addedAt,
       format: item.format,
       title: item.title,
       year: item.year,

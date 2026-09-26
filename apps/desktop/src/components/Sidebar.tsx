@@ -5,7 +5,7 @@ import {
   Archive as ArchivePhosphorIcon,
 } from '@phosphor-icons/react';
 import { motion } from 'motion/react';
-import AnimatedDownloadIcon from '@/components/AnimatedDownloadIcon';
+import DelayedIconTooltip from '@/components/DelayedIconTooltip';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { normalizeOtherFolderIcon, otherFolderIconPair, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
 import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
@@ -333,7 +333,7 @@ function SidebarProfileSwitcher({
       <button
         type="button"
         onClick={() => setMenuOpen((open) => !open)}
-        title="Switch profile"
+        title={compact ? undefined : 'Switch profile'}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         className={cn(
@@ -679,16 +679,15 @@ export default function Sidebar() {
   const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
   const updateButtonLabel =
     updateState?.status === 'downloaded'
-      ? 'Update'
+      ? 'Install update'
       : updateState?.status === 'installing'
         ? 'Restarting'
-        : updateState?.downloadPercent
+        : updateState?.downloadPercent != null
           ? `Downloading ${Math.round(updateState.downloadPercent)}%`
           : 'Downloading';
   const updateDownloadPercent = updateState?.status === 'downloading'
     ? Math.max(0, Math.min(100, Math.round(updateState.downloadPercent || 0)))
     : 0;
-  const UpdateIcon = updateState?.status === 'installing' ? RefreshCw : Download;
   const scanProgress = Math.max(0, Math.min(100, Math.round(state.scanProgress || 0)));
   const scanButtonLabel = state.isScanning
     ? `Refreshing library ${scanProgress}%`
@@ -706,17 +705,18 @@ export default function Sidebar() {
               followPointer={false}
               className="loom-shared-highlight-sidebar-modern flex min-h-0 w-full flex-1 flex-col items-center gap-3 overflow-x-hidden overflow-y-auto overscroll-contain [&>*]:shrink-0"
             >
-              <button
-                type="button"
-                onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
-                title="Search library"
-                aria-label="Search library"
-                data-shared-highlight-item
-                data-shared-highlight-id="search"
-                className="loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-              >
-                <Search className="h-6 w-6" aria-hidden="true" />
-              </button>
+              <DelayedIconTooltip label="Search library">
+                <button
+                  type="button"
+                  onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
+                  aria-label="Search library"
+                  data-shared-highlight-item
+                  data-shared-highlight-id="search"
+                  className="loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                >
+                  <Search className="h-6 w-6" aria-hidden="true" />
+                </button>
+              </DelayedIconTooltip>
               {(() => {
                 return [homeNavItem, ...orderedSidebarItems].map((item) => {
                 if (item.kind === 'divider') {
@@ -727,96 +727,91 @@ export default function Sidebar() {
                 const usesPhosphorNavIcon = item.id.startsWith('live:') || item.id.startsWith('stremio:');
                 const usesRedActiveIcon = item.id === 'sports' || usesPhosphorNavIcon;
                 return (
-                  <Link
-                    key={`modern-${item.id}`}
-                    to={item.path}
-                    title={item.label}
-                    aria-label={item.label}
-                    aria-current={isActive ? 'page' : undefined}
-                    data-shared-highlight-item
-                    data-shared-highlight-id={item.id}
-                    className={cn(
-                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
-                      isActive && 'loom-modern-sidebar-action-active',
-                    )}
-                  >
-                    <Icon className={cn(
-                      item.id === 'discover' || usesPhosphorNavIcon ? 'h-7 w-7' : 'h-6 w-6',
-                      usesPhosphorNavIcon && !isActive && 'loom-sidebar-phosphor-outline',
-                      usesRedActiveIcon && isActive ? 'text-red-500' : undefined,
-                    )} />
-                  </Link>
+                  <DelayedIconTooltip key={`modern-${item.id}`} label={item.label}>
+                    <Link
+                      to={item.path}
+                      aria-label={item.label}
+                      aria-current={isActive ? 'page' : undefined}
+                      data-shared-highlight-item
+                      data-shared-highlight-id={item.id}
+                      className={cn(
+                        'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                        isActive && 'loom-modern-sidebar-action-active',
+                      )}
+                    >
+                      <Icon className={cn(
+                        item.id === 'discover' || usesPhosphorNavIcon ? 'h-7 w-7' : 'h-6 w-6',
+                        usesPhosphorNavIcon && !isActive && 'loom-sidebar-phosphor-outline',
+                        usesRedActiveIcon && isActive ? 'text-red-500' : undefined,
+                      )} />
+                    </Link>
+                  </DelayedIconTooltip>
                 );
                 });
               })()}
             </SharedListHighlight>
           </nav>
           {state.isScanning && (
-            <div
-              className="loom-modern-sidebar-action relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-surface-2)] text-[var(--loom-text)]"
-              title={scanButtonLabel}
-              aria-label={scanButtonLabel}
-              role="status"
-              aria-live="polite"
-            >
-              <span
-                className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)]/35 transition-[height] duration-300"
-                style={{ height: `${scanProgress}%` }}
-                aria-hidden="true"
-              />
-              <span className="relative z-10 flex flex-col items-center leading-none">
-                <RefreshCw className="loom-scan-spinner h-4 w-4" aria-hidden="true" />
-                <span className="mt-1 text-[9px] font-semibold tabular-nums">{scanProgress}%</span>
-              </span>
-            </div>
-          )}
-          {showUpdateButton && (
-            <button
-              type="button"
-              onClick={() => {
-                if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
-              }}
-              disabled={updateState?.status !== 'downloaded'}
-              className={cn(
-                'relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full disabled:cursor-wait',
-                updateState?.status === 'downloading'
-                  ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
-                  : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
-                updateState?.status === 'downloaded'
-                  ? 'hover:bg-[var(--loom-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--loom-accent)]'
-                  : 'cursor-wait',
-              )}
-              title={updateState?.message || updateButtonLabel}
-              aria-label={updateButtonLabel}
-              aria-busy={updateState?.status === 'downloading' || updateState?.status === 'installing'}
-            >
-              {updateState?.status === 'downloading' && (
+            <DelayedIconTooltip label={scanButtonLabel} className="mb-3">
+              <div
+                className="loom-modern-sidebar-action relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-surface-2)] text-[var(--loom-text)]"
+                aria-label={scanButtonLabel}
+                role="status"
+                aria-live="polite"
+              >
                 <span
-                  className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)] transition-[height] duration-300"
-                  style={{ height: `${updateDownloadPercent}%` }}
+                  className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)]/35 transition-[height] duration-300"
+                  style={{ height: `${scanProgress}%` }}
                   aria-hidden="true"
                 />
-              )}
-              <span className="relative z-10 flex flex-col items-center leading-none">
-                {updateState?.status === 'downloading' ? (
-                  <AnimatedDownloadIcon className="h-4 w-4" isDownloading size={16} />
-                ) : (
-                  <UpdateIcon className={cn('h-4 w-4', updateState?.status === 'installing' && 'animate-spin')} aria-hidden="true" />
+                <span className="relative z-10 flex flex-col items-center leading-none">
+                  <RefreshCw className="loom-scan-spinner h-4 w-4" aria-hidden="true" />
+                  <span className="mt-1 text-[9px] font-semibold tabular-nums">{scanProgress}%</span>
+                </span>
+              </div>
+            </DelayedIconTooltip>
+          )}
+          {showUpdateButton && (
+            <DelayedIconTooltip label={updateButtonLabel} className="mb-3 h-12 w-12 items-center justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
+                }}
+                disabled={updateState?.status !== 'downloaded'}
+                className={cn(
+                  'relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full disabled:cursor-wait',
+                  updateState?.status === 'downloading'
+                    ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
+                    : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
+                  updateState?.status === 'downloaded'
+                    ? 'hover:bg-[var(--loom-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--loom-accent)]'
+                    : 'cursor-wait',
                 )}
-                {updateState?.status === 'downloaded' && (
-                  <span className="mt-1 text-[9px] font-semibold">Update</span>
-                )}
+                aria-label={updateButtonLabel}
+                aria-busy={updateState?.status === 'downloading' || updateState?.status === 'installing'}
+              >
                 {updateState?.status === 'downloading' && (
-                  <span className="mt-1 text-[9px] font-semibold tabular-nums">{updateDownloadPercent}%</span>
+                  <span
+                    className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)] transition-[height] duration-300"
+                    style={{ height: `${updateDownloadPercent}%` }}
+                    aria-hidden="true"
+                  />
                 )}
-                {updateState?.status === 'installing' && (
-                  <span className="mt-1 text-[9px] font-semibold">Restart</span>
+                {updateState?.status === 'downloading' ? (
+                  <span className="relative z-10 text-xs font-semibold tabular-nums" aria-hidden="true">{updateDownloadPercent}%</span>
+                ) : updateState?.status === 'downloaded' ? (
+                  <Download className="relative z-10 h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="relative z-10 h-4 w-4 animate-spin" aria-hidden="true" />
                 )}
-              </span>
-            </button>
+              </button>
+            </DelayedIconTooltip>
           )}
           <div className="loom-modern-sidebar-profile">
-            <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
+            <DelayedIconTooltip label="Switch profile">
+              <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
+            </DelayedIconTooltip>
           </div>
           {/* Keep the detail page focused on its media controls. The corner
               settings/profile entry remains available on home and library
@@ -975,37 +970,39 @@ export default function Sidebar() {
 
         <div className="mt-auto flex items-center gap-1">
           {showUpdateButton && (
-            <button
-              type="button"
-              onClick={() => {
-                if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
-              }}
-              disabled={updateState?.status !== 'downloaded'}
-              className={cn(
-                'relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg px-3 text-xs font-semibold transition-colors disabled:cursor-wait',
-                updateState?.status === 'downloading'
-                  ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
-                  : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
-                updateState?.status === 'downloaded' ? 'hover:bg-[var(--loom-accent-hover)]' : 'cursor-wait',
-              )}
-              title={updateState?.message || 'Update Loom'}
-              aria-label={updateButtonLabel}
-              aria-busy={updateState?.status === 'downloading' || updateState?.status === 'installing'}
-            >
-              {updateState?.status === 'downloading' && (
-                <span
-                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent)] transition-[width] duration-300"
-                  style={{ width: `${updateDownloadPercent}%` }}
-                  aria-hidden="true"
-                />
-              )}
-              {updateState?.status === 'downloading' ? (
-                <AnimatedDownloadIcon className="relative z-10 h-4 w-4" isDownloading size={16} />
-              ) : (
-                <UpdateIcon className={cn('relative z-10 h-4 w-4', updateState?.status === 'installing' && 'animate-spin')} aria-hidden="true" />
-              )}
-              <span className="relative z-10">{updateButtonLabel}</span>
-            </button>
+            <DelayedIconTooltip label={updateButtonLabel} className="mb-2 h-9 w-9 items-center justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
+                }}
+                disabled={updateState?.status !== 'downloaded'}
+                className={cn(
+                  'relative grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full transition-colors disabled:cursor-wait',
+                  updateState?.status === 'downloading'
+                    ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
+                    : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
+                  updateState?.status === 'downloaded' ? 'hover:bg-[var(--loom-accent-hover)]' : 'cursor-wait',
+                )}
+                aria-label={updateButtonLabel}
+                aria-busy={updateState?.status === 'downloading' || updateState?.status === 'installing'}
+              >
+                {updateState?.status === 'downloading' && (
+                  <span
+                    className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)] transition-[height] duration-300"
+                    style={{ height: `${updateDownloadPercent}%` }}
+                    aria-hidden="true"
+                  />
+                )}
+                {updateState?.status === 'downloading' ? (
+                  <span className="relative z-10 text-[9px] font-semibold tabular-nums" aria-hidden="true">{updateDownloadPercent}%</span>
+                ) : updateState?.status === 'downloaded' ? (
+                  <Download className="relative z-10 h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="relative z-10 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                )}
+              </button>
+            </DelayedIconTooltip>
           )}
         </div>
 
