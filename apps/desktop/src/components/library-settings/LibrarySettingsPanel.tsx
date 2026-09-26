@@ -25,6 +25,7 @@ import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIc
 import { otherFolderGroupForFolder, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import AddLibraryWizard, { type WizardFolder } from './AddLibraryWizard';
 import OrganizeFilesSection from './OrganizeFilesSection';
+import LibraryHealthCard from './LibraryHealthCard';
 import {
   LIBRARY_TYPE_DEFINITIONS,
   LibraryTypeIcon,
@@ -632,6 +633,8 @@ export default function LibrarySettingsPanel({
           <OrganizeFilesSection disabled={anyScanning} />
         </CardContent>
       </Card>
+
+      <LibraryHealthCard disabled={anyScanning} />
 
       <Card className="settings-panel">
         <CardHeader className="gap-1"><CardTitle className="text-base text-white">Data management</CardTitle><CardDescription className="text-[var(--loom-muted)]">Back up the database or clear this device's local Loom data.</CardDescription></CardHeader>

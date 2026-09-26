@@ -82,7 +82,10 @@ import {
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
+import { parseIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
+import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
+import { loadShowSchedules } from './main/showSchedule.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
   createWindow,
@@ -1806,6 +1809,30 @@ const mediaRenameHandlers = {
     mediaRenameExecutor.undo(batchId);
     return mediaRenameExecutor.history().map(mediaRenameBatchForRenderer);
   },
+  libraryEpisodeUpdates: async () => {
+    const profileId = getDesktopActiveProfileId();
+    if (!profileId) return { shows: [], recentlyAdded: [] };
+    const items = libraryItemsFor(filterLibraryForProfile(loadLibrary(), profileId));
+    return computeEpisodeUpdates(items, {
+      progress: getAllProgress(profileId),
+      now: Date.now(),
+      addedAt: fileAddedAt,
+      schedules: await showSchedulesFor(items),
+    });
+  },
+  libraryHealth: async () => {
+    const items = libraryItemsFor(loadLibrary());
+    const profileId = getDesktopActiveProfileId();
+    const updates = computeEpisodeUpdates(items, {
+      progress: profileId ? getAllProgress(profileId) : {},
+      now: Date.now(),
+      addedAt: fileAddedAt,
+      schedules: await showSchedulesFor(items),
+    });
+    const skipped = mediaRenameExecutor.plan().skipped
+      .map((skip) => ({ title: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason }));
+    return computeLibraryHealth(items, updates, skipped);
+  },
   mediaRenameStatus: () => {
     const lastBatch = mediaRenameExecutor.history(1)[0];
     return {
@@ -1816,6 +1843,25 @@ const mediaRenameHandlers = {
     };
   },
 };
+
+function showSchedulesFor(items: MediaItem[]) {
+  const offline = loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode);
+  return loadShowSchedules(getMediaRenameDatabase(), items, { offline });
+}
+
+function libraryItemsFor(data: LibraryData): MediaItem[] {
+  return [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])];
+}
+
+/** When a file arrived in the library: its creation time on disk, which renames keep. */
+function fileAddedAt(filePath: string): number | null {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.birthtimeMs || stat.mtimeMs || null;
+  } catch {
+    return null;
+  }
+}
 
 // "Organize files after sync" set to automatic: once a scan has saved, apply
 // every change that passes all checks. It never runs during playback or a
@@ -1906,6 +1952,11 @@ registerIpcHandlers<LibraryData, AppSettings>({
   },
   listIptvChannels: (request) => iptvService.listChannels(request),
   resolveIptvStreamUrl: (sourceId, channelId) => iptvService.getChannelStreamUrl(sourceId, channelId),
+  setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => iptvService.setFavorite(sourceId, channelId, favorite),
+  explainIptvChannel: async (reference: string) => {
+    const parsed = parseIptvPlaybackReference(reference);
+    return parsed ? iptvService.explainChannel(parsed.sourceId, parsed.channelId) : null;
+  },
   loadSettings,
   settingsForRenderer: () => {
     const settings = loadSettings();
@@ -2352,7 +2403,9 @@ export const mediaServerDeps = {
     return iptvService.listSources();
   },
   listIptvChannels: (request) => iptvService.listChannels(request),
-  resolveIptvStreamUrl: (sourceId, channelId) => iptvService.getChannelStreamUrl(sourceId, channelId),
+  // The stream proxy opens channels through here, which also records them
+  // as recently watched.
+  resolveIptvStreamUrl: (sourceId, channelId) => iptvService.resolveForPlayback(sourceId, channelId),
   profileRestrictionIdentity,
   readJsonBody,
   requireLocalOrLanAccess,

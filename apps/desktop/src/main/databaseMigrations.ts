@@ -38,6 +38,10 @@ export const MEDIA_RENAME_LOG_MIGRATION_VERSION = 19;
 export const SUBTITLE_LANGUAGE_REPAIR_MIGRATION_VERSION = 20;
 /** v21 journals rename batches in flight so an interrupted one is reversed at startup. */
 export const MEDIA_RENAME_JOURNAL_MIGRATION_VERSION = 21;
+/** v22 keeps favorite and recently watched live TV channels. */
+export const IPTV_FAVORITES_MIGRATION_VERSION = 22;
+/** v23 caches each show's full episode list for new, upcoming, and missing episodes. */
+export const SHOW_SCHEDULE_CACHE_MIGRATION_VERSION = 23;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -385,6 +389,8 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateMediaRenameLog(database);
   migrateSubtitleLanguages(database);
   migrateMediaRenameJournal(database);
+  migrateIptvFavorites(database);
+  migrateShowScheduleCache(database);
 }
 
 /**
@@ -656,6 +662,48 @@ function migrateMediaRenameJournal(database: BetterSqlite3.Database): void {
     `);
     database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
       .run(MEDIA_RENAME_JOURNAL_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * Favorites and recents are keyed by source and channel ID, which survive a
+ * playlist refresh; a channel the provider drops simply stops matching.
+ */
+function migrateIptvFavorites(database: BetterSqlite3.Database): void {
+  const hasTable = (name: string) => database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  if (hasTable('iptv_favorites') && hasTable('iptv_recent')) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS iptv_favorites (
+        source_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (source_id, channel_id)
+      );
+      CREATE TABLE IF NOT EXISTS iptv_recent (
+        source_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        watched_at INTEGER NOT NULL,
+        PRIMARY KEY (source_id, channel_id)
+      );
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(IPTV_FAVORITES_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+function migrateShowScheduleCache(database: BetterSqlite3.Database): void {
+  if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'show_schedule_cache'").get()) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS show_schedule_cache (
+        cache_key TEXT PRIMARY KEY,
+        episodes_json TEXT NOT NULL,
+        fetched_at INTEGER NOT NULL
+      );
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(SHOW_SCHEDULE_CACHE_MIGRATION_VERSION, Date.now());
   })();
 }
 

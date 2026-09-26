@@ -265,6 +265,7 @@ const iptvChannelRequestSchema = z.object({
   limit: finiteNumber.positive().max(200).optional(),
   offset: finiteNumber.nonnegative().max(1_000_000).optional(),
   verify: z.boolean().optional(),
+  collection: z.enum(['all', 'favorites', 'recent']).optional(),
 });
 
 const stremioExtraSchema = z.record(
@@ -359,11 +360,15 @@ export interface IpcHandlerDependencies<
   updateIptvSource: (sourceId: string, patch: IpcContract['iptv:update-source']['args'][1]) => IpcResult<'iptv:update-source'>;
   removeIptvSource: (sourceId: string) => IpcResult<'iptv:remove-source'>;
   refreshIptvSource: (sourceId: string) => Promise<IpcResult<'iptv:refresh-source'>>;
+  explainIptvChannel: (reference: string) => Promise<IpcResult<'iptv:explain-channel'>>;
+  setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => IpcResult<'iptv:set-favorite'>;
   previewMediaRenames: () => IpcResult<'library:rename-preview'>;
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
   listMediaRenames: () => IpcResult<'library:rename-history'>;
   undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
   mediaRenameStatus: () => IpcResult<'library:rename-status'>;
+  libraryEpisodeUpdates: () => Promise<IpcResult<'library:episode-updates'>>;
+  libraryHealth: () => Promise<IpcResult<'library:health'>>;
   listIptvChannels: (request: IpcContract['iptv:list-channels']['args'][0]) => IpcResult<'iptv:list-channels'>;
   resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
   loadSettings: () => TSettings;
@@ -849,6 +854,11 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.listMediaRenames();
   });
+  handleNoArgs('library:episode-updates', () => deps.libraryEpisodeUpdates());
+  handleNoArgs('library:health', () => {
+    deps.authorizeSettingsWrite();
+    return deps.libraryHealth();
+  });
   handleNoArgs('library:rename-status', () => {
     deps.authorizeSettingsWrite();
     return deps.mediaRenameStatus();
@@ -859,6 +869,8 @@ export function registerIpcHandlers<
   }, z.tuple([z.string().uuid()]));
 
   handle('iptv:list-channels', (_event, request) => deps.listIptvChannels(request), z.tuple([iptvChannelRequestSchema]));
+  handle('iptv:set-favorite', (_event, sourceId, channelId, favorite) => deps.setIptvFavorite(sourceId, channelId, favorite), z.tuple([iptvSourceIdSchema, z.string().min(1).max(500), z.boolean()]));
+  handle('iptv:explain-channel', (_event, reference) => deps.explainIptvChannel(reference), z.tuple([z.string().max(2000)]));
 
   handleNoArgs('media:get-server-port', () => deps.getMediaServerPort());
 

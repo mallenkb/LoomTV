@@ -151,12 +151,16 @@ const desktopApi = {
   listMediaRenames: () => ipcRenderer.invoke('library:rename-history'),
   undoMediaRename: (batchId: string) => ipcRenderer.invoke('library:rename-undo', batchId),
   mediaRenameStatus: () => ipcRenderer.invoke('library:rename-status'),
+  libraryEpisodeUpdates: () => ipcRenderer.invoke('library:episode-updates'),
+  libraryHealth: () => ipcRenderer.invoke('library:health'),
   onLibraryFilesOrganized: (callback: (result: { renamed: number }) => void) => {
     const handler = (_: unknown, result: { renamed: number }) => callback(result);
     ipcRenderer.on('library:files-organized', handler);
     return () => ipcRenderer.removeListener('library:files-organized', handler);
   },
   listIptvChannels: (request: IptvChannelRequest) => ipcRenderer.invoke('iptv:list-channels', request),
+  explainIptvChannel: (reference: string) => ipcRenderer.invoke('iptv:explain-channel', reference),
+  setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => ipcRenderer.invoke('iptv:set-favorite', sourceId, channelId, favorite),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   listStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:list'),
   listAvailableStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:available'),

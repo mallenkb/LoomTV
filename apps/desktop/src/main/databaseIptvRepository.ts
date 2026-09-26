@@ -43,6 +43,7 @@ export type IptvChannelRecord = {
   nowEndMs: number;
   nextTitle: string;
   nextStartMs: number;
+  favorite: boolean;
 };
 
 export type IptvChannelQuery = {
@@ -51,6 +52,8 @@ export type IptvChannelQuery = {
   group?: string;
   subcategory?: string;
   geoFilter?: 'all' | 'exclude' | 'only';
+  /** Only favorites, or only recently watched channels (newest first). */
+  collection?: 'all' | 'favorites' | 'recent';
   sort?: 'name-asc' | 'name-desc' | 'category';
   limit?: number;
   offset?: number;
@@ -92,6 +95,7 @@ const channelRowSchema = z.object({
   now_end_ms: z.number().nullable(),
   next_title: z.string().nullable(),
   next_start_ms: z.number().nullable(),
+  favorite: z.number().int(),
 });
 
 const countRowSchema = z.object({ total: z.number().int() });
@@ -184,6 +188,8 @@ export function renameIptvSource(
 
 export function deleteIptvSource(database: BetterSqlite3.Database, sourceId: string): boolean {
   return database.transaction(() => {
+    database.prepare('DELETE FROM iptv_favorites WHERE source_id = ?').run(sourceId);
+    database.prepare('DELETE FROM iptv_recent WHERE source_id = ?').run(sourceId);
     database.prepare('DELETE FROM iptv_programmes WHERE source_id = ?').run(sourceId);
     database.prepare('DELETE FROM iptv_channels WHERE source_id = ?').run(sourceId);
     const result = database.prepare('DELETE FROM iptv_sources WHERE id = ?').run(sourceId);
@@ -281,6 +287,9 @@ export function recordIptvRefresh(
   return getIptvSource(database, sourceId);
 }
 
+/** A channel's guide key in SQL: its tvg-id without the "@feed" suffix (see guideChannelKey). */
+const GUIDE_KEY = "CASE WHEN instr(c.tvg_id, '@') > 0 THEN substr(c.tvg_id, 1, instr(c.tvg_id, '@') - 1) ELSE c.tvg_id END";
+
 /**
  * Only channels whose latest full check passed are listed: the stream loaded,
  * a segment decoded to real picture or sound, and nothing has failed since.
@@ -313,6 +322,12 @@ function channelFilter(request: IptvChannelQuery): { clause: string; parameters:
     parameters.subcategory = subcategory.toLowerCase().replace(/\s+/g, '');
   }
 
+  if (request.collection === 'favorites') {
+    clauses.push('EXISTS (SELECT 1 FROM iptv_favorites f WHERE f.source_id = c.source_id AND f.channel_id = c.channel_id)');
+  } else if (request.collection === 'recent') {
+    clauses.push('EXISTS (SELECT 1 FROM iptv_recent r WHERE r.source_id = c.source_id AND r.channel_id = c.channel_id)');
+  }
+
   if (request.geoFilter === 'exclude') clauses.push('c.is_geo_blocked = 0');
   else if (request.geoFilter === 'only') clauses.push('c.is_geo_blocked = 1');
 
@@ -342,7 +357,9 @@ export function listIptvChannels(
   const limit = Math.min(Math.max(Math.trunc(request.limit ?? MAX_IPTV_CHANNEL_PAGE), 1), MAX_IPTV_CHANNEL_PAGE);
   const offset = Math.max(Math.trunc(request.offset ?? 0), 0);
   const nowMs = Number.isFinite(request.nowMs) ? Number(request.nowMs) : Date.now();
-  const orderBy = request.sort === 'name-desc'
+  const orderBy = request.collection === 'recent'
+    ? '(SELECT r.watched_at FROM iptv_recent r WHERE r.source_id = c.source_id AND r.channel_id = c.channel_id) DESC'
+    : request.sort === 'name-desc'
     ? 'c.name COLLATE NOCASE DESC, c.position ASC'
     : request.sort === 'category'
       ? "CASE WHEN c.group_title = '' THEN 1 ELSE 0 END, c.group_title COLLATE NOCASE ASC, c.name COLLATE NOCASE ASC, c.position ASC"
@@ -355,18 +372,19 @@ export function listIptvChannels(
       SELECT
         c.source_id, c.channel_id, c.position, c.name, c.tvg_id, c.tvg_name,
         c.logo_url, c.group_title, c.stream_url,
+        EXISTS (SELECT 1 FROM iptv_favorites f WHERE f.source_id = c.source_id AND f.channel_id = c.channel_id) AS favorite,
         now_p.title AS now_title, now_p.start_ms AS now_start_ms, now_p.end_ms AS now_end_ms,
         next_p.title AS next_title, next_p.start_ms AS next_start_ms
       FROM iptv_channels c
       LEFT JOIN iptv_programmes now_p ON now_p.rowid = (
         SELECT p.rowid FROM iptv_programmes p
-        WHERE p.source_id = c.source_id AND p.tvg_id = c.tvg_id
+        WHERE p.source_id = c.source_id AND p.tvg_id = ${GUIDE_KEY}
           AND p.start_ms <= @nowMs AND p.end_ms > @nowMs
         ORDER BY p.start_ms DESC LIMIT 1
       )
       LEFT JOIN iptv_programmes next_p ON next_p.rowid = (
         SELECT p.rowid FROM iptv_programmes p
-        WHERE p.source_id = c.source_id AND p.tvg_id = c.tvg_id AND p.start_ms > @nowMs
+        WHERE p.source_id = c.source_id AND p.tvg_id = ${GUIDE_KEY} AND p.start_ms > @nowMs
         ORDER BY p.start_ms ASC LIMIT 1
       )
       WHERE ${clause}
@@ -390,6 +408,7 @@ export function listIptvChannels(
     nowEndMs: row.now_end_ms || 0,
     nextTitle: row.next_title || '',
     nextStartMs: row.next_start_ms || 0,
+    favorite: row.favorite === 1,
   }));
 }
 
@@ -586,4 +605,29 @@ export function pruneIptvStreamHealth(database: BetterSqlite3.Database): void {
   database
     .prepare('DELETE FROM iptv_stream_health WHERE stream_url NOT IN (SELECT stream_url FROM iptv_channels)')
     .run();
+}
+
+export function setIptvFavorite(database: BetterSqlite3.Database, sourceId: string, channelId: string, favorite: boolean): void {
+  if (favorite) {
+    database.prepare('INSERT OR IGNORE INTO iptv_favorites (source_id, channel_id, created_at) VALUES (?, ?, ?)').run(sourceId, channelId, Date.now());
+  } else {
+    database.prepare('DELETE FROM iptv_favorites WHERE source_id = ? AND channel_id = ?').run(sourceId, channelId);
+  }
+}
+
+/** Channels kept in a source's recently watched list. */
+export const MAX_IPTV_RECENT = 30;
+
+export function recordIptvRecent(database: BetterSqlite3.Database, sourceId: string, channelId: string, watchedAt = Date.now()): void {
+  database.transaction(() => {
+    database.prepare(`
+      INSERT INTO iptv_recent (source_id, channel_id, watched_at) VALUES (?, ?, ?)
+      ON CONFLICT(source_id, channel_id) DO UPDATE SET watched_at = excluded.watched_at
+    `).run(sourceId, channelId, watchedAt);
+    database.prepare(`
+      DELETE FROM iptv_recent WHERE source_id = ? AND channel_id NOT IN (
+        SELECT channel_id FROM iptv_recent WHERE source_id = ? ORDER BY watched_at DESC LIMIT ?
+      )
+    `).run(sourceId, sourceId, MAX_IPTV_RECENT);
+  })();
 }

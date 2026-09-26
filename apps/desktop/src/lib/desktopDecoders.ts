@@ -129,6 +129,7 @@ export const iptvChannelPageSchema = z.object({
     nowEndMs: nonNegativeNumber,
     nextTitle: z.string(),
     nextStartMs: nonNegativeNumber,
+    favorite: z.boolean().optional().default(false),
   })),
   total: nonNegativeNumber,
   offset: nonNegativeNumber,

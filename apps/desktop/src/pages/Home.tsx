@@ -14,6 +14,7 @@ import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
+import WhatsNewRails from '@/components/WhatsNewRails';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
@@ -45,6 +46,7 @@ function DefaultHome() {
     () => excludeOtherFolderMedia(allAnimeShows, libraryFolderGroups.others || []),
     [allAnimeShows, libraryFolderGroups.others],
   );
+  const homeItems = useMemo(() => [...movies, ...tvShows, ...animeShows], [animeShows, movies, tvShows]);
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
@@ -148,6 +150,10 @@ function DefaultHome() {
               <ContinueWatchingCard key={item.id} item={item} from={currentRoute} progress={progress} />
             ))}
           </MediaRail>
+        )}
+
+        {!normalizedQuery && activeFilter === 'all' && (
+          <WhatsNewRails items={homeItems} from={currentRoute} />
         )}
 
         {!normalizedQuery && visibleMyListItems.length > 0 && (

@@ -614,6 +614,7 @@ function AppShell({
             currentEpisode={nowPlaying.currentEpisode}
             startPosition={nowPlaying.startPosition}
             isLiveStream={nowPlaying.isLiveStream}
+            onPlayLiveChannel={handlePlayLiveChannel}
             onEpisodeChange={handleEpisodeSelect}
             onClose={handleClose}
           />

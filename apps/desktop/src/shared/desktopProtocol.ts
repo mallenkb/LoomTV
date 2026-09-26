@@ -948,6 +948,38 @@ export interface MediaRenameBatch {
   examples: { fromName: string; toName: string }[];
 }
 
+export interface LibraryEpisodeRef {
+  season: number;
+  episode: number;
+  title: string;
+  airDate?: string;
+  addedAt?: number;
+}
+
+/** New, upcoming, and missing episodes for one show, for the active profile. */
+export interface LibraryShowUpdates {
+  mediaId: string;
+  title: string;
+  type: 'movie' | 'tv' | 'anime';
+  newEpisodes: LibraryEpisodeRef[];
+  nextAirs: LibraryEpisodeRef | null;
+  missing: LibraryEpisodeRef[];
+}
+
+export interface LibraryEpisodeUpdates {
+  shows: LibraryShowUpdates[];
+  recentlyAdded: Array<{ mediaId: string; title: string; type: 'movie' | 'tv' | 'anime'; addedAt: number; label: string }>;
+}
+
+/** Everything in the library that needs a look, for Settings > Library. */
+export interface LibraryHealthReport {
+  unmatched: Array<{ mediaId: string; title: string; type: 'movie' | 'tv' | 'anime'; fileName: string }>;
+  splitShows: Array<{ title: string; folders: string[] }>;
+  noSubtitles: Array<{ mediaId: string; title: string; type: 'movie' | 'tv' | 'anime'; files: number }>;
+  missingEpisodes: Array<{ mediaId: string; title: string; count: number; examples: string[] }>;
+  renameSkipped: Array<{ title: string; fileName: string; reason: string }>;
+}
+
 /** The "Organize files" row in Library sync. */
 export interface MediaRenameStatus {
   mode: 'ask' | 'auto' | 'off';
@@ -1029,6 +1061,8 @@ export interface IptvChannelSummary {
   nowEndMs: number;
   nextTitle: string;
   nextStartMs: number;
+  /** Starred by the viewer; favorites show in their own row. */
+  favorite: boolean;
 }
 
 export type IptvChannelSort = 'name-asc' | 'name-desc' | 'category';
@@ -1040,6 +1074,8 @@ export interface IptvChannelRequest {
   group?: string;
   subcategory?: string;
   geoFilter?: IptvGeoFilter;
+  /** Only favorites, or only recently watched channels (newest first). */
+  collection?: 'all' | 'favorites' | 'recent';
   sort?: IptvChannelSort;
   limit?: number;
   offset?: number;

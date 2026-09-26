@@ -33,6 +33,8 @@ import type {
   MediaRenameBatch,
   MediaRenamePreview,
   MediaRenameStatus,
+  LibraryEpisodeUpdates,
+  LibraryHealthReport,
   LocalNetworkPairedDevice,
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -266,8 +268,12 @@ export type DesktopBridgeApi = {
       listMediaRenames?: () => Promise<MediaRenameBatch[]>;
       undoMediaRename?: (batchId: string) => Promise<MediaRenameBatch[]>;
       mediaRenameStatus?: () => Promise<MediaRenameStatus>;
+      libraryEpisodeUpdates?: () => Promise<LibraryEpisodeUpdates>;
+      libraryHealth?: () => Promise<LibraryHealthReport>;
       onLibraryFilesOrganized?: (callback: (result: { renamed: number }) => void) => () => void;
       listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
+      explainIptvChannel?: (reference: string) => Promise<string | null>;
+      setIptvFavorite?: (sourceId: string, channelId: string, favorite: boolean) => Promise<void>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
       listStremioPlugins?: () => Promise<StremioPluginIpcResult<StremioPluginSummary[]>>;
@@ -1376,6 +1382,17 @@ const desktopTransport = {
     return window.desktopApi.listMediaRenames();
   },
 
+  /** New, upcoming, and missing episodes, plus recently added titles. */
+  async libraryEpisodeUpdates(): Promise<LibraryEpisodeUpdates> {
+    if (!window.desktopApi?.libraryEpisodeUpdates) return { shows: [], recentlyAdded: [] };
+    return window.desktopApi.libraryEpisodeUpdates();
+  },
+
+  async libraryHealth(): Promise<LibraryHealthReport | null> {
+    if (!window.desktopApi?.libraryHealth) return null;
+    return window.desktopApi.libraryHealth();
+  },
+
   async mediaRenameStatus(): Promise<MediaRenameStatus | null> {
     if (!window.desktopApi?.mediaRenameStatus) return null;
     return window.desktopApi.mediaRenameStatus();
@@ -1397,6 +1414,17 @@ const desktopTransport = {
       method: 'POST',
       body: JSON.stringify({ sourceId }),
     });
+  },
+
+  async setIptvFavorite(sourceId: string, channelId: string, favorite: boolean): Promise<void> {
+    if (!window.desktopApi?.setIptvFavorite) throw new Error('Favorites are only available in the desktop app.');
+    await window.desktopApi.setIptvFavorite(sourceId, channelId, favorite);
+  },
+
+  /** Why a live channel will not play, in plain words; null when it answers. */
+  async explainIptvChannel(reference: string): Promise<string | null> {
+    if (!window.desktopApi?.explainIptvChannel) return null;
+    return window.desktopApi.explainIptvChannel(reference);
   },
 
   async listIptvChannels(request: IptvChannelRequest): Promise<IptvChannelPage> {

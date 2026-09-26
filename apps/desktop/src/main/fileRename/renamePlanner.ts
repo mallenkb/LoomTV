@@ -67,7 +67,8 @@ export type RenamePlannerInput = {
 
 const SIDECAR_EXTENSIONS = new Set(['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx', '.sup', '.nfo', '.jpg', '.jpeg', '.png', '.webp']);
 const SUBTITLE_TAG = /^(?:[a-z]{2,3}(?:-[a-z]{2,4})?|forced|sdh|cc|hi|default|full|signs|songs|commentary|opensubtitles|loomtv-clean-(?:signs|dialogue|honorific)|english|spanish|french|german|italian|portuguese|japanese|korean|chinese|arabic|russian|hindi)$/i;
-const PLACEHOLDER_TITLE = /^(?:tba|tbd|to be announced|untitled|episode\s*#?\d+|ep\.?\s*\d+|\d+)$/i;
+// A bare number is a real title too (Lioness S02E06 is "2831"); only "Episode 6"-style numbers are placeholders.
+const PLACEHOLDER_TITLE = /^(?:tba|tbd|to be announced|untitled|episode\s*#?\d+|ep\.?\s*\d+)$/i;
 const SAMPLE_NAME = /(?:^|[\s._-])sample(?:[\s._-]|$)/i;
 const MAX_BASE_LENGTH = 200;
 /** Tokens that start the release-tag part of a name: quality, source, codec, language, group markers. */

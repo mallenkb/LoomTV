@@ -467,3 +467,49 @@ export async function recheckLivePlaylist(marker: StreamLiveMarker): Promise<'ad
     unregister();
   }
 }
+
+/** What a viewer should be told when a channel will not play, in plain words. */
+function viewerMessageFor(failure: StreamFailure): string {
+  const status = Number(failure.message.match(/HTTP (\d{3})/)?.[1] || 0);
+  if (status === 401 || status === 403 || status === 451) return "This channel isn't available in your region, or the provider requires a sign-in.";
+  if (status === 404 || status === 410) return 'This channel is offline. The provider has removed the stream.';
+  if (/no longer exists/.test(failure.message)) return 'This channel is offline. Its server no longer exists.';
+  if (/certificate/.test(failure.message)) return "This channel's server has an invalid security certificate, so LoomTV won't connect to it.";
+  if (/plain HTTP/.test(failure.message)) return "This channel only streams over an insecure connection, which LoomTV doesn't open.";
+  if (/web page/.test(failure.message)) return "This channel's address now leads to a web page, not a video stream.";
+  return "This channel's server isn't responding right now. Try again later.";
+}
+
+/**
+ * A quick check for the player when a live channel starts: fetch the
+ * playlist (and, for HLS, one variant) once. Null when the stream answers;
+ * otherwise a sentence the player shows instead of a black screen.
+ */
+export async function describeStreamProblem(streamUrl: string): Promise<string | null> {
+  const signal = AbortSignal.timeout(20_000);
+  try {
+    if (!streamUrl.startsWith('https:')) throw new StreamFailure('The stream uses plain HTTP.', true);
+    const playlist = await fetchBytes(streamUrl, PLAYLIST_MAX_BYTES, signal).catch((error: unknown) => {
+      // A direct stream that keeps sending is answering.
+      if (error instanceof StreamFailure && error.message === 'oversized') return null;
+      throw error;
+    });
+    if (!playlist) return null;
+    const head = playlist.body.subarray(0, 512).toString('utf8').trimStart();
+    if (!isPlaylist(playlist.body)) {
+      if (/text\/html/i.test(playlist.type) || /^<(!doctype|html)/i.test(head)) {
+        throw new StreamFailure('The stream address returns a web page, not video.', true);
+      }
+      return null;
+    }
+    const text = playlist.body.toString('utf8');
+    if (/#EXT-X-STREAM-INF/.test(text)) {
+      const variant = pickVariant(text, playlist.url);
+      if (variant) await fetchBytes(variant, PLAYLIST_MAX_BYTES, signal);
+    }
+    return null;
+  } catch (error) {
+    if (error instanceof StreamFailure) return error.message === 'oversized' ? null : viewerMessageFor(error);
+    return "This channel's server isn't responding right now. Try again later.";
+  }
+}

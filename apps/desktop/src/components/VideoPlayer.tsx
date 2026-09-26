@@ -88,6 +88,10 @@ import {
 } from './VideoPlayer/helpers';
 import PauseOverlay from './VideoPlayer/PauseOverlay';
 import NextEpisodePrompt from './VideoPlayer/NextEpisodePrompt';
+import StillWatchingPrompt from './VideoPlayer/StillWatchingPrompt';
+import LiveChannelOverlay from './VideoPlayer/LiveChannelOverlay';
+import { adjacentLiveChannel, lastLiveChannel, livePosition, noteLiveChannelPlaying } from '@/lib/liveChannelLineup';
+import { useStillWatching } from './VideoPlayer/useStillWatching';
 import PlayerControlBar from './VideoPlayer/PlayerControlBar';
 import PlayerEpisodePanel from './VideoPlayer/PlayerEpisodePanel';
 import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
@@ -195,6 +199,7 @@ export default function VideoPlayer({
   currentEpisode = 1,
   startPosition,
   isLiveStream = false,
+  onPlayLiveChannel,
   onClose,
   onEpisodeChange,
 }: VideoPlayerProps) {
@@ -1084,6 +1089,43 @@ export default function VideoPlayer({
     };
   }, [applyResolvedNativePreferences]);
 
+  const { askingStillWatching, allowAutomaticNext, answerStillWatching } = useStillWatching();
+
+  // Live channels: say plainly why one will not play (instead of a black
+  // screen), and switch channels without leaving the player.
+  const [liveProblem, setLiveProblem] = useState<string | null>(null);
+  const [liveBarVisible, setLiveBarVisible] = useState(isLiveStream);
+  useEffect(() => {
+    if (!isLiveStream) return undefined;
+    noteLiveChannelPlaying(filePath);
+    let cancelled = false;
+    void desktopApi.explainIptvChannel(filePath).then((problem) => {
+      if (!cancelled && problem) setLiveProblem(problem);
+    }).catch(() => undefined);
+    const timer = window.setTimeout(() => setLiveBarVisible(false), 4000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [filePath, isLiveStream]);
+  const liveErrored = isLiveStream && playerState === 'error';
+  useEffect(() => {
+    if (!liveErrored) return undefined;
+    let cancelled = false;
+    void desktopApi.explainIptvChannel(filePath).then((problem) => {
+      if (!cancelled) setLiveProblem(problem || "The channel stopped responding. Try again, or switch to another channel.");
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [filePath, liveErrored]);
+  const switchLiveChannel = useCallback((channel: { reference: string; name: string; logoUrl?: string } | null) => {
+    if (!channel || !onPlayLiveChannel || channel.reference === filePath) return;
+    onPlayLiveChannel(channel.reference, channel.name, channel.logoUrl);
+  }, [filePath, onPlayLiveChannel]);
+  const liveControls = {
+    step: (step: number) => switchLiveChannel(adjacentLiveChannel(filePath, step)),
+    last: () => switchLiveChannel(lastLiveChannel(filePath)),
+  };
+  // Key and media-button handlers are long-lived; they read the latest controls here.
+  const liveControlsRef = useRef(liveControls);
+  liveControlsRef.current = liveControls;
+  const liveLineupPosition = isLiveStream ? livePosition(filePath) : { index: 0, total: 0 };
   const {
     goToEpisode,
     handleNextEpisode,
@@ -1093,6 +1135,7 @@ export default function VideoPlayer({
     playNextEpisodeNow,
     scheduleNextEpisode,
   } = useEpisodeNavigation({
+    allowAutomaticNext,
     autoplayNextEnabled,
     currentEpisode,
     currentSeason,
@@ -1646,7 +1689,7 @@ export default function VideoPlayer({
       setErrorMessage(null);
       setPaused(true);
       if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
-        latestEpisodePlaybackRef.current.scheduleNextEpisode();
+        latestEpisodePlaybackRef.current.autoAdvance();
       }
     } else if (state.status === 'closed') {
       // Native engines may report closed after EOF. Release the composited
@@ -2443,7 +2486,7 @@ export default function VideoPlayer({
         latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
         setPaused(true);
         if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
-          latestEpisodePlaybackRef.current.scheduleNextEpisode();
+          latestEpisodePlaybackRef.current.autoAdvance();
         }
         return;
       }
@@ -2457,7 +2500,7 @@ export default function VideoPlayer({
       }
       setPaused(true);
       if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
-        latestEpisodePlaybackRef.current.scheduleNextEpisode();
+        latestEpisodePlaybackRef.current.autoAdvance();
       }
     };
 
@@ -3499,10 +3542,12 @@ export default function VideoPlayer({
         setMediaSessionStopped(true);
         break;
       case 'previousItem':
-        handlePrevEpisode();
+        if (isLiveStreamRef.current) liveControlsRef.current.step(-1);
+        else handlePrevEpisode();
         break;
       case 'nextItem':
-        handleNextEpisode();
+        if (isLiveStreamRef.current) liveControlsRef.current.step(1);
+        else handleNextEpisode();
         break;
       case 'seekRelative':
         seekTo(playbackPositionRef.current + command.offsetSeconds);
@@ -3636,6 +3681,18 @@ export default function VideoPlayer({
       }
 
       const key = e.code === 'Space' ? ' ' : e.key;
+      if (isLiveStreamRef.current && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (key === 'PageUp' || key === 'PageDown') {
+          e.preventDefault();
+          liveControlsRef.current.step(key === 'PageUp' ? -1 : 1);
+          return;
+        }
+        if (key === 'q' || key === 'Q') {
+          e.preventDefault();
+          liveControlsRef.current.last();
+          return;
+        }
+      }
       switch (key) {
         case 'Escape':
           resetSurfaceDoubleClickGuard();
@@ -4235,7 +4292,7 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {playerState === 'error' && (
+        {playerState === 'error' && !(isLiveStream && liveProblem) && (
           <div
             ref={errorDialogRef}
             role="alertdialog"
@@ -4285,7 +4342,36 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {showNextEpisodePrompt && (
+        {isLiveStream && (
+          <LiveChannelOverlay
+            name={title}
+            index={liveLineupPosition.index}
+            total={liveLineupPosition.total}
+            problem={liveProblem}
+            showBar={liveBarVisible || (showControls && playerState !== 'error')}
+            canStep={Boolean(onPlayLiveChannel) && liveLineupPosition.total > 1}
+            canGoBack={Boolean(onPlayLiveChannel && lastLiveChannel(filePath))}
+            onStep={(step) => liveControlsRef.current.step(step)}
+            onLast={() => liveControlsRef.current.last()}
+            onClose={handleClose}
+          />
+        )}
+
+        {askingStillWatching && (
+          <StillWatchingPrompt
+            title={title}
+            onContinue={() => {
+              answerStillWatching();
+              scheduleNextEpisode();
+            }}
+            onStop={() => {
+              answerStillWatching();
+              onClose();
+            }}
+          />
+        )}
+
+        {showNextEpisodePrompt && !askingStillWatching && (
           <NextEpisodePrompt
             controlsVisible={showControls && playerState !== 'error'}
             progress={nextEpisodePromptProgress}

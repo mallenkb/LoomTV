@@ -1,6 +1,7 @@
 import { useParams } from '@tanstack/react-router';
 import { queryClient, queryScope } from '@/lib/queryClient';
 import VirtualEpisodeList from '@/components/VirtualEpisodeList';
+import ShowUpdatesPanel from '@/components/ShowUpdatesPanel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from '@/lib/navigation';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
@@ -1094,6 +1095,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           role="tabpanel"
           aria-labelledby="detail-tab-episodes"
         >
+          {mediaId ? <ShowUpdatesPanel mediaId={mediaId} /> : null}
           {visibleSeasons.length === 0 ? (
             <p className="text-[var(--loom-muted)]">No season information available. Try scanning the library.</p>
           ) : (

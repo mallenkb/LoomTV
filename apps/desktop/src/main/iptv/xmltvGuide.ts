@@ -95,6 +95,16 @@ function readChildText(body: string, childName: string): string {
 }
 
 /**
+ * The key a guide channel and a playlist channel are matched on: the ID
+ * without iptv-org's feed suffix, so a playlist's "00sReplay.us@SD" matches a
+ * guide's "00sReplay.us". Both sides are reduced the same way, so guides that
+ * keep the suffix still match.
+ */
+export function guideChannelKey(id: string): string {
+  return id.replace(/@[^@]*$/, '');
+}
+
+/**
  * Collect the guide entries for the channels a playlist actually carries.
  * `knownChannelIds` keeps a national guide covering thousands of channels from
  * writing rows for channels this source cannot play.
@@ -115,7 +125,7 @@ export function parseXmltvGuide(
     const [, attributes, body] = match;
     match = pattern.exec(text);
 
-    const tvgId = readAttribute(attributes, 'channel');
+    const tvgId = guideChannelKey(readAttribute(attributes, 'channel'));
     if (!tvgId || (knownChannelIds && !knownChannelIds.has(tvgId))) {
       result.skipped += 1;
       continue;

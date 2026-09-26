@@ -3,6 +3,8 @@ import { gunzipSync } from 'node:zlib';
 import { safeFetch } from '../safeFetch.ts';
 import {
   countIptvChannelHealth,
+  recordIptvRecent,
+  setIptvFavorite,
   countIptvChannels,
   countIptvSources,
   deleteIptvSource,
@@ -31,12 +33,13 @@ import { isPlaybackActivityActive } from '../ffmpegGovernor.ts';
 import {
   checkIptvStream,
   createFfmpegRunner,
+  describeStreamProblem,
   recheckLivePlaylist,
   type FfmpegRunner,
   type StreamCheckResult,
   type StreamLiveMarker,
 } from './iptvStreamHealth.ts';
-import { parseXmltvGuide } from './xmltvGuide.ts';
+import { guideChannelKey, parseXmltvGuide } from './xmltvGuide.ts';
 import type {
   IptvChannelPage,
   IptvSourceHealth,
@@ -63,6 +66,7 @@ const HEALTH_FOLLOW_UP_MS = 10 * 60 * 1000;
 const HEALTH_STARTUP_DELAY_MS = 10 * 1000;
 const HEALTH_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 const HEALTH_STREAM_CONCURRENCY = 24;
+const RECENT_WRITE_INTERVAL_MS = 60_000;
 const HEALTH_FFMPEG_CONCURRENCY = 4;
 /** How often a paused check looks again for playback to finish. */
 const HEALTH_PLAYBACK_POLL_MS = 5000;
@@ -196,6 +200,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
   // downloading joins the in-flight refresh instead of racing it into the
   // same rows.
   const inFlight = new Map<string, Promise<IptvSourceSummary>>();
+  const recentWrites = new Map<string, number>();
 
   // Health checks run one source at a time behind a single queue: a check
   // holds dozens of connections open and should not stack with another.
@@ -371,7 +376,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
         let warning = '';
         if (guideUrl) {
           const knownChannelIds = new Set(
-            playlist.channels.map((channel) => channel.tvgId).filter(Boolean),
+            playlist.channels.map((channel) => guideChannelKey(channel.tvgId)).filter(Boolean),
           );
           // The guide only annotates channels. A guide host that is down must
           // not hold back the channel list; keep the last listings and say so.
@@ -518,6 +523,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
           nowEndMs: channel.nowEndMs,
           nextTitle: channel.nextTitle,
           nextStartMs: channel.nextStartMs,
+          favorite: channel.favorite,
         })),
         total: countIptvChannels(database, request),
         offset: Math.max(Math.trunc(request.offset ?? 0), 0),
@@ -531,6 +537,32 @@ export function createIptvService(deps: IptvServiceDependencies) {
 
     getChannelStreamUrl(sourceId: string, channelId: string): string | null {
       return getIptvChannelStreamUrl(deps.getDatabase(), sourceId, channelId);
+    },
+
+    setFavorite(sourceId: string, channelId: string, favorite: boolean): void {
+      setIptvFavorite(deps.getDatabase(), sourceId, channelId, favorite);
+    },
+
+    /**
+     * The stream to play for a channel, noting it as recently watched. A live
+     * playlist can be re-requested every few seconds, so one write a minute.
+     */
+    resolveForPlayback(sourceId: string, channelId: string): string | null {
+      const streamUrl = getIptvChannelStreamUrl(deps.getDatabase(), sourceId, channelId);
+      const key = `${sourceId}\u0000${channelId}`;
+      const now = Date.now();
+      if (streamUrl && now - (recentWrites.get(key) || 0) > RECENT_WRITE_INTERVAL_MS) {
+        recentWrites.set(key, now);
+        recordIptvRecent(deps.getDatabase(), sourceId, channelId, now);
+      }
+      return streamUrl;
+    },
+
+    /** Why a channel will not play, for the player; null when it answers. */
+    async explainChannel(sourceId: string, channelId: string): Promise<string | null> {
+      const streamUrl = getIptvChannelStreamUrl(deps.getDatabase(), sourceId, channelId);
+      if (!streamUrl) return 'This channel is no longer in the playlist.';
+      return describeStreamProblem(streamUrl);
     },
   };
 }

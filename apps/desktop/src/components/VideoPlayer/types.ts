@@ -106,6 +106,8 @@ export interface VideoPlayerProps {
    * window, so recording a position would only pollute Continue Watching.
    */
   isLiveStream?: boolean;
+  /** Switch to another live channel (channel up/down, last channel). */
+  onPlayLiveChannel?: (reference: string, name: string, logoUrl?: string) => void;
   onClose: () => void;
   onEpisodeChange?: (filePath: string, season: number, episode: number) => void;
 }

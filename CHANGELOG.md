@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.196](docs/releases/v1.0.196.md)
+
+Adds episode discovery, a library health report, live TV channel controls, and a prompt before unattended autoplay continues.
+
 ### [1.0.195](docs/releases/v1.0.195.md)
 
 Adds optional automatic file organization after library sync, with undoable changes and protection for recently modified files.

@@ -1,6 +1,6 @@
 import { useParams } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Play } from 'lucide-react';
+import { AlertTriangle, Play, Star } from 'lucide-react';
 import TelevisionPlaceholder from '@/components/TelevisionPlaceholder';
 import LibrarySearch from '@/components/LibrarySearch';
 import ThemeFilterDropdown from '@/components/ThemeFilterDropdown';
@@ -11,6 +11,8 @@ import { iptvSourceDisplayName } from '@/lib/liveTvSources';
 import type { IptvChannelPage, IptvChannelSort, IptvChannelSummary, IptvGeoFilter } from '@/shared/desktopProtocol';
 import { buildIptvPlaybackReference } from '@/shared/iptvPlayback';
 import { normalizeIptvLogoUrl } from '@/shared/iptvLogoUrl';
+import { displayChannelName } from '@/shared/iptvChannelName';
+import { setLiveLineup } from '@/lib/liveChannelLineup';
 
 const CHANNEL_PAGE_SIZE = 120;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -22,6 +24,12 @@ const SORT_OPTIONS: ReadonlyArray<{ value: IptvChannelSort; label: string }> = [
   { value: 'name-asc', label: 'A–Z' },
   { value: 'name-desc', label: 'Z–A' },
   { value: 'category', label: 'Categories' },
+];
+type ChannelCollection = 'all' | 'favorites' | 'recent';
+const COLLECTION_OPTIONS: ReadonlyArray<{ value: ChannelCollection; label: string }> = [
+  { value: 'all', label: 'All channels' },
+  { value: 'favorites', label: 'Favorites' },
+  { value: 'recent', label: 'Recently watched' },
 ];
 const GEO_FILTER_OPTIONS: ReadonlyArray<{ value: IptvGeoFilter; label: string }> = [
   { value: 'all', label: 'All channels' },
@@ -63,23 +71,27 @@ function ChannelCard({
   channel,
   nowMs,
   onPlay,
+  onToggleFavorite,
 }: {
   channel: IptvChannelSummary;
   nowMs: number;
   onPlay: () => void;
+  onToggleFavorite: () => void;
 }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const logoUrl = useMemo(() => normalizeIptvLogoUrl(channel.logoUrl), [channel.logoUrl]);
   const progress = programmeProgress(channel, nowMs);
+  const name = displayChannelName(channel.name);
 
   useEffect(() => setLogoFailed(false), [logoUrl]);
 
   return (
+    <div className="group relative h-full">
     <button
       type="button"
       onClick={onPlay}
-      className="group relative flex h-full flex-col gap-3 rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3 text-left transition-colors hover:border-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-      aria-label={channel.nowTitle ? `Play ${channel.name}, now showing ${channel.nowTitle}` : `Play ${channel.name}`}
+      className="relative flex h-full w-full flex-col gap-3 rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3 text-left transition-colors hover:border-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+      aria-label={channel.nowTitle ? `Play ${name}, now showing ${channel.nowTitle}` : `Play ${name}`}
     >
       <div className="flex items-center gap-3">
         <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--loom-surface-2)]">
@@ -100,12 +112,12 @@ function ChannelCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-[var(--loom-text)]">{channel.name}</p>
+          <p className="truncate text-sm font-semibold text-[var(--loom-text)]" title={channel.name}>{name}</p>
           {channel.groupTitle ? (
             <p className="truncate text-xs text-[var(--loom-faint)]">{channelCategories(channel.groupTitle).join(' · ')}</p>
           ) : null}
         </div>
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-3)] text-[var(--loom-text)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        <span className="mr-9 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-3)] text-[var(--loom-text)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <Play className="h-4 w-4 fill-current" strokeWidth={0} aria-hidden="true" />
         </span>
       </div>
@@ -126,6 +138,17 @@ function ChannelCard({
         </div>
       ) : null}
     </button>
+    <button
+      type="button"
+      onClick={onToggleFavorite}
+      aria-pressed={channel.favorite}
+      aria-label={channel.favorite ? `Remove ${name} from favorites` : `Add ${name} to favorites`}
+      title={channel.favorite ? 'Remove from favorites' : 'Add to favorites'}
+      className={`absolute right-3 top-5 grid h-8 w-8 place-items-center rounded-full transition-opacity hover:bg-[var(--loom-surface-3)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${channel.favorite ? 'text-[var(--loom-accent)] opacity-100' : 'text-[var(--loom-muted)] opacity-0 group-hover:opacity-100'}`}
+    >
+      <Star className={`h-4 w-4 ${channel.favorite ? 'fill-current' : ''}`} aria-hidden="true" />
+    </button>
+    </div>
   );
 }
 
@@ -145,6 +168,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
   const [subcategory, setSubcategory] = useState(ALL_SUBCATEGORIES);
   const [geoFilter, setGeoFilter] = useState<IptvGeoFilter>('all');
   const [sort, setSort] = useState<IptvChannelSort>('category');
+  const [collection, setCollection] = useState<ChannelCollection>('all');
   const [page, setPage] = useState<IptvChannelPage | null>(null);
   const [channels, setChannels] = useState<IptvChannelSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -175,7 +199,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
   useEffect(() => {
     setChannels([]);
     setIsLoading(true);
-  }, [sourceId, debouncedQuery, group, subcategory, geoFilter, sort]);
+  }, [sourceId, debouncedQuery, group, subcategory, geoFilter, sort, collection]);
 
   const loadChannels = useCallback(async (offset: number) => {
     if (!sourceId) return;
@@ -191,6 +215,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
         subcategory: subcategory || undefined,
         geoFilter,
         sort,
+        collection,
         limit: CHANNEL_PAGE_SIZE,
         offset,
         verify,
@@ -208,7 +233,7 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
         setIsPaging(false);
       }
     }
-  }, [debouncedQuery, geoFilter, group, sort, sourceId, subcategory]);
+  }, [collection, debouncedQuery, geoFilter, group, sort, sourceId, subcategory]);
 
   useEffect(() => {
     void loadChannels(0);
@@ -284,6 +309,31 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
     return () => observer.disconnect();
   }, [channels.length, isLoading, isPaging, loadChannels, remainingCount]);
 
+  // Star or unstar at once; the list catches up when it next loads.
+  const toggleFavorite = (channel: IptvChannelSummary) => {
+    const favorite = !channel.favorite;
+    setChannels((current) => current
+      .map((entry) => (entry.channelId === channel.channelId ? { ...entry, favorite } : entry))
+      .filter((entry) => collection !== 'favorites' || entry.favorite));
+    void desktopApi.setIptvFavorite(sourceId, channel.channelId, favorite).catch((error) => {
+      setLoadError(error instanceof Error ? error.message : 'Could not update favorites.');
+      void loadChannels(0);
+    });
+  };
+
+  // Opening a channel records the list it was opened from, so the player can
+  // step through the same channels in the same order.
+  const playChannel = (channel: IptvChannelSummary) => {
+    const lineup = channels.map((entry) => ({
+      reference: buildIptvPlaybackReference(sourceId, entry.channelId, entry.streamUrl),
+      name: displayChannelName(entry.name),
+      logoUrl: normalizeIptvLogoUrl(entry.logoUrl) || undefined,
+    }));
+    const reference = buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl);
+    setLiveLineup(lineup, reference);
+    onPlay(reference, displayChannelName(channel.name), normalizeIptvLogoUrl(channel.logoUrl) || undefined);
+  };
+
   if (!sourceId) return null;
 
   return (
@@ -340,6 +390,13 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                   emptySearchMessage="No matching subcategories"
                 />
               ) : null}
+              <ThemeFilterDropdown
+                id="live-tv-collection"
+                label="Show channels"
+                value={collection}
+                options={COLLECTION_OPTIONS}
+                onChange={(value) => setCollection(value as ChannelCollection)}
+              />
               <ThemeFilterDropdown
                 id="live-tv-geo-filter"
                 label="Filter channel availability"
@@ -419,7 +476,8 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                           key={channel.channelId}
                           channel={channel}
                           nowMs={nowMs}
-                          onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, normalizeIptvLogoUrl(channel.logoUrl) || undefined)}
+                          onPlay={() => playChannel(channel)}
+                          onToggleFavorite={() => toggleFavorite(channel)}
                         />
                       ))}
                     </div>
@@ -433,7 +491,8 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
                     key={channel.channelId}
                     channel={channel}
                     nowMs={nowMs}
-                    onPlay={() => onPlay(buildIptvPlaybackReference(sourceId, channel.channelId, channel.streamUrl), channel.name, normalizeIptvLogoUrl(channel.logoUrl) || undefined)}
+                    onPlay={() => playChannel(channel)}
+                    onToggleFavorite={() => toggleFavorite(channel)}
                   />
                 ))}
               </div>

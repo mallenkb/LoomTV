@@ -140,6 +140,16 @@ const tvMazeShowSchema: z.ZodType<TVMazeShow> = z.object({
 });
 const tvMazeSearchSchema: z.ZodType<TVMazeSearchEntry[]> = z.array(z.object({ show: tvMazeShowSchema.optional() }));
 
+/** A TVmaze show ID from a TVDB or IMDb ID, or null when TVmaze has no match. */
+export async function lookupTvmazeShowId(ids: { tvdbId?: string; imdbId?: string }): Promise<number | null> {
+  const query = ids.tvdbId ? `thetvdb=${encodeURIComponent(ids.tvdbId)}` : ids.imdbId ? `imdb=${encodeURIComponent(ids.imdbId)}` : '';
+  if (!query) return null;
+  const response = await safeFetch(`https://api.tvmaze.com/lookup/shows?${query}`, {}, { allowedHosts: ['api.tvmaze.com'], retries: 1 });
+  if (!response.ok) return null;
+  const id = Number((await response.json() as { id?: unknown }).id);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 export function tvMazeShowIsEnded(status?: string | null): boolean {
   return status?.trim().toLowerCase() === 'ended';
 }
@@ -175,7 +185,7 @@ function tvmazeEpisodeToMeta(episode: TVMazeEpisode): EpisodeMeta {
   };
 }
 
-async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
+export async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
   const episodesRes = await safeFetch(`https://api.tvmaze.com/shows/${showId}/episodes`, {}, {
     allowedHosts: ['api.tvmaze.com'],
     retries: 2,

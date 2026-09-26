@@ -34,6 +34,8 @@ import type {
   MediaRenameBatch,
   MediaRenamePreview,
   MediaRenameStatus,
+  LibraryEpisodeUpdates,
+  LibraryHealthReport,
   MetadataApiKeys,
   MetadataKeyTestResult,
   MetadataProviderRequest,
@@ -116,12 +118,16 @@ export interface IpcContract {
   'library:rename-history': { args: []; result: MediaRenameBatch[] };
   'library:rename-undo': { args: [batchId: string]; result: MediaRenameBatch[] };
   'library:rename-status': { args: []; result: MediaRenameStatus };
+  'library:episode-updates': { args: []; result: LibraryEpisodeUpdates };
+  'library:health': { args: []; result: LibraryHealthReport };
   'iptv:list-sources': { args: []; result: IptvSourceSummary[] };
   'iptv:add-source': { args: [input: IptvSourceInput]; result: IptvSourceSummary[] };
   'iptv:update-source': { args: [sourceId: string, patch: IptvSourcePatch]; result: IptvSourceSummary[] };
   'iptv:remove-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:refresh-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:list-channels': { args: [request: IptvChannelRequest]; result: IptvChannelPage };
+  'iptv:explain-channel': { args: [reference: string]; result: string | null };
+  'iptv:set-favorite': { args: [sourceId: string, channelId: string, favorite: boolean]; result: void };
   'media:ffmpeg-available': { args: []; result: { available: boolean; path: string | null } };
   'media:get-server-port': { args: []; result: number };
   'media:get-stream-url': { args: [filePath: string, options?: StreamUrlOptions]; result: StreamUrlResult };

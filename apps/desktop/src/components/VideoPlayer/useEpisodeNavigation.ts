@@ -12,6 +12,8 @@ type UpdatePlaybackSnapshot = (
 
 type EpisodeNavigationOptions = {
   autoplayNextEnabled: boolean;
+  /** Asked before an episode that ended on its own starts the next; false holds it. */
+  allowAutomaticNext?: () => boolean;
   currentEpisode: number;
   currentSeason: number;
   duration: number;
@@ -35,6 +37,7 @@ type EpisodeNavigationOptions = {
 
 export function useEpisodeNavigation({
   autoplayNextEnabled,
+  allowAutomaticNext,
   currentEpisode,
   currentSeason,
   duration,
@@ -127,11 +130,19 @@ export function useEpisodeNavigation({
     goToEpisode(nextEpisode.season, nextEpisode.episode);
   }, [filePath, goToEpisode, nextEpisode, onEpisodeChange]);
 
+  // An episode that ended on its own: start the next one unless the viewer
+  // should be asked whether they are still watching.
+  const autoAdvance = useCallback(() => {
+    if (allowAutomaticNext && !allowAutomaticNext()) return;
+    scheduleNextEpisode();
+  }, [allowAutomaticNext, scheduleNextEpisode]);
+
   const latestPlaybackRef = useRef({
     autoplayNextEnabled,
     nextEpisodeFile: nextEpisode,
     markCurrentEpisodeComplete,
     scheduleNextEpisode,
+    autoAdvance,
   });
 
   useEffect(() => {
@@ -140,8 +151,9 @@ export function useEpisodeNavigation({
       nextEpisodeFile: nextEpisode,
       markCurrentEpisodeComplete,
       scheduleNextEpisode,
+      autoAdvance,
     };
-  }, [autoplayNextEnabled, markCurrentEpisodeComplete, nextEpisode, scheduleNextEpisode]);
+  }, [autoAdvance, autoplayNextEnabled, markCurrentEpisodeComplete, nextEpisode, scheduleNextEpisode]);
 
   return {
     goToEpisode,
