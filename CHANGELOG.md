@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.194](docs/releases/v1.0.194.md)
+
+Keeps automatic desktop update downloads in the background without an interrupting dialog.
+
 ### [1.0.193](docs/releases/v1.0.193.md)
 
 Adds reviewed, undoable media file renaming and verifies live TV streams before listing them.

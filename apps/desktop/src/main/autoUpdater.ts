@@ -777,10 +777,8 @@ async function handleManualUpdateCheck() {
   }
 
   if (checkedState.status === 'downloading' || checkedState.status === 'available') {
-    showUpdateDialog(
-      'Update check in progress',
-      'An update is being checked and downloaded in the background.',
-    );
+    // Updates download automatically. Keep background progress in the sidebar
+    // and Settings instead of interrupting the user with a modal.
     return;
   }
 
