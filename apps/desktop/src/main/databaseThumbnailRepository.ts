@@ -30,7 +30,8 @@ export function createDatabaseThumbnailRepository(database: BetterSqlite3.Databa
     if (now - row.updated_at >= THUMBNAIL_TOUCH_INTERVAL_MS) {
       database.prepare('UPDATE thumbnail_cache SET updated_at = ? WHERE cache_key = ?').run(now, cacheKey);
     }
-    return { bytes: Buffer.from(row.image_bytes), mimeType: row.mime_type };
+    // SQLite already returns an owned Buffer; the response can use it directly.
+    return { bytes: row.image_bytes, mimeType: row.mime_type };
   }
 
   function trimForIncoming(cacheKey: string, incomingBytes: number): void {

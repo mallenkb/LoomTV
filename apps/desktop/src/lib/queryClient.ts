@@ -60,7 +60,8 @@ export function trimQueryCache({ maxBytes = 8 * 1024 * 1024, maxEntries = 160 } 
       .filter(query => query.getObserversCount() === 0 && query.state.fetchStatus === 'idle')
       .sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt);
     const counts = new Map<string, number>();
-    for (const query of [...idle].reverse()) {
+    for (let index = idle.length - 1; index >= 0; index -= 1) {
+      const query = idle[index];
       const family = String(query.queryKey[0]);
       const limit = family === 'discover' ? 12 : family === 'detail' || family === 'explore' || family === 'discover-detail' ? 24 : 96;
       const count = (counts.get(family) || 0) + 1;
@@ -69,7 +70,10 @@ export function trimQueryCache({ maxBytes = 8 * 1024 * 1024, maxEntries = 160 } 
       // again for each eviction in a burst of completed native reads.
       if (count > limit) cache.remove(query);
     }
-    const remaining = idle.filter(query => cache.get(query.queryHash) === query).length;
+    let remaining = 0;
+    for (const query of idle) {
+      if (cache.get(query.queryHash) === query) remaining += 1;
+    }
     let excess = Math.max(0, remaining - maxEntries);
     for (const query of idle) {
       if (excess <= 0) break;

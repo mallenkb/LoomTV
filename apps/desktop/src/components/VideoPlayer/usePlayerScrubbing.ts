@@ -6,6 +6,10 @@ const NATIVE_SCRUB_PREVIEW_INTERVAL_MS = 80;
 // A trackpad swipe ends with momentum events; commit once they stop.
 const WHEEL_SCRUB_COMMIT_MS = 220;
 const WHEEL_LINE_PIXELS = 16;
+const WHEEL_SCRUB_MAX_VERTICAL_RATIO = Math.tan(20 * Math.PI / 180);
+// A swipe's first events are 1-2 px in any direction. Judge its angle only
+// after this much travel, so noise can't mark a sideways swipe as vertical.
+const WHEEL_GESTURE_CLASSIFY_PIXELS = 8;
 
 /**
  * Seconds of media per pixel of horizontal trackpad travel. Finer on short
@@ -203,12 +207,13 @@ export function usePlayerScrubbing({
     updatePlaybackSnapshot,
   ]);
 
-  // Two-finger horizontal swipe scrubs the timeline, as in VLC; a vertical
-  // swipe does nothing. With macOS
-  // natural scrolling, fingers moving right report a negative deltaX, which
-  // moves forward. Frames preview through the same throttled native seeks as
-  // dragging the bar, and the final position is committed once the swipe and
-  // its momentum have stopped.
+  // Two-finger swipes within 20 degrees of horizontal scrub the timeline.
+  // Up/down and steeper swipes do nothing, including their momentum. With
+  // macOS natural scrolling, fingers moving right report a negative deltaX,
+  // which moves forward. Frames preview through the same throttled native
+  // seeks as dragging the bar, and the final position is committed once the
+  // swipe and its momentum have stopped.
+  //
   // seekTo and duration change while a video plays. Read them through a ref
   // so a change mid-swipe doesn't re-register the listener and drop the swipe.
   const wheelScrubLatestRef = useRef({ duration, seekTo, updatePlaybackSnapshot, onWheelScrubActivity });
@@ -220,10 +225,16 @@ export function usePlayerScrubbing({
     const latest = wheelScrubLatestRef;
     let pendingPosition: number | null = null;
     let commitTimer: ReturnType<typeof setTimeout> | null = null;
+    let gestureDirection: 'horizontal' | 'ignored' | null = null;
+    let unclassifiedX = 0;
+    let unclassifiedY = 0;
 
     const endGesture = (commit: boolean) => {
       if (commitTimer) clearTimeout(commitTimer);
       commitTimer = null;
+      gestureDirection = null;
+      unclassifiedX = 0;
+      unclassifiedY = 0;
       const target = pendingPosition;
       pendingPosition = null;
       if (target === null) return;
@@ -244,21 +255,37 @@ export function usePlayerScrubbing({
       const { duration } = latest.current;
       // Ctrl+wheel is a pinch gesture, not a swipe.
       if (event.ctrlKey || !duration) return;
-      if (pendingPosition === null) {
-        if (startsInScrollableRegion(event.target, container)) return;
-        // Vertical swipes over the video deliberately do nothing.
-        if (event.deltaX === 0 || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
-          event.preventDefault();
-          return;
+      if (event.deltaX === 0 && event.deltaY === 0) return;
+      const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? WHEEL_LINE_PIXELS : 1;
+      const isWithinAngle = (x: number, y: number) => x !== 0 && Math.abs(y) <= Math.abs(x) * WHEEL_SCRUB_MAX_VERTICAL_RATIO;
+      let deltaPixels = event.deltaX * scale;
+      let classifiedNow = false;
+      if (gestureDirection === null) {
+        if (unclassifiedX === 0 && unclassifiedY === 0) {
+          if (startsInScrollableRegion(event.target, container)) return;
+          // A drag on the progress bar owns scrubbing until it ends.
+          if (listenerCleanupRef.current) return;
         }
-        // A drag on the progress bar owns scrubbing until it ends.
-        if (listenerCleanupRef.current) return;
+        unclassifiedX += event.deltaX * scale;
+        unclassifiedY += event.deltaY * scale;
+        if (Math.hypot(unclassifiedX, unclassifiedY) >= WHEEL_GESTURE_CLASSIFY_PIXELS) {
+          gestureDirection = isWithinAngle(unclassifiedX, unclassifiedY) ? 'horizontal' : 'ignored';
+          classifiedNow = true;
+          // Apply the travel used to judge the angle as the swipe's first step.
+          deltaPixels = unclassifiedX;
+        }
+      }
+      event.preventDefault();
+      if (commitTimer) clearTimeout(commitTimer);
+      commitTimer = setTimeout(() => endGesture(true), WHEEL_SCRUB_COMMIT_MS);
+      if (gestureDirection !== 'horizontal') return;
+      // Check every event so vertical drift cannot seek during a horizontal swipe.
+      if (!classifiedNow && !isWithinAngle(event.deltaX, event.deltaY)) return;
+      if (pendingPosition === null) {
         pendingPosition = playbackPositionRef.current;
         isScrubbingRef.current = true;
         setIsScrubbing(true);
       }
-      event.preventDefault();
-      const deltaPixels = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaX * WHEEL_LINE_PIXELS : event.deltaX;
       pendingPosition = Math.min(duration, Math.max(0, pendingPosition - deltaPixels * wheelScrubSecondsPerPixel(duration)));
       requestNativePreview(pendingPosition);
       if (previewRafRef.current === null) {
@@ -268,8 +295,6 @@ export function usePlayerScrubbing({
         });
       }
       latest.current.onWheelScrubActivity();
-      if (commitTimer) clearTimeout(commitTimer);
-      commitTimer = setTimeout(() => endGesture(true), WHEEL_SCRUB_COMMIT_MS);
     };
 
     container.addEventListener('wheel', handleWheel, { passive: false });
