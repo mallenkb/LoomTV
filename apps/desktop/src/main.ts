@@ -1950,9 +1950,14 @@ registerIpcHandlers<LibraryData, AppSettings>({
     await iptvService.refreshSource(sourceId);
     return iptvService.listSources();
   },
+  setIptvPageActive: (active: boolean) => {
+    if (active) iptvService.startHealthChecks();
+    else iptvService.stopHealthChecks();
+  },
   listIptvChannels: (request) => iptvService.listChannels(request),
   resolveIptvStreamUrl: (sourceId, channelId) => iptvService.getChannelStreamUrl(sourceId, channelId),
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => iptvService.setFavorite(sourceId, channelId, favorite),
+  iptvGuide: (references: string[], fromMs: number, toMs: number) => iptvService.guide(references, fromMs, toMs),
   explainIptvChannel: async (reference: string) => {
     const parsed = parseIptvPlaybackReference(reference);
     return parsed ? iptvService.explainChannel(parsed.sourceId, parsed.channelId) : null;
@@ -2593,7 +2598,6 @@ app.whenReady().then(async () => {
   void startBackgroundServices().catch((error) => {
     console.error('Loom background startup failed:', error);
   });
-  iptvService.startHealthChecks();
 }).catch((error) => {
   console.error('Failed to start Loom Media Server:', error);
   // A failed startup must not remain as a headless process holding the single

@@ -13,6 +13,7 @@ import {
   getIptvSource,
   insertIptvSource,
   listIptvChannels,
+  listIptvGuide,
   listIptvGroups,
   listIptvSubcategories,
   listIptvSources,
@@ -40,8 +41,10 @@ import {
   type StreamLiveMarker,
 } from './iptvStreamHealth.ts';
 import { guideChannelKey, parseXmltvGuide } from './xmltvGuide.ts';
+import { parseIptvPlaybackReference } from '../../shared/iptvPlayback.ts';
 import type {
   IptvChannelPage,
+  IptvGuide,
   IptvSourceHealth,
   IptvSourceInput,
   IptvSourcePatch,
@@ -207,7 +210,10 @@ export function createIptvService(deps: IptvServiceDependencies) {
   const healthQueued = new Set<string>();
   const healthProgress = new Map<string, { checked: number; total: number }>();
   let healthChain: Promise<void> = Promise.resolve();
+  let healthChecksActive = false;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
   let sweepTimer: ReturnType<typeof setInterval> | null = null;
+  const followUpTimers = new Set<ReturnType<typeof setTimeout>>();
 
   const healthFor = (database: import('better-sqlite3').Database, sourceId: string, checkedAt: number): IptvSourceHealth => {
     const progress = healthProgress.get(sourceId);
@@ -232,6 +238,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
   };
 
   async function checkSourceHealth(sourceId: string, dueBefore: number): Promise<{ transientFailures: number }> {
+    if (!healthChecksActive) return { transientFailures: 0 };
     const database = deps.getDatabase();
     if (!getIptvSource(database, sourceId)) return { transientFailures: 0 };
     const ffmpegPath = deps.findFFmpeg?.() ?? null;
@@ -260,16 +267,18 @@ export function createIptvService(deps: IptvServiceDependencies) {
     // roll out of the provider's window while it waits its turn.
     const queue = [...due];
     const worker = async () => {
-      for (let entry = queue.shift(); entry && !sourceRemoved; entry = queue.shift()) {
+      for (let entry = queue.shift(); entry && !sourceRemoved && healthChecksActive; entry = queue.shift()) {
         let result: StreamCheckResult;
         do {
           await waitForPlaybackIdle();
+          if (!healthChecksActive) return;
           if (!getIptvSource(database, sourceId)) {
             sourceRemoved = true;
             return;
           }
           result = await checkIptvStream(entry.streamUrl, runFfmpeg);
-        } while (result.outcome === 'inconclusive' && result.interrupted);
+        } while (healthChecksActive && result.outcome === 'inconclusive' && result.interrupted);
+        if (!healthChecksActive) return;
         if (!getIptvSource(database, sourceId)) {
           sourceRemoved = true;
           return;
@@ -282,7 +291,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
       }
     };
     await Promise.all(Array.from({ length: HEALTH_STREAM_CONCURRENCY }, worker));
-    if (sourceRemoved) return { transientFailures: 0 };
+    if (sourceRemoved || !healthChecksActive) return { transientFailures: 0 };
 
     // Second look at every live playlist, each timed from its own first look:
     // three segment lengths, and never under the minimum, so a stream sampled
@@ -290,18 +299,21 @@ export function createIptvService(deps: IptvServiceDependencies) {
     const readyAt = (marker: StreamLiveMarker) => marker.fetchedAt + Math.max(marker.targetSeconds * 3000, HEALTH_LIVE_MIN_WAIT_MS);
     const liveQueue = [...markers].sort((left, right) => readyAt(left.marker) - readyAt(right.marker));
     const liveWorker = async () => {
-      for (let item = liveQueue.shift(); item; item = liveQueue.shift()) {
+      for (let item = liveQueue.shift(); item && healthChecksActive; item = liveQueue.shift()) {
         const wait = readyAt(item.marker) - Date.now();
         if (wait > 0) await sleep(wait);
+        if (!healthChecksActive) return;
         let second: Awaited<ReturnType<typeof recheckLivePlaylist>>;
         do {
           await waitForPlaybackIdle();
+          if (!healthChecksActive) return;
           if (!getIptvSource(database, sourceId)) {
             sourceRemoved = true;
             return;
           }
           second = await recheckLivePlaylist(item.marker);
-        } while (second === 'interrupted');
+        } while (healthChecksActive && second === 'interrupted');
+        if (!healthChecksActive) return;
         if (second === 'advanced') {
           record(item.entry, { outcome: 'ok', analyzed: true, live: null });
         } else if (second === 'frozen') {
@@ -313,6 +325,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
     };
     await Promise.all(Array.from({ length: HEALTH_STREAM_CONCURRENCY }, liveWorker));
 
+    if (!healthChecksActive) return { transientFailures: 0 };
     if (getIptvSource(database, sourceId)) recordIptvHealthCheck(database, sourceId, startedAt);
     pruneIptvStreamHealth(database);
     return { transientFailures };
@@ -324,7 +337,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
    * queued behind another still skips streams verified in the meantime.
    */
   function scheduleHealthCheck(sourceId: string, freshMs = HEALTH_FRESH_MS, followUp = false): void {
-    if (healthQueued.has(sourceId)) return;
+    if (!healthChecksActive || healthQueued.has(sourceId)) return;
     healthQueued.add(sourceId);
     healthChain = healthChain.then(async () => {
       let transientFailures = 0;
@@ -336,13 +349,19 @@ export function createIptvService(deps: IptvServiceDependencies) {
         healthQueued.delete(sourceId);
         healthProgress.delete(sourceId);
       }
-      if (transientFailures > 0 && !followUp) {
-        setTimeout(() => scheduleHealthCheck(sourceId, freshMs, true), HEALTH_FOLLOW_UP_MS).unref?.();
+      if (healthChecksActive && transientFailures > 0 && !followUp) {
+        const timer = setTimeout(() => {
+          followUpTimers.delete(timer);
+          scheduleHealthCheck(sourceId, freshMs, true);
+        }, HEALTH_FOLLOW_UP_MS);
+        followUpTimers.add(timer);
+        timer.unref?.();
       }
     });
   }
 
   function sweepHealth(freshMs: number): void {
+    if (!healthChecksActive) return;
     for (const source of listIptvSources(deps.getDatabase())) {
       if (source.refreshedAt > 0) scheduleHealthCheck(source.id, freshMs);
     }
@@ -490,15 +509,27 @@ export function createIptvService(deps: IptvServiceDependencies) {
 
     refreshSource,
 
-    /**
-     * Verify every source shortly after launch, then keep streams no older
-     * than a day while the app stays open.
-     */
+    /** Verify sources only while the Live TV page is mounted. */
     startHealthChecks(): void {
-      if (sweepTimer) return;
-      setTimeout(() => sweepHealth(HEALTH_FRESH_MS), HEALTH_STARTUP_DELAY_MS).unref?.();
+      if (healthChecksActive) return;
+      healthChecksActive = true;
+      startupTimer = setTimeout(() => {
+        startupTimer = null;
+        sweepHealth(HEALTH_FRESH_MS);
+      }, HEALTH_STARTUP_DELAY_MS);
+      startupTimer.unref?.();
       sweepTimer = setInterval(() => sweepHealth(HEALTH_RECHECK_MS), HEALTH_SWEEP_INTERVAL_MS);
       sweepTimer.unref?.();
+    },
+
+    stopHealthChecks(): void {
+      healthChecksActive = false;
+      if (startupTimer) clearTimeout(startupTimer);
+      if (sweepTimer) clearInterval(sweepTimer);
+      startupTimer = null;
+      sweepTimer = null;
+      for (const timer of followUpTimers) clearTimeout(timer);
+      followUpTimers.clear();
     },
 
     listChannels(request: IptvChannelQuery & { verify?: boolean }): IptvChannelPage {
@@ -559,6 +590,27 @@ export function createIptvService(deps: IptvServiceDependencies) {
     },
 
     /** Why a channel will not play, for the player; null when it answers. */
+    /** What the given channels show between two times, keyed by reference. */
+    guide(references: readonly string[], fromMs: number, toMs: number): IptvGuide {
+      const bySource = new Map<string, Map<string, string>>();
+      for (const reference of references) {
+        const parsed = parseIptvPlaybackReference(reference);
+        if (!parsed) continue;
+        const channels = bySource.get(parsed.sourceId) || new Map<string, string>();
+        channels.set(parsed.channelId, reference);
+        bySource.set(parsed.sourceId, channels);
+      }
+      const guide: IptvGuide = {};
+      for (const [sourceId, channels] of bySource) {
+        const listings = listIptvGuide(deps.getDatabase(), sourceId, [...channels.keys()], fromMs, toMs);
+        for (const [channelId, programmes] of listings) {
+          const reference = channels.get(channelId);
+          if (reference) guide[reference] = programmes;
+        }
+      }
+      return guide;
+    },
+
     async explainChannel(sourceId: string, channelId: string): Promise<string | null> {
       const streamUrl = getIptvChannelStreamUrl(deps.getDatabase(), sourceId, channelId);
       if (!streamUrl) return 'This channel is no longer in the playlist.';
@@ -566,4 +618,3 @@ export function createIptvService(deps: IptvServiceDependencies) {
     },
   };
 }
-

@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  LayoutGrid,
   ListOrdered,
   Maximize,
   Minimize,
@@ -53,7 +54,17 @@ interface PlayerControlBarProps {
   handleVolume: React.ChangeEventHandler<HTMLInputElement>;
   handlePrevEpisode: () => void;
   handleNextEpisode: () => void;
+  handlePreviousLiveChannel?: () => void;
+  handleNextLiveChannel?: () => void;
   openEpisodePanel: () => void;
+  /** Live only: what's on now, shown beside "LIVE". */
+  liveNowPlaying?: React.ReactNode;
+  /** Live only: opens the channel list beside the player. */
+  openChannelList?: () => void;
+  showChannelList?: boolean;
+  /** Live only: opens the guide over the lower part of the player. */
+  openGuide?: () => void;
+  showGuide?: boolean;
   openSubtitlesPanel: () => void;
   openMediaPanel: () => void;
   toggleFullscreen: () => void;
@@ -93,7 +104,14 @@ export default function PlayerControlBar({
   handleVolume,
   handlePrevEpisode,
   handleNextEpisode,
+  handlePreviousLiveChannel,
+  handleNextLiveChannel,
   openEpisodePanel,
+  liveNowPlaying,
+  openChannelList,
+  showChannelList = false,
+  openGuide,
+  showGuide = false,
   openSubtitlesPanel,
   openMediaPanel,
   toggleFullscreen,
@@ -112,12 +130,8 @@ export default function PlayerControlBar({
     >
       <div className="mb-2 flex items-center gap-3">
         {isLiveStream ? (
-          <div
-            className="flex min-w-[6.75rem] shrink-0 items-center gap-2 px-1 text-sm font-semibold tracking-wide text-white sm:text-base"
-            aria-label="Live playback"
-          >
-            <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_10px_rgb(239_68_68_/_0.8)]" aria-hidden="true" />
-            LIVE
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {liveNowPlaying}
           </div>
         ) : (
           <button
@@ -135,7 +149,8 @@ export default function PlayerControlBar({
           </button>
         )}
 
-        {/* Progress bar */}
+        {/* Progress bar. A live stream has no timeline to show or seek. */}
+        {!isLiveStream && (
         <div
           ref={seekSliderRef}
           role={isLiveStream ? 'progressbar' : 'slider'}
@@ -178,6 +193,7 @@ export default function PlayerControlBar({
             style={{ left: `${isLiveStream ? 100 : progressPct}%` }}
           />
         </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -248,23 +264,23 @@ export default function PlayerControlBar({
 
         <div className="flex-1" />
 
-        {hasEpisodes && (
+        {(hasEpisodes || (isLiveStream && handlePreviousLiveChannel && handleNextLiveChannel)) && (
           <div className="mr-1 flex items-center gap-1">
             <button
               type="button"
-              onClick={handlePrevEpisode}
+              onClick={isLiveStream ? handlePreviousLiveChannel : handlePrevEpisode}
               className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-              title="Previous episode"
-              aria-label="Previous episode"
+              title={isLiveStream ? 'Previous channel (Page Up)' : 'Previous episode'}
+              aria-label={isLiveStream ? 'Previous channel' : 'Previous episode'}
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={2.5} />
             </button>
             <button
               type="button"
-              onClick={handleNextEpisode}
+              onClick={isLiveStream ? handleNextLiveChannel : handleNextEpisode}
               className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-              title="Next episode"
-              aria-label="Next episode"
+              title={isLiveStream ? 'Next channel (Page Down)' : 'Next episode'}
+              aria-label={isLiveStream ? 'Next channel' : 'Next episode'}
             >
               <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
             </button>
@@ -272,6 +288,39 @@ export default function PlayerControlBar({
         )}
 
         <div className="mx-1 hidden h-7 w-px bg-white/20 sm:block" aria-hidden="true" />
+
+        {isLiveStream && openChannelList && (
+          <button
+            type="button"
+            onClick={openChannelList}
+            data-player-panel-toggle="true"
+            className={`flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showChannelList ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
+            title="Channel list"
+            aria-label="Channel list"
+            aria-pressed={showChannelList}
+            aria-expanded={showChannelList}
+          >
+            <ListOrdered className="h-5 w-5" strokeWidth={2.25} />
+            <span className="text-sm font-medium">Channels</span>
+          </button>
+        )}
+
+        {isLiveStream && openGuide && (
+          <button
+            type="button"
+            onClick={openGuide}
+            data-player-panel-toggle="true"
+            data-player-guide-toggle="true"
+            className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showGuide ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
+            title="Guide (G)"
+            aria-label="Guide"
+            aria-pressed={showGuide}
+            aria-expanded={showGuide}
+            aria-keyshortcuts="G"
+          >
+            <LayoutGrid className="h-5 w-5" strokeWidth={2.25} />
+          </button>
+        )}
 
         {hasEpisodes && (
           <button
@@ -289,7 +338,7 @@ export default function PlayerControlBar({
           </button>
         )}
 
-        <button
+        {!isLiveStream && <button
           type="button"
           onClick={openSubtitlesPanel}
           data-player-panel-toggle="true"
@@ -300,7 +349,7 @@ export default function PlayerControlBar({
           aria-expanded={showMediaPanel && mediaPanelTab === 'subtitles'}
         >
           <Subtitles className="h-5 w-5" strokeWidth={2.25} />
-        </button>
+        </button>}
 
         <button
           type="button"

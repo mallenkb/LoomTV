@@ -89,8 +89,11 @@ import {
 import PauseOverlay from './VideoPlayer/PauseOverlay';
 import NextEpisodePrompt from './VideoPlayer/NextEpisodePrompt';
 import StillWatchingPrompt from './VideoPlayer/StillWatchingPrompt';
-import LiveChannelOverlay from './VideoPlayer/LiveChannelOverlay';
-import { adjacentLiveChannel, lastLiveChannel, livePosition, noteLiveChannelPlaying } from '@/lib/liveChannelLineup';
+import LiveProblemPanel, { LiveNowPlaying } from './VideoPlayer/LiveChannelOverlay';
+import PlayerChannelPanel from './VideoPlayer/PlayerChannelPanel';
+import PlayerGuide from './VideoPlayer/PlayerGuide';
+import { nowAndNext, useLiveGuide } from '@/lib/useLiveGuide';
+import { adjacentLiveChannel, lastLiveChannel, liveLineup, livePosition, noteLiveChannelPlaying } from '@/lib/liveChannelLineup';
 import { useStillWatching } from './VideoPlayer/useStillWatching';
 import PlayerControlBar from './VideoPlayer/PlayerControlBar';
 import PlayerEpisodePanel from './VideoPlayer/PlayerEpisodePanel';
@@ -1094,7 +1097,6 @@ export default function VideoPlayer({
   // Live channels: say plainly why one will not play (instead of a black
   // screen), and switch channels without leaving the player.
   const [liveProblem, setLiveProblem] = useState<string | null>(null);
-  const [liveBarVisible, setLiveBarVisible] = useState(isLiveStream);
   useEffect(() => {
     if (!isLiveStream) return undefined;
     noteLiveChannelPlaying(filePath);
@@ -1102,8 +1104,7 @@ export default function VideoPlayer({
     void desktopApi.explainIptvChannel(filePath).then((problem) => {
       if (!cancelled && problem) setLiveProblem(problem);
     }).catch(() => undefined);
-    const timer = window.setTimeout(() => setLiveBarVisible(false), 4000);
-    return () => { cancelled = true; window.clearTimeout(timer); };
+    return () => { cancelled = true; };
   }, [filePath, isLiveStream]);
   const liveErrored = isLiveStream && playerState === 'error';
   useEffect(() => {
@@ -1126,6 +1127,20 @@ export default function VideoPlayer({
   const liveControlsRef = useRef(liveControls);
   liveControlsRef.current = liveControls;
   const liveLineupPosition = isLiveStream ? livePosition(filePath) : { index: 0, total: 0 };
+  const [showLiveGuide, setShowLiveGuide] = useState(false);
+  // The lineup changes only when a channel is opened from Live TV, which also changes filePath.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const liveLineupChannels = useMemo(() => (isLiveStream ? liveLineup() : []), [isLiveStream, filePath]);
+  const liveReferences = useMemo(() => liveLineupChannels.map((channel) => channel.reference), [liveLineupChannels]);
+  const { guide: liveGuide, now: liveGuideNow } = useLiveGuide(liveReferences, isLiveStream);
+  const liveNow = isLiveStream ? nowAndNext(liveGuide[filePath], liveGuideNow) : { now: null, next: null };
+  const toggleLiveGuide = useCallback(() => {
+    setShowLiveGuide((open) => !open);
+    setShowSidebar(false);
+    setShowMediaPanel(false);
+  }, []);
+  const showLiveGuideRef = useRef(showLiveGuide);
+  showLiveGuideRef.current = showLiveGuide;
   const {
     goToEpisode,
     handleNextEpisode,
@@ -2732,6 +2747,10 @@ export default function VideoPlayer({
   }, [onClose, shutdownPlayback]);
 
   const handlePlayerEscape = useCallback(() => {
+    if (showLiveGuide) {
+      setShowLiveGuide(false);
+      return;
+    }
     if (showMarkerEditor) {
       setShowMarkerEditor(false);
       return;
@@ -2749,7 +2768,7 @@ export default function VideoPlayer({
       return;
     }
     void handleBack();
-  }, [fullscreen, handleBack, showMarkerEditor, showMediaPanel, showSidebar, toggleFullscreen]);
+  }, [fullscreen, handleBack, showLiveGuide, showMarkerEditor, showMediaPanel, showSidebar, toggleFullscreen]);
 
   useModalLayer({ contentRef: containerRef, onEscape: handlePlayerEscape });
   useModalLayer({
@@ -2781,6 +2800,7 @@ export default function VideoPlayer({
     }
 
     setShowSidebar(false);
+    setShowLiveGuide(false);
     setMediaPanelTab('video');
     setShowMediaPanel(true);
   }, [showMediaPanel, mediaPanelTab]);
@@ -2792,6 +2812,7 @@ export default function VideoPlayer({
     }
 
     setShowMediaPanel(false);
+    setShowLiveGuide(false);
     setShowSidebar(true);
   }, [showSidebar]);
 
@@ -3692,6 +3713,16 @@ export default function VideoPlayer({
           liveControlsRef.current.last();
           return;
         }
+        if (key === 'g' || key === 'G') {
+          e.preventDefault();
+          toggleLiveGuide();
+          return;
+        }
+        if (key === 'Escape' && showLiveGuideRef.current) {
+          e.preventDefault();
+          setShowLiveGuide(false);
+          return;
+        }
       }
       switch (key) {
         case 'Escape':
@@ -3807,6 +3838,7 @@ export default function VideoPlayer({
     };
   }, [
     resetSurfaceDoubleClickGuard,
+    toggleLiveGuide,
     changePlaybackRate,
     changeVolume,
     duration,
@@ -4187,6 +4219,7 @@ export default function VideoPlayer({
         <TopPlayerControls
           visible={showTopControls && playerState !== 'error'}
           label={activeIframeUrl ? title : (currentEpLabel ?? title)}
+          live={isLiveStream}
           actionLabel={activeIframeUrl && hasEpisodes ? 'Sources' : undefined}
           onAction={activeIframeUrl && hasEpisodes ? openEpisodePanel : undefined}
           fullscreen={fullscreen}
@@ -4342,17 +4375,11 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {isLiveStream && (
-          <LiveChannelOverlay
-            name={title}
-            index={liveLineupPosition.index}
-            total={liveLineupPosition.total}
+        {isLiveStream && liveProblem && (
+          <LiveProblemPanel
             problem={liveProblem}
-            showBar={liveBarVisible || (showControls && playerState !== 'error')}
             canStep={Boolean(onPlayLiveChannel) && liveLineupPosition.total > 1}
-            canGoBack={Boolean(onPlayLiveChannel && lastLiveChannel(filePath))}
             onStep={(step) => liveControlsRef.current.step(step)}
-            onLast={() => liveControlsRef.current.last()}
             onClose={handleClose}
           />
         )}
@@ -4490,7 +4517,18 @@ export default function VideoPlayer({
           handleVolume={handleVolume}
           handlePrevEpisode={handlePrevEpisode}
           handleNextEpisode={handleNextEpisode}
+          handlePreviousLiveChannel={isLiveStream && onPlayLiveChannel && liveLineupPosition.total > 1
+            ? () => liveControlsRef.current.step(-1)
+            : undefined}
+          handleNextLiveChannel={isLiveStream && onPlayLiveChannel && liveLineupPosition.total > 1
+            ? () => liveControlsRef.current.step(1)
+            : undefined}
           openEpisodePanel={openEpisodePanel}
+          liveNowPlaying={isLiveStream ? <LiveNowPlaying now={liveNow.now} next={liveNow.next} at={liveGuideNow} /> : undefined}
+          openChannelList={isLiveStream && onPlayLiveChannel && liveLineupPosition.total > 1 ? openEpisodePanel : undefined}
+          showChannelList={isLiveStream && showSidebar}
+          openGuide={isLiveStream && onPlayLiveChannel && liveLineupPosition.total > 1 ? toggleLiveGuide : undefined}
+          showGuide={isLiveStream && showLiveGuide}
           openSubtitlesPanel={openSubtitlesPanel}
           openMediaPanel={openMediaPanel}
           toggleFullscreen={toggleFullscreen}
@@ -4508,6 +4546,7 @@ export default function VideoPlayer({
           className="contents"
         >
           <PlayerSettingsPanel
+            videoOnly={isLiveStream}
             mediaPanelWidth={mediaPanelWidth}
             setMediaPanelWidth={setMediaPanelWidth}
             startSidePanelResize={startSidePanelResize}
@@ -4607,6 +4646,34 @@ export default function VideoPlayer({
             }}
           />
         </div>
+      )}
+
+      {isLiveStream && showSidebar && (
+        <PlayerChannelPanel
+          channels={liveLineupChannels}
+          current={filePath}
+          guide={liveGuide}
+          now={liveGuideNow}
+          onSelect={(channel) => {
+            setShowSidebar(false);
+            switchLiveChannel(channel);
+          }}
+          onClose={() => setShowSidebar(false)}
+        />
+      )}
+
+      {isLiveStream && showLiveGuide && (
+        <PlayerGuide
+          channels={liveLineupChannels}
+          guide={liveGuide}
+          now={liveGuideNow}
+          current={filePath}
+          onWatch={(channel) => {
+            setShowLiveGuide(false);
+            switchLiveChannel(channel);
+          }}
+          onClose={() => setShowLiveGuide(false)}
+        />
       )}
 
       {hasEpisodes && showSidebar && (

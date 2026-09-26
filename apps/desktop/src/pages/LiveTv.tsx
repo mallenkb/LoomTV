@@ -185,6 +185,11 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
   const isModern = theme.homeStyle === 'modern';
 
   useEffect(() => {
+    void desktopApi.setIptvPageActive(true);
+    return () => { void desktopApi.setIptvPageActive(false); };
+  }, []);
+
+  useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query]);

@@ -97,6 +97,7 @@ function SegmentedSetting<T extends string | number>({
 }
 
 interface PlayerSettingsPanelProps {
+  videoOnly?: boolean;
   mediaPanelWidth: number;
   setMediaPanelWidth: React.Dispatch<React.SetStateAction<number>>;
   startSidePanelResize: (
@@ -155,6 +156,7 @@ interface PlayerSettingsPanelProps {
 }
 
 export default function PlayerSettingsPanel({
+  videoOnly = false,
   mediaPanelWidth,
   setMediaPanelWidth,
   startSidePanelResize,
@@ -201,6 +203,7 @@ export default function PlayerSettingsPanel({
   applySubtitleStyleToStream,
   onCorrectSkipTiming,
 }: PlayerSettingsPanelProps) {
+  const activeTab: ControlTab = videoOnly ? 'video' : mediaPanelTab;
   const trackSource = (track: MediaTrack) => track.source === 'opensubtitles' ? 'OpenSubtitles download'
     : track.source === 'sidecar' ? 'Added subtitle file' : 'Embedded in video';
   const subtitleGroups = useMemo(() => {
@@ -237,7 +240,7 @@ export default function PlayerSettingsPanel({
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white truncate">Playback Settings</p>
-          <p className="text-[10px] uppercase tracking-widest text-[var(--loom-accent)]/75">Subtitles, Audio, Video</p>
+          <p className="text-[10px] uppercase tracking-widest text-[var(--loom-accent)]/75">{videoOnly ? 'Video' : 'Subtitles, Audio, Video'}</p>
         </div>
         <button
           type="button"
@@ -249,24 +252,24 @@ export default function PlayerSettingsPanel({
         </button>
       </div>
 
-      <div className="grid grid-cols-3 border-b border-white/10 text-xs font-bold uppercase tracking-wide text-white/75" role="tablist" aria-label="Playback settings sections">
+      {!videoOnly && <div className="grid grid-cols-3 border-b border-white/10 text-xs font-bold uppercase tracking-wide text-white/75" role="tablist" aria-label="Playback settings sections">
         {(['subtitles', 'audio', 'video'] as ControlTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setMediaPanelTab(tab)}
             role="tab"
-            aria-selected={mediaPanelTab === tab}
-            className={`px-3 py-4 transition-colors ${mediaPanelTab === tab ? 'bg-white/5 text-white' : 'hover:bg-white/5 hover:text-white/80'}`}
+            aria-selected={activeTab === tab}
+            className={`px-3 py-4 transition-colors ${activeTab === tab ? 'bg-white/5 text-white' : 'hover:bg-white/5 hover:text-white/80'}`}
           >
             {tab}
           </button>
         ))}
-      </div>
+      </div>}
 
       <ScrollArea className="flex-1">
         <div className="p-5 text-sm text-white/85">
-          {mediaPanelTab === 'video' && (
+          {activeTab === 'video' && (
             <div className="space-y-5">
               <div>
                 <p className="mb-2 text-xs font-semibold text-white">Video track</p>
@@ -397,8 +400,10 @@ export default function PlayerSettingsPanel({
                       ['Engine', playbackInformation.engine],
                       ['Mode', playbackInformation.mode],
                       ['Video', selectedTrackLabel(videoTracks, selectedVideoTrackIndex, 'Not selected')],
-                      ['Audio', selectedTrackLabel(audioTracks, selectedAudioTrackIndex, 'Not selected')],
-                      ['Subtitles', selectedTrackLabel(subtitleTracks, selectedSubtitleTrackIndex, 'Off')],
+                      ...(videoOnly ? [] : [
+                        ['Audio', selectedTrackLabel(audioTracks, selectedAudioTrackIndex, 'Not selected')],
+                        ['Subtitles', selectedTrackLabel(subtitleTracks, selectedSubtitleTrackIndex, 'Off')],
+                      ]),
                       ['Hardware decode', playbackInformation.hardwareDecode],
                       ['Encode backend', playbackInformation.encodeBackend],
                     ].map(([label, value]) => (
@@ -418,7 +423,7 @@ export default function PlayerSettingsPanel({
             </div>
           )}
 
-          {mediaPanelTab === 'audio' && (
+          {activeTab === 'audio' && (
             <div className="space-y-5">
               <div>
                 <p className="mb-2 text-xs font-semibold text-white">Audio track</p>
@@ -486,7 +491,7 @@ export default function PlayerSettingsPanel({
             </div>
           )}
 
-          {mediaPanelTab === 'subtitles' && (
+          {activeTab === 'subtitles' && (
             <div className="space-y-5">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">

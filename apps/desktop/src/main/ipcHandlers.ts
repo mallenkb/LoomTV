@@ -360,7 +360,9 @@ export interface IpcHandlerDependencies<
   updateIptvSource: (sourceId: string, patch: IpcContract['iptv:update-source']['args'][1]) => IpcResult<'iptv:update-source'>;
   removeIptvSource: (sourceId: string) => IpcResult<'iptv:remove-source'>;
   refreshIptvSource: (sourceId: string) => Promise<IpcResult<'iptv:refresh-source'>>;
+  setIptvPageActive: (active: boolean) => IpcResult<'iptv:set-page-active'>;
   explainIptvChannel: (reference: string) => Promise<IpcResult<'iptv:explain-channel'>>;
+  iptvGuide: (references: string[], fromMs: number, toMs: number) => IpcResult<'iptv:guide'>;
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => IpcResult<'iptv:set-favorite'>;
   previewMediaRenames: () => IpcResult<'library:rename-preview'>;
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
@@ -841,6 +843,8 @@ export function registerIpcHandlers<
     return deps.refreshIptvSource(sourceId);
   }, z.tuple([iptvSourceIdSchema]));
 
+  handle('iptv:set-page-active', (_event, active) => deps.setIptvPageActive(active), z.tuple([z.boolean()]));
+
   // Renaming touches files on disk, so every step is an owner-only settings write.
   handleNoArgs('library:rename-preview', () => {
     deps.authorizeSettingsWrite();
@@ -870,6 +874,7 @@ export function registerIpcHandlers<
 
   handle('iptv:list-channels', (_event, request) => deps.listIptvChannels(request), z.tuple([iptvChannelRequestSchema]));
   handle('iptv:set-favorite', (_event, sourceId, channelId, favorite) => deps.setIptvFavorite(sourceId, channelId, favorite), z.tuple([iptvSourceIdSchema, z.string().min(1).max(500), z.boolean()]));
+  handle('iptv:guide', (_event, references, fromMs, toMs) => deps.iptvGuide(references, fromMs, toMs), z.tuple([z.array(z.string().max(2000)).max(1000), z.number().int().nonnegative(), z.number().int().nonnegative()]).refine(([, from, to]) => to > from && to - from <= 24 * 60 * 60 * 1000));
   handle('iptv:explain-channel', (_event, reference) => deps.explainIptvChannel(reference), z.tuple([z.string().max(2000)]));
 
   handleNoArgs('media:get-server-port', () => deps.getMediaServerPort());

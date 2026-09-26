@@ -600,7 +600,16 @@ function AppShell({
           onReset={handleClose}
         >
           <VideoPlayer
-            key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
+            // Browser fullscreen belongs to this DOM tree. Keep the live player
+            // mounted while its channel changes, and keep an episode player
+            // mounted while it advances through a series.
+            key={nowPlaying.isLiveStream
+              ? 'live'
+              : nowPlaying.mediaId
+                ? `media:${nowPlaying.mediaId}`
+                : nowPlaying.episodeFiles?.length
+                  ? `series:${nowPlaying.title}`
+                  : `file:${nowPlaying.filePath}`}
             mediaId={nowPlaying.mediaId}
             playbackRequestId={nowPlaying.playbackRequestId}
             playRequestedAtMs={nowPlaying.playRequestedAtMs}

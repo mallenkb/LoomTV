@@ -25,6 +25,7 @@ import type {
   LibraryScanMode,
   LibraryScanProgress,
   IptvChannelPage,
+  IptvGuide,
   IptvChannelRequest,
   IptvSourceInput,
   IptvSourcePatch,
@@ -263,6 +264,7 @@ export type DesktopBridgeApi = {
       updateIptvSource?: (sourceId: string, patch: IptvSourcePatch) => Promise<IptvSourceSummary[]>;
       removeIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
       refreshIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
+      setIptvPageActive?: (active: boolean) => Promise<void>;
       previewMediaRenames?: () => Promise<MediaRenamePreview>;
       applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
       listMediaRenames?: () => Promise<MediaRenameBatch[]>;
@@ -273,6 +275,7 @@ export type DesktopBridgeApi = {
       onLibraryFilesOrganized?: (callback: (result: { renamed: number }) => void) => () => void;
       listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
       explainIptvChannel?: (reference: string) => Promise<string | null>;
+      iptvGuide?: (references: string[], fromMs: number, toMs: number) => Promise<IptvGuide>;
       setIptvFavorite?: (sourceId: string, channelId: string, favorite: boolean) => Promise<void>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
@@ -1416,9 +1419,19 @@ const desktopTransport = {
     });
   },
 
+  async setIptvPageActive(active: boolean): Promise<void> {
+    await window.desktopApi?.setIptvPageActive?.(active);
+  },
+
   async setIptvFavorite(sourceId: string, channelId: string, favorite: boolean): Promise<void> {
     if (!window.desktopApi?.setIptvFavorite) throw new Error('Favorites are only available in the desktop app.');
     await window.desktopApi.setIptvFavorite(sourceId, channelId, favorite);
+  },
+
+  /** Guide listings for live channels between two times; empty outside the desktop app. */
+  async iptvGuide(references: string[], fromMs: number, toMs: number): Promise<IptvGuide> {
+    if (!window.desktopApi?.iptvGuide) return {};
+    return window.desktopApi.iptvGuide(references, fromMs, toMs);
   },
 
   /** Why a live channel will not play, in plain words; null when it answers. */

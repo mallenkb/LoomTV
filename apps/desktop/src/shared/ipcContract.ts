@@ -17,6 +17,7 @@ import type {
   LocalNetworkStatus,
   LocalSegmentAnalysisStatus,
   IptvChannelPage,
+  IptvGuide,
   IptvChannelRequest,
   IptvSourceInput,
   IptvSourcePatch,
@@ -125,7 +126,9 @@ export interface IpcContract {
   'iptv:update-source': { args: [sourceId: string, patch: IptvSourcePatch]; result: IptvSourceSummary[] };
   'iptv:remove-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:refresh-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
+  'iptv:set-page-active': { args: [active: boolean]; result: void };
   'iptv:list-channels': { args: [request: IptvChannelRequest]; result: IptvChannelPage };
+  'iptv:guide': { args: [references: string[], fromMs: number, toMs: number]; result: IptvGuide };
   'iptv:explain-channel': { args: [reference: string]; result: string | null };
   'iptv:set-favorite': { args: [sourceId: string, channelId: string, favorite: boolean]; result: void };
   'media:ffmpeg-available': { args: []; result: { available: boolean; path: string | null } };

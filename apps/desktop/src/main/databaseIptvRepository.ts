@@ -473,6 +473,43 @@ export function listIptvSubcategories(
   return [...subcategories.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
 }
 
+const guideRowSchema = z.object({
+  channel_id: z.string(),
+  start_ms: z.number().int(),
+  end_ms: z.number().int(),
+  title: z.string(),
+  description: z.string(),
+});
+
+/** Guide listings for some of a source's channels that overlap a time window. */
+export function listIptvGuide(
+  database: BetterSqlite3.Database,
+  sourceId: string,
+  channelIds: readonly string[],
+  fromMs: number,
+  toMs: number,
+): Map<string, Array<{ startMs: number; endMs: number; title: string; description: string }>> {
+  const rows = database
+    .prepare(`
+      SELECT c.channel_id, p.start_ms, p.end_ms, p.title, p.description
+      FROM iptv_channels c
+      JOIN iptv_programmes p ON p.source_id = c.source_id AND p.tvg_id = ${GUIDE_KEY}
+      WHERE c.source_id = @sourceId
+        AND c.channel_id IN (SELECT value FROM json_each(@channelIds))
+        AND c.tvg_id <> ''
+        AND p.end_ms > @fromMs AND p.start_ms < @toMs
+      ORDER BY c.channel_id, p.start_ms
+    `)
+    .all({ sourceId, channelIds: JSON.stringify(channelIds), fromMs, toMs });
+  const guide = new Map<string, Array<{ startMs: number; endMs: number; title: string; description: string }>>();
+  for (const row of parseDatabaseRows(rows, guideRowSchema, 'IPTV guide')) {
+    const list = guide.get(row.channel_id) || [];
+    list.push({ startMs: row.start_ms, endMs: row.end_ms, title: row.title, description: row.description });
+    guide.set(row.channel_id, list);
+  }
+  return guide;
+}
+
 /** Resolve a channel to the stream URL the player is allowed to open. */
 export function getIptvChannelStreamUrl(
   database: BetterSqlite3.Database,

@@ -43,3 +43,8 @@ export function lastLiveChannel(reference: string): LineupChannel | null {
   if (!previous || previous === reference) return null;
   return lineup.find((channel) => channel.reference === previous) || null;
 }
+
+/** Every channel in the lineup, in order, for the player's channel list. */
+export function liveLineup(): readonly LineupChannel[] {
+  return lineup;
+}

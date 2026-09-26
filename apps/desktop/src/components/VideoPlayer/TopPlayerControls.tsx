@@ -5,6 +5,8 @@ import { ChevronLeft, X } from 'lucide-react';
 type TopPlayerControlsProps = {
   visible: boolean;
   label: string;
+  /** Shows a LIVE badge before the label, for live channels. */
+  live?: boolean;
   actionLabel?: string;
   onAction?: () => void;
   fullscreen?: boolean;
@@ -16,6 +18,7 @@ type TopPlayerControlsProps = {
 function TopPlayerControls({
   visible,
   label,
+  live = false,
   actionLabel,
   onAction,
   fullscreen,
@@ -45,8 +48,14 @@ function TopPlayerControls({
         Back
       </button>
 
-      <div className="loom-player-top-control pointer-events-none absolute left-1/2 top-1/2 max-w-[60%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/55 px-4 py-1.5 text-center text-xs font-medium text-white shadow-lg backdrop-blur-xl">
-        <span className="block truncate">{label}</span>
+      <div className={`loom-player-top-control pointer-events-none absolute left-1/2 top-1/2 max-w-[60%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-2 rounded-full border border-white/10 bg-black/55 ${live ? 'py-1 pl-1.5 pr-4' : 'px-4 py-1.5'} text-center text-xs font-medium text-white shadow-lg backdrop-blur-xl`}>
+        {live ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold tracking-wider text-white">
+            <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden="true" />
+            LIVE
+          </span>
+        ) : null}
+        <span className="block min-w-0 truncate">{label}</span>
       </div>
 
       <div className="flex items-center gap-2">

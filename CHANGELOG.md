@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.197](docs/releases/v1.0.197.md)
+
+Adds an in-player live channel list and programme guide, and runs stream health checks only while Live TV is open.
+
 ### [1.0.196](docs/releases/v1.0.196.md)
 
 Adds episode discovery, a library health report, live TV channel controls, and a prompt before unattended autoplay continues.

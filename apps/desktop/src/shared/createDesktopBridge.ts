@@ -146,6 +146,7 @@ const desktopApi = {
     ipcRenderer.invoke('iptv:update-source', sourceId, patch),
   removeIptvSource: (sourceId: string) => ipcRenderer.invoke('iptv:remove-source', sourceId),
   refreshIptvSource: (sourceId: string) => ipcRenderer.invoke('iptv:refresh-source', sourceId),
+  setIptvPageActive: (active: boolean) => ipcRenderer.invoke('iptv:set-page-active', active),
   previewMediaRenames: () => ipcRenderer.invoke('library:rename-preview'),
   applyMediaRenames: (entryIds: string[]) => ipcRenderer.invoke('library:rename-apply', entryIds),
   listMediaRenames: () => ipcRenderer.invoke('library:rename-history'),
@@ -159,6 +160,7 @@ const desktopApi = {
     return () => ipcRenderer.removeListener('library:files-organized', handler);
   },
   listIptvChannels: (request: IptvChannelRequest) => ipcRenderer.invoke('iptv:list-channels', request),
+  iptvGuide: (references: string[], fromMs: number, toMs: number) => ipcRenderer.invoke('iptv:guide', references, fromMs, toMs),
   explainIptvChannel: (reference: string) => ipcRenderer.invoke('iptv:explain-channel', reference),
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => ipcRenderer.invoke('iptv:set-favorite', sourceId, channelId, favorite),
   getSettings: () => ipcRenderer.invoke('settings:get'),

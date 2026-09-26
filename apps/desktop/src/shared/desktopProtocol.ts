@@ -1065,6 +1065,17 @@ export interface IptvChannelSummary {
   favorite: boolean;
 }
 
+/** One show in a live channel's guide. */
+export interface IptvGuideProgramme {
+  startMs: number;
+  endMs: number;
+  title: string;
+  description: string;
+}
+
+/** Guide listings by playback reference, for the player's guide. */
+export type IptvGuide = Record<string, IptvGuideProgramme[]>;
+
 export type IptvChannelSort = 'name-asc' | 'name-desc' | 'category';
 export type IptvGeoFilter = 'all' | 'exclude' | 'only';
 
