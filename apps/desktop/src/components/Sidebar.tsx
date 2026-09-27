@@ -191,6 +191,26 @@ const sidebarNavItems: Record<LibrarySidebarNavItemId, SidebarNavItem> = {
   others: { id: 'others', path: '/others', label: 'Others', icon: folderIcons.regular, activeIcon: folderIcons.fill },
 };
 
+function SidebarDownloadProgress({ percent }: { percent: number }) {
+  const numberClassName = 'grid h-[38px] place-items-center text-[12px] font-semibold tabular-nums';
+
+  return (
+    <span className="relative z-10 block h-full w-full" aria-hidden="true">
+      <span className={cn('absolute inset-0 text-[var(--loom-text)]', numberClassName)}>
+        {percent}
+      </span>
+      <span
+        className="absolute inset-x-0 bottom-0 overflow-hidden text-[var(--loom-accent-foreground)] transition-[height] duration-300"
+        style={{ height: `${percent}%` }}
+      >
+        <span className={cn('absolute inset-x-0 bottom-0', numberClassName)}>
+          {percent}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function hasLinkedLibraryFolder(folders: readonly unknown[] | undefined): boolean {
   return Boolean(folders?.some((folder) => typeof folder === 'string' && folder.trim().length > 0));
 }
@@ -680,7 +700,7 @@ export default function Sidebar() {
   const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
   const updateButtonLabel =
     updateState?.status === 'downloaded'
-      ? 'Install update'
+      ? 'Install'
       : updateState?.status === 'installing'
         ? 'Restarting'
         : updateState?.downloadPercent != null
@@ -753,9 +773,9 @@ export default function Sidebar() {
             </SharedListHighlight>
           </nav>
           {state.isScanning && (
-            <DelayedIconTooltip label={scanButtonLabel} className="mb-3 h-9 w-9 items-center justify-center">
+            <DelayedIconTooltip label={scanButtonLabel} className="mb-3 h-[38px] w-[38px] items-center justify-center">
               <div
-                className="loom-modern-sidebar-action relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-surface-2)] text-[var(--loom-text)]"
+                className="loom-modern-sidebar-action relative grid h-[38px] w-[38px] shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-surface-3)] text-[var(--loom-text)]"
                 aria-label={scanButtonLabel}
                 role="status"
                 aria-live="polite"
@@ -766,14 +786,13 @@ export default function Sidebar() {
                   aria-hidden="true"
                 />
                 <span className="relative z-10 flex flex-col items-center leading-none">
-                  <RefreshCw className="loom-scan-spinner h-4 w-4" aria-hidden="true" />
-                  <span className="mt-1 text-[9px] font-semibold tabular-nums">{scanProgress}%</span>
+                  <RefreshCw className="loom-scan-spinner h-4 w-4 text-[var(--loom-text)] opacity-90" aria-hidden="true" />
                 </span>
               </div>
             </DelayedIconTooltip>
           )}
           {showUpdateButton && (
-            <DelayedIconTooltip label={updateButtonLabel} className="mb-3 h-9 w-9 items-center justify-center">
+            <DelayedIconTooltip label={updateButtonLabel} className="mb-3 h-[38px] w-[38px] items-center justify-center">
               <button
                 type="button"
                 onClick={() => {
@@ -781,7 +800,7 @@ export default function Sidebar() {
                 }}
                 disabled={updateState?.status !== 'downloaded'}
                 className={cn(
-                  'relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full transition-colors disabled:cursor-wait',
+                  'relative grid h-[38px] w-[38px] shrink-0 place-items-center overflow-hidden rounded-full transition-colors disabled:cursor-wait',
                   updateState?.status === 'downloading'
                     ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
                     : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
@@ -800,7 +819,7 @@ export default function Sidebar() {
                   />
                 )}
                 {updateState?.status === 'downloading' ? (
-                  <span className="relative z-10 text-xs font-semibold tabular-nums" aria-hidden="true">{updateDownloadPercent}%</span>
+                  <SidebarDownloadProgress percent={updateDownloadPercent} />
                 ) : updateState?.status === 'downloaded' ? (
                   <Download className="relative z-10 h-4 w-4" aria-hidden="true" />
                 ) : (
@@ -969,7 +988,7 @@ export default function Sidebar() {
 
         <div className="mt-auto flex items-center gap-1">
           {showUpdateButton && (
-            <DelayedIconTooltip label={updateButtonLabel} className="mb-2 h-6 w-6 items-center justify-center">
+            <DelayedIconTooltip label={updateButtonLabel} className="mb-2 h-[38px] w-[38px] items-center justify-center">
               <button
                 type="button"
                 onClick={() => {
@@ -977,7 +996,7 @@ export default function Sidebar() {
                 }}
                 disabled={updateState?.status !== 'downloaded'}
                 className={cn(
-                  'relative grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full transition-colors disabled:cursor-wait',
+                  'relative grid h-[38px] w-[38px] shrink-0 place-items-center overflow-hidden rounded-full transition-colors disabled:cursor-wait',
                   updateState?.status === 'downloading'
                     ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
                     : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
@@ -994,7 +1013,7 @@ export default function Sidebar() {
                   />
                 )}
                 {updateState?.status === 'downloading' ? (
-                  <span className="relative z-10 text-[9px] font-semibold tabular-nums" aria-hidden="true">{updateDownloadPercent}%</span>
+                  <SidebarDownloadProgress percent={updateDownloadPercent} />
                 ) : updateState?.status === 'downloaded' ? (
                   <Download className="relative z-10 h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
@@ -1014,8 +1033,8 @@ export default function Sidebar() {
             aria-label="Refresh library"
             title={scanButtonLabel}
             className={cn(
-              'relative grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:cursor-wait disabled:opacity-60',
-              state.isScanning && 'bg-[var(--loom-surface-2)] text-[var(--loom-text)]',
+              'relative grid h-[38px] w-[38px] shrink-0 place-items-center overflow-hidden rounded-full text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:cursor-wait',
+              state.isScanning && 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]',
             )}
           >
             {state.isScanning && (
@@ -1026,8 +1045,7 @@ export default function Sidebar() {
               />
             )}
             <span className="relative z-10 flex flex-col items-center leading-none">
-              <RefreshCw className={cn('h-3.5 w-3.5', state.isScanning && 'loom-scan-spinner')} aria-hidden="true" />
-              {state.isScanning && <span className="mt-px text-[7px] font-semibold tabular-nums">{scanProgress}%</span>}
+              <RefreshCw className={cn('h-3.5 w-3.5', state.isScanning && 'loom-scan-spinner text-[var(--loom-text)] opacity-90')} aria-hidden="true" />
             </span>
           </button>
         </div>

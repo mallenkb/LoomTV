@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.1](docs/releases/v2.0.1.md)
+
+Improves sidebar progress indicators and retries automatic file organization after files settle or the app restarts.
+
 ### [2.0.0](docs/releases/v2.0.0.md)
 
 Marks the 2.0.0 major-version checkpoint. No app-code changes since 1.0.203.

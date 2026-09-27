@@ -381,15 +381,18 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       .map((row) => [row.file_path, row.rejected_name.toLowerCase()]),
   );
 
-  function plan(options: { automatic?: boolean } = {}): RenamePlan {
+  function plan(options: { automatic?: boolean } = {}): RenamePlan & { retryAfterMs?: number } {
     const data = deps.loadLibrary();
     const locks = lockedTargets();
     const now = Date.now();
-    return planRenames({
+    const deferred = new Map<string, number>();
+    const result = planRenames({
       ...(options.automatic ? {
         isRecentlyModified: (filePath: string) => {
           try {
-            return now - fs.statSync(filePath).mtimeMs < RECENT_CHANGE_MS;
+            const remaining = RECENT_CHANGE_MS - (now - fs.statSync(filePath).mtimeMs);
+            if (remaining > 0) deferred.set(filePath, remaining);
+            return remaining > 0;
           } catch {
             return true;
           }
@@ -409,6 +412,11 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       },
       isLocked: (filePath, targetName) => locks.get(filePath) === targetName.toLowerCase(),
     });
+    const delays = result.skipped.flatMap((skip) => {
+      const delay = deferred.get(skip.filePath);
+      return delay === undefined ? [] : [delay];
+    });
+    return { ...result, ...(delays.length ? { retryAfterMs: Math.max(1000, Math.min(...delays) + 1000) } : {}) };
   }
 
   const openJournal = (batchId: string, direction: 'apply' | 'undo', operations: readonly LoggedOperation[]): string => {
@@ -559,10 +567,10 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
      * one undoable batch through the same journal as a reviewed apply. Files
      * changed in the last few minutes wait. Null when there is nothing to do.
      */
-    applyAutomatic(): { batchId: string; renamed: number } | null {
-      const entries = plan({ automatic: true }).entries;
-      if (entries.length === 0) return null;
-      return this.apply(entries.map((entry) => entry.id));
+    applyAutomatic(): { batchId: string; renamed: number; retryAfterMs?: number } | null {
+      const { entries, retryAfterMs } = plan({ automatic: true });
+      if (entries.length === 0) return retryAfterMs === undefined ? null : { batchId: '', renamed: 0, retryAfterMs };
+      return { ...this.apply(entries.map((entry) => entry.id)), retryAfterMs };
     },
 
     apply(entryIds: readonly string[]): { batchId: string; renamed: number } {

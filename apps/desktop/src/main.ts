@@ -1931,6 +1931,8 @@ function runAutomaticOrganize(): void {
     const result = mediaRenameExecutor.applyAutomatic();
     lastAutomaticError = '';
     if (!result) return;
+    if (result.retryAfterMs !== undefined) scheduleAutomaticOrganize(result.retryAfterMs);
+    if (result.renamed === 0) return;
     console.info(`[rename] Organized ${result.renamed} file(s) after sync.`);
     const window = getMainWindow();
     if (window && !window.isDestroyed()) window.webContents.send('library:files-organized', { renamed: result.renamed });
@@ -2637,6 +2639,8 @@ app.whenReady().then(async () => {
   }
   presentPrimaryWindow();
   recordPlaybackDiagnostic('desktop.window.requested');
+  // Resume eligible renames if Loom closed during the file-settling delay.
+  scheduleAutomaticOrganize();
 
   if (!(loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode))) {
     void stremioPluginService.installDefaultCinemeta().catch((error) => {
