@@ -635,8 +635,9 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
     return (filePath: string) => {
       const library = loadLibrary();
       if (library !== indexedLibrary) {
-        byPath = new Map(libraryItemsFor(library).filter((item) => item.filePath)
-          .map((item) => [path.resolve(item.filePath!), item]));
+        byPath = new Map(libraryItemsFor(library).flatMap((item) => (
+          item.filePath ? [[path.resolve(item.filePath), item] as const] : []
+        )));
         indexedLibrary = library;
       }
       return byPath.get(path.resolve(filePath));
