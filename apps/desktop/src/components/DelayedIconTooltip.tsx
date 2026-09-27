@@ -73,7 +73,7 @@ export default function DelayedIconTooltip({
         <span
           role="tooltip"
           className={cn(
-            'pointer-events-none fixed z-[1000] -translate-y-1/2 whitespace-nowrap rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-3)] px-3 py-2 text-sm font-medium text-[var(--loom-text)] shadow-[0_8px_24px_rgba(0,0,0,0.35)]',
+            'pointer-events-none fixed z-[1000] -translate-y-1/2 whitespace-nowrap rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-3)] px-3 py-2 text-xs font-medium text-[var(--loom-text)] shadow-[0_8px_24px_rgba(0,0,0,0.35)]',
             side === 'left' && '-translate-x-full',
           )}
           style={position}

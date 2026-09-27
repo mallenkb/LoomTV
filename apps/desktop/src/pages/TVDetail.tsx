@@ -436,6 +436,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     || routeState?.fromDiscover
     || routeState?.from?.startsWith('/discover'),
   );
+  const openLocalMediaIdRef = useRef<string | null>(null);
+  const redirectingMissingIdRef = useRef<string | null>(null);
   const routeCatalogItem = useMemo(
     () => {
       const routeItem = routeState?.stremioCatalogItem;
@@ -498,13 +500,14 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     // Only an explicit future host binding may connect provider identity to a
     // local library identity.
     const found = routeFallbackShow ? null : findLocalShowMatch(collection, mediaId);
+    if (found) openLocalMediaIdRef.current = mediaId || null;
     const cached = queryClient.getQueryData<{ revision: number; item: TVShow }>(['detail', ...queryScope(), mediaId]);
     const nextShow = routeFallbackShow || (found && cached?.revision === state.catalogRevision ? cached.item : found);
     if (routeFallbackShow) setIsRemoteStremioShow(true);
     else if (found) setIsRemoteStremioShow(false);
     setShow(nextShow);
     const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|${routeAddonType}|${mediaId}` : '';
-    if (!nextShow && mediaId && metadataFetchKeyRef.current !== fetchKey) {
+    if (!nextShow && mediaId && openLocalMediaIdRef.current !== mediaId && metadataFetchKeyRef.current !== fetchKey) {
       metadataFetchKeyRef.current = fetchKey;
       const metadataRequest = routeAddonId
         ? desktopApi.getStremioMeta(routeAddonId, { type: routeAddonType, id: mediaId })
@@ -698,6 +701,28 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const { artwork: _staleArtwork, ...rest } = routeState;
     navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
   }, [location.pathname, location.search, location.state, navigate, refreshLibrary]);
+
+  const sourceRoute = routeState?.from?.startsWith('/discover')
+    ? routeState.from
+    : routeState?.fromDiscover || isRemoteStremioShow
+      ? getCachedDiscoverReturnRoute()
+      : routeState?.from;
+  const fallbackRoute = kind === 'anime' ? '/anime' : '/tv';
+  const backTarget = sourceRoute && !sourceRoute.startsWith('/anime/') && !sourceRoute.startsWith('/tv/')
+    ? sourceRoute
+    : fallbackRoute;
+
+  useEffect(() => {
+    if (isRemoteDetailRoute || !mediaId || state.isLoading) return;
+    const collection = kind === 'anime' ? state.animeShows : state.tvShows;
+    if (findLocalShowMatch(collection, mediaId)) {
+      openLocalMediaIdRef.current = mediaId;
+      return;
+    }
+    if (openLocalMediaIdRef.current !== mediaId || redirectingMissingIdRef.current === mediaId) return;
+    redirectingMissingIdRef.current = mediaId;
+    navigate(backTarget, { replace: true });
+  }, [backTarget, isRemoteDetailRoute, kind, mediaId, navigate, state.animeShows, state.isLoading, state.tvShows]);
 
   if (!show) {
     return (
@@ -924,15 +949,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     );
   };
 
-  const sourceRoute = routeState?.from?.startsWith('/discover')
-    ? routeState.from
-    : routeState?.fromDiscover || isRemoteStremioShow
-      ? getCachedDiscoverReturnRoute()
-      : routeState?.from;
-  const fallbackRoute = kind === 'anime' ? '/anime' : '/tv';
-  const backTarget = sourceRoute && !sourceRoute.startsWith('/anime/') && !sourceRoute.startsWith('/tv/')
-    ? sourceRoute
-    : fallbackRoute;
   const handleBack = () => {
     const historyIndex = window.history.state?.__TSR_index;
     if (typeof historyIndex === 'number' && historyIndex > 0) {

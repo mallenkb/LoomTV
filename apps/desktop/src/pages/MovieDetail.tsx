@@ -179,6 +179,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     || routeState?.fromDiscover
     || routeState?.from?.startsWith('/discover'),
   );
+  const openLocalMediaIdRef = useRef<string | null>(null);
+  const redirectingMissingIdRef = useRef<string | null>(null);
   const routeCatalogItem = useMemo(
     () => {
       const routeItem = routeState?.stremioCatalogItem;
@@ -220,13 +222,14 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     // specific local file is the same work. Discover items remain remote-only
     // until the host supplies an explicit provider-to-library binding.
     const found = routeFallbackMovie ? null : findLocalMovieMatch(state.movies, mediaId);
+    if (found) openLocalMediaIdRef.current = mediaId || null;
     const cached = queryClient.getQueryData<{ revision: number; item: MediaItem }>(['detail', ...queryScope(), mediaId]);
     const nextMovie = routeFallbackMovie || (found && cached?.revision === state.catalogRevision ? cached.item : found);
     if (routeFallbackMovie) setIsRemoteStremioMovie(true);
     else if (found) setIsRemoteStremioMovie(false);
     setMovie(nextMovie);
     const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|movie|${mediaId}` : '';
-    if (!nextMovie && mediaId && metadataFetchKeyRef.current !== fetchKey) {
+    if (!nextMovie && mediaId && openLocalMediaIdRef.current !== mediaId && metadataFetchKeyRef.current !== fetchKey) {
       metadataFetchKeyRef.current = fetchKey;
       const metadataRequest = routeAddonId
         ? desktopApi.getStremioMeta(routeAddonId, { type: 'movie', id: mediaId })
@@ -348,6 +351,28 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
   }, [location.pathname, location.search, location.state, navigate, refreshLibrary]);
 
+  const sourceRoute = routeState?.from?.startsWith('/discover')
+    ? routeState.from
+    : routeState?.fromDiscover || isRemoteStremioMovie
+      ? getCachedDiscoverReturnRoute()
+      : routeState?.from;
+  const isOtherMedia = Boolean(movie && !isRemoteStremioMovie && !routeCatalogItem
+    && mediaBelongsToFolders(movie.filePath, state.libraryFolderGroups.others || []));
+  const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/')
+    ? sourceRoute
+    : isOtherMedia ? '/others' : '/movies';
+
+  useEffect(() => {
+    if (isRemoteDetailRoute || !mediaId || state.isLoading) return;
+    if (findLocalMovieMatch(state.movies, mediaId)) {
+      openLocalMediaIdRef.current = mediaId;
+      return;
+    }
+    if (openLocalMediaIdRef.current !== mediaId || redirectingMissingIdRef.current === mediaId) return;
+    redirectingMissingIdRef.current = mediaId;
+    navigate(backTarget, { replace: true });
+  }, [backTarget, isRemoteDetailRoute, mediaId, navigate, state.isLoading, state.movies]);
+
   if (!movie) {
     return (
       <div className="loom-page h-full overflow-y-auto">
@@ -406,16 +431,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     }
   };
 
-  const sourceRoute = routeState?.from?.startsWith('/discover')
-    ? routeState.from
-    : routeState?.fromDiscover || isRemoteStremioMovie
-      ? getCachedDiscoverReturnRoute()
-      : routeState?.from;
-  const isOtherMedia = !isRemoteContent
-    && mediaBelongsToFolders(movie.filePath, state.libraryFolderGroups.others || []);
-  const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/')
-    ? sourceRoute
-    : isOtherMedia ? '/others' : '/movies';
   const handleBack = () => {
     const historyIndex = window.history.state?.__TSR_index;
     if (typeof historyIndex === 'number' && historyIndex > 0) {
