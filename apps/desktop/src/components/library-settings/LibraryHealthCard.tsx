@@ -80,7 +80,7 @@ export default function LibraryHealthCard({ disabled }: { disabled: boolean }) {
                 <li key={entry.mediaId} className="text-[var(--loom-text)]">{entry.title}<span className="text-[var(--loom-muted)]"> · {entry.fileName}</span></li>
               ))}
             </Section>
-            <Section title="Missing episodes" count={report.missingEpisodes.reduce((total, show) => total + show.count, 0)} hint="Aired episodes missing from seasons you have. TV shows only.">
+            <Section title="Not added yet" count={report.missingEpisodes.reduce((total, show) => total + show.count, 0)} hint="Episodes that have aired, in seasons you have, but aren't in your library. TV shows only.">
               {report.missingEpisodes.map((show) => (
                 <li key={show.mediaId} className="text-[var(--loom-text)]">
                   {show.title}<span className="text-[var(--loom-muted)]"> · {show.examples.join(', ')}{show.count > show.examples.length ? ` and ${show.count - show.examples.length} more` : ''}</span>

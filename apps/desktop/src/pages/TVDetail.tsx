@@ -747,6 +747,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     (showUpdates?.newEpisodes || []).map((episode) => `${episode.season}:${episode.episode}`),
   );
 
+  // Aired episodes the library doesn't have yet, shown dimmed in their place.
+  const notAddedForSeason = (seasonNum: number): EpisodeMeta[] =>
+    (showUpdates?.missing || [])
+      .filter((episode) => episode.season === seasonNum)
+      .map((episode) => ({ season: seasonNum, number: episode.episode, title: episode.title, summary: episode.summary || '', still: episode.still || '', rating: 0, airDate: episode.airDate || '' }));
+
   const findEpisodeFile = (season: number, episode: number): string | null =>
     show.episodeFiles?.find((ef) => ef.season === season && ef.episode === episode)?.filePath || null;
 
@@ -1125,6 +1131,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             <SharedListHighlight activeId={expandedSeason === null ? null : String(expandedSeason)} className="loom-shared-highlight-season-cards space-y-2">
               {visibleSeasons.map((season) => {
                 const seasonEps = episodesWithFilesForSeason(season.number);
+                const seasonNotAdded = notAddedForSeason(season.number)
+                  .filter((missing) => !seasonEps.some((episode) => episode.number === missing.number));
+                const notAddedNumbers = new Set(seasonNotAdded.map((episode) => episode.number));
+                const seasonRows = [...seasonEps, ...seasonNotAdded].sort((left, right) => left.number - right.number);
                 const seasonTitle = seasonDisplayTitle(season.number, season.title);
                 const seasonFiles = sortedEpisodeFilesForSeason(season.number);
                 const fileCount = seasonFiles.length;
@@ -1162,6 +1172,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                         <span className="text-sm text-[var(--loom-muted)]">
                           {(() => {
                             const count = seasonEps.length > 0 ? seasonEps.length : season.episodeCount || fileCount;
+                            if (seasonNotAdded.length) return `${count} of ${count + seasonNotAdded.length} episodes`;
                             return `${count} ${count === 1 ? 'episode' : 'episodes'}`;
                           })()}
                         </span>
@@ -1192,7 +1203,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                     {isExpanded && (
                       <SharedListHighlight className="loom-shared-highlight-episodes divide-y divide-[var(--loom-panel-border)]" >
                         <VirtualEpisodeList id={`season-${season.number}-episodes`}>
-                        {seasonEps.length > 0 ? seasonEps.map((episode) => (
+                        {seasonEps.length > 0 ? seasonRows.map((episode) => notAddedNumbers.has(episode.number) ? (
+                          <NotAddedEpisodeRow key={episode.number} ep={episode} seriesTitle={show.title} seasonNum={season.number} />
+                        ) : (
                           <EpisodeRow
                             key={episode.number}
                             ep={episode}
@@ -1276,6 +1289,41 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         trailerUrl={show.trailerUrl}
         onClose={() => setTrailerOpen(false)}
       />
+    </div>
+  );
+}
+
+/** An aired episode that isn't in the library yet: dimmed, and not playable. */
+function NotAddedEpisodeRow({ ep, seriesTitle, seasonNum }: { ep: EpisodeMeta; seriesTitle: string; seasonNum: number }) {
+  const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
+  const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
+  const episodeAirDate = formatEpisodeAirDate(ep.airDate);
+  return (
+    <div
+      role="group"
+      className="flex w-full items-center gap-4 p-4 opacity-55"
+      aria-label={`${epLabel}: ${displayTitle}. Not added yet${episodeAirDate ? `. Released ${episodeAirDate}` : ''}`}
+    >
+      <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded bg-[var(--loom-surface-3)] grayscale">
+        <SafeArtwork
+          src={artworkVariant(ep.still, 'w300')}
+          alt=""
+          className="h-full w-full"
+          fallback={<div className="flex h-full w-full items-center justify-center">
+            <span className="font-mono text-xs text-[var(--loom-faint)]">{epLabel}</span>
+          </div>}
+        />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <p className="min-w-0 flex-1 truncate text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
+          {episodeAirDate && <span className="shrink-0 whitespace-nowrap text-xs text-[var(--loom-faint)]">{episodeAirDate}</span>}
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          {ep.summary ? <p className="line-clamp-2 min-w-0 flex-1 text-xs leading-relaxed text-[var(--loom-muted)]">{ep.summary}</p> : <span className="flex-1" />}
+          <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-white/80">Not added yet</span>
+        </div>
+      </div>
     </div>
   );
 }

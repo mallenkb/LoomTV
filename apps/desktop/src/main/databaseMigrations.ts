@@ -42,6 +42,7 @@ export const MEDIA_RENAME_JOURNAL_MIGRATION_VERSION = 21;
 export const IPTV_FAVORITES_MIGRATION_VERSION = 22;
 /** v23 caches each show's full episode list for new, upcoming, and missing episodes. */
 export const SHOW_SCHEDULE_CACHE_MIGRATION_VERSION = 23;
+export const LIBRARY_FIRST_SEEN_MIGRATION_VERSION = 24;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -393,6 +394,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateMediaRenameJournal(database);
   migrateIptvFavorites(database);
   migrateShowScheduleCache(database);
+  migrateLibraryFirstSeen(database);
 }
 
 /**
@@ -1423,5 +1425,24 @@ function migrateLibraryFoldersKind(database: BetterSqlite3.Database): void {
 
       DROP TABLE library_folders_old;
     `);
+  })();
+}
+
+function migrateLibraryFirstSeen(database: BetterSqlite3.Database): void {
+
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS library_first_seen (
+        seen_key TEXT PRIMARY KEY,
+        first_seen_at INTEGER NOT NULL,
+        bulk INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    const columns = database.prepare('PRAGMA table_info(library_first_seen)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'present')) {
+      database.exec('ALTER TABLE library_first_seen ADD COLUMN present INTEGER NOT NULL DEFAULT 1');
+    }
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(LIBRARY_FIRST_SEEN_MIGRATION_VERSION, Date.now());
   })();
 }

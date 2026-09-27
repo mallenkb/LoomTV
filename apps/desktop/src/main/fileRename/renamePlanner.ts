@@ -289,6 +289,17 @@ function codecLabel(details: LocalDetails): string {
  * then a number. Null when a copy's quality is unknown, in which case the
  * copies are left as they are rather than named by guesswork.
  */
+/**
+ * Whether a file name already follows LoomTV's naming ("S01E05 - Title.mkv",
+ * "Title (2010).mkv"). Those files are left as they are, even if the matched
+ * title has changed since, so only new or never-organized files are renamed.
+ */
+export function hasOrganizedName(type: MediaItem['type'], name: string): boolean {
+  return type === 'movie'
+    ? /^.+ \(\d{4}\)(?: - .+)?\.[a-z0-9]+$/i.test(name)
+    : /^S\d{2}E\d{2,4}(?:-E\d{2,4})*(?: - .+)?\.[a-z0-9]+$/i.test(name);
+}
+
 export function versionLabels(copies: readonly LocalDetails[]): string[] | null {
   const resolutions = copies.map(resolutionLabel);
   if (resolutions.some((label) => !label)) return null;
@@ -411,6 +422,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     recordedSubtitles: readonly string[],
     targetDirectory = path.dirname(filePath),
     createFolder?: string,
+    completeEpisodeTitle = false,
   ): 'planned' | 'unchanged' | 'rejected' => {
     const skip = (reason: string): 'rejected' => {
       skipped.push({ mediaId: item.id, mediaTitle: item.title, filePath, reason });
@@ -423,8 +435,11 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     if (input.isRecentlyModified?.(filePath)) {
       return skip('The file changed in the last few minutes and may still be downloading, so it waits for the next sync.');
     }
-    const base = withinLimit(newBase);
-    const target = `${base}${path.extname(name).toLowerCase()}`;
+    // Keep organized names except provisional episode codes awaiting a title.
+    // The file can still move into its folder.
+    const keepName = hasOrganizedName(item.type, name) && !completeEpisodeTitle;
+    const base = keepName ? name.slice(0, name.length - path.extname(name).length) : withinLimit(newBase);
+    const target = keepName ? name : `${base}${path.extname(name).toLowerCase()}`;
     if (target === name && !moving) return 'unchanged';
     if (input.isLocked(filePath, target)) return skip('You undid this rename, so it is not renamed again unless its match changes.');
     if (moving && !input.sameDrive(directory, createFolder ? path.dirname(createFolder) : targetDirectory)) {
@@ -690,6 +705,8 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       first: typeof files[number];
       code: string;
       base: string;
+      untitledBase: string;
+      placeholderBase: string;
       recorded: string[];
       targetDirectory: string;
       createFolder: string | undefined;
@@ -729,17 +746,30 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       }
       const titles: string[] = [];
       let missingTitle = false;
+      let missingEpisode = false;
       for (const file of sorted) {
-        const title = metadataEpisodes.get(`${file.season}:${file.episode}`)?.title?.trim() || '';
+        const episode = metadataEpisodes.get(`${file.season}:${file.episode}`);
+        if (!episode) missingEpisode = true;
+        const title = episode?.title?.trim() || '';
         if (!title || PLACEHOLDER_TITLE.test(title)) missingTitle = true;
         titles.push(title);
       }
-      if (missingTitle) {
-        skip('The episode title has not been published yet.');
+      if (missingEpisode) {
+        skip('The episode is not present in the matched show metadata.');
         continue;
       }
-      const namedWords = fileEpisodeTitle(name);
+      const namedWordsFromFile = fileEpisodeTitle(name);
+      const provisionalTitle = PLACEHOLDER_TITLE.test(namedWordsFromFile.join(' '));
+      const namedWords = provisionalTitle ? [] : namedWordsFromFile;
+      if (missingTitle && namedWords.length > 0) {
+        // Keep an existing descriptive title until metadata can confirm it.
+        if (hasOrganizedName(item.type, name)) continue;
+        skip('The episode title is unavailable, so the title in this file name cannot be confirmed.');
+        continue;
+      }
       if (!episodeTitlesAgree(namedWords, titles.join(' '))) {
+        // Already organized under an earlier title: left alone, not reported.
+        if (hasOrganizedName(item.type, name)) continue;
         skip(`The file name calls this episode "${namedWords.join(' ')}", but the match is "${titles.join(' & ')}".`);
         continue;
       }
@@ -771,16 +801,16 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       }
       const inShowFolder = dedicated && (targetDirectory === showFolder || path.dirname(targetDirectory) === showFolder);
       const code = episodeCode(first.season, sorted.map((file) => file.episode));
-      const episodeTitle = sanitizeNamePart([...new Set(titles)].join(' & '));
-      const base = inShowFolder
-        ? `${code} - ${episodeTitle}`
-        : `${titleWithYear(item.title, item.year)} - ${code} - ${episodeTitle}`;
+      const episodeTitle = sanitizeNamePart([...new Set(titles.map((title, index) => title || `Episode ${sorted[index].episode}`))].join(' & '));
+      const untitledBase = inShowFolder ? code : `${titleWithYear(item.title, item.year)} - ${code}`;
+      const base = `${untitledBase} - ${episodeTitle}`;
+      const placeholderBase = `${untitledBase} - ${sorted.map((file) => `Episode ${file.episode}`).join(' & ')}`;
       if (sorted.length > 1 && sorted.some((file) => (claims.get(`${file.season}:${file.episode}`) || 0) > 1)) {
         skip(`This file holds ${code}, and another file also holds one of those episodes.`);
         continue;
       }
       const recorded = sorted.flatMap((file) => subtitlePaths(file.subtitles));
-      passed.push({ filePath, first, code, base, recorded, targetDirectory, createFolder, directory });
+      passed.push({ filePath, first, code, base, untitledBase, placeholderBase, recorded, targetDirectory, createFolder, directory });
     }
 
     // Copies of one episode are kept side by side as versions, but only when
@@ -802,13 +832,19 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
           skipCopies(`The video quality of a copy of ${code} is unknown, so the copies cannot be told apart by name.`);
           continue;
         }
-        copies.forEach((copy, index) => { copy.base = `${copy.base} - ${labels[index]}`; });
+        copies.forEach((copy, index) => {
+          copy.base = `${copy.base} - ${labels[index]}`;
+          copy.untitledBase = `${copy.untitledBase} - ${labels[index]}`;
+          copy.placeholderBase = `${copy.placeholderBase} - ${labels[index]}`;
+        });
       }
       const results = new Map<typeof copies[number], 'planned' | 'unchanged' | 'rejected'>();
       let rejected: typeof copies[number] | null = null;
       const grouped = planAsGroup(() => {
         for (const copy of copies) {
-          const result = planFile(item, code, copy.filePath, copy.base, copy.recorded, copy.targetDirectory, copy.createFolder);
+          const currentBase = path.basename(copy.filePath, path.extname(copy.filePath));
+          const completeEpisodeTitle = currentBase === copy.untitledBase || currentBase === copy.placeholderBase;
+          const result = planFile(item, code, copy.filePath, copy.base, copy.recorded, copy.targetDirectory, copy.createFolder, completeEpisodeTitle);
           results.set(copy, result);
           if (result === 'rejected') {
             rejected = copy;

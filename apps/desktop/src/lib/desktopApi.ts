@@ -540,6 +540,15 @@ async function localMediaUrl(pathname: string, params: URLSearchParams): Promise
   return `${base}${pathname}?${params.toString()}`;
 }
 
+// The desktop builds these; the web app only checks their outer shape.
+const libraryEpisodeUpdatesSchema = z.custom<LibraryEpisodeUpdates>((value) => (
+  Boolean(value) && typeof value === 'object' && Array.isArray((value as LibraryEpisodeUpdates).shows)
+));
+const libraryHealthSchema = z.custom<LibraryHealthReport>((value) => (
+  Boolean(value) && typeof value === 'object' && Array.isArray((value as LibraryHealthReport).unmatched)
+));
+const iptvGuideSchema = z.custom<IptvGuide>((value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value));
+
 async function fetchJson<TSchema extends z.ZodType>(
   pathname: string,
   schema: TSchema,
@@ -1387,13 +1396,13 @@ const desktopTransport = {
 
   /** New, upcoming, and missing episodes. */
   async libraryEpisodeUpdates(): Promise<LibraryEpisodeUpdates> {
-    if (!window.desktopApi?.libraryEpisodeUpdates) return { shows: [] };
-    return window.desktopApi.libraryEpisodeUpdates();
+    if (window.desktopApi?.libraryEpisodeUpdates) return window.desktopApi.libraryEpisodeUpdates();
+    return fetchJson('/api/renderer/library/episode-updates', libraryEpisodeUpdatesSchema);
   },
 
   async libraryHealth(): Promise<LibraryHealthReport | null> {
-    if (!window.desktopApi?.libraryHealth) return null;
-    return window.desktopApi.libraryHealth();
+    if (window.desktopApi?.libraryHealth) return window.desktopApi.libraryHealth();
+    return fetchJson('/api/renderer/library/health', libraryHealthSchema);
   },
 
   async mediaRenameStatus(): Promise<MediaRenameStatus | null> {
@@ -1424,20 +1433,23 @@ const desktopTransport = {
   },
 
   async setIptvFavorite(sourceId: string, channelId: string, favorite: boolean): Promise<void> {
-    if (!window.desktopApi?.setIptvFavorite) throw new Error('Favorites are only available in the desktop app.');
-    await window.desktopApi.setIptvFavorite(sourceId, channelId, favorite);
+    if (window.desktopApi?.setIptvFavorite) {
+      await window.desktopApi.setIptvFavorite(sourceId, channelId, favorite);
+      return;
+    }
+    await fetchJson('/api/renderer/iptv/favorite', z.object({ ok: z.boolean() }), { method: 'POST', body: JSON.stringify({ sourceId, channelId, favorite }) });
   },
 
-  /** Guide listings for live channels between two times; empty outside the desktop app. */
+  /** Guide listings for live channels between two times. */
   async iptvGuide(references: string[], fromMs: number, toMs: number): Promise<IptvGuide> {
-    if (!window.desktopApi?.iptvGuide) return {};
-    return window.desktopApi.iptvGuide(references, fromMs, toMs);
+    if (window.desktopApi?.iptvGuide) return window.desktopApi.iptvGuide(references, fromMs, toMs);
+    return fetchJson('/api/renderer/iptv/guide', iptvGuideSchema, { method: 'POST', body: JSON.stringify({ references, fromMs, toMs }) });
   },
 
   /** Why a live channel will not play, in plain words; null when it answers. */
   async explainIptvChannel(reference: string): Promise<string | null> {
-    if (!window.desktopApi?.explainIptvChannel) return null;
-    return window.desktopApi.explainIptvChannel(reference);
+    if (window.desktopApi?.explainIptvChannel) return window.desktopApi.explainIptvChannel(reference);
+    return (await fetchJson('/api/renderer/iptv/explain', z.object({ problem: z.string().nullable() }), { method: 'POST', body: JSON.stringify({ reference }) })).problem;
   },
 
   async listIptvChannels(request: IptvChannelRequest): Promise<IptvChannelPage> {

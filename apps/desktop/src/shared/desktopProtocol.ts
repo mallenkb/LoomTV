@@ -956,6 +956,9 @@ export interface LibraryEpisodeRef {
   title: string;
   airDate?: string;
   addedAt?: number;
+  /** Set on not-added episodes, from the show's schedule. */
+  summary?: string;
+  still?: string;
 }
 
 /** New, upcoming, and missing episodes for one show, for the active profile. */
@@ -964,12 +967,16 @@ export interface LibraryShowUpdates {
   title: string;
   type: 'movie' | 'tv' | 'anime';
   newEpisodes: LibraryEpisodeRef[];
+  /** A season that just arrived and hasn't been started, for a show you follow. */
+  newSeason?: number | null;
   nextAirs: LibraryEpisodeRef | null;
   missing: LibraryEpisodeRef[];
 }
 
 export interface LibraryEpisodeUpdates {
   shows: LibraryShowUpdates[];
+  /** Media IDs of titles added in the last week that you haven't started. */
+  newlyAdded: string[];
 }
 
 /** Everything in the library that needs a look, for Settings > Library. */

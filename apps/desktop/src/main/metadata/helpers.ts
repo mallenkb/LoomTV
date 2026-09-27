@@ -317,7 +317,9 @@ export function mergeEpisodeMetadataSources(
 
     return {
       ...local,
-      title: remotes.find(({ episode }) => Boolean(episode.title))?.episode.title || local.title,
+      title: remotes.find(({ episode }) => Boolean(episode.title?.trim())
+        && !/^(?:tba|tbd|to be announced|untitled|episode\s*#?\d+|ep\.?\s*\d+)$/i.test(episode.title.trim()))?.episode.title
+        || remotes.find(({ episode }) => Boolean(episode.title))?.episode.title || local.title,
       summary: local.summary || remotes.find(({ episode }) => Boolean(episode.summary))?.episode.summary || '',
       still: remotes.find(({ episode }) => Boolean(episode.still))?.episode.still || local.still,
       rating: local.rating || ratingRemotes.find((episode) => numericRating(episode.rating) > 0)?.rating || 0,

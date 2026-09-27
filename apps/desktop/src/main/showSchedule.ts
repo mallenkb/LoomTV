@@ -15,7 +15,7 @@ import type { EpisodeMeta, MediaItem } from './metadata/types.ts';
 const SCHEDULE_TTL_MS = 12 * 60 * 60 * 1000;
 const FETCH_CONCURRENCY = 4;
 
-type Scheduled = Pick<EpisodeMeta, 'season' | 'number' | 'title' | 'airDate'>;
+type Scheduled = Pick<EpisodeMeta, 'season' | 'number' | 'title' | 'airDate'> & Partial<Pick<EpisodeMeta, 'summary' | 'still'>>;
 
 function cacheKey(item: MediaItem): string | null {
   const ids = item.providerIds;
@@ -30,7 +30,7 @@ async function fetchSchedule(item: MediaItem): Promise<Scheduled[] | null> {
   const showId = Number(ids.tvmazeId) || await lookupTvmazeShowId({ tvdbId: ids.tvdbId, imdbId: ids.imdbId });
   if (!showId) return null;
   const episodes = await fetchTVEpisodesById(showId);
-  return episodes.map(({ season, number, title, airDate }) => ({ season, number, title, airDate }));
+  return episodes.map(({ season, number, title, airDate, summary, still }) => ({ season, number, title, airDate, summary, still }));
 }
 
 /**
@@ -55,8 +55,11 @@ export async function loadShowSchedules(
     const key = cacheKey(item);
     if (!key) continue;
     const row = read.get(key) as { episodes_json: string; fetched_at: number } | undefined;
-    if (row) schedules.set(item.id, JSON.parse(row.episodes_json) as Scheduled[]);
-    if (!options.offline && (!row || now - row.fetched_at > SCHEDULE_TTL_MS)) stale.push({ item, key });
+    const cached = row ? JSON.parse(row.episodes_json) as Scheduled[] : null;
+    if (cached) schedules.set(item.id, cached);
+    // Lists cached before summaries and stills were kept are refreshed once.
+    const lacksDetails = Boolean(cached?.length) && !cached?.some((episode) => 'summary' in episode);
+    if (!options.offline && (!row || lacksDetails || now - row.fetched_at > SCHEDULE_TTL_MS)) stale.push({ item, key });
   }
 
   let next = 0;

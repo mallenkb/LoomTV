@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { desktopApi } from '@/lib/desktopApi';
 import type { LibraryEpisodeUpdates } from '@/shared/desktopProtocol';
 
-const EMPTY: LibraryEpisodeUpdates = { shows: [] };
+const EMPTY: LibraryEpisodeUpdates = { shows: [], newlyAdded: [] };
 
 /**
  * New, upcoming, and missing episodes for the active profile. Re-read when

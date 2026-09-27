@@ -85,6 +85,7 @@ import { createIptvService } from './main/iptv/iptvService.ts';
 import { parseIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
+import { recordFirstSeen } from './main/libraryFirstSeen.ts';
 import { loadShowSchedules } from './main/showSchedule.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
@@ -427,7 +428,9 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 16;
+// 17: episode numbers in fansub names ("Show - 10 [1080p]") are now read, so
+// folders scanned before that must be read again.
+const SCAN_CACHE_VERSION = 17;
 let libraryMutationVersion = 0;
 const activeScans = new Set<AbortController>();
 let cachedLibrary: LibraryData | null = null;
@@ -626,6 +629,20 @@ function metadataRequestWhenOnline<TArgs extends unknown[], TResult>(
 }
 
 const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuilders({
+  getExistingItem: (() => {
+    let indexedLibrary: LibraryData | undefined;
+    let byPath = new Map<string, MediaItem>();
+    return (filePath: string) => {
+      const library = loadLibrary();
+      if (library !== indexedLibrary) {
+        byPath = new Map(libraryItemsFor(library).filter((item) => item.filePath)
+          .map((item) => [path.resolve(item.filePath!), item]));
+        indexedLibrary = library;
+      }
+      return byPath.get(path.resolve(filePath));
+    };
+  })(),
+  fetchTVMetadataById: metadataRequestWhenOnline(fetchTVMetadataById, () => null),
   extractSeasons,
   fetchFanartMovieLogos: metadataRequestWhenOnline(fetchFanartMovieLogos, () => []),
   fetchFanartTVLogos: metadataRequestWhenOnline(fetchFanartTVLogos, () => []),
@@ -1447,6 +1464,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   advanceLibraryMutationVersion();
   warmSkipSegmentsAfterScan(data);
   reconcileSkipAnalysisAfterScan(previous, data);
+  firstSeenDates(true);
   scheduleAutomaticOrganize();
   if (scanCommits.get(data)?.backgroundMetadataRefresh) {
     void refreshIncompleteMetadataQueue(loadLibrary()).then(() => refreshDisplayMetadataQueue(loadLibrary()))
@@ -1469,7 +1487,10 @@ function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): bool
     addedAtById.set(targetId, targetAddedAt === undefined ? sourceAddedAt : Math.min(sourceAddedAt, targetAddedAt));
   }
   const addedAtNow = Date.now();
-  for (const item of libraryItemsFor(data)) item.addedAt = addedAtById.get(item.id) ?? item.addedAt ?? addedAtNow;
+  // A title absent from the saved library is a new addition, even if scan cache
+  // metadata still carries the date from an earlier copy. Rename aliases above
+  // preserve the date for titles that stayed in the library.
+  for (const item of libraryItemsFor(data)) item.addedAt = addedAtById.get(item.id) ?? addedAtNow;
   const durablePrevious = stripInlineArtworkFromLibrary(previous, true);
   const durableNext = stripInlineArtworkFromLibrary(data);
   const persistenceStarted = performance.now();
@@ -1820,12 +1841,12 @@ const mediaRenameHandlers = {
   },
   libraryEpisodeUpdates: async () => {
     const profileId = getDesktopActiveProfileId();
-    if (!profileId) return { shows: [] };
+    if (!profileId) return { shows: [], newlyAdded: [] };
     const items = libraryItemsFor(filterLibraryForProfile(loadLibrary(), profileId));
     return computeEpisodeUpdates(items, {
       progress: getAllProgress(profileId),
       now: Date.now(),
-      addedAt: fileAddedAt,
+      seen: firstSeenDates(),
       schedules: await showSchedulesFor(items),
     });
   },
@@ -1835,7 +1856,7 @@ const mediaRenameHandlers = {
     const updates = computeEpisodeUpdates(items, {
       progress: profileId ? getAllProgress(profileId) : {},
       now: Date.now(),
-      addedAt: fileAddedAt,
+      seen: firstSeenDates(),
       schedules: await showSchedulesFor(items),
     });
     const skipped = mediaRenameExecutor.plan().skipped
@@ -1845,7 +1866,7 @@ const mediaRenameHandlers = {
   mediaRenameStatus: () => {
     const lastBatch = mediaRenameExecutor.history(1)[0];
     return {
-      mode: loadSettings().organizeFilesAfterSync || 'ask',
+      mode: loadSettings().organizeFilesAfterSync || 'auto',
       pendingFiles: mediaRenameExecutor.plan().entries.filter((entry) => entry.kind === 'file').length,
       lastBatch: lastBatch ? mediaRenameBatchForRenderer(lastBatch) : null,
       lastAutomaticError,
@@ -1858,11 +1879,21 @@ function showSchedulesFor(items: MediaItem[]) {
   return loadShowSchedules(getMediaRenameDatabase(), items, { offline });
 }
 
+/** Records newly seen titles and episodes (whole library, every profile) and returns all dates. */
+function firstSeenDates(reconcilePresence = false) {
+  try {
+    return recordFirstSeen(getMediaRenameDatabase(), libraryItemsFor(loadLibrary()), { now: Date.now(), fileTime: fileAddedAt, reconcilePresence });
+  } catch (error) {
+    console.warn('[library] Could not record first-seen dates:', error instanceof Error ? error.message : error);
+    return new Map();
+  }
+}
+
 function libraryItemsFor(data: LibraryData): MediaItem[] {
   return [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])];
 }
 
-/** When a file arrived in the library: its creation time on disk, which renames keep. */
+/** A file's creation time on disk; only used to date a library that predates first-seen records. */
 function fileAddedAt(filePath: string): number | null {
   try {
     const stat = fs.statSync(filePath);
@@ -1882,7 +1913,7 @@ let autoOrganizeTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAutomaticError = '';
 
 function scheduleAutomaticOrganize(delayMs = AUTO_ORGANIZE_DELAY_MS): void {
-  if ((loadSettings().organizeFilesAfterSync || 'ask') !== 'auto') return;
+  if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
   if (autoOrganizeTimer) clearTimeout(autoOrganizeTimer);
   autoOrganizeTimer = setTimeout(runAutomaticOrganize, delayMs);
   autoOrganizeTimer.unref?.();
@@ -1890,7 +1921,7 @@ function scheduleAutomaticOrganize(delayMs = AUTO_ORGANIZE_DELAY_MS): void {
 
 function runAutomaticOrganize(): void {
   autoOrganizeTimer = null;
-  if ((loadSettings().organizeFilesAfterSync || 'ask') !== 'auto') return;
+  if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
   if (isPlaybackActivityActive() || activeScans.size > 0) {
     scheduleAutomaticOrganize(AUTO_ORGANIZE_RETRY_MS);
     return;
@@ -2417,6 +2448,14 @@ export const mediaServerDeps = {
     return iptvService.listSources();
   },
   listIptvChannels: (request) => iptvService.listChannels(request),
+  libraryEpisodeUpdates: mediaRenameHandlers.libraryEpisodeUpdates,
+  libraryHealth: mediaRenameHandlers.libraryHealth,
+  iptvGuide: (references: string[], fromMs: number, toMs: number) => iptvService.guide(references, fromMs, toMs),
+  explainIptvChannel: async (reference: string) => {
+    const parsed = parseIptvPlaybackReference(reference);
+    return parsed ? iptvService.explainChannel(parsed.sourceId, parsed.channelId) : null;
+  },
+  setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => iptvService.setFavorite(sourceId, channelId, favorite),
   // The stream proxy opens channels through here, which also records them
   // as recently watched.
   resolveIptvStreamUrl: (sourceId, channelId) => iptvService.resolveForPlayback(sourceId, channelId),

@@ -21,6 +21,7 @@ import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { useHomeRailOrder } from '@/lib/homeRailOrder';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { useModalLayer } from '@/components/ui/dialog';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
@@ -772,10 +773,12 @@ function heroDurationLabel(seconds?: number): string {
 }
 
 function PosterRail({ title, items, from }: { title: string; items: MediaItem[]; from: string }) {
+  const orderForHome = useHomeRailOrder();
+  const ordered = useMemo(() => orderForHome(items), [items, orderForHome]);
   const titleHref = title === 'Anime' ? '/anime' : title === 'TV Shows' ? '/tv' : title === 'Movies' ? '/movies' : undefined;
   return (
     <MediaRail title={title} titleHref={titleHref} variant="modern">
-      {items.slice(0, 24).map((item) => (
+      {ordered.slice(0, 24).map((item) => (
         <MediaPosterCard
           key={item.id}
           item={item}

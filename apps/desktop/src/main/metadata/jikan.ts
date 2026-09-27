@@ -282,13 +282,15 @@ async function fetchAnimeCast(malId: number, title: string): Promise<MediaItem['
   return mergeAnimeVoiceActorFallback(primary, fallback);
 }
 
-export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | null> {
+export async function fetchJikanMetadata(title: string, knownMalId?: number): Promise<JikanAnimeResult | null> {
   try {
-    const searchData = await jikanFetch(
+    const searchData = knownMalId ? null : await jikanFetch(
       `/anime?q=${encodeURIComponent(title)}&limit=5&sfw`,
       jikanListResponseSchema(jikanAnimeHitSchema),
     );
-    const hit = searchData.data?.[0];
+    const hit = knownMalId
+      ? (await jikanFetch(`/anime/${knownMalId}`, z.object({ data: jikanAnimeHitSchema }))).data
+      : searchData?.data?.[0];
     if (!hit) return null;
 
     const malId = hit.mal_id ?? 0;

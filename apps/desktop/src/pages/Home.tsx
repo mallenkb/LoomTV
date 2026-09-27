@@ -18,6 +18,7 @@ import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
+import { useHomeRailOrder } from '@/lib/homeRailOrder';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -122,6 +123,7 @@ function DefaultHome() {
       .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
     [activeFilter, listState, movies, normalizedQuery, progress],
   );
+  const orderForHome = useHomeRailOrder();
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
   const showMoviesSection = isLoading || filteredMovies.length > 0;
@@ -163,19 +165,19 @@ function DefaultHome() {
 
         {showAnimeSection && (
           <MediaRail title="Anime" titleHref="/anime" className="mb-8" action={<SeeAllLink to="/anime" />}>
-            <PosterCards items={filteredAnime.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
+            <PosterCards items={orderForHome(filteredAnime).slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
 
         {showTVSection && (
           <MediaRail title="TV Shows" titleHref="/tv" className="mb-8" action={<SeeAllLink to="/tv" />}>
-            <PosterCards items={filteredTVShows.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
+            <PosterCards items={orderForHome(filteredTVShows).slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
 
         {showMoviesSection && (
           <MediaRail title="Movies" titleHref="/movies" className="mb-8" action={<SeeAllLink to="/movies" />}>
-            <PosterCards items={filteredMovies.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
+            <PosterCards items={orderForHome(filteredMovies).slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
         {!isLoading && (normalizedQuery || activeFilter !== 'all') && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (

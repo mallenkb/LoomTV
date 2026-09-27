@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.203](docs/releases/v1.0.203.md)
+
+Adds new-media badges and missing-episode rows, improves scan metadata and rename handling, and defaults unset file-organization preferences to automatic.
+
 ### [1.0.202](docs/releases/v1.0.202.md)
 
 Redirects stale local detail pages to the right library section and reduces delayed tooltip text size.

@@ -45,6 +45,11 @@ export function parseEpisodeFileName(fileName: string, fallbackSeason: number): 
   const namedEpisode = withoutExt.match(/(?:episode|ep|e)\s*0*(\d{1,3})\b/i);
   if (namedEpisode) return { season: fallbackSeason, episode: parseInt(namedEpisode[1], 10) };
 
+  // Fansub style: "Show - 10 [1080p]", "Show_-_10_SUB_1080p", "Show - 10v2".
+  // A year in that spot ("Show - 2019") is not an episode.
+  const dashNumber = withoutExt.replace(/_/g, ' ').match(/\s-\s+(?!(?:19|20)\d\d(?!\d))0*(\d{1,4})(?:v\d)?(?=\s|$|[[(.])/);
+  if (dashNumber) return { season: fallbackSeason, episode: parseInt(dashNumber[1], 10) };
+
   const trailingNumber = withoutExt.match(/[-–_\s]+0*(\d{1,3})\s*$/);
   if (trailingNumber) return { season: fallbackSeason, episode: parseInt(trailingNumber[1], 10) };
 

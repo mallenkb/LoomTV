@@ -169,7 +169,7 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
 
   const selectedCount = preview ? preview.entries.filter((entry) => selected.has(entry.id)).length : 0;
 
-  const mode = organize?.mode ?? 'ask';
+  const mode = organize?.mode ?? 'auto';
   const pending = organize?.pendingFiles ?? 0;
   const lastBatch = history[0] || null;
   const summary = disabled

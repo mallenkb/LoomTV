@@ -213,9 +213,11 @@ function normalizeSettings(input: unknown): AppSettings {
     autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
       ? autoSyncIntervalHours
       : 72,
-    organizeFilesAfterSync: raw.organizeFilesAfterSync === 'auto' || raw.organizeFilesAfterSync === 'off'
+    // New and never-organized files are renamed after each sync unless the
+    // viewer chose "Ask me" or "Off".
+    organizeFilesAfterSync: raw.organizeFilesAfterSync === 'ask' || raw.organizeFilesAfterSync === 'off'
       ? raw.organizeFilesAfterSync
-      : 'ask',
+      : 'auto',
     otherFolderIcon: typeof raw.otherFolderIcon === 'string' ? raw.otherFolderIcon : 'folder',
     playbackSkipBackSeconds: Number.isFinite(Number(raw.playbackSkipBackSeconds)) && Number(raw.playbackSkipBackSeconds) > 0
       ? Number(raw.playbackSkipBackSeconds)

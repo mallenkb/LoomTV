@@ -122,6 +122,9 @@ import type {
   MediaSegmentResponse,
   IptvChannelPage,
   IptvChannelRequest,
+  IptvGuide,
+  LibraryEpisodeUpdates,
+  LibraryHealthReport,
   IptvSourceInput,
   IptvSourcePatch,
   IptvSourceSummary,
@@ -184,6 +187,12 @@ export interface MediaServerDependencies {
   removeIptvSource: (sourceId: string) => IptvSourceSummary[];
   refreshIptvSource: (sourceId: string) => Promise<IptvSourceSummary[]>;
   listIptvChannels: (request: IptvChannelRequest) => IptvChannelPage;
+  // The same answers the desktop window gets over IPC, for the web app.
+  libraryEpisodeUpdates: () => Promise<LibraryEpisodeUpdates>;
+  libraryHealth: () => Promise<LibraryHealthReport>;
+  iptvGuide: (references: string[], fromMs: number, toMs: number) => IptvGuide;
+  explainIptvChannel: (reference: string) => Promise<string | null>;
+  setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => void;
   resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
   readJsonBody: (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
   requireLocalOrLanAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
@@ -966,6 +975,45 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         readJsonBody(req).then(httpBodyParsers.rendererIptvChannels)
           .then((request) => writeJson(res, 200, deps.listIptvChannels(request)))
           .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid Live TV request.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/library/episode-updates' && req.method === 'GET') {
+        deps.libraryEpisodeUpdates()
+          .then((updates) => writeJson(res, 200, updates))
+          .catch((error) => writeJson(res, 500, { error: error instanceof Error ? error.message : 'Could not load episode updates.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/library/health' && req.method === 'GET') {
+        deps.libraryHealth()
+          .then((report) => writeJson(res, 200, report))
+          .catch((error) => writeJson(res, 500, { error: error instanceof Error ? error.message : 'Could not load library health.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/guide' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererIptvGuide)
+          .then(({ references, fromMs, toMs }) => writeJson(res, 200, deps.iptvGuide(references, fromMs, toMs)))
+          .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid guide request.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/explain' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererIptvExplain)
+          .then(({ reference }) => deps.explainIptvChannel(reference))
+          .then((problem) => writeJson(res, 200, { problem }))
+          .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid channel.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/iptv/favorite' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererIptvFavorite)
+          .then(({ sourceId, channelId, favorite }) => {
+            deps.setIptvFavorite(sourceId, channelId, favorite);
+            writeJson(res, 200, { ok: true });
+          })
+          .catch((error) => writeJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid favorite request.' }));
         return;
       }
 
