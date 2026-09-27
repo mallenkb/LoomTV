@@ -259,7 +259,7 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
                 data-shared-highlight-item
                 data-shared-highlight-id={category.path}
                 className={cn(
-                  'relative inline-flex h-full items-center justify-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
+                  'relative inline-flex h-full items-center justify-center rounded-full px-5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
                   category.iconOnly && 'w-12 px-3',
                   isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
                 )}
@@ -334,6 +334,7 @@ function SidebarProfileSwitcher({
         type="button"
         onClick={() => setMenuOpen((open) => !open)}
         title={compact ? undefined : 'Switch profile'}
+        aria-label={compact ? `Switch profile, ${activeProfile.name}` : undefined}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         className={cn(
@@ -809,9 +810,7 @@ export default function Sidebar() {
             </DelayedIconTooltip>
           )}
           <div className="loom-modern-sidebar-profile">
-            <DelayedIconTooltip label="Switch profile">
-              <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
-            </DelayedIconTooltip>
+            <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
           </div>
           {/* Keep the detail page focused on its media controls. The corner
               settings/profile entry remains available on home and library

@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.201](docs/releases/v1.0.201.md)
+
+Refines modern sidebar category labels and improves the compact profile switcher's accessible name and tooltip behavior.
+
 ### [1.0.200](docs/releases/v1.0.200.md)
 
 Matches sidebar update and refresh controls to the profile avatar size and adds a smooth theme-aware update hover.
