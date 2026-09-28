@@ -11,7 +11,8 @@ module.exports = function withTvLauncher(config) {
     if (!features.some((entry) => entry.$?.['android:name'] === 'android.hardware.touchscreen')) {
       features.push({ $: { 'android:name': 'android.hardware.touchscreen', 'android:required': 'false' } });
     }
-    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(manifest);
+    const application = manifest.application?.[0];
+    if (!application) throw new Error('AndroidManifest.xml is missing the application element');
     application.$['android:banner'] = '@mipmap/ic_launcher';
     const activity = AndroidConfig.Manifest.getMainActivityOrThrow(manifest);
     const filters = activity['intent-filter'] || [];
