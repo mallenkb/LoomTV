@@ -16,7 +16,7 @@
       "import": "./src/legacy-state-import.js"
     }
   },
-  "packageManager": "pnpm@11.20.0",
+  "packageManager": "pnpm@12.6.0",
   "bin": {
     "loomtv-server": "src/cli.js"
   },

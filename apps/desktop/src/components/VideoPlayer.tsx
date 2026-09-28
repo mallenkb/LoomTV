@@ -2846,16 +2846,20 @@ export default function VideoPlayer({
     return () => window.clearTimeout(timeout);
   }, [playerState, activeIframeUrl]);
 
+  const showSubtitlesPanel = useCallback(() => {
+    setShowSidebar(false);
+    setMediaPanelTab('subtitles');
+    setShowMediaPanel(true);
+  }, []);
+
   const openSubtitlesPanel = useCallback(() => {
     if (showMediaPanel && mediaPanelTab === 'subtitles') {
       setShowMediaPanel(false);
       return;
     }
 
-    setShowSidebar(false);
-    setMediaPanelTab('subtitles');
-    setShowMediaPanel(true);
-  }, [showMediaPanel, mediaPanelTab]);
+    showSubtitlesPanel();
+  }, [showMediaPanel, mediaPanelTab, showSubtitlesPanel]);
 
   useEffect(() => {
     if (playbackEngineRef.current) {
@@ -3302,7 +3306,7 @@ export default function VideoPlayer({
     restartForTrackChange();
   }, [restartForTrackChange, trackPreferenceScopeKey]);
 
-  const selectSubtitleTrack = useCallback((trackIndex: number, temporary = false) => {
+  const selectSubtitleTrack = useCallback((trackIndex: number, temporary = false, onFailure?: () => void) => {
     setSubtitleSelectionRevision(++subtitleSelectionRevisionRef.current);
     setOnlineCaption(null);
     if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
@@ -3336,6 +3340,7 @@ export default function VideoPlayer({
         selectedSubtitleTrackIndexRef.current = previousTrackIndex;
         setSelectedSubtitleTrackIndex(previousTrackIndex);
         setErrorMessage('LibVLC has not exposed that subtitle track yet. Playback was left unchanged.');
+        onFailure?.();
         return;
       }
       libVlcSubtitleFallbackRef.current = nativeSubtitleRequired;
@@ -3345,11 +3350,12 @@ export default function VideoPlayer({
         selectedSubtitleTrackIndexRef.current = previousTrackIndex;
         setSelectedSubtitleTrackIndex(previousTrackIndex);
         setErrorMessage(error instanceof Error ? error.message : 'LibVLC could not change the subtitle track.');
+        onFailure?.();
       });
       return;
     }
     if (engine) {
-      void engine.selectSubtitle(enabled ? trackIndex : null).catch(() => undefined);
+      void engine.selectSubtitle(enabled ? trackIndex : null).catch(() => onFailure?.());
       return;
     }
     if (playbackAction === 'burn-in') {
@@ -3788,6 +3794,20 @@ export default function VideoPlayer({
           e.preventDefault();
           toggleFullscreen();
           break;
+        case 'c':
+        case 'C': {
+          if (hasCommandModifier) break;
+          resetSurfaceDoubleClickGuard();
+          e.preventDefault();
+          if (activeOnlineCaption || selectedSubtitleTrackIndexRef.current !== -1) break;
+          const captionTrackIndex = firstSubtitleTrackIndex(probeTracksRef.current);
+          if (captionTrackIndex === -1) {
+            showSubtitlesPanel();
+            break;
+          }
+          selectSubtitleTrack(captionTrackIndex, false, showSubtitlesPanel);
+          break;
+        }
         case '[':
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
@@ -3850,6 +3870,9 @@ export default function VideoPlayer({
     paused,
     resetPlaybackRate,
     runMediaSessionCommand,
+    activeOnlineCaption,
+    selectSubtitleTrack,
+    showSubtitlesPanel,
     skipBackSeconds,
     skipForwardSeconds,
     seekTo,
@@ -4623,7 +4646,9 @@ export default function VideoPlayer({
                     if (!cues.length) throw new Error('This subtitle has no readable timed captions. Choose another result.');
                     if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
                     const engine = playbackEngineRef.current;
-                    if (engine) await engine.selectSubtitle(null);
+                    // Only turn off a built-in track that is showing; LibVLC treats
+                    // turning off subtitles that are already off as an error.
+                    if (engine && selectedSubtitleTrackIndexRef.current !== -1) await engine.selectSubtitle(null);
                     if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
                     selectSubtitleTrack(-1, true);
                     setOnlineSubtitleDelay(0);

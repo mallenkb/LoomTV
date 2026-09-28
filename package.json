@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-workspace",
   "private": true,
-  "packageManager": "pnpm@11.20.0",
+  "packageManager": "pnpm@12.6.0",
   "scripts": {
     "audit:prod": "node scripts/audit-production.cjs",
     "container:verify": "node scripts/verify-container-policy.cjs",

@@ -1818,7 +1818,11 @@ class LibVlcPlaybackSession {
           return applied;
         }
         case 'set-subtitle-track': {
-          const applied = api.subtitleSetTrack ? Number(api.subtitleSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
+          const trackId = command.trackId ?? -1;
+          // LibVLC refuses to turn subtitles off when none are showing, for
+          // example on a file with no embedded tracks. Off is already true then.
+          if (trackId === -1 && api.subtitleGetTrack && Number(api.subtitleGetTrack(this.player)) === -1) return true;
+          const applied = api.subtitleSetTrack ? Number(api.subtitleSetTrack(this.player, trackId)) >= 0 : false;
           if (applied) this.refreshNativeTracks(true);
           return applied;
         }

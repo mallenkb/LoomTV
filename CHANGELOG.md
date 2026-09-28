@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.2](docs/releases/v2.0.2.md)
+
+Adds a subtitle shortcut, avoids a redundant LibVLC subtitle toggle, and updates the workspace to pnpm 12.6.0.
+
 ### [2.0.1](docs/releases/v2.0.1.md)
 
 Improves sidebar progress indicators and retries automatic file organization after files settle or the app restarts.
