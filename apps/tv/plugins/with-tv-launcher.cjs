@@ -1,4 +1,4 @@
-const { AndroidConfig, withAndroidManifest } = require('expo/config-plugins');
+const { withAndroidManifest } = require('expo/config-plugins');
 
 module.exports = function withTvLauncher(config) {
   return withAndroidManifest(config, (next) => {
@@ -14,16 +14,27 @@ module.exports = function withTvLauncher(config) {
     const application = manifest.application?.[0];
     if (!application) throw new Error('AndroidManifest.xml is missing the application element');
     application.$['android:banner'] = '@mipmap/ic_launcher';
-    const activity = AndroidConfig.Manifest.getMainActivityOrThrow(manifest);
-    const filters = activity['intent-filter'] || [];
-    for (const filter of filters) {
-      const categories = filter.category || [];
-      const hasLauncher = categories.some((entry) => entry.$?.['android:name'] === 'android.intent.category.LAUNCHER');
-      const hasLeanback = categories.some((entry) => entry.$?.['android:name'] === 'android.intent.category.LEANBACK_LAUNCHER');
-      if (hasLauncher && !hasLeanback) categories.push({ $: { 'android:name': 'android.intent.category.LEANBACK_LAUNCHER' } });
-      filter.category = categories;
+    let hasMainLauncher = false;
+    for (const activity of application.activity || []) {
+      for (const filter of activity['intent-filter'] || []) {
+        const actions = filter.action || [];
+        const categories = filter.category || [];
+        const isMainLauncher = actions.some(
+          (entry) => entry.$?.['android:name'] === 'android.intent.action.MAIN',
+        ) && categories.some(
+          (entry) => entry.$?.['android:name'] === 'android.intent.category.LAUNCHER',
+        );
+        if (isMainLauncher) hasMainLauncher = true;
+        const hasLeanback = categories.some(
+          (entry) => entry.$?.['android:name'] === 'android.intent.category.LEANBACK_LAUNCHER',
+        );
+        if (isMainLauncher && !hasLeanback) {
+          categories.push({ $: { 'android:name': 'android.intent.category.LEANBACK_LAUNCHER' } });
+        }
+        filter.category = categories;
+      }
     }
-    activity['intent-filter'] = filters;
+    if (!hasMainLauncher) throw new Error('AndroidManifest.xml is missing the main launcher intent filter');
     return next;
   });
 };
