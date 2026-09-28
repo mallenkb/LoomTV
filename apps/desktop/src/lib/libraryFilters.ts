@@ -18,6 +18,8 @@ export interface LibraryListState {
   favoriteIds: ReadonlySet<string>;
 }
 
+export const CONTINUE_WATCHING_LIMIT = 5;
+
 export const primaryLibraryFilterOptions: LibraryFilterOption[] = [
   { id: 'all', label: 'All' },
   { id: 'in-progress', label: 'In Progress' },
@@ -65,12 +67,16 @@ function progressFraction(stored: StoredProgress | null, durationHint = 0): numb
   return position > 0 && duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
 }
 
+function isProgressWatched(stored: StoredProgress | null, durationHint = 0): boolean {
+  return Boolean(stored?.watched) || progressFraction(stored, durationHint) >= WATCHED_THRESHOLD;
+}
+
 function movieProgressState(movie: MediaItem, progress: Record<string, StoredProgress>) {
   const stored = progressFor(movie.filePath, progress);
   const fraction = progressFraction(stored, movie.localMetadata?.durationSeconds);
   return {
     inProgress: (stored?.position || 0) > 10 && fraction > 0 && fraction < WATCHED_THRESHOLD,
-    watched: Boolean(stored?.watched) || fraction >= WATCHED_THRESHOLD,
+    watched: isProgressWatched(stored, movie.localMetadata?.durationSeconds),
   };
 }
 
@@ -81,7 +87,7 @@ function showProgressState(show: TVShow, progress: Record<string, StoredProgress
     const fraction = progressFraction(stored, file.localMetadata?.durationSeconds);
     return {
       inProgress: (stored?.position || 0) > 10 && fraction > 0 && fraction < WATCHED_THRESHOLD,
-      watched: Boolean(stored?.watched) || fraction >= WATCHED_THRESHOLD,
+      watched: isProgressWatched(stored, file.localMetadata?.durationSeconds),
     };
   });
 
@@ -91,6 +97,38 @@ function showProgressState(show: TVShow, progress: Record<string, StoredProgress
     watched: episodeFiles.length > 0 && watchedCount === episodeFiles.length,
     partiallyWatched: watchedCount > 0,
   };
+}
+
+/**
+ * Return the five most recently played titles whose latest playback file is
+ * still unfinished. A completed movie or episode leaves Continue Watching;
+ * the title returns once playback resumes in another file.
+ */
+export function selectContinueWatchingItems(
+  items: readonly MediaItem[],
+  progress: Record<string, StoredProgress>,
+): MediaItem[] {
+  return items
+    .map((item) => {
+      const candidates = [
+        { filePath: item.filePath, durationHint: item.localMetadata?.durationSeconds || 0 },
+        ...(item.episodeFiles || []).map((episode) => ({
+          filePath: episode.filePath,
+          durationHint: episode.localMetadata?.durationSeconds || 0,
+        })),
+      ];
+      const latest = candidates
+        .map((candidate) => ({ ...candidate, stored: progress[candidate.filePath] }))
+        .filter((candidate): candidate is typeof candidate & { stored: StoredProgress } => Boolean(candidate.stored))
+        .sort((left, right) => (right.stored.updatedAt || 0) - (left.stored.updatedAt || 0))[0];
+      if (!latest || (latest.stored.updatedAt || 0) <= 0) return null;
+      if ((latest.stored.position || 0) <= 10 || isProgressWatched(latest.stored, latest.durationHint)) return null;
+      return { item, updatedAt: latest.stored.updatedAt || 0 };
+    })
+    .filter((entry): entry is { item: MediaItem; updatedAt: number } => Boolean(entry))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, CONTINUE_WATCHING_LIMIT)
+    .map(({ item }) => item);
 }
 
 function hasMetadata(item: MediaItem | TVShow): boolean {

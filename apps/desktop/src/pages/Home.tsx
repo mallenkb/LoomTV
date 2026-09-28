@@ -15,7 +15,13 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
-import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import {
+  CONTINUE_WATCHING_LIMIT,
+  createLibraryListState,
+  matchesLibraryFilter,
+  selectContinueWatchingItems,
+  type LibraryFilter,
+} from '@/lib/libraryFilters';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
 import { useHomeRailOrder } from '@/lib/homeRailOrder';
@@ -78,24 +84,7 @@ function DefaultHome() {
   // catalog, so one profile's viewing cannot reorder Home for another.
   const progress = useProgressSnapshot();
   const continueWatching = useMemo(() => {
-    const recency = (item: MediaItem): number => {
-      let last = progress[item.filePath]?.updatedAt || 0;
-      for (const episodeFile of item.episodeFiles || []) {
-        const updatedAt = progress[episodeFile.filePath]?.updatedAt || 0;
-        if (updatedAt > last) last = updatedAt;
-      }
-      return last;
-    };
-    const hasPlaybackProgress = (item: MediaItem): boolean => (
-      (progress[item.filePath]?.position || 0) > 10
-      || (item.episodeFiles || []).some((episodeFile) => (progress[episodeFile.filePath]?.position || 0) > 10)
-    );
-    return [...movies, ...tvShows, ...animeShows]
-      .map((item) => [item, recency(item)] as const)
-      .filter(([item, last]) => last > 0 && hasPlaybackProgress(item) && !matchesLibraryFilter(item, 'watched', progress))
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([item]) => item);
+    return selectContinueWatchingItems([...movies, ...tvShows, ...animeShows], progress);
   }, [animeShows, movies, tvShows, progress]);
   const visibleMyListItems = useMemo(
     () => myListItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
@@ -151,7 +140,7 @@ function DefaultHome() {
 
         {!normalizedQuery && visibleContinueWatching.length > 0 && (
           <MediaRail title="Continue Watching" className="mb-8">
-            {visibleContinueWatching.slice(0, 8).map((item) => (
+            {visibleContinueWatching.slice(0, CONTINUE_WATCHING_LIMIT).map((item) => (
               <ContinueWatchingCard key={item.id} item={item} from={currentRoute} progress={progress} />
             ))}
           </MediaRail>

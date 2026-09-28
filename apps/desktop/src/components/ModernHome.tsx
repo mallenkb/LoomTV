@@ -20,7 +20,13 @@ import { useTheme } from '@/components/ThemeProvider';
 import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
-import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import {
+  CONTINUE_WATCHING_LIMIT,
+  createLibraryListState,
+  matchesLibraryFilter,
+  selectContinueWatchingItems,
+  type LibraryFilter,
+} from '@/lib/libraryFilters';
 import { useHomeRailOrder } from '@/lib/homeRailOrder';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { useModalLayer } from '@/components/ui/dialog';
@@ -109,21 +115,10 @@ export default function ModernHome() {
     () => normalizedQuery ? visibleItems.filter((item) => matchesMediaItem(item, normalizedQuery)) : [],
     [normalizedQuery, visibleItems],
   );
-  const continueWatching = useMemo(() => {
-    const recency = (item: MediaItem) => Math.max(
-      progress[item.filePath]?.updatedAt || 0,
-      ...(item.episodeFiles || []).map((episode) => progress[episode.filePath]?.updatedAt || 0),
-    );
-    const hasPlaybackProgress = (item: MediaItem): boolean => (
-      (progress[item.filePath]?.position || 0) > 10
-      || (item.episodeFiles || []).some((episode) => (progress[episode.filePath]?.position || 0) > 10)
-    );
-    return visibleItems
-      .map((item) => [item, recency(item)] as const)
-      .filter(([item, updatedAt]) => updatedAt > 0 && hasPlaybackProgress(item) && !matchesLibraryFilter(item, 'watched', progress))
-      .sort((left, right) => right[1] - left[1])
-      .map(([item]) => item);
-  }, [progress, visibleItems]);
+  const continueWatching = useMemo(
+    () => selectContinueWatchingItems(visibleItems, progress),
+    [progress, visibleItems],
+  );
   const savedItems = useMemo(() => {
     const byId = new Map(allItems.map((item) => [item.id, item]));
     const seen = new Set<string>();
@@ -802,7 +797,7 @@ function ContinueWatchingRail({
 }) {
   return (
     <MediaRail title="Continue Watching" variant="modern">
-      {items.slice(0, 8).map((item) => (
+      {items.slice(0, CONTINUE_WATCHING_LIMIT).map((item) => (
         <ContinueWatchingCard key={item.id} item={item} from={from} progress={progress} />
       ))}
     </MediaRail>
