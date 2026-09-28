@@ -10,7 +10,39 @@ const outputPath = path.resolve(
   process.argv[2] || path.join('artifacts', 'loomtv-sbom.cdx.json'),
 )
 const lockfileSource = fs.readFileSync(lockfilePath, 'utf8')
-const lockfile = YAML.parse(lockfileSource)
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function mergeLockfileRecords(target, source, location = 'lockfile') {
+  for (const [key, value] of Object.entries(source)) {
+    if (!Object.hasOwn(target, key)) {
+      target[key] = value
+      continue
+    }
+
+    const existing = target[key]
+    if (isRecord(existing) && isRecord(value)) {
+      mergeLockfileRecords(existing, value, `${location}.${key}`)
+      continue
+    }
+
+    if (JSON.stringify(existing) !== JSON.stringify(value)) {
+      throw new Error(`Conflicting pnpm lockfile documents at ${location}.${key}`)
+    }
+  }
+}
+
+const lockfileDocuments = YAML.parseAllDocuments(lockfileSource)
+const lockfile = {}
+for (const [index, document] of lockfileDocuments.entries()) {
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid pnpm lockfile document ${index + 1}: ${document.errors[0].message}`)
+  }
+  const documentData = document.toJS()
+  if (documentData) mergeLockfileRecords(lockfile, documentData, `document ${index + 1}`)
+}
 const runtimeManifestPath = path.join(
   workspaceRoot,
   'apps/desktop/resources/ffmpeg/runtime-provenance.json',
