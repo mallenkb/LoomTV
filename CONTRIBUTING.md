@@ -1,6 +1,6 @@
 # Contributing to Loom Media Server
 
-Loom Media Server is a local-first desktop media library and player for movies, TV shows, and anime that users already own or are authorized to use. Contributions should keep that boundary clear: the project does not provide, host, download, or sell media.
+Loom is a private media library and player for files that users own, created, or are authorized to use. It runs as a desktop app or as a headless Loom Media Server, with web, mobile, and TV clients. Video is the released library; photos, music, audiobooks, books, and comics are in early development. Contributions should keep that boundary clear: the project does not provide, host, download, or sell media.
 
 ## Ways to Contribute
 
@@ -8,7 +8,7 @@ Loom Media Server is a local-first desktop media library and player for movies, 
 - Improve tests around media classification, playback planning, local server security, updater behavior, and renderer utilities.
 - Improve documentation for installation, release workflows, platform quirks, and provider setup.
 - Help with cross-platform packaging issues on macOS, Windows, and Linux.
-- Propose small UX improvements that keep Loom Media Server focused on local media management.
+- Propose small UX improvements that keep Loom focused on managing the user's own media.
 
 ## Development Setup
 
@@ -53,7 +53,7 @@ corepack pnpm --filter loom-media-server-desktop dist
 apps/
   desktop/       Electron main process, renderer UI, local database, playback, probing, and packaging.
   server/        Headless server, API, setup, and admin UI.
-  mobile/        Expo mobile client for pairing and playback experiments.
+  mobile/        Expo client for iOS and Android.
   tv/            Expo client for Android TV and Fire TV.
 packages/    Shared contracts, media helpers, protocol types, and migration helpers.
 docs/        Screenshots, release notes, future work, and implementation notes.
