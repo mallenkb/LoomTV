@@ -1210,6 +1210,11 @@ export function createCanonicalStateStore({ dataDir }) {
       return { marker: redactedMarker(marker, availability), restoredAt };
     },
     readAdminState: () => readAdminState(requireDatabase()),
+    /** Replace only the scan status row; scan checkpoints use this. @param {import('./server-admin-types.js').Scan} scan */
+    updateScanState(scan) {
+      requireDatabase().prepare('INSERT OR REPLACE INTO scan_state(singleton,payload_json) VALUES(1,?)').run(json(scan));
+      return true;
+    },
     /** @param {import('./server-state-types.js').AdminState['backup']} state */
     updateBackupState(state) {
       requireDatabase().prepare('INSERT OR REPLACE INTO backup_state(singleton,payload_json) VALUES(1,?)').run(json(state));

@@ -133,6 +133,7 @@ export interface MediaSource extends MediaSourceSummary {
 }
 export interface AdminStore {
   readAdminState(): unknown; replaceAdminState(state: AdminState): unknown;
+  updateScanState?(scan: Scan): unknown;
   updateBackupState?(state: BackupStatus): unknown; appendOperationalLog?(entry: OperationalLog): unknown;
   exportCanonicalSnapshot?(): CanonicalStateSnapshot;
   restoreCanonicalSnapshot?(snapshot: unknown, now: number): unknown;

@@ -989,6 +989,20 @@ export function createHeadlessAdminService(options) {
   }
 
   const scanner = createHeadlessLibraryScanner({
+    // Checkpoints update the scan counters only. The full catalog is written
+    // once, when the scan completes.
+    saveScanProgress: async ({ scanId, scannedFiles, indexedFiles }) => {
+      const state = await loadState();
+      if (state.scan?.id !== scanId) return;
+      state.scan = { ...state.scan, scannedFiles, indexedFiles };
+      if (!stateStore?.updateScanState) {
+        await saveState(state);
+        return;
+      }
+      const scan = state.scan;
+      writeQueue = writeQueue.catch(() => undefined).then(() => { stateStore.updateScanState?.(scan); });
+      await writeQueue;
+    },
     loadState: async () => {
       const state = await loadState();
       return {
