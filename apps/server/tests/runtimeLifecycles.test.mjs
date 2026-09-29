@@ -169,7 +169,8 @@ async function transcodeFixture(t, options = {}) {
     playbackSessionRegistry: registry,
     cacheQuotaOptions: { maxTotalBytes: 200, maxSessionBytes: 100, minFreeBytes: 0, sweepIntervalMs: 100 },
     transcodeAdmissionOptions: { globalLimit: 4, principalLimit: 4 },
-    clock: { setInterval: (callback) => { sweep = callback; return { unref() {} }; }, clearInterval() {} },
+    // Capture the 100 ms quota sweep; sessions also start their own HLS pacing ticks.
+    clock: { setInterval: (callback, ms) => { if (ms === 100) sweep = callback; return { unref() {} }; }, clearInterval() {} },
     authorize: async () => true,
     adminService: {
       authenticateRequest: async () => principal,
