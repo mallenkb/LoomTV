@@ -87,3 +87,76 @@ test('an account is limited to 10 profiles', async () => {
     (error) => error.status === 400 && error.code === 'profile_limit',
   );
 });
+
+// A limiter whose checks finish only when the test releases them, in order.
+function heldLimiter() {
+  const held = [];
+  return {
+    run: (work) => new Promise((resolve, reject) => { held.push(() => work().then(resolve, reject)); }),
+    releaseNext: async () => { const next = held.shift(); if (next) next(); await new Promise((resolve) => { setImmediate(resolve); }); },
+    releaseLast: async () => { const last = held.pop(); if (last) last(); await new Promise((resolve) => { setImmediate(resolve); }); },
+    get pending() { return held.length; },
+  };
+}
+
+async function pinProfileStore(kdfLimiter) {
+  let state = normalizeHeadlessClientState({});
+  const canonicalStore = {
+    readClientState: () => state,
+    replaceClientState: (next) => { state = normalizeHeadlessClientState(next); },
+    mutateClientState: (mutation) => mutation(state),
+  };
+  const setup = createHeadlessClientState({ store: canonicalStore });
+  const profile = await setup.createProfile({ name: 'Kids' }, 'user-a');
+  await setup.updateProfilePin(profile.id, '1234', 'user-a');
+  return { client: createHeadlessClientState({ store: canonicalStore, kdfLimiter }), profile };
+}
+
+test('a concurrent PIN burst checks no more PINs than the free-attempt budget', async () => {
+  const limiter = heldLimiter();
+  const { client, profile } = await pinProfileStore(limiter);
+  const attempts = Array.from({ length: 10 }, (_, index) => client.selectProfile(profile.id, 'user-a', false, 'tv-1', String(1000 + index)).catch((error) => error));
+  await new Promise((resolve) => { setImmediate(resolve); });
+  assert.equal(limiter.pending, 5, 'only five attempts may be checked at once');
+  while (limiter.pending) await limiter.releaseNext();
+  const results = await Promise.all(attempts);
+  assert.equal(results.filter((error) => error.code === 'pin_in_progress').length, 5);
+  assert.equal(results.filter((error) => error.code === 'profile_locked').length, 5);
+  // Each checked failure was counted, so the profile is now in its wait period.
+  await assert.rejects(client.selectProfile(profile.id, 'user-a', false, 'tv-1', '1234'), { status: 429, code: 'profile_locked' });
+});
+
+test('a PIN success does not erase a failure that finished while it was checked', async () => {
+  const limiter = heldLimiter();
+  const { client, profile } = await pinProfileStore(limiter);
+  const correct = client.selectProfile(profile.id, 'user-a', false, 'tv-1', '1234');
+  await new Promise((resolve) => { setImmediate(resolve); });
+  const wrong = client.selectProfile(profile.id, 'user-a', false, 'tv-1', '0000').catch((error) => error);
+  await new Promise((resolve) => { setImmediate(resolve); });
+  assert.equal(limiter.pending, 2);
+  // Finish the wrong attempt first, while the correct one is still checking.
+  await limiter.releaseLast();
+  assert.equal((await wrong).code, 'profile_locked');
+  await limiter.releaseNext();
+  await correct;
+  // The earlier failure survived, so the fourth further failure is the fifth
+  // in total and starts the wait period.
+  const outcomes = [];
+  for (const pin of ['1111', '2222', '3333', '4444']) {
+    const attempt = client.selectProfile(profile.id, 'user-a', false, 'tv-1', pin).catch((error) => error);
+    await new Promise((resolve) => { setImmediate(resolve); });
+    await limiter.releaseNext();
+    outcomes.push((await attempt).status);
+  }
+  assert.deepEqual(outcomes, [403, 403, 403, 429]);
+});
+
+test('a PIN changed during the check is not accepted', async () => {
+  const limiter = heldLimiter();
+  const { client, profile } = await pinProfileStore(limiter);
+  const attempt = client.selectProfile(profile.id, 'user-a', false, 'tv-1', '1234').catch((error) => error);
+  await new Promise((resolve) => { setImmediate(resolve); });
+  await client.updateProfilePin(profile.id, '9876', 'user-a');
+  await limiter.releaseNext();
+  assert.equal((await attempt).code, 'profile_pin_changed');
+});

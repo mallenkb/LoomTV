@@ -2,12 +2,15 @@ import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util';
 import { canonicalProfileKind } from '@loom-media-server/video-contracts';
 import { migrateLegacyProfileKind } from '@loom-media-server/video-contracts/server';
+import { sharedKdfLimiter } from './kdf-admission.js';
 
 const MAX_PROFILES = 32;
 const MAX_PROGRESS = 20_000;
 const MAX_NAME_LENGTH = 80;
 const PROFILE_UNLOCK_TTL_MS = 30 * 60 * 1000;
 const MAX_PIN_FAILURES = 2_048;
+// Failed PINs allowed before each further failure adds a growing wait.
+const FREE_PIN_ATTEMPTS = 5;
 /** @type {(password: string, salt: Buffer, keylen: number, options: import('node:crypto').ScryptOptions) => Promise<Buffer>} */
 const scrypt = promisify(scryptCallback);
 
@@ -238,13 +241,17 @@ function legacySnapshot(state) {
   };
 }
 
-/** @param {{ store: import('./server-state-types.js').StateStore; validateAccount?: (accountId: string) => Promise<boolean> }} options */
-export function createHeadlessClientState({ store, validateAccount = async () => false }) {
+/** @param {{ store: import('./server-state-types.js').StateStore; validateAccount?: (accountId: string) => Promise<boolean>; kdfLimiter?: ReturnType<typeof import('./kdf-admission.js').createKdfLimiter> }} options */
+export function createHeadlessClientState({ store, validateAccount = async () => false, kdfLimiter = sharedKdfLimiter }) {
   if (!store) throw new Error('createHeadlessClientState requires the canonical state store.');
   /** @type {Map<string, {revision: number; expiresAt: number}>} */
   const unlockedSelections = new Map();
   /** @type {Map<string, {failures: number; blockedUntil: number; lastAttemptAt: number}>} */
   const pinFailures = new Map();
+  // PIN attempts per failure key that are between the lock check and
+  // recording their result.
+  /** @type {Map<string, number>} */
+  const inFlightPins = new Map();
   /** @param {string} accountId @param {string} deviceId @param {string} profileId */
   const unlockKey = (accountId, deviceId, profileId) => `${accountId}\u0000${deviceId}\u0000${profileId}`;
   const prunePinState = () => {
@@ -450,6 +457,8 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
       const before = store.readClientState();
       const { profile } = requireProfile(before, profileId, accountId, false);
+      /** @type {string | null | undefined} */
+      let verifiedPinHash;
       if (profile.hasPin) {
         prunePinState();
         const remoteAddress = String(address || 'unknown').slice(0, 128);
@@ -459,25 +468,55 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
           `device\u0000${accountId}\u0000${normalizedDeviceId}\u0000${profileId}`,
         ];
         const failureStates = failureKeys.map((key) => pinFailures.get(key)).filter((entry) => entry !== undefined);
-        const current = Date.now();
+        const attemptStartedAt = Date.now();
         const blockedUntil = Math.max(0, ...failureStates.map((entry) => entry.blockedUntil));
-        if (blockedUntil > current) throw Object.assign(new Error('That PIN could not be accepted.'), {
-          status: 429, code: 'profile_locked', retryAfter: Math.max(1, Math.ceil((blockedUntil - current) / 1000)),
+        if (blockedUntil > attemptStartedAt) throw Object.assign(new Error('That PIN could not be accepted.'), {
+          status: 429, code: 'profile_locked', retryAfter: Math.max(1, Math.ceil((blockedUntil - attemptStartedAt) / 1000)),
         });
+        // Attempts still being checked count against the free-attempt budget,
+        // so a concurrent burst cannot try more PINs than the lock allows.
+        const failuresSoFar = Math.max(0, ...failureStates.map((entry) => entry.failures));
+        const inFlight = Math.max(0, ...failureKeys.map((key) => inFlightPins.get(key) || 0));
+        if (failuresSoFar + inFlight >= FREE_PIN_ATTEMPTS) throw Object.assign(new Error('Another PIN attempt is still being checked. Try again shortly.'), {
+          status: 429, code: 'pin_in_progress', retryAfter: 1,
+        });
+        for (const key of failureKeys) inFlightPins.set(key, (inFlightPins.get(key) || 0) + 1);
         const credential = before.profileCredentials.find((item) => item.profileId === profileId);
-        if (!await verifyPin(pin, credential)) {
-          const failures = Math.max(0, ...failureStates.map((entry) => entry.failures)) + 1;
-          const delayMs = failures < 5 ? 0 : Math.min(15 * 60 * 1000, 30_000 * 2 ** (failures - 5));
+        let accepted;
+        try {
+          accepted = await kdfLimiter.run(() => verifyPin(pin, credential));
+        } finally {
+          for (const key of failureKeys) {
+            const remaining = (inFlightPins.get(key) || 1) - 1;
+            if (remaining > 0) inFlightPins.set(key, remaining); else inFlightPins.delete(key);
+          }
+        }
+        if (!accepted) {
+          // Count from the current state, not the pre-check snapshot, so
+          // concurrent failures each add one.
+          const current = Date.now();
+          const failures = Math.max(0, ...failureKeys.map((key) => pinFailures.get(key)?.failures || 0)) + 1;
+          const delayMs = failures < FREE_PIN_ATTEMPTS ? 0 : Math.min(15 * 60 * 1000, 30_000 * 2 ** (failures - FREE_PIN_ATTEMPTS));
           for (const key of failureKeys) pinFailures.set(key, { failures, blockedUntil: current + delayMs, lastAttemptAt: current });
           throw Object.assign(new Error('That PIN could not be accepted.'), {
             status: delayMs ? 429 : 403, code: 'profile_locked', ...(delayMs ? { retryAfter: Math.ceil(delayMs / 1000) } : {}),
           });
         }
-        for (const key of failureKeys) pinFailures.delete(key);
+        // Clear only failures recorded before this attempt began; a failure
+        // that finished while this one was being checked still counts.
+        for (const key of failureKeys) {
+          if ((pinFailures.get(key)?.lastAttemptAt ?? 0) <= attemptStartedAt) pinFailures.delete(key);
+        }
+        verifiedPinHash = credential?.pinHash ?? null;
       }
       let selectedRevision = 0;
       const selected = store.mutateClientState((state) => {
         const { profile } = requireProfile(state, profileId, accountId, false);
+        // The PIN may have changed or been removed while it was being checked.
+        if (verifiedPinHash !== undefined
+          && state.profileCredentials.find((item) => item.profileId === profileId)?.pinHash !== verifiedPinHash) {
+          throw Object.assign(new Error('The profile PIN changed. Enter the new PIN.'), { status: 409, code: 'profile_pin_changed' });
+        }
         const existing = state.selections.find((item) => item.accountId === accountId && item.deviceId === normalizedDeviceId);
         if (existing) { existing.profileId = profileId; existing.revision += 1; existing.selectedAt = Date.now(); }
         else state.selections.push({ accountId, deviceId: normalizedDeviceId, profileId, revision: 0, automaticSignIn: false, selectedAt: Date.now() });

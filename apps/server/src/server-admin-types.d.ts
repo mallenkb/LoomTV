@@ -150,6 +150,7 @@ export interface AdminOptions {
   getClientState?: () => Promise<unknown>; replaceClientState?: (state: unknown) => Promise<unknown>;
   replaceAllState?: (state: { adminState: AdminState; clientState: unknown }) => Promise<unknown>;
   stateStore?: AdminStore;
+  kdfLimiter?: ReturnType<typeof import('./kdf-admission.js').createKdfLimiter>;
   onCanonicalRestore?: () => Promise<unknown> | unknown;
   onPlaybackSessionsRevoked?: (id: string, reason: string) => Promise<unknown> | unknown;
   onPlaybackSessionsRevokedForItem?: (id: string, reason: string) => Promise<unknown> | unknown;

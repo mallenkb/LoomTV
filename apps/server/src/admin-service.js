@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import { sharedKdfLimiter } from './kdf-admission.js';
 import { createHeadlessLibraryScanner } from './library-scanner.js';
 import { normalizeIpAddress } from './trusted-proxy.js';
 import {
@@ -1127,6 +1128,12 @@ export function createHeadlessAdminService(options) {
     return user ? { record: user, principal: publicUserPrincipal(user), type: 'user' } : null;
   }
 
+  // Sign-in attempts per identity key that are between the lock check and
+  // recording their result.
+  /** @type {Map<string, number>} */
+  const inFlightLogins = new Map();
+  const kdfLimiter = options.kdfLimiter || sharedKdfLimiter;
+
   /** @param {string} identity @param {unknown} address @param {ReturnType<typeof userByName>} match */
   function loginKeys(identity, address, match) {
     const submittedIdentity = identity || 'owner';
@@ -1542,11 +1549,27 @@ export function createHeadlessAdminService(options) {
         });
       }
 
-      const credential = match?.record;
-      await loginDelay(loginThrottleDelayMs(loginFailureCount(state, keys.address, now)));
-      const passwordValid = credential
-        ? await verifyPassword(input.password, credential.salt, credential.hash)
-        : await scrypt(input.password, 'loomtv-invalid-login-salt', PASSWORD_BYTES).then(() => false);
+      // Count attempts still being checked against the lock budget, so a
+      // concurrent burst cannot run more password checks than the lock allows.
+      const inFlight = inFlightLogins.get(keys.identity) || 0;
+      if (loginFailureCount(state, keys.identity, now) + inFlight >= MAX_LOGIN_ATTEMPTS) {
+        throw Object.assign(new Error('Another sign-in attempt for this account is still being checked. Try again shortly.'), {
+          status: 429, code: 'login_in_progress', retryAfter: 1,
+        });
+      }
+      inFlightLogins.set(keys.identity, inFlight + 1);
+      let passwordValid;
+      try {
+        const credential = match?.record;
+        await loginDelay(loginThrottleDelayMs(loginFailureCount(state, keys.address, now)));
+        const password = /** @type {string} */ (input.password);
+        passwordValid = await kdfLimiter.run(() => (credential
+          ? verifyPassword(password, credential.salt, credential.hash)
+          : scrypt(password, 'loomtv-invalid-login-salt', PASSWORD_BYTES).then(() => false)));
+      } finally {
+        const remaining = (inFlightLogins.get(keys.identity) || 1) - 1;
+        if (remaining > 0) inFlightLogins.set(keys.identity, remaining); else inFlightLogins.delete(keys.identity);
+      }
       if (!match || !passwordValid || (match.type === 'user' && match.record.disabled)) {
         rememberLoginFailure(state, { identity: keys.identity, address: keys.address }, now);
         await saveState(state);
