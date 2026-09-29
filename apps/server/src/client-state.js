@@ -323,6 +323,16 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     });
   };
 
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {string | undefined} deviceId */
+  const scopedContext = (state, accountId, profileId, media, deviceId) => {
+    const { profile, assignment } = requireProfile(state, profileId, accountId, false);
+    const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
+    return restrictedProfileContext(state, accountId, profile, assignment, media, {
+      deviceId: String(deviceId || `invitation:${profileId}`).slice(0, 128),
+      selectionRevision: Number(restrictions?.revision || 0),
+    });
+  };
+
   return {
     async ready() {},
     async exportState() { return legacySnapshot(store.readClientState()); },
@@ -485,13 +495,28 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     },
     /** @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} [media] @param {string | undefined} [deviceId] */
     async requireScopedProfile(accountId, profileId, media = undefined, deviceId = undefined) {
+      return scopedContext(store.readClientState(), accountId, profileId, media, deviceId);
+    },
+    /**
+     * Check many items against the active profile with one client-state read.
+     * The returned function applies the same rules as requireActivePlaybackProfile.
+     * @param {string} accountId @param {string | undefined} deviceId
+     */
+    async activePlaybackProfileChecker(accountId, deviceId) {
       const state = store.readClientState();
-      const { profile, assignment } = requireProfile(state, profileId, accountId, false);
-      const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
-      return restrictedProfileContext(state, accountId, profile, assignment, media, {
-        deviceId: String(deviceId || `invitation:${profileId}`).slice(0, 128),
-        selectionRevision: Number(restrictions?.revision || 0),
-      });
+      playbackContext(state, accountId, deviceId, undefined);
+      /** @param {import('./server-state-types.js').ProfileMedia} media */
+      return (media) => playbackContext(state, accountId, deviceId, media);
+    },
+    /**
+     * Check many items against an invitation's profile with one client-state read.
+     * @param {string} accountId @param {string} profileId @param {string | undefined} [deviceId]
+     */
+    async scopedProfileChecker(accountId, profileId, deviceId = undefined) {
+      const state = store.readClientState();
+      scopedContext(state, accountId, profileId, undefined, deviceId);
+      /** @param {import('./server-state-types.js').ProfileMedia} media */
+      return (media) => scopedContext(state, accountId, profileId, media, deviceId);
     },
     /** @param {string} accountId @param {string | undefined} deviceId */
     async getActiveProfileState(accountId, deviceId) {

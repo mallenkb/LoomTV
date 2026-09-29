@@ -64,10 +64,13 @@ export interface MediaAdmin {
 export interface MediaClientState {
   requireActivePlaybackProfile(accountId: string, deviceId?: string, media?: LibraryItem | MediaSource): Promise<ProfileContext>;
   requireScopedProfile(accountId: string, profileId: string, media?: LibraryItem | MediaSource, deviceId?: string): Promise<ProfileContext>;
+  activePlaybackProfileChecker(accountId: string, deviceId?: string): Promise<(media: LibraryItem | MediaSource) => ProfileContext>;
+  scopedProfileChecker(accountId: string, profileId: string, deviceId?: string): Promise<(media: LibraryItem | MediaSource) => ProfileContext>;
 }
 export interface RemoteMediaPolicy {
   resolveInvitationPrincipal(sessionId: string): Promise<Principal | null>;
   invitationProfileContext(principal: Principal, media?: LibraryItem | MediaSource): Promise<ProfileContext | null>;
+  invitationProfileChecker(principal: Principal): Promise<((media: LibraryItem | MediaSource) => ProfileContext) | null>;
   assertPrincipal(req: AuthRequest | undefined, principal: Principal | null | undefined, routeClass?: string): RemoteContext;
 }
 export interface MediaClock {

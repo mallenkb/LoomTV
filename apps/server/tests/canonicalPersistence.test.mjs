@@ -170,3 +170,60 @@ test('targeted progress saves keep only the newest entries per profile', async (
   }
   assert.deepEqual(Object.keys(await client.listProgress(profile.id, owner.id)).sort(), ['b', 'c', 'd']);
 });
+
+test('library filtering checks every item against one client-state read', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  store.mutateClientState((state) => {
+    state.profileRestrictions.push({ profileId: profile.id, allowedRootIds: ['root-a'], allowUnrated: true, maximumAge: 12, country: 'US', revision: 1 });
+  });
+  const items = [
+    { id: 'allowed', rootId: 'root-a' },
+    { id: 'other-root', rootId: 'root-b' },
+    { id: 'rated-16', rootId: 'root-a', contentRatings: { US: { minimumAge: 16 } } },
+    { id: 'rated-7', rootId: 'root-a', maximumAge: 7 },
+  ];
+  const decide = async (run) => {
+    try { await run(); return 'allowed'; } catch (error) { return error.code; }
+  };
+  const expected = [];
+  for (const item of items) expected.push(await decide(() => client.requireActivePlaybackProfile(owner.id, undefined, item)));
+  assert.deepEqual(expected, ['allowed', 'permission_denied', 'permission_denied', 'allowed']);
+
+  let reads = 0;
+  const readClientState = store.readClientState;
+  store.readClientState = () => { reads += 1; return readClientState(); };
+  t.after(() => { store.readClientState = readClientState; });
+  const check = await client.activePlaybackProfileChecker(owner.id, undefined);
+  const actual = [];
+  for (const item of items) actual.push(await decide(() => check(item)));
+  assert.deepEqual(actual, expected, 'the snapshot checker must make the same decisions');
+  assert.equal(reads, 1);
+
+  const scoped = await client.scopedProfileChecker(owner.id, profile.id);
+  assert.deepEqual(await Promise.all(items.map((item) => decide(() => scoped(item)))), expected);
+  assert.equal(reads, 2);
+});
+
+test('bulk media source lookup matches the per-item lookup', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  const roots = [{ id: 'root-a', path: '/media/a', kind: 'movies', createdAt: 1 }];
+  const catalog = ['movie-1', 'movie-2', 'episode-1'].map((id, index) => ({
+    id, rootId: 'root-a', path: `/media/a/${id}.mkv`, relativePath: `${id}.mkv`, type: 'video',
+    kind: id.startsWith('episode') ? 'episode' : 'movie', title: id, extension: '.mkv',
+    sizeBytes: 100 + index, modifiedAtMs: 10 + index, available: index !== 1, indexedAt: 1000 + index,
+  }));
+  store.replaceAdminState({ owner, roots, catalog });
+  const grouped = store.listMediaSourcesByMedia();
+  assert.deepEqual([...grouped.keys()].sort(), ['episode-1', 'movie-1', 'movie-2']);
+  for (const item of catalog) assert.deepEqual(grouped.get(item.id), store.listMediaSources(item.id));
+  assert.equal(grouped.get('movie-2')[0].state, 'offline');
+});

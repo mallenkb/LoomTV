@@ -358,6 +358,22 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return getClientState().requireScopedProfile(principal.id, principal.invitationProfileId, media, deviceId);
   }
 
+  /**
+   * invitationProfileContext for many items with one client-state read.
+   * @param {import('./server-media-types.js').Principal} principal
+   */
+  async function invitationProfileChecker(principal) {
+    if (principal?.authentication !== 'invitation-session') return null;
+    if (!principal.invitationProfileId) throw remoteError(403, 'permission_denied', 'Invitation profile is unavailable.');
+    const check = await getClientState().scopedProfileChecker(principal.id, principal.invitationProfileId, principal.deviceId ?? undefined);
+    /** @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource} media */
+    return (media) => {
+      if (principal.invitationMediaIds && !principal.invitationMediaIds.includes(media.id)) throw remoteError(403, 'permission_denied', 'Media is outside the invitation scope.');
+      if (!principal.rootIds?.includes(media.rootId || '')) throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+      return check(media);
+    };
+  }
+
   /** @param {import('./server-media-types.js').DownloadInput} input @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
   async function createDownload(input, principal, req) {
     const requestContext = assertPrincipal(req, principal, 'download');
@@ -458,7 +474,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
 
   return {
     context, preflight, assertPrincipal, policy, updatePolicy, audit,
-    createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext,
+    createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext, invitationProfileChecker,
     listInvitations: (/** @type {import('./server-media-types.js').Principal} */ principal) => store.listInvitations(principal.id),
     /** @param {string} id @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
     revokeInvitation(id, principal, req) {

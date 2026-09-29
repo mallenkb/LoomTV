@@ -1947,9 +1947,13 @@ export function createHeadlessAdminService(options) {
         episodes.push(entry);
         episodesBySeries.set(entry.seriesId, episodes);
       }
+      // One query for every source instead of one per item and per episode.
+      const allSources = stateStore?.listMediaSourcesByMedia?.();
+      /** @param {string} mediaId */
+      const sourcesFor = (mediaId) => (allSources ? allSources.get(mediaId) || [] : stateStore?.listMediaSources?.(mediaId));
       /** @param {string} seriesId */
       const episodeSourcesForSeries = (seriesId) => (episodesBySeries.get(seriesId) || [])
-        .flatMap((entry) => stateStore?.listMediaSources?.(entry.id)
+        .flatMap((entry) => sourcesFor(entry.id)
           || [{ id: entry.sourceId || `${entry.id}:primary`, rootId: entry.rootId, state: entry.available === false ? 'offline' : 'online' }]);
       return items.flatMap((item) => {
         const linkedEpisodes = item.kind === 'series'
@@ -1957,7 +1961,7 @@ export function createHeadlessAdminService(options) {
           : [];
         if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(item.id)
           && !linkedEpisodes.some((entry) => principal.invitationMediaIds?.includes(entry.id) === true)) return [];
-        const ownSources = stateStore?.listMediaSources?.(item.id);
+        const ownSources = sourcesFor(item.id);
         const canonicalSources = item.kind === 'series'
           ? episodeSourcesForSeries(item.id)
           : ownSources?.length ? ownSources

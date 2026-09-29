@@ -138,6 +138,7 @@ export interface AdminStore {
   restoreCanonicalSnapshot?(snapshot: unknown, now: number): unknown;
   catalogRevision?(): string | number;
   listMediaSources?(id: string): MediaSourceSummary[];
+  listMediaSourcesByMedia?(): Map<string, MediaSourceSummary[]>;
   readMediaSource?(id: string, sourceId?: string): MediaSource | null;
   recordMediaProbe?(id: string, sourceId: string, probe: Probe): unknown;
 }

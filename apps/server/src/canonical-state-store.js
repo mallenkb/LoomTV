@@ -1617,6 +1617,25 @@ export function createCanonicalStateStore({ dataDir }) {
         ...(row.modified_at_ms === null ? {} : { modifiedAtMs: Number(row.modified_at_ms) }),
       }));
     },
+    /** Every media source in one query, grouped by media ID in listMediaSources order. */
+    listMediaSourcesByMedia() {
+      /** @type {Map<string, import('./server-admin-types.js').MediaSourceSummary[]>} */
+      const grouped = new Map();
+      const rows = /** @type {Array<import('./server-state-types.js').SqlRows['media_sources']>} */ (requireDatabase().prepare(`SELECT s.id,s.media_id,s.root_id,s.state,s.file_extension,s.size_bytes,s.modified_at_ms,
+        s.indexed_at,s.last_seen_at FROM media_sources s
+        ORDER BY s.media_id,s.state='online' DESC,s.last_seen_at DESC,s.indexed_at DESC`).all());
+      for (const row of rows) {
+        const sources = grouped.get(row.media_id) || [];
+        sources.push({
+          id: row.id, mediaId: row.media_id, rootId: row.root_id, state: row.state,
+          extension: row.file_extension,
+          ...(row.size_bytes === null ? {} : { sizeBytes: Number(row.size_bytes) }),
+          ...(row.modified_at_ms === null ? {} : { modifiedAtMs: Number(row.modified_at_ms) }),
+        });
+        grouped.set(row.media_id, sources);
+      }
+      return grouped;
+    },
     /** @param {string} mediaId @param {string} sourceId @param {import('@loom-media-server/video-contracts').MediaProbe | import('./server-admin-types.js').Probe} probe */
     recordMediaProbe(mediaId, sourceId, probe) {
       const result = requireDatabase().prepare('UPDATE media_sources SET probe_json=? WHERE media_id=? AND id=?')
