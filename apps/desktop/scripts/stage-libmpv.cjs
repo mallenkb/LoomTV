@@ -25,7 +25,7 @@ fs.chmodSync(stagedLibrary, fs.statSync(stagedLibrary).mode | 0o200);
 
 const bridgeOutput = path.join(destination, 'libloomtv_mpv_bridge.dylib');
 const build = spawnSync(process.execPath, [
-  path.join(desktopRoot, 'native', 'libmpv', 'draft-render-bridge', 'build.mjs'),
+  path.join(desktopRoot, 'native', 'libmpv', 'render-bridge', 'build.mjs'),
   bridgeOutput,
 ], {
   env: { ...process.env, LIBMPV_INCLUDE_DIR: include },

@@ -116,3 +116,6 @@ apps/desktop/resources/libvlc/
 
 # Electron scanner resources are built from native/scanner.
 apps/desktop/resources/scanner/
+
+# Local AI agent configuration
+/.codex/
