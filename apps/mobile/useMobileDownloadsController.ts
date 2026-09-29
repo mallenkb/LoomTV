@@ -34,6 +34,8 @@ export function useMobileDownloadsController({ activeProfile, client, connection
   const generation = useRef(0);
   const removed = useRef(new Set<string>());
   const activeOperations = useRef(new Set<string>());
+  // Transfers for the current host and profile; a scope change aborts them.
+  const activeTransfers = useRef(new Set<AbortController>());
   const [downloadingMediaId, setDownloadingMediaId] = useState('');
 
   useEffect(() => {
@@ -42,6 +44,7 @@ export function useMobileDownloadsController({ activeProfile, client, connection
     setStored({ scope, items: {} });
     setDownloadingMediaId('');
     let cancelled = false;
+    const transfers = activeTransfers.current;
     const hostDeviceId = connection?.hostDeviceId;
     const profileId = activeProfile?.id;
     if (!hostDeviceId || !profileId) {
@@ -56,7 +59,13 @@ export function useMobileDownloadsController({ activeProfile, client, connection
       .catch((error) => {
         if (!cancelled) reportNonFatal('downloads.list', error);
       });
-    return () => { cancelled = true; generation.current += 1; };
+    return () => {
+      cancelled = true;
+      generation.current += 1;
+      // Stop network traffic now instead of discarding the result later.
+      for (const transfer of transfers) transfer.abort();
+      transfers.clear();
+    };
   }, [activeProfile?.id, connection?.hostDeviceId, scope]);
 
   const targetWithOfflineDownload = useCallback((target: PlayTarget): PlayTarget | null => {
@@ -72,6 +81,8 @@ export function useMobileDownloadsController({ activeProfile, client, connection
     if (activeOperations.current.has(operation)) return;
     activeOperations.current.add(operation);
     const startedGeneration = generation.current;
+    const transfer = new AbortController();
+    activeTransfers.current.add(transfer);
     setDownloadingMediaId(mediaId);
     let capability: MobileDownloadCapability | null = null;
     try {
@@ -88,6 +99,7 @@ export function useMobileDownloadsController({ activeProfile, client, connection
         title: target.title,
         capability,
         isCurrent: () => generation.current === startedGeneration,
+        signal: transfer.signal,
         contentUrl: secureLanUrl(new URL(capability.contentUrl, connection.baseUrl).toString()),
       });
       if (generation.current === startedGeneration) setStored((current) => current.scope === scope
@@ -97,6 +109,7 @@ export function useMobileDownloadsController({ activeProfile, client, connection
         await client.revokeOfflineDownload(connection.baseUrl, connection.deviceToken, capability.id).catch(() => undefined);
       }
       activeOperations.current.delete(operation);
+      activeTransfers.current.delete(transfer);
       if (generation.current === startedGeneration) setDownloadingMediaId((current) => current === mediaId ? '' : current);
     }
   }, [activeProfile, client, connection, isServerOffline, scope]);

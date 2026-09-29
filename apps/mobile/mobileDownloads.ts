@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import { createDownloadResumable } from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 export type MobileDownloadCapability = {
@@ -122,7 +123,29 @@ type SaveDownloadInput = {
   capability: MobileDownloadCapability;
   contentUrl: string;
   isCurrent?: () => boolean;
+  /** Aborting stops the network transfer and removes the partial file. */
+  signal?: AbortSignal;
 };
+
+/**
+ * The file name the server sent in Content-Disposition, or the last URL path
+ * segment. Players rely on the extension, so keep it; drop anything that could
+ * leave the download directory.
+ */
+export function mobileDownloadFileName(headers: Record<string, string> | undefined, url: string): string {
+  const disposition = Object.entries(headers || {}).find(([key]) => key.toLowerCase() === 'content-disposition')?.[1] || '';
+  const encoded = /filename\*\s*=\s*(?:UTF-8'[^']*')?([^;]+)/i.exec(disposition)?.[1];
+  const quoted = /filename\s*=\s*"([^"]*)"/i.exec(disposition)?.[1] ?? /filename\s*=\s*([^;]+)/i.exec(disposition)?.[1];
+  let name: string;
+  try { name = encoded ? decodeURIComponent(encoded.trim()) : (quoted || '').trim(); } catch { name = (quoted || '').trim(); }
+  if (!name) {
+    try { name = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || ''); } catch { name = ''; }
+  }
+  const printable = Array.from(name.split(/[\\/]/).pop() || '')
+    .filter((character) => character.charCodeAt(0) >= 0x20 && character.charCodeAt(0) !== 0x7f).join('');
+  const safe = printable.replace(/^\.+/, '').slice(-180);
+  return safe || 'media';
+}
 
 export function saveMobileDownload(input: SaveDownloadInput): Promise<MobileDownload> {
   const generation = hostGenerations.get(input.hostDeviceId) || 0;
@@ -160,10 +183,24 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
   );
   directory.create({ idempotent: true, intermediates: true });
   try {
-    const file = await File.downloadFileAsync(input.contentUrl, directory, {
+    if (input.signal?.aborted) throw new Error('The download was cancelled.');
+    // The legacy resumable download is the one expo-file-system API that can
+    // stop a transfer in flight, which a profile change or lock needs.
+    const transfer = createDownloadResumable(input.contentUrl, new File(directory, 'download.part').uri, {
       headers: { Authorization: mobileDownloadAuthorization(input.capability) },
-      idempotent: false,
     });
+    const cancel = () => { void transfer.cancelAsync().catch(() => undefined); };
+    input.signal?.addEventListener('abort', cancel, { once: true });
+    let result: Awaited<ReturnType<typeof transfer.downloadAsync>>;
+    try {
+      result = await transfer.downloadAsync();
+    } finally {
+      input.signal?.removeEventListener('abort', cancel);
+    }
+    if (!result || input.signal?.aborted) throw new Error('The download was cancelled.');
+    if (result.status < 200 || result.status >= 300) throw new Error(`The server refused the download (HTTP ${result.status}).`);
+    const file = new File(directory, mobileDownloadFileName(result.headers, input.contentUrl));
+    new File(result.uri).move(file);
     if (input.capability.sizeBytes > 0 && file.size !== input.capability.sizeBytes) {
       throw new Error('The downloaded file is incomplete. Please retry.');
     }
