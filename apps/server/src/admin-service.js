@@ -2338,4 +2338,5 @@ export function createHeadlessAdminService(options) {
   };
 }
 
+export const headlessAdminStateFilename = STATE_FILENAME;
 export { normalizeState as normalizeHeadlessAdminState };

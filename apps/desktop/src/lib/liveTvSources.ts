@@ -8,7 +8,7 @@ import type { IptvSourceSummary } from '@/shared/desktopProtocol';
  * through the same window-event channel the sidebar already uses for folder
  * names and nav order.
  */
-export const IPTV_SOURCES_CHANGED_EVENT = 'loomtv:iptv-sources-changed';
+const IPTV_SOURCES_CHANGED_EVENT = 'loomtv:iptv-sources-changed';
 
 export function notifyIptvSourcesChanged(sources?: readonly IptvSourceSummary[]): void {
   window.dispatchEvent(new CustomEvent<readonly IptvSourceSummary[] | undefined>(

@@ -5,7 +5,7 @@ import { motion, useAnimation } from 'motion/react';
 
 import { cn } from '@/lib/utils';
 
-export interface DownloadIconHandle {
+interface DownloadIconHandle {
   startAnimation: () => void;
   stopAnimation: () => void;
 }

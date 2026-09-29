@@ -51,7 +51,7 @@ function fileNameForItem(item: MediaItem): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() || item.title;
 }
 
-export function usePosterArtwork(item: MediaItem, fallbackFilePath: string, preferGenerated = false, nearViewport = true) {
+function usePosterArtwork(item: MediaItem, fallbackFilePath: string, preferGenerated = false, nearViewport = true) {
   const artworkSuspended = useArtworkSuspended();
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
   const baseImageSources = useMemo(() => posterSources(item), [item]);

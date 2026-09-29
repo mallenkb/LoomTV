@@ -5,8 +5,8 @@
  * with the same helpers so both sides agree on what a query means.
  */
 
-export const IPTV_SEARCH_MAX_TERMS = 8;
-export const IPTV_SEARCH_MAX_QUERY_LENGTH = 200;
+const IPTV_SEARCH_MAX_TERMS = 8;
+const IPTV_SEARCH_MAX_QUERY_LENGTH = 200;
 
 /**
  * Fold a channel label into the comparable form used by both the stored search
@@ -14,7 +14,7 @@ export const IPTV_SEARCH_MAX_QUERY_LENGTH = 200;
  * from an ASCII keyboard, and every run of punctuation becomes a single space
  * so "HBO-2", "HBO 2", and "HBO.2" are the same channel to a searcher.
  */
-export function normalizeIptvText(value: string): string {
+function normalizeIptvText(value: string): string {
   return value
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

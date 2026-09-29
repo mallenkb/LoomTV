@@ -16,7 +16,7 @@ const WHEEL_GESTURE_CLASSIFY_PIXELS = 8;
  * episodes, capped so a swipe across a two-hour film still moves minutes,
  * not the whole film.
  */
-export function wheelScrubSecondsPerPixel(duration: number): number {
+function wheelScrubSecondsPerPixel(duration: number): number {
   return Math.min(1, Math.max(0.1, duration / 2400));
 }
 

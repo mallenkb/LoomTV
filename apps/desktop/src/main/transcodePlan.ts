@@ -14,8 +14,8 @@ import {
 
 export const HLS_SEGMENT_SECONDS = 2;
 export const HLS_WINDOW_SEGMENTS = 45;
-export const LOCAL_HLS_SEGMENT_SECONDS = 1;
-export const LOCAL_HLS_WINDOW_SEGMENTS = 30;
+const LOCAL_HLS_SEGMENT_SECONDS = 1;
+const LOCAL_HLS_WINDOW_SEGMENTS = 30;
 
 export type HlsSegmentProfile = 'local-interactive' | 'lan-stable';
 

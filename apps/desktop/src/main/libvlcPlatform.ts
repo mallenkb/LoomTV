@@ -1,4 +1,4 @@
-export type LibVlcPlatformHost = 'macos-child' | 'windows-child';
+type LibVlcPlatformHost = 'macos-child' | 'windows-child';
 
 export type LibVlcPlatformBinding = {
   drawableSymbol: 'libvlc_media_player_set_nsobject' | 'libvlc_media_player_set_hwnd';

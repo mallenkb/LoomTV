@@ -12,13 +12,13 @@
   },
   "scripts": {
     "preinstall": "node scripts/enforce-pnpm.cjs",
-    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs && node scripts/stage-libmpv.cjs",
+    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs && node scripts/fetch-native-runtimes.cjs",
     "prebuild": "node scripts/enforce-pnpm.cjs",
-    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
-    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
-    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
-    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
-    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required && node scripts/stage-libmpv.cjs",
+    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
+    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
+    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
+    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
+    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
     "prelint": "node scripts/enforce-pnpm.cjs",
     "start": "node scripts/run-electron-forge.cjs start",
     "start:built": "corepack pnpm run rebuild:natives && corepack pnpm run build && node scripts/run-built-app.cjs",
@@ -41,7 +41,12 @@
     "verify:windows-release": "pwsh -NoProfile -File scripts/verify-windows-release.ps1",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint .",
-    "scanner:build": "node scripts/build-scanner.cjs"
+    "pretest": "node scripts/ensure-node-natives.cjs && cargo build --locked --release --manifest-path native/scanner/Cargo.toml",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts",
+    "scanner:build": "node scripts/build-scanner.cjs",
+    "runtimes:fetch": "node scripts/fetch-native-runtimes.cjs",
+    "libmpv:bundle": "node scripts/bundle-libmpv.cjs",
+    "scanner:test": "node scripts/ensure-node-natives.cjs && cargo test --locked --release --manifest-path native/scanner/Cargo.toml && cargo build --locked --release --manifest-path native/scanner/Cargo.toml && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/scanner*.test.ts"
   },
   "keywords": [],
   "author": "malllenkb",
@@ -218,24 +223,24 @@
       "icon": "resources/icon.icns",
       "extraResources": [
         {
-          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/lib",
-          "to": "libvlc/darwin/arm64/lib"
+          "from": "resources/libvlc/darwin/${arch}/VLC.app/Contents/MacOS/lib",
+          "to": "libvlc/darwin/${arch}/lib"
         },
         {
-          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/plugins",
-          "to": "libvlc/darwin/arm64/plugins",
+          "from": "resources/libvlc/darwin/${arch}/VLC.app/Contents/MacOS/plugins",
+          "to": "libvlc/darwin/${arch}/plugins",
           "filter": [
             "**/*",
             "!libmacosx_plugin.dylib"
           ]
         },
         {
-          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/share",
-          "to": "libvlc/darwin/arm64/share"
+          "from": "resources/libvlc/darwin/${arch}/VLC.app/Contents/MacOS/share",
+          "to": "libvlc/darwin/${arch}/share"
         },
         {
-          "from": "resources/libvlc/darwin/arm64/packaged-runtime-manifest.json",
-          "to": "libvlc/darwin/arm64/runtime-manifest.json"
+          "from": "resources/libvlc/darwin/${arch}/packaged-runtime-manifest.json",
+          "to": "libvlc/darwin/${arch}/runtime-manifest.json"
         },
         {
           "from": "resources/ffmpeg/mac",

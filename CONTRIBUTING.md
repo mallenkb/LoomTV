@@ -1,13 +1,14 @@
 # Contributing to Loom Media Server
 
-Loom Media Server is a local-first desktop media library and player for movies, TV shows, and anime that users already own or are authorized to use. Contributions should keep that boundary clear: the project does not provide, host, download, or sell media.
+Loom is a private media library and player for files that users own, created, or are authorized to use. It runs as a desktop app or as a headless Loom Media Server, with web, mobile, and TV clients. Video is the released library; photos, music, audiobooks, books, and comics are in early development. Contributions should keep that boundary clear: the project does not provide, host, download, or sell media.
 
 ## Ways to Contribute
 
 - Fix bugs in library scanning, metadata matching, playback, artwork, settings, or packaging.
+- Improve tests around media classification, playback planning, local server security, updater behavior, and renderer utilities.
 - Improve documentation for installation, release workflows, platform quirks, and provider setup.
 - Help with cross-platform packaging issues on macOS, Windows, and Linux.
-- Propose small UX improvements that keep Loom Media Server focused on local media management.
+- Propose small UX improvements that keep Loom focused on managing the user's own media.
 
 ## Development Setup
 
@@ -15,7 +16,7 @@ Requirements:
 
 - Node.js
 - pnpm via Corepack
-- Rust via rustup for desktop builds. The pinned Rust 1.98.0 toolchain is selected automatically from `rust-toolchain.toml`.
+- Rust via rustup for desktop tests. The pinned Rust 1.98.0 toolchain is selected automatically from `rust-toolchain.toml`.
 - A desktop environment supported by Electron
 
 Install dependencies from the repository root:
@@ -24,6 +25,8 @@ Install dependencies from the repository root:
 corepack enable
 corepack pnpm install
 ```
+
+The first desktop start downloads the pinned LibVLC, libmpv, and FFmpeg runtimes for your machine (about 200 MB on an Apple silicon Mac) and checks their SHA-256 hashes. See `apps/desktop/native-runtimes.json`.
 
 Run the desktop app:
 
@@ -35,13 +38,14 @@ Run checks before opening a pull request:
 
 ```sh
 corepack pnpm typecheck
-corepack pnpm lint
+corepack pnpm test
 ```
 
 Desktop-specific commands are also available:
 
 ```sh
 corepack pnpm desktop:typecheck
+corepack pnpm desktop:test
 corepack pnpm --filter loom-media-server-desktop dist
 ```
 
@@ -51,7 +55,7 @@ corepack pnpm --filter loom-media-server-desktop dist
 apps/
   desktop/       Electron main process, renderer UI, local database, playback, probing, and packaging.
   server/        Headless server, API, setup, and admin UI.
-  mobile/        Expo mobile client for pairing and playback experiments.
+  mobile/        Expo client for iOS and Android.
   tv/            Expo client for Android TV and Fire TV.
 packages/    Shared contracts, media helpers, protocol types, and migration helpers.
 docs/        Screenshots, release notes, future work, and implementation notes.
@@ -60,6 +64,7 @@ docs/        Screenshots, release notes, future work, and implementation notes.
 ## Pull Request Guidelines
 
 - Keep changes focused. Avoid broad refactors mixed with behavior changes.
+- Include tests when changing shared helpers, scan logic, security checks, playback planning, updater behavior, or metadata matching.
 - Update README or docs when changing setup, packaging, release behavior, privacy/security posture, or user-visible workflows.
 - Do not commit media libraries, copyrighted content, private API keys, generated installers, local databases, or personal configuration.
 - For UI changes, include screenshots or a short description of what changed.
@@ -84,7 +89,7 @@ Report vulnerabilities privately using the process in `SECURITY.md`.
 
 - Prefer TypeScript types that document the shape of data crossing process or package boundaries.
 - Keep Electron main-process code, preload APIs, and renderer UI responsibilities separate.
-- Prefer small helper functions for parsing, classification, planning, and security decisions.
+- Prefer small helper functions with focused tests for parsing, classification, planning, and security decisions.
 - Keep user-facing copy direct and specific.
 
 ## License

@@ -1,0 +1,74 @@
+{
+  "manifestVersion": 1,
+  "description": "Native playback runtimes that desktop builds download from a Loom GitHub release. scripts/fetch-native-runtimes.cjs checks each archive against its SHA-256 and extracts it under resources/. archs lists the CPU architectures an archive serves; the macOS FFmpeg archive holds universal binaries.",
+  "release": "runtimes-2026-09",
+  "baseUrl": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/",
+  "runtimes": [
+    {
+      "id": "ffmpeg-darwin-universal",
+      "platform": "darwin",
+      "archs": ["arm64", "x64"],
+      "archive": "ffmpeg-darwin-universal.tar.gz",
+      "sha256": "3d194a637f417c9fb41a0fa64e2f04b5ed3f210cc3bb4038a5f64c768a013166",
+      "size": 121162894,
+      "destination": "ffmpeg/mac",
+      "replaceDestination": false,
+      "requiredFiles": ["ffmpeg", "ffprobe"]
+    },
+    {
+      "id": "ffmpeg-win32-x64",
+      "platform": "win32",
+      "archs": ["x64"],
+      "archive": "ffmpeg-win32-x64.tar.gz",
+      "sha256": "63e8ee6ae06cac29aa7bb0c35cb35c509f935862877bc38079fa2b24262f3765",
+      "size": 73870300,
+      "destination": "ffmpeg/win",
+      "replaceDestination": false,
+      "requiredFiles": ["ffmpeg.exe", "ffprobe.exe"]
+    },
+    {
+      "id": "libvlc-darwin-arm64",
+      "platform": "darwin",
+      "archs": ["arm64"],
+      "archive": "libvlc-darwin-arm64.tar.gz",
+      "sha256": "5c6db97aade8b4d5f2c5b6065d73e8c1943588809257cab4665057779f5a7280",
+      "size": 57404989,
+      "destination": "libvlc/darwin/arm64",
+      "replaceDestination": true,
+      "requiredFiles": ["VLC.app/Contents/MacOS/lib/libvlc.dylib", "packaged-runtime-manifest.json"]
+    },
+    {
+      "id": "libvlc-darwin-x64",
+      "platform": "darwin",
+      "archs": ["x64"],
+      "archive": "libvlc-darwin-x64.tar.gz",
+      "sha256": "e66d69dbcc0ddc5bda8ac1c1acf3d3622b5cef4d1e735971ca8bf3840c37c0a9",
+      "size": 64425587,
+      "destination": "libvlc/darwin/x64",
+      "replaceDestination": true,
+      "requiredFiles": ["VLC.app/Contents/MacOS/lib/libvlc.dylib", "packaged-runtime-manifest.json"]
+    },
+    {
+      "id": "libvlc-win32-x64",
+      "platform": "win32",
+      "archs": ["x64"],
+      "archive": "libvlc-win32-x64.tar.gz",
+      "sha256": "1d1dea285083877bf8a1008ebc3895e3cde45aba5adaf21ee52f8e10d1f5ef39",
+      "size": 52843680,
+      "destination": "libvlc/win32/x64",
+      "replaceDestination": true,
+      "requiredFiles": ["libvlc.dll", "runtime-manifest.json"]
+    },
+    {
+      "id": "libmpv-darwin-arm64",
+      "platform": "darwin",
+      "archs": ["arm64"],
+      "archive": "libmpv-darwin-arm64.tar.gz",
+      "sha256": "57bf887fdd0d0316c73a6ce13a6880c7fe09b7ce14a80f5193194540b136b398",
+      "size": 25918789,
+      "destination": "mpv/lib",
+      "replaceDestination": true,
+      "requiredFiles": ["libmpv.dylib", "libloomtv_mpv_bridge.dylib", "libmpv-inventory.json"]
+    }
+  ]
+}

@@ -217,7 +217,7 @@ export function createAndSelectGuest(deviceId: string): ProfileSummary {
   return summary(guest);
 }
 
-export function clearGuestSelection(deviceId: string): void {
+function clearGuestSelection(deviceId: string): void {
   const selection = getDeviceProfileSelectionState(deviceId);
   if (!selection) return;
   const profile = getProfile(selection.profileId);

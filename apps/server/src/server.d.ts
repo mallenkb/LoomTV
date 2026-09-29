@@ -94,5 +94,4 @@ export interface CanonicalVideoServer {
 }
 
 export function createCanonicalVideoServer(options: CanonicalRuntimeOptions): CanonicalVideoServer;
-export const createHeadlessServer: typeof createCanonicalVideoServer;
 export function readServerVersion(packageRoot: string): Promise<string>;

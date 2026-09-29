@@ -11,7 +11,7 @@ export const RENDERER_SESSION_ROUTE = '/api/renderer/session';
 
 const RENDERER_ROUTE_PREFIX = '/api/renderer/';
 
-export function rendererRequestOrigin(headers: http.IncomingHttpHeaders): string | null {
+function rendererRequestOrigin(headers: http.IncomingHttpHeaders): string | null {
   const origin = Array.isArray(headers.origin) ? headers.origin[0] : headers.origin;
   if (origin) return origin;
 

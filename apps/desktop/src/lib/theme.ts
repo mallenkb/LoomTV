@@ -7,7 +7,7 @@ export type AppThemeColor = 'red' | 'blue' | 'orange' | 'yellow' | 'twitch';
 export type AppDarkTheme = 'black';
 export type AppLoaderStyle = 'play-mark' | 'logo-mark' | 'horizontal-logo';
 export type AppHomeStyle = 'default' | 'modern';
-export type AppModernHeroMode = 'continue-watching' | 'featured';
+type AppModernHeroMode = 'continue-watching' | 'featured';
 export type AppCastCardStyle = 'standard' | 'compact';
 
 export type AppThemeSettings = {
@@ -30,7 +30,7 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   castCardStyle: 'compact',
 };
 
-export const THEME_CACHE_KEY = 'loomtv:theme-settings';
+const THEME_CACHE_KEY = 'loomtv:theme-settings';
 const cachedThemeSchema = z.object({
   mode: z.enum(['dark', 'light']).optional(),
   color: z.enum(['red', 'blue', 'orange', 'yellow', 'twitch']).optional(),
@@ -107,17 +107,17 @@ export function normalizeThemeMode(value?: string): AppThemeMode {
   return value === 'light' ? 'light' : 'dark';
 }
 
-export function normalizeThemeColor(value?: string): AppThemeColor {
+function normalizeThemeColor(value?: string): AppThemeColor {
   return value === 'yellow' || value === 'red' || value === 'blue' || value === 'orange' || value === 'twitch'
     ? value
     : DEFAULT_THEME_SETTINGS.color;
 }
 
-export function normalizeDarkTheme(value?: string): AppDarkTheme {
+function normalizeDarkTheme(value?: string): AppDarkTheme {
   return value === 'black' ? value : DEFAULT_THEME_SETTINGS.darkTheme;
 }
 
-export function normalizeLoaderStyle(value?: string): AppLoaderStyle {
+function normalizeLoaderStyle(value?: string): AppLoaderStyle {
   return value === 'logo-mark' || value === 'horizontal-logo' || value === 'play-mark'
     ? value
     : DEFAULT_THEME_SETTINGS.loaderStyle;
@@ -132,11 +132,11 @@ export function normalizeHomeStyle(value?: string): AppHomeStyle {
   return DEFAULT_THEME_SETTINGS.homeStyle;
 }
 
-export function normalizeModernHeroMode(value?: string): AppModernHeroMode {
+function normalizeModernHeroMode(value?: string): AppModernHeroMode {
   return value === 'featured' ? 'featured' : 'continue-watching';
 }
 
-export function normalizeCastCardStyle(value?: string): AppCastCardStyle {
+function normalizeCastCardStyle(value?: string): AppCastCardStyle {
   return value === 'standard' ? 'standard' : 'compact';
 }
 

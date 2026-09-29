@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const tmdbProviderSchema = z.object({
+const tmdbProviderSchema = z.object({
   provider_id: z.number().int(),
   provider_name: z.string(),
   logo_path: z.string().nullish(),
@@ -17,7 +17,7 @@ export const tmdbWatchProviderDetailSchema = z.object({
   results: z.record(z.string(), tmdbWatchProviderRegionSchema).optional(),
 });
 
-export const tmdbGenreSchema = z.object({ id: z.number().int(), name: z.string() });
+const tmdbGenreSchema = z.object({ id: z.number().int(), name: z.string() });
 export const tmdbGenreResponseSchema = z.object({ genres: z.array(tmdbGenreSchema).optional() });
 
 const tmdbListResultSchema = z.object({

@@ -18,6 +18,14 @@ blockExoticSubdeps: false
 # 24 hour delay before pnpm accepts newly published package versions.
 minimumReleaseAge: 1440
 nodeLinker: hoisted
+# Mac release jobs package both CPUs; retain optional native bindings for each.
+supportedArchitectures:
+  os:
+    - current
+  cpu:
+    - current
+    - arm64
+    - x64
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.3
   vite-plus: 0.2.3
@@ -27,7 +35,7 @@ overrides:
   browserslist: 4.28.8
   builder-util-runtime: 9.7.0
   '@expo/cli>tar': 7.5.21
-  '@expo/cli>undici': 6.28.0
+  '@expo/cli>undici': 6.28.1
   '@expo/cli>ws': 8.21.0
   '@expo/metro-config>postcss': 8.5.23
   '@expo/xcpretty>js-yaml': 4.3.2
@@ -35,7 +43,7 @@ overrides:
   'electron-updater>js-yaml': 4.3.2
   '@xmldom/xmldom@0.8.13': 0.8.15
   '@xmldom/xmldom@0.9.10': 0.9.12
-  'fast-uri@3.1.2': 3.1.6
+  'fast-uri@3.1.2': 3.1.8
   nanoid: 3.3.18
   'react-devtools-core>shell-quote': 1.9.0
   'tar@7.5.15': 7.5.21

@@ -97,7 +97,7 @@ function defaultAudioLanguage(item: EpisodeFile): string {
   return audio?.language || 'und';
 }
 
-export { mediaFileRevision } from './fileIdentity.ts';
+;
 
 function releaseKey(filePath: string, durationMs: number, audioTrack: number, audioLanguage: string): string {
   const stats = fs.statSync(filePath);

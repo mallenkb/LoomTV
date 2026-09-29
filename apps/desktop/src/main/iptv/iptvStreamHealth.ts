@@ -47,7 +47,7 @@ export type StreamCheckResult =
   | { outcome: 'dead' | 'blank'; reason: string; definitive: boolean; analyzed: boolean }
   | { outcome: 'inconclusive'; reason: string; interrupted?: boolean };
 
-export type StreamAnalysis = {
+type StreamAnalysis = {
   /** Video frames ffmpeg actually decoded, not just a declared video track. */
   hasVideo: boolean;
   /** Audio samples ffmpeg actually decoded. */
@@ -58,7 +58,7 @@ export type StreamAnalysis = {
   maxVolumeDb: number | null;
 };
 
-export type FfmpegRun = {
+type FfmpegRun = {
   stderr: string;
   /** Null when the process did not exit on its own. */
   exitCode: number | null;
@@ -71,7 +71,7 @@ export type FfmpegRun = {
 
 export type FfmpegRunner = (input: Buffer) => Promise<FfmpegRun>;
 
-export type SampleVerdict =
+type SampleVerdict =
   | { kind: 'plays' }
   | { kind: 'blank'; reason: string }
   | { kind: 'unconfirmed'; reason: string; tooShort?: boolean };
@@ -214,7 +214,7 @@ function decryptAes128(body: Buffer, key: Buffer, ivHex: string, sequence: numbe
  * Picture and sound count only when frames or samples were decoded: a track
  * the container declares but ffmpeg cannot decode is not evidence of either.
  */
-export function parseStreamAnalysis(stderr: string): StreamAnalysis {
+function parseStreamAnalysis(stderr: string): StreamAnalysis {
   const frames = Number([...stderr.matchAll(/frame=\s*(\d+)/g)].at(-1)?.[1] || 0);
   // volumedetect can report more than once (a probe instance says 0); the
   // largest count is the decoded audio.
@@ -238,7 +238,7 @@ export function parseStreamAnalysis(stderr: string): StreamAnalysis {
  * to judge. A radio stream behind a still logo, or a news channel cutting to
  * black for a moment, still plays; black or frozen with silence does not.
  */
-export function judgeStreamAnalysis(analysis: StreamAnalysis): SampleVerdict {
+function judgeStreamAnalysis(analysis: StreamAnalysis): SampleVerdict {
   const silent = !analysis.hasAudio || (analysis.maxVolumeDb !== null && analysis.maxVolumeDb <= SILENT_DB);
   if (!analysis.hasVideo && !analysis.hasAudio) return { kind: 'blank', reason: 'No picture or sound could be decoded from the stream.' };
   if (analysis.seconds < MIN_JUDGED_SECONDS) {
@@ -252,7 +252,7 @@ export function judgeStreamAnalysis(analysis: StreamAnalysis): SampleVerdict {
 }
 
 /** What a finished ffmpeg run says about the sample it was given. */
-export function verdictFromRun(run: FfmpegRun): SampleVerdict | 'retry-later' {
+function verdictFromRun(run: FfmpegRun): SampleVerdict | 'retry-later' {
   // Not the stream's fault: try again on a later check, and change nothing now.
   if (run.interrupted || run.timedOut || run.failedToStart) return 'retry-later';
   if (run.exitCode !== 0) return { kind: 'unconfirmed', reason: `the decoder failed with exit code ${run.exitCode}` };

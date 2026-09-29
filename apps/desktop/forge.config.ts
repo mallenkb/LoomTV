@@ -126,12 +126,18 @@ function nativeRuntimeFileName(engine: 'libvlc' | 'mpv', platform: string): stri
   return 'libvlc.so';
 }
 
-function nativeEnginesForPlatform(platform: string): Array<'libvlc' | 'mpv'> {
-  // LibVLC is the primary local engine on macOS and Windows. MPV remains the
-  // macOS fallback; Linux keeps its existing browser/native-system fallback.
-  if (platform === 'darwin') return ['libvlc', 'mpv'];
-  if (platform === 'win32') return ['libvlc'];
-  return [];
+// The runtime distribution policy lists the platform-arch targets that bundle
+// each native engine (LibVLC on Apple silicon, Intel Macs, and Windows x64;
+// libmpv only on Apple silicon). Linux keeps its browser/system fallback.
+function bundledNativeTargets(engine: 'libvlc' | 'mpv'): string[] {
+  const policy: unknown = JSON.parse(fs.readFileSync(path.join(__dirname, 'resources', 'ffmpeg', 'runtime-provenance.json'), 'utf8'));
+  const targets = (policy as { distributionPolicy?: { bundledNativePlaybackTargets?: Record<string, unknown> } })
+    ?.distributionPolicy?.bundledNativePlaybackTargets?.[engine];
+  return Array.isArray(targets) ? targets.filter((target): target is string => typeof target === 'string') : [];
+}
+
+function nativeEnginesForPlatform(platform: string, arch: string): Array<'libvlc' | 'mpv'> {
+  return (['libvlc', 'mpv'] as const).filter((engine) => bundledNativeTargets(engine).includes(`${platform}-${arch}`));
 }
 
 function containsFile(root: string, expectedName: string): boolean {
@@ -180,8 +186,14 @@ function prunePackagedNativeResources(outputPath: string, platform: string, arch
     if (!fs.existsSync(engineRoot)) continue;
     for (const entry of fs.readdirSync(engineRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      // The in-process MPV library and bridge use mpv/lib on every target.
-      if (engine === 'mpv' && entry.name === 'lib') continue;
+      // The in-process MPV library and bridge live in mpv/lib; keep them only
+      // where libmpv is bundled for this architecture.
+      if (engine === 'mpv' && entry.name === 'lib') {
+        if (!nativeEnginesForPlatform(platform, arch).includes('mpv')) {
+          fs.rmSync(path.join(engineRoot, entry.name), { recursive: true, force: true });
+        }
+        continue;
+      }
       const platformRoot = path.join(engineRoot, entry.name);
       if (entry.name !== platform) {
         fs.rmSync(platformRoot, { recursive: true, force: true });
@@ -293,7 +305,7 @@ function resignPackagedMacApp(outputPath: string): void {
 function assertPackagedNativeRuntimes(outputPath: string, platform: string, arch: string): void {
   const target = `${platform}/${arch}`;
   const missing: string[] = [];
-  for (const engine of nativeEnginesForPlatform(platform)) {
+  for (const engine of nativeEnginesForPlatform(platform, arch)) {
     const runtimeRoot = engine === 'mpv'
       ? path.join(resourcesPath(outputPath, platform), 'mpv', 'lib')
       : path.join(resourcesPath(outputPath, platform), engine, platform, arch);

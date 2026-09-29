@@ -34,7 +34,7 @@ export type RenamePlanEntry = {
   createFolder?: string;
 };
 
-export type RenameSkip = {
+type RenameSkip = {
   mediaId: string;
   mediaTitle: string;
   filePath: string;
@@ -103,7 +103,7 @@ function entryId(kind: 'file' | 'folder', from: string, to: string, sidecars: re
  * dash, reserved characters go, and trailing dots and spaces (which Windows
  * strips or rejects) are trimmed.
  */
-export function sanitizeNamePart(value: string): string {
+function sanitizeNamePart(value: string): string {
   return value
     .replace(/\s*:\s*/g, ' - ')
     .replace(/[/\\?*"<>|]/g, '')
@@ -117,15 +117,15 @@ function withinLimit(base: string): string {
   return base.length <= MAX_BASE_LENGTH ? base : base.slice(0, MAX_BASE_LENGTH).replace(/[\s.-]+$/, '');
 }
 
-export function titleWithYear(title: string, year: number): string {
+function titleWithYear(title: string, year: number): string {
   return `${sanitizeNamePart(title)} (${year})`;
 }
 
-export function seasonFolderName(season: number): string {
+function seasonFolderName(season: number): string {
   return `Season ${String(season).padStart(2, '0')}`;
 }
 
-export function episodeCode(season: number, episodes: readonly number[]): string {
+function episodeCode(season: number, episodes: readonly number[]): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   const first = `S${pad(season)}E${pad(episodes[0])}`;
   return episodes.length > 1 ? `${first}-E${pad(episodes[episodes.length - 1])}` : first;
@@ -137,7 +137,7 @@ export function episodeCode(season: number, episodes: readonly number[]): string
  * the name carries nothing that identifies it beyond the extension and the
  * caller should fall back to the extension alone.
  */
-export function sidecarSuffix(sidecarName: string, videoBase: string): string {
+function sidecarSuffix(sidecarName: string, videoBase: string): string {
   const lowerName = sidecarName.toLowerCase();
   const lowerBase = videoBase.toLowerCase();
   if (lowerName.startsWith(lowerBase) && /^[.-]/.test(sidecarName.slice(videoBase.length))) {
@@ -294,13 +294,13 @@ function codecLabel(details: LocalDetails): string {
  * "Title (2010).mkv"). Those files are left as they are, even if the matched
  * title has changed since, so only new or never-organized files are renamed.
  */
-export function hasOrganizedName(type: MediaItem['type'], name: string): boolean {
+function hasOrganizedName(type: MediaItem['type'], name: string): boolean {
   return type === 'movie'
     ? /^.+ \(\d{4}\)(?: - .+)?\.[a-z0-9]+$/i.test(name)
     : /^S\d{2}E\d{2,4}(?:-E\d{2,4})*(?: - .+)?\.[a-z0-9]+$/i.test(name);
 }
 
-export function versionLabels(copies: readonly LocalDetails[]): string[] | null {
+function versionLabels(copies: readonly LocalDetails[]): string[] | null {
   const resolutions = copies.map(resolutionLabel);
   if (resolutions.some((label) => !label)) return null;
   let labels = resolutions as string[];

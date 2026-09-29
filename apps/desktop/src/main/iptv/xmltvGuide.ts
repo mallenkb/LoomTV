@@ -8,7 +8,7 @@
  * single malformed `<programme>` costs one entry instead of the whole refresh.
  */
 
-export const MAX_GUIDE_PROGRAMMES = 200_000;
+const MAX_GUIDE_PROGRAMMES = 200_000;
 const MAX_TITLE_LENGTH = 300;
 const MAX_DESCRIPTION_LENGTH = 1000;
 

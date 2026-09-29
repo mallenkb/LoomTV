@@ -10,7 +10,7 @@ type RuntimePaths = {
   mediaDir: string | null;
 };
 
-export type { CanonicalCompatibilityHandler } from 'loom-media-server-headless/runtime';
+;
 
 export type CanonicalServerHostOptions = {
   /** Set only after the canonical migration report is committed successfully. */

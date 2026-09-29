@@ -15,7 +15,7 @@ export {
   ARTWORK_FILE_ACCEPT,
   ARTWORK_FORMAT_LABEL,
   MAX_ARTWORK_FILE_BYTES,
-  MAX_ARTWORK_IMPORT_BYTES,
+  
   MAX_ARTWORK_IMPORT_COUNT,
   validateArtworkDimensions,
   type SupportedArtworkMimeType,

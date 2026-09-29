@@ -89,9 +89,24 @@ for (const advisory of gatedAdvisories) {
   acceptedWaivers.push({ advisory, waiver })
 }
 
+// Call out waivers close to expiry so they are renewed or removed before the
+// gate starts failing.
+const EXPIRY_NOTICE_DAYS = 14
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function daysUntilExpiry(expires) {
+  const expiryEnd = Date.parse(`${expires}T23:59:59.999Z`)
+  return Math.floor((expiryEnd - Date.now()) / DAY_MS)
+}
+
 for (const { advisory, waiver } of acceptedWaivers) {
+  const daysLeft = daysUntilExpiry(waiver.expires)
+  const expiryNotice =
+    daysLeft <= EXPIRY_NOTICE_DAYS
+      ? `EXPIRES IN ${daysLeft} DAY(S), renew or remove it. `
+      : ''
   const message =
-    `WAIVED until ${waiver.expires}: ${advisory.github_advisory_id} ` +
+    `${expiryNotice}WAIVED until ${waiver.expires}: ${advisory.github_advisory_id} ` +
     `(${advisory.module_name}, owner ${waiver.owner}) — ${waiver.reason}`
   console.warn(message)
   if (process.env.GITHUB_ACTIONS === 'true') {

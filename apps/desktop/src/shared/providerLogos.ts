@@ -8,7 +8,7 @@ type ProviderLogoSource = {
   logoPath?: string | null;
 };
 
-export function isPrimeVideoProvider(provider: ProviderLogoSource): boolean {
+function isPrimeVideoProvider(provider: ProviderLogoSource): boolean {
   const name = provider.name?.trim().toLowerCase() || '';
   return provider.id === 9
     || provider.id === 119

@@ -7,7 +7,7 @@ import type { JikanAnimeResult } from './metadata/jikan.ts';
 import type { OMDbResponse } from './metadata/omdb.ts';
 import type { EpisodeFile, EpisodeMeta, TVMetadata } from './metadata/types.ts';
 
-export function isTVPattern(folderName: string, files: string[]): boolean {
+function isTVPattern(folderName: string, files: string[]): boolean {
   const lower = folderName.toLowerCase();
   if (/season/i.test(lower)) return true;
   if (/[Ss]\d{1,2}[Ee]\d{1,3}/.test(folderName)) return true;
@@ -211,7 +211,7 @@ export function mergeOfficialSeasonMetadata(
   return [...seasons.values()].sort((left, right) => left.number - right.number);
 }
 
-export function officialSeasonDisplayTitle(seasonNumber: number, officialTitle?: string): string {
+function officialSeasonDisplayTitle(seasonNumber: number, officialTitle?: string): string {
   const baseTitle = genericSeasonTitle(seasonNumber);
   const subtitle = officialSeasonSubtitle(officialTitle, seasonNumber);
   return subtitle ? `${baseTitle}: ${subtitle}` : baseTitle;

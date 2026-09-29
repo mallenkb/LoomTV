@@ -11,7 +11,7 @@ import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
-import { isTopmostModalContent, useModalLayer } from '@/components/ui/dialog';
+import { useModalLayer } from '@/components/ui/dialog';
 import { useLibrary, type LocalMediaDetails } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import {
@@ -116,12 +116,10 @@ import {
 } from './VideoPlayer/episodeIndex';
 import {
   hasReachedInitialResumePosition,
-  isEditableShortcutTarget,
   initialHlsStartPosition,
   initialStreamOffset,
   isTimeBuffered,
   isPlayerControlTarget,
-  isSliderShortcutTarget,
   keepsPlayerFocus,
   playbackProgressForExit,
   resolveEngineTrackId,
@@ -137,10 +135,8 @@ import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
 import { useEpisodeNavigation } from './VideoPlayer/useEpisodeNavigation';
 import { useMediaControlSession } from './VideoPlayer/useMediaControlSession';
-import type {
-  MediaSessionCommand,
-  MediaSessionCommandType,
-} from '../shared/mediaControlProtocol.ts';
+import { usePlayerKeyboardShortcuts } from './VideoPlayer/usePlayerKeyboardShortcuts';
+import { usePlayerMediaCommands } from './VideoPlayer/usePlayerMediaCommands';
 import { usePlayerScrubbing } from './VideoPlayer/usePlayerScrubbing';
 import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
@@ -3507,94 +3503,21 @@ export default function VideoPlayer({
 
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
-  const lastMediaCommandRef = useRef<{ type: MediaSessionCommandType; at: number } | null>(null);
-
-  /**
-   * Apply one system media command to the session that is already open.
-   *
-   * Every branch calls the player's own operations, so the active engine keeps
-   * playing the file it already has: nothing here reopens the media, switches
-   * engine, starts a transcode, or fetches metadata.
-   *
-   * `handledInMain` means the main process already ran the transport against
-   * LibVLC or mpv, which is the normal path for a native engine. In that case
-   * this only syncs the player's own pause intent so autoplay and the pause
-   * overlay agree with what the engine is about to report. Repeats of a
-   * transport command inside a quarter second are dropped, so a key that
-   * reaches both the media session and the focused window acts once.
-   */
-  const runMediaSessionCommand = useCallback((
-    command: MediaSessionCommand,
-    handledInMain = false,
-  ) => {
-    if (command.type !== 'seekAbsolute') {
-      const now = performance.now();
-      const previous = lastMediaCommandRef.current;
-      if (previous?.type === command.type && now - previous.at < 250) return;
-      lastMediaCommandRef.current = { type: command.type, at: now };
-    }
-
-    if (handledInMain) {
-      // The engine already moved. Record the user's intent so the player does
-      // not treat the resulting state change as an unexpected pause.
-      if (command.type === 'play') userPausedRef.current = false;
-      else if (command.type === 'pause') userPausedRef.current = true;
-      else if (command.type === 'toggle') userPausedRef.current = !paused;
-      return;
-    }
-
-    switch (command.type) {
-      case 'play':
-        if (paused) togglePlay();
-        break;
-      case 'pause': {
-        userPausedRef.current = true;
-        const engine = playbackEngineRef.current;
-        if (engine) {
-          void engine.pause().catch((error) => console.warn('[player] Pause failed:', error));
-        } else if (videoRef.current) {
-          videoRef.current.autoplay = false;
-          videoRef.current.pause();
-        }
-        break;
-      }
-      case 'toggle':
-        togglePlay();
-        break;
-      case 'stop':
-        // Stop ends playback and releases the session. It does not close the
-        // player window: macOS sends stopCommand in more situations than users
-        // expect, and tearing the UI down on it would be a bug.
-        if (!paused) togglePlay();
-        setMediaSessionStopped(true);
-        break;
-      case 'previousItem':
-        if (isLiveStreamRef.current) liveControlsRef.current.step(-1);
-        else handlePrevEpisode();
-        break;
-      case 'nextItem':
-        if (isLiveStreamRef.current) liveControlsRef.current.step(1);
-        else handleNextEpisode();
-        break;
-      case 'seekRelative':
-        seekTo(playbackPositionRef.current + command.offsetSeconds);
-        break;
-      case 'seekAbsolute':
-        seekTo(command.positionSeconds);
-        break;
-      case 'setRate':
-        setPlaybackRate(Math.min(3, Math.max(0.25, command.rate)));
-        break;
-    }
-  }, [
-    handleNextEpisode,
-    handlePrevEpisode,
+  const runMediaSessionCommand = usePlayerMediaCommands({
     paused,
+    userPausedRef,
+    playbackEngineRef,
+    videoRef,
+    isLiveStreamRef,
+    liveControlsRef,
+    playbackPositionRef,
+    togglePlay,
     seekTo,
     setPlaybackRate,
-    togglePlay,
-    userPausedRef,
-  ]);
+    setMediaSessionStopped,
+    handleNextEpisode,
+    handlePrevEpisode,
+  });
 
   useEffect(() => {
     if (!paused) setMediaSessionStopped(false);
@@ -3636,227 +3559,16 @@ export default function VideoPlayer({
     ...(mediaSessionArtworkUrl ? { artworkUrl: mediaSessionArtworkUrl } : {}),
   }, runMediaSessionCommand);
 
-  useEffect(() => {
-    const ownsShortcut = (event: KeyboardEvent) => (
-      !event.defaultPrevented && !event.isComposing
-      && isTopmostModalContent(containerRef.current)
-      && !isEditableShortcutTarget(event.target) && !isPlayerControlTarget(event.target)
-      && !isEditableShortcutTarget(document.activeElement) && !isPlayerControlTarget(document.activeElement)
-    );
-    const isPlaybackSpace = (event: KeyboardEvent) => (
-      ownsShortcut(event)
-      && (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar')
-      && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing
-      && !isEditableShortcutTarget(event.target)
-    );
-    const onKey = (e: KeyboardEvent) => {
-      // M also works when the volume button or slider has keyboard focus.
-      if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey
-        && !e.isComposing && !e.defaultPrevented && isTopmostModalContent(containerRef.current)
-        && !isEditableShortcutTarget(e.target) && !isEditableShortcutTarget(document.activeElement)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        resetSurfaceDoubleClickGuard();
-        if (!e.repeat && playerStateRef.current !== 'error') toggleMute();
-        return;
-      }
-      // Forward and back always seek while a video is playing, no matter which
-      // panel or control holds focus. Typing targets, dropdowns, and native
-      // sliders keep their own arrow behavior.
-      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing
-        && !isEditableShortcutTarget(e.target) && !isEditableShortcutTarget(document.activeElement)
-        && !isSliderShortcutTarget(e.target) && !isSliderShortcutTarget(document.activeElement)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        if (playerStateRef.current === 'error') return;
-        resetSurfaceDoubleClickGuard();
-        const step = e.shiftKey ? 30 : 10;
-        seekTo(playbackPositionRef.current + (e.key === 'ArrowRight' ? step : -step));
-        return;
-      }
-      if (e.key === 'Escape' || !ownsShortcut(e)) return;
-      if (isPlaybackSpace(e)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        if (!e.repeat && playerStateRef.current !== 'error') togglePlay();
-        return;
-      }
-      const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
-      if (!hasCommandModifier && !e.isComposing
-        && (e.key === 'ArrowUp' || e.key === 'ArrowDown')
-        && !isEditableShortcutTarget(e.target)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        if (playerStateRef.current === 'error') return;
-        resetSurfaceDoubleClickGuard();
-        changeVolume(e.key === 'ArrowUp' ? 0.05 : -0.05);
-        return;
-      }
-      if (isEditableShortcutTarget(e.target) || e.isComposing) return;
-      if (playerStateRef.current === 'error') {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          handleClose();
-        }
-        return;
-      }
-      if (
-        isPlayerControlTarget(e.target)
-        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
-      ) {
-        return;
-      }
-
-      const key = e.code === 'Space' ? ' ' : e.key;
-      if (isLiveStreamRef.current && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (key === 'PageUp' || key === 'PageDown') {
-          e.preventDefault();
-          liveControlsRef.current.step(key === 'PageUp' ? -1 : 1);
-          return;
-        }
-        if (key === 'q' || key === 'Q') {
-          e.preventDefault();
-          liveControlsRef.current.last();
-          return;
-        }
-        if (key === 'g' || key === 'G') {
-          e.preventDefault();
-          toggleLiveGuide();
-          return;
-        }
-        if (key === 'Escape' && showLiveGuideRef.current) {
-          e.preventDefault();
-          setShowLiveGuide(false);
-          return;
-        }
-      }
-      switch (key) {
-        case 'Escape':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          if (fullscreen) toggleFullscreen();
-          else handleBack();
-          break;
-        case 'k':
-        case 'K':
-        case 'MediaPlayPause':
-          if (hasCommandModifier) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          runMediaSessionCommand({ type: 'toggle' });
-          break;
-        case 'j':
-        case 'J':
-        case 'MediaRewind':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
-          break;
-        case 'l':
-        case 'L':
-        case 'MediaFastForward':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          seekTo(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
-          break;
-        case 'MediaPlay':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          if (paused) togglePlay();
-          break;
-        case 'MediaPause':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          if (!paused) togglePlay();
-          break;
-        case 'MediaTrackPrevious':
-        case 'MediaPreviousTrack':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          runMediaSessionCommand({ type: 'previousItem' });
-          break;
-        case 'MediaTrackNext':
-        case 'MediaNextTrack':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          runMediaSessionCommand({ type: 'nextItem' });
-          break;
-        case 'Backspace':
-          if (e.metaKey || e.ctrlKey || e.altKey) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          handleBack();
-          break;
-        case 'f':
-        case 'F':
-          if (hasCommandModifier) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          toggleFullscreen();
-          break;
-        case 'c':
-        case 'C': {
-          if (hasCommandModifier) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          if (activeOnlineCaption || selectedSubtitleTrackIndexRef.current !== -1) break;
-          const captionTrackIndex = firstSubtitleTrackIndex(probeTracksRef.current);
-          if (captionTrackIndex === -1) {
-            showSubtitlesPanel();
-            break;
-          }
-          selectSubtitleTrack(captionTrackIndex, false, showSubtitlesPanel);
-          break;
-        }
-        case '[':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          changePlaybackRate(-0.25);
-          break;
-        case ']':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          changePlaybackRate(0.25);
-          break;
-        case 'r':
-        case 'R':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          resetPlaybackRate();
-          break;
-        case 'Home':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          seekTo(0);
-          break;
-        case 'End':
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          seekTo(duration);
-          break;
-        default:
-          if (/^[0-9]$/.test(e.key) && duration > 0) {
-            resetSurfaceDoubleClickGuard();
-            e.preventDefault();
-            seekTo((Number(e.key) / 10) * duration);
-          }
-          break;
-      }
-    };
-    // Buttons can activate on Space keyup. Consume both halves of the gesture
-    // so the previously focused control cannot also fire a synthetic click.
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (!isPlaybackSpace(e)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    };
-    window.addEventListener('keydown', onKey, true);
-    window.addEventListener('keyup', onKeyUp, true);
-    return () => {
-      window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('keyup', onKeyUp, true);
-    };
-  }, [
+  usePlayerKeyboardShortcuts({
+    containerRef,
+    playerStateRef,
+    playbackPositionRef,
+    isLiveStreamRef,
+    liveControlsRef,
+    showLiveGuideRef,
+    selectedSubtitleTrackIndexRef,
+    probeTracksRef,
+    setShowLiveGuide,
     resetSurfaceDoubleClickGuard,
     toggleLiveGuide,
     changePlaybackRate,
@@ -3870,7 +3582,7 @@ export default function VideoPlayer({
     paused,
     resetPlaybackRate,
     runMediaSessionCommand,
-    activeOnlineCaption,
+    hasOnlineCaption: Boolean(activeOnlineCaption),
     selectSubtitleTrack,
     showSubtitlesPanel,
     skipBackSeconds,
@@ -3879,7 +3591,7 @@ export default function VideoPlayer({
     toggleMute,
     toggleFullscreen,
     togglePlay,
-  ]);
+  });
 
   // There is no `navigator.mediaSession` path inside the desktop app. The main
   // process owns the system media session for LibVLC, mpv, and Chromium alike,

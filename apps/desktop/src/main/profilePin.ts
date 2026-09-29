@@ -13,7 +13,7 @@ function deriveKey(pin: string, salt: Buffer): Promise<Buffer> {
   });
 }
 
-export function isValidProfilePin(pin: string): boolean {
+function isValidProfilePin(pin: string): boolean {
   return PIN_PATTERN.test(pin);
 }
 

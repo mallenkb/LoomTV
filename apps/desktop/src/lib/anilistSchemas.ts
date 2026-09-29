@@ -6,7 +6,7 @@ const aniListPersonImageSchema = z.object({
   large: z.string().nullish(),
 });
 
-export const aniListCharacterEdgeSchema = z.object({
+const aniListCharacterEdgeSchema = z.object({
   node: z.object({
     name: aniListNameSchema.nullish(),
     image: aniListPersonImageSchema.nullish(),
@@ -19,7 +19,7 @@ export const aniListCharacterEdgeSchema = z.object({
   })).nullish(),
 });
 
-export const aniListMediaSchema = z.object({
+const aniListMediaSchema = z.object({
   id: z.number().int(),
   title: z.object({
     userPreferred: z.string().nullish(),

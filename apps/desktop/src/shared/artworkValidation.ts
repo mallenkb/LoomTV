@@ -4,11 +4,11 @@ export const ARTWORK_FILE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif,im
 export const MAX_ARTWORK_FILE_BYTES = 16 * 1024 * 1024;
 export const MAX_ARTWORK_IMPORT_COUNT = 512;
 export const MAX_ARTWORK_IMPORT_BYTES = 64 * 1024 * 1024;
-export const MAX_ARTWORK_WIDTH = 8_192;
-export const MAX_ARTWORK_HEIGHT = 8_192;
-export const MAX_ARTWORK_PIXELS = 25_000_000;
+const MAX_ARTWORK_WIDTH = 8_192;
+const MAX_ARTWORK_HEIGHT = 8_192;
+const MAX_ARTWORK_PIXELS = 25_000_000;
 
-export const SUPPORTED_ARTWORK_MIME_TYPES = [
+const SUPPORTED_ARTWORK_MIME_TYPES = [
   'image/jpeg',
   'image/png',
   'image/webp',
@@ -19,7 +19,7 @@ export const SUPPORTED_ARTWORK_MIME_TYPES = [
 
 export type SupportedArtworkMimeType = typeof SUPPORTED_ARTWORK_MIME_TYPES[number];
 
-export const ARTWORK_STORAGE_TARGETS = ['thumbnail', 'poster', 'cover', 'logo'] as const;
+const ARTWORK_STORAGE_TARGETS = ['thumbnail', 'poster', 'cover', 'logo'] as const;
 export type ArtworkStorageTarget = typeof ARTWORK_STORAGE_TARGETS[number];
 
 export type ArtworkValidationResult =
@@ -65,7 +65,7 @@ export function validateArtworkDimensions(width: number, height: number): Artwor
   return { ok: true };
 }
 
-export function isArtworkStorageTarget(value: unknown): value is ArtworkStorageTarget {
+function isArtworkStorageTarget(value: unknown): value is ArtworkStorageTarget {
   return typeof value === 'string' && (ARTWORK_STORAGE_TARGETS as readonly string[]).includes(value);
 }
 

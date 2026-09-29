@@ -238,7 +238,7 @@ function loadCandidate(koffi: KoffiRuntime, libraryPath: string): WarmRuntime | 
   }
 }
 
-export function warmLibVlcRuntime(): boolean {
+function warmLibVlcRuntime(): boolean {
   if (warmRuntime) return true;
   if (warmupStarted || !enabled()) return false;
   warmupStarted = true;
@@ -271,7 +271,7 @@ export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance
   return warmRuntime.instance;
 }
 
-export function releaseWarmLibVlcRuntime(): void {
+function releaseWarmLibVlcRuntime(): void {
   const loaded = warmRuntime;
   warmRuntime = null;
   if (!loaded) return;

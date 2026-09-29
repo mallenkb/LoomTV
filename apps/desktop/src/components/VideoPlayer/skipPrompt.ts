@@ -7,7 +7,7 @@ export type SkipPromptSegment = {
   mediaDurationMs: number;
 };
 
-export function isKnownSkipPromptType(type: string): type is SkipPromptSegmentType {
+function isKnownSkipPromptType(type: string): type is SkipPromptSegmentType {
   return type === 'intro' || type === 'recap' || type === 'outro' || type === 'credits' || type === 'preview';
 }
 

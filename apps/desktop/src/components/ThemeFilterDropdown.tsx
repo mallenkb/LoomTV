@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 
-export type ThemeFilterOption = {
+type ThemeFilterOption = {
   value: string;
   label: string;
 };

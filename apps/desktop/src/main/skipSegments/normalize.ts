@@ -51,7 +51,7 @@ export function normalizeSegment(
   };
 }
 
-export function durationToleranceMs(localDurationMs: number): number {
+function durationToleranceMs(localDurationMs: number): number {
   return Math.max(30_000, localDurationMs * 0.02);
 }
 

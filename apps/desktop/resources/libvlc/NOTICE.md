@@ -1,8 +1,9 @@
 # LibVLC runtime notice
 
-This notice covers the staged macOS arm64 and Windows x64 payloads in this
-checkout. They are repackaged from the official VLC 3.0.23 arm64 macOS and
-VLC 3.0.21 Windows x64 distributions. The payloads are kept outside `app.asar`
+This notice covers the macOS arm64, macOS x64, and Windows x64 payloads, which
+builds download from the `runtimes-2026-09` release (see
+`apps/desktop/native-runtimes.json`). They are repackaged from the official
+VLC 3.0.23 arm64 and Intel macOS and VLC 3.0.21 Windows x64 distributions. The payloads are kept outside `app.asar`
 so the native libraries and plugin modules can be loaded by the Electron main
 process. Windows uses the LibVLC bridge through a child HWND and Direct3D11.
 
@@ -11,6 +12,17 @@ Upstream artifact: `vlc-3.0.23-arm64.dmg`
 Source: <https://download.videolan.org/vlc/last/macosx/vlc-3.0.23-arm64.dmg>
 
 Archive SHA-256: `fc6fac08d87f538517d44aca0c5e7a244b67c8c4cb589bf478363a7315fd5e0d`
+
+Intel macOS artifact: `vlc-3.0.23-intel64.dmg`
+
+Source: <https://download.videolan.org/pub/videolan/vlc/3.0.23/macosx/vlc-3.0.23-intel64.dmg>
+
+Archive SHA-256: `ec01530ce69d849dd057fba8876e68ac39bf279dc28de4e9c04e4aec11fc98db`
+
+Both macOS payloads replace `libvideotoolbox_plugin.dylib` with a build of the
+same VLC 3.0.23 source that carries Loom's 4K HEVC VideoToolbox patch
+(`apps/desktop/native/libvlc`). The Intel plugin is built with
+`arch -x86_64 bash build-videotoolbox-fix.sh` on Apple silicon.
 
 Windows artifact: `vlc-3.0.21-win64.exe`
 

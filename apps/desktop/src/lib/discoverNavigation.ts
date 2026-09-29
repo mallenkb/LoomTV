@@ -3,7 +3,7 @@ import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { parseStoredValue } from '@/lib/desktopDecoders';
 import { z } from 'zod';
 
-export const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
+const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
 export const EXPLORE_ITEM_UPDATED_EVENT = 'loomtv:explore-item-updated';
 const DISCOVER_RETURN_ROUTE_TTL_MS = 7_200_000;
 const cachedDiscoverReturnRouteSchema = z.object({

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-export type OperationResultCode = 'success' | 'http_error' | 'timeout' | 'rejected' | 'failed';
+type OperationResultCode = 'success' | 'http_error' | 'timeout' | 'rejected' | 'failed';
 export type CacheStatus = 'hit' | 'miss' | 'stale' | 'bypass' | 'not-applicable';
 
 export type OperationEvent = {
@@ -24,7 +24,7 @@ function redactedContext(
   return safeEntries.length > 0 ? Object.fromEntries(safeEntries) : undefined;
 }
 
-export function recordOperationEvent(event: OperationEvent): void {
+function recordOperationEvent(event: OperationEvent): void {
   const payload = {
     event: 'operation.completed',
     ...event,

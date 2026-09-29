@@ -584,9 +584,6 @@ export function createCanonicalVideoServer(options) {
   };
 }
 
-/** Compatibility name for integrations that have not adopted the canonical runtime name. */
-export const createHeadlessServer = createCanonicalVideoServer;
-
 /** @param {string} packageRoot */
 export async function readServerVersion(packageRoot) {
   try {

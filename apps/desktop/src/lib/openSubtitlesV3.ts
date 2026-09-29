@@ -1,4 +1,4 @@
-export const OPEN_SUBTITLES_V3_SOURCE = 'OpenSubtitles v3';
+const OPEN_SUBTITLES_V3_SOURCE = 'OpenSubtitles v3';
 const ORIGIN = 'https://opensubtitles-v3.strem.io';
 const MAX_BYTES = 2 * 1024 * 1024;
 

@@ -90,10 +90,8 @@ import {
   createProfile as createProfileRecord,
   createGuestProfile as createGuestProfileRecord,
   deleteProfile as deleteProfileRecord,
-  getDeviceProfileSelection as getDeviceProfileSelectionRecord,
   getDeviceProfileSelectionState as getDeviceProfileSelectionStateRecord,
   getDeviceSelectionRevision as getDeviceSelectionRevisionRecord,
-  getOwnerProfile as getOwnerProfileRecord,
   getProfile as getProfileRecord,
   getProfileLists as getProfileListsRecord,
   getProfilePinCredentials as getProfilePinCredentialsRecord,
@@ -130,7 +128,7 @@ export type {
   ProfileRestrictions,
   ProfileUpdateInput,
 } from './databaseProfilesRepository.ts';
-export type { CachedArtwork, FetchedArtworkBytes } from './databaseArtworkRepository.ts';
+export type { CachedArtwork,  } from './databaseArtworkRepository.ts';
 export type { StoredMediaFingerprint } from './databaseSegmentsRepository.ts';
 export type { PersistedStremioAddonSnapshot } from './databasePluginRepository.ts';
 
@@ -584,10 +582,6 @@ export function getProfile(profileId: string): ProfileRecord | null {
   return getProfileRecord(getDb(), profileId);
 }
 
-export function getOwnerProfile(): ProfileRecord | null {
-  return getOwnerProfileRecord(getDb());
-}
-
 export function createProfile(input: ProfileCreateInput): ProfileRecord {
   return createProfileRecord(getDb(), input);
 }
@@ -598,10 +592,6 @@ export function updateProfile(profileId: string, patch: ProfileUpdateInput): Pro
 
 export function deleteProfile(profileId: string): void {
   deleteProfileRecord(getDb(), profileId);
-}
-
-export function getDeviceProfileSelection(deviceId: string): string | null {
-  return getDeviceProfileSelectionRecord(getDb(), deviceId);
 }
 
 export function selectDeviceProfile(deviceId: string, profileId: string): ProfileRecord {

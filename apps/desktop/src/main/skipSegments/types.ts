@@ -9,7 +9,7 @@ export type MediaSegmentSource =
   | 'chromaprint';
 
 type MediaSegmentCandidateStatus = 'active' | 'review' | 'rejected';
-export type SegmentAnalysisMetadata = {
+type SegmentAnalysisMetadata = {
   detector?: 'chromaprint' | 'blackframe' | 'chapter';
   // True means boundaries and semantics were checked against this exact file
   // revision, set only by exact-file detectors or explicit user verification,

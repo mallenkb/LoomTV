@@ -1,5 +1,5 @@
-export const PRIMARY_MEDIA_PROTOCOL_SCHEME = 'loomtv' as const;
-export const LEGACY_MEDIA_PROTOCOL_SCHEME = 'plexserver' as const;
+const PRIMARY_MEDIA_PROTOCOL_SCHEME = 'loomtv' as const;
+const LEGACY_MEDIA_PROTOCOL_SCHEME = 'plexserver' as const;
 
 /**
  * New media URLs use LoomTV's name. The legacy alias remains readable so a

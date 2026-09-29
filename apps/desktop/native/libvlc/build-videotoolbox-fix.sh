@@ -7,10 +7,15 @@ set -euo pipefail
 archive=$1
 input=$2
 output=$3
-[[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo 'This build is verified for Apple Silicon macOS only.' >&2; exit 2; }
+# The plugin is built for the architecture the shell runs as. On Apple silicon,
+# run this script under `arch -x86_64` to build the Intel plugin with Rosetta.
+host_arch=$(uname -m)
+[[ $(uname -s) == Darwin && ( $host_arch == arm64 || $host_arch == x86_64 ) ]] || { echo 'This build supports macOS arm64 and x86_64 only.' >&2; exit 2; }
 [[ -f "$archive" && -d "$input" && ! -e "$output" ]] || { echo 'Input files must exist and the output must be new.' >&2; exit 2; }
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$input/Contents/Info.plist")
 [[ "$version" == 3.0.23 ]] || { echo 'The input runtime must be VLC 3.0.23.' >&2; exit 2; }
+runtime_archs=$(lipo -archs "$input/Contents/MacOS/lib/libvlccore.dylib")
+[[ " $runtime_archs " == *" $host_arch "* ]] || { echo "The input runtime ($runtime_archs) does not contain $host_arch. Run under arch -$host_arch or supply a matching VLC.app." >&2; exit 2; }
 expected=e891cae6aa3ccda69bf94173d5105cbc55c7a7d9b1d21b9b21666e69eff3e7e0
 actual=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
 [[ "$actual" == "$expected" ]] || { echo 'Expected the official VLC 3.0.23 source archive.' >&2; exit 2; }
@@ -34,12 +39,12 @@ for source in codec/vt_utils.c codec/videotoolbox.m codec/hxxx_helper.c \
   packetizer/hxxx_nal.c packetizer/hxxx_sei.c packetizer/h264_slice.c \
   packetizer/h264_nal.c packetizer/hevc_nal.c video_chroma/copy.c; do
   object="$build_dir/$(basename "${source%.*}").o"
-  clang -c -O2 -fPIC -mmacosx-version-min=11.0 -DHAVE_CONFIG_H -D__PLUGIN__ \
+  clang -arch "$host_arch" -c -O2 -fPIC -mmacosx-version-min=11.0 -DHAVE_CONFIG_H -D__PLUGIN__ \
     '-DMODULE_STRING="videotoolbox"' -I"$source_dir" -I"$source_dir/include" \
     -I"$source_dir/modules" "$source_dir/modules/$source" -o "$object"
   objects+=("$object")
 done
-clang -dynamiclib -mmacosx-version-min=11.0 "${objects[@]}" \
+clang -arch "$host_arch" -dynamiclib -mmacosx-version-min=11.0 "${objects[@]}" \
   -L"$input/Contents/MacOS/lib" -lvlccore -framework Foundation \
   -framework VideoToolbox -framework CoreMedia -framework CoreVideo -liconv \
   -o "$build_dir/libvideotoolbox_plugin.dylib"

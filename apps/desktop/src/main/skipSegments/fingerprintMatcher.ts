@@ -11,8 +11,8 @@ export type FingerprintMatch = {
   durationMs: number;
 };
 
-export const PUBLISH_CONFIDENCE = 0.90;
-export const REVIEW_CONFIDENCE = 0.80;
+const PUBLISH_CONFIDENCE = 0.90;
+const REVIEW_CONFIDENCE = 0.80;
 
 export function classifyDetectionConfidence(confidence: number): 'active' | 'review' | 'discard' {
   if (confidence >= PUBLISH_CONFIDENCE) return 'active';

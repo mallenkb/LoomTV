@@ -34,7 +34,7 @@ export type ComPointer = bigint;
 
 const POINTER_SIZE = 8;
 
-export const S_OK = 0;
+const S_OK = 0;
 const E_NOINTERFACE = -2147467262; // 0x80004002
 const E_POINTER = -2147467261; // 0x80004003
 /** `RoInitialize` reporting that the apartment already exists in another mode. */

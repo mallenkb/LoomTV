@@ -7,7 +7,7 @@ import type { ParsedIptvProgramme } from './iptv/xmltvGuide.ts';
 import type { IptvSourceIconId } from '../shared/desktopProtocol.ts';
 
 export const MAX_IPTV_SOURCES = 12;
-export const MAX_IPTV_CHANNEL_PAGE = 200;
+const MAX_IPTV_CHANNEL_PAGE = 200;
 
 export type IptvSourceRecord = {
   id: string;
@@ -653,7 +653,7 @@ export function setIptvFavorite(database: BetterSqlite3.Database, sourceId: stri
 }
 
 /** Channels kept in a source's recently watched list. */
-export const MAX_IPTV_RECENT = 30;
+const MAX_IPTV_RECENT = 30;
 
 export function recordIptvRecent(database: BetterSqlite3.Database, sourceId: string, channelId: string, watchedAt = Date.now()): void {
   database.transaction(() => {

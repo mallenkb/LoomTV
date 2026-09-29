@@ -16,10 +16,6 @@ Inactive cache entries expire after three minutes by default. Trimming applies f
 
 Thumbnail, provider metadata, and media-segment reads share a four-request concurrency limit. Cancellation removes queued work; already dispatched native calls can finish. Detail preloading allows one request at a time.
 
-## Validation
+## Status
 
-Both desktop TypeScript checks, targeted renderer ESLint, both production renderer builds, and whitespace checks passed. No tests, native builds, runtime checks, visual checks, or performance measurements were run. Warm navigation latency, scrolling behavior, and total process memory remain to be measured in the desktop app.
-
-## Review location
-
-This migration is isolated on `codex/tanstack-desktop-migration`. Its baseline preserves the desktop fixes present when the worktree was created. It has not been merged into the original checkout or pushed.
+The migration is merged into `main` and shipped in the desktop releases. The desktop test suite covers the query cache limits and sidebar navigation. Warm navigation latency, scrolling behavior, and total process memory have not been measured in the running app.

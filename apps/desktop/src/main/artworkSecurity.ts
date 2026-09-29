@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 
-export const MAX_ARTWORK_INPUT_BYTES = 5 * 1024 * 1024;
-export const MAX_ARTWORK_OUTPUT_BYTES = 2 * 1024 * 1024;
-export const MAX_ARTWORK_DIMENSION = 8_192;
-export const MAX_ARTWORK_PIXELS = 32_000_000;
-export const MAX_ARTWORK_FRAMES = 1;
+const MAX_ARTWORK_INPUT_BYTES = 5 * 1024 * 1024;
+const MAX_ARTWORK_OUTPUT_BYTES = 2 * 1024 * 1024;
+const MAX_ARTWORK_DIMENSION = 8_192;
+const MAX_ARTWORK_PIXELS = 32_000_000;
+const MAX_ARTWORK_FRAMES = 1;
 
-export type ArtworkFormat = 'png' | 'jpeg' | 'gif' | 'webp';
+type ArtworkFormat = 'png' | 'jpeg' | 'gif' | 'webp';
 
 export type ArtworkInspection = {
   format: ArtworkFormat;

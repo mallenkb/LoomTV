@@ -1,6 +1,6 @@
 # Security Policy
 
-Loom Media Server is a local-first desktop media library and player. It works with local files, local network workflows, metadata provider credentials, bundled media tooling, and desktop update flows. Security reports are taken seriously because a small desktop app still has access to sensitive local resources.
+Loom is a private media library and player. It runs as a desktop app or as a headless Loom Media Server, and serves web, mobile, and TV clients. It works with local files, local network sharing and pairing, remote access, metadata provider credentials, bundled media tooling, and desktop update flows. These give it access to sensitive local resources, so security reports are taken seriously.
 
 ## Supported Versions
 
