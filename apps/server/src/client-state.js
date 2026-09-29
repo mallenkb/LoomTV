@@ -671,6 +671,25 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     },
     /** @param {string} profileId @param {string} mediaId @param {{position?: unknown; duration?: unknown; watched?: unknown}} input @param {string} accountId */
     async saveProgress(profileId, mediaId, input, accountId, canSeeAll = false) {
+      // Playback sends this every few seconds. The SQLite store updates one
+      // row; stores without the targeted method use the full mutation below.
+      if (typeof store.saveWatchProgress === 'function') {
+        const mediaKey = String(mediaId).slice(0, 128);
+        const positionSeconds = safeNumber(input.position);
+        const durationSeconds = safeNumber(input.duration);
+        const updatedAt = Date.now();
+        const { watched } = store.saveWatchProgress({
+          profileId, mediaId: mediaKey, positionSeconds, durationSeconds,
+          ...(typeof input.watched === 'boolean' ? { watched: input.watched } : {}),
+          updatedAt, maxPerProfile: MAX_PROGRESS,
+        }, ({ exists, assignments }) => {
+          if (!exists) throw Object.assign(new Error('Profile was not found.'), { status: 404, code: 'profile_not_found' });
+          if (!canSeeAll && !assignments.some((item) => item.accountId === accountId)) {
+            throw Object.assign(new Error('That profile is not available to this account.'), { status: 403, code: 'profile_forbidden' });
+          }
+        });
+        return { position: positionSeconds, duration: durationSeconds, watched, updatedAt };
+      }
       return store.mutateClientState((state) => {
         requireProfile(state, profileId, accountId, canSeeAll);
         const mediaKey = String(mediaId).slice(0, 128);

@@ -110,3 +110,63 @@ test('preference validation rejects non-numeric values without replacing saved p
   await assert.rejects(client.saveTrackPreferences(profile.id, 'movie-1', { audio: { enabled: true, index: '0' } }, owner.id), { code: 'invalid_request' });
   assert.deepEqual(await client.getProfilePreferences(profile.id, owner.id), { skipBackSeconds: 10 });
 });
+
+test('a progress heartbeat writes one row and leaves other profile tables alone', async (t) => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  await client.saveProfilePreferences(profile.id, { themeMode: 'light' }, owner.id);
+  await client.setProfileListEntry(profile.id, 'movie-1', 'watchlist', true, owner.id);
+  await client.saveTrackPreferences(profile.id, 'movie-1', { audio: { enabled: true, language: 'en', index: 0 } }, owner.id);
+
+  // Persistent triggers log any delete or rewrite of the neighbouring tables,
+  // which the former full-state replacement did on every heartbeat.
+  const observer = new DatabaseSync(path.join(dataDir, 'loomtv-canonical.sqlite'));
+  t.after(() => observer.close());
+  observer.exec('CREATE TABLE test_change_log (tbl TEXT NOT NULL)');
+  for (const table of ['profiles', 'profile_assignments', 'profile_preferences', 'profile_list_entries', 'track_preferences', 'watch_history']) {
+    observer.exec(`CREATE TRIGGER test_${table}_delete AFTER DELETE ON ${table} BEGIN INSERT INTO test_change_log VALUES ('${table}'); END;
+      CREATE TRIGGER test_${table}_update AFTER UPDATE ON ${table} BEGIN INSERT INTO test_change_log VALUES ('${table}'); END;`);
+  }
+  const changes = () => observer.prepare('SELECT tbl FROM test_change_log').all().map((row) => row.tbl);
+
+  const first = await client.saveProgress(profile.id, 'movie-1', { position: 30, duration: 100 }, owner.id);
+  assert.equal(first.watched, false);
+  const second = await client.saveProgress(profile.id, 'movie-1', { position: 95, duration: 100 }, owner.id);
+  assert.equal(second.watched, true, 'reaching 90% marks the title watched');
+  const rewound = await client.saveProgress(profile.id, 'movie-1', { position: 10, duration: 100 }, owner.id);
+  assert.equal(rewound.watched, true, 'watched stays set until explicitly cleared');
+  const cleared = await client.saveProgress(profile.id, 'movie-1', { position: 10, duration: 100, watched: false }, owner.id);
+  assert.equal(cleared.watched, false);
+  assert.deepEqual(changes(), [], 'heartbeats must not touch other profile tables');
+  assert.deepEqual(await client.listProgress(profile.id, owner.id), {
+    'movie-1': { position: 10, duration: 100, watched: false, updatedAt: cleared.updatedAt },
+  });
+
+  await assert.rejects(client.saveProgress(profile.id, 'movie-1', { position: 1, duration: 100 }, 'someone-else'), { status: 403, code: 'profile_forbidden' });
+  await assert.rejects(client.saveProgress('missing-profile', 'movie-1', { position: 1, duration: 100 }, owner.id), { status: 404, code: 'profile_not_found' });
+
+  // The triggers do catch full-state writes.
+  await client.saveProfilePreferences(profile.id, { themeMode: 'dark' }, owner.id);
+  assert.ok(changes().length > 0);
+});
+
+test('targeted progress saves keep only the newest entries per profile', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  const allow = () => {};
+  for (const [index, mediaId] of ['a', 'b', 'c', 'd'].entries()) {
+    store.saveWatchProgress({ profileId: profile.id, mediaId, positionSeconds: 5, durationSeconds: 100, updatedAt: 1000 + index, maxPerProfile: 3 }, allow);
+  }
+  assert.deepEqual(Object.keys(await client.listProgress(profile.id, owner.id)).sort(), ['b', 'c', 'd']);
+});
