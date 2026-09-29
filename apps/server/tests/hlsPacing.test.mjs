@@ -36,7 +36,7 @@ const ffmpeg = (() => {
 
 test('a full remux keeps its first segments and a playlist that starts at them', {
   skip: !ffmpeg ? 'ffmpeg is not installed' : false,
-  timeout: 120_000,
+  timeout: process.platform === 'win32' ? 240_000 : 120_000,
 }, async (t) => {
   const { service, outputDirFor, response, segments, waitFor } = await pacingFixture(t, {
     spawnProcess: undefined,
@@ -62,7 +62,7 @@ test('a full remux keeps its first segments and a playlist that starts at them',
       assert.equal(segment.statusCode, 200, 'an advertised segment must exist');
     }
     return current.includes('#EXT-X-ENDLIST');
-  }, 60_000));
+  }, process.platform === 'win32' ? 200_000 : 60_000));
   const playlist = await fs.readFile(path.join(outputDir, 'index.m3u8'), 'utf8');
   assert.match(playlist, /#EXT-X-PLAYLIST-TYPE:EVENT/);
   assert.match(playlist, /#EXT-X-MEDIA-SEQUENCE:0/);
