@@ -5,7 +5,7 @@
       "reviewedOn": "2026-09-28",
       "expires": "2026-11-06",
       "owner": "@mallenkb",
-      "reason": "Build-time denial of service only; there is no fixed published image-size version. The local image-size patch guards malformed ICNS entries and zero-sized image boxes. Scope is limited to Metro dependency paths from the mobile and Android TV projects; remove this waiver when the advisory disappears or any path leaves that scope.",
+      "reason": "Build-time denial of service only. The fix is published in image-size 2.0.3, but Metro 0.83 requires image-size ^1.0.2 and calls its default export, which 2.x removed, so overriding to 2.x would break the Metro build. The local image-size patch guards malformed ICNS entries and zero-sized image boxes. Scope is limited to Metro dependency paths from the mobile and Android TV projects; remove this waiver when the advisory disappears or any path leaves that scope.",
       "allowedPathPrefixes": [
         "apps__mobile>",
         "apps__tv>"
@@ -19,7 +19,7 @@
       "reviewedOn": "2026-09-28",
       "expires": "2026-11-06",
       "owner": "@mallenkb",
-      "reason": "Build-time denial of service only; there is no fixed published image-size version. The local image-size patch guards malformed ICNS entries and zero-sized image boxes. Scope is limited to Metro dependency paths from the mobile and Android TV projects; remove this waiver when the advisory disappears or any path leaves that scope.",
+      "reason": "Build-time denial of service only. The fix is published in image-size 2.0.3, but Metro 0.83 requires image-size ^1.0.2 and calls its default export, which 2.x removed, so overriding to 2.x would break the Metro build. The local image-size patch guards malformed ICNS entries and zero-sized image boxes. Scope is limited to Metro dependency paths from the mobile and Android TV projects; remove this waiver when the advisory disappears or any path leaves that scope.",
       "allowedPathPrefixes": [
         "apps__mobile>",
         "apps__tv>"
