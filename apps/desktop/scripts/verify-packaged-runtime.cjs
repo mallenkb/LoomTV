@@ -8,7 +8,7 @@ const asar = require('@electron/asar');
 const root = process.cwd();
 const outDir = path.join(root, 'out');
 const platform = process.platform;
-const arch = process.arch;
+const arch = architectureToken(String(process.env.LOOMTV_RUNTIME_ARCH || process.arch).trim().toLowerCase());
 
 function exists(candidate) {
   return fs.existsSync(candidate);
@@ -286,6 +286,11 @@ function nativePayloadRoot(component) {
   );
 }
 
+function verifyMacArchitecture(candidate) {
+  const result = spawnSync('/usr/bin/lipo', ['-verify_arch', arch === 'x64' ? 'x86_64' : arch, candidate], { encoding: 'utf8' });
+  if (result.status !== 0) fail(`Wrong architecture for ${candidate}: ${result.stderr || result.error || ''}`);
+}
+
 function verifyNativeFile(candidate, label, targetPlatform, executable) {
   if (!regularFile(candidate)) {
     fail(`Missing ${label}: ${candidate}`);
@@ -301,6 +306,7 @@ function verifyNativeFile(candidate, label, targetPlatform, executable) {
   } catch (error) {
     fail(`Could not inspect ${label}: ${candidate}: ${String(error)}`);
   }
+  if (targetPlatform === 'darwin' && platform === 'darwin') verifyMacArchitecture(candidate);
   return true;
 }
 
@@ -477,7 +483,14 @@ for (const candidate of requiredUnpacked) {
 }
 
 const sqliteNative = requiredUnpacked[0];
-if (exists(sqliteNative)) {
+// A host Electron cannot load another architecture's addon. Check its Mach-O
+// slice when inspecting an Intel Mac package from an Apple-silicon CI runner.
+if (platform === 'darwin') {
+  for (const binary of [scanner, ...requiredUnpacked]) {
+    verifyMacArchitecture(binary);
+  }
+}
+if (exists(sqliteNative) && arch === process.arch) {
   const checkScript = path.join(os.tmpdir(), `loomtv-native-check-${process.pid}.cjs`);
   fs.writeFileSync(checkScript, `require(${JSON.stringify(sqliteNative)});\n`, 'utf8');
 
@@ -492,9 +505,14 @@ if (exists(sqliteNative)) {
   }
 }
 
+if (arch !== process.arch) console.log(`[runtime-check] ${arch} addon architecture checked; Electron ABI loading requires a ${arch} host.`);
+
 const bundledFfmpeg = path.join(resources, 'ffmpeg', platformFolder(), binaryName('ffmpeg'));
 const bundledFfprobe = path.join(resources, 'ffmpeg', platformFolder(), binaryName('ffprobe'));
 const bundledFpcalc = path.join(resources, 'fpcalc', platformFolder(), platform === 'win32' ? 'fpcalc.exe' : 'fpcalc');
+if (platform === 'darwin') {
+  for (const binary of [bundledFfmpeg, bundledFfprobe, bundledFpcalc]) verifyMacArchitecture(binary);
+}
 const fpcalcNotice = path.join(resources, 'fpcalc', 'NOTICE.md');
 const libVlcNotice = path.join(resources, 'libvlc', 'NOTICE.md');
 const mpvNotice = path.join(resources, 'mpv', 'NOTICE.md');
@@ -586,6 +604,8 @@ if (bundledNativePlaybackTargets?.libvlc.includes(selectedNativeRuntimeTarget)) 
 }
 if (bundledNativePlaybackTargets?.mpv.includes(selectedNativeRuntimeTarget)) {
   verifyMpvPayload(targetPlatform, targetArch);
+} else if (exists(path.join(resources, 'mpv', 'lib'))) {
+  fail(`Unsupported libmpv payload remains packaged for ${selectedNativeRuntimeTarget}.`);
 }
 
 // When these are absent the tray silently falls back to the full-colour app

@@ -271,6 +271,12 @@ jobs:
       - name: Verify packaged runtime dependencies
         run: corepack pnpm --filter loom-media-server-desktop run verify:runtime
 
+      - name: Verify Intel macOS packaged runtime dependencies
+        if: runner.os == 'macOS'
+        env:
+          LOOMTV_RUNTIME_ARCH: x64
+        run: corepack pnpm --filter loom-media-server-desktop run verify:runtime out/builder/mac
+
       - name: Upload unsigned package smoke artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
