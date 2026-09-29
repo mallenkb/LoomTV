@@ -192,3 +192,28 @@ test('starting a scan with no roots fails with a clear error', async () => {
   const { scanner } = makeHarness({ roots: [] });
   await assert.rejects(() => scanner.start({}), (error) => error.status === 400);
 });
+
+test('scan checkpoints report progress without saving the whole state', async () => {
+  const files = Array.from({ length: 120 }, (_, index) => `Movies/movie-${String(index).padStart(3, '0')}.mkv`);
+  const rootPath = await makeLibrary(files);
+  const state = { roots: [{ id: 'root-1', path: rootPath }], catalog: [], scan: { state: 'idle' } };
+  const progress = [];
+  let loads = 0;
+  let saves = 0;
+  const scanner = createHeadlessLibraryScanner({
+    loadState: async () => { loads += 1; return state; },
+    saveState: async () => { saves += 1; },
+    saveScanProgress: async (update) => { progress.push(update); },
+    appendLog: async () => undefined,
+  });
+  await scanner.start({});
+  const loadsAtStart = loads;
+  const savesAtStart = saves;
+  const scan = await waitForScan(state);
+  assert.equal(scan.state, 'completed');
+  assert.deepEqual(progress.map(({ scannedFiles, indexedFiles }) => [scannedFiles, indexedFiles]), [[50, 50], [100, 100]]);
+  assert.ok(progress.every((update) => update.scanId === scan.id));
+  // Only the completion writes the catalog; checkpoints add no loads or saves.
+  assert.equal(saves - savesAtStart, 1);
+  assert.ok(loads - loadsAtStart <= 2, `completion should need at most two loads, saw ${loads - loadsAtStart}`);
+});

@@ -789,3 +789,20 @@ test('restore refuses the live state file and non-backup permissions', async () 
     (error) => error.status === 403,
   );
 });
+
+test('a concurrent sign-in burst runs no more password checks than the lock budget', async () => {
+  let checks = 0;
+  const releases = [];
+  const kdfLimiter = { run: (work) => { checks += 1; return new Promise((resolve, reject) => { releases.push(() => work().then(resolve, reject)); }); } };
+  const { service } = await onboardedService({ options: { kdfLimiter } });
+  const attempts = Array.from({ length: 12 }, (_, index) => service.createSession({ password: `wrong-password-${index}`, address: '127.0.0.1' }).catch((error) => error));
+  // Let every attempt reach its password check or its admission refusal.
+  for (let round = 0; round < 50 && checks < 5; round += 1) await new Promise((resolve) => { setTimeout(resolve, 20); });
+  await new Promise((resolve) => { setTimeout(resolve, 300); });
+  assert.equal(checks, 5, 'at most five password checks may run for one identity');
+  while (releases.length) releases.shift()();
+  const results = await Promise.all(attempts);
+  assert.equal(results.filter((error) => error.code === 'login_in_progress').length, 7);
+  assert.equal(results.filter((error) => error.code === 'invalid_credentials' || error.code === 'login_locked').length, 5);
+  await assert.rejects(service.createSession({ password: OWNER_PASSWORD, address: '127.0.0.1' }), { status: 429, code: 'login_locked' });
+});

@@ -38,12 +38,14 @@ fresh review. Expired waivers fail the gate.
 
 ## Live waivers
 
-Both current `image-size` advisories are build-time denial-of-service findings with no fixed
-published version. They are owned by `@mallenkb`, expire on 2026-11-06, and are accepted only when
-every path starts at `apps__mobile>` and contains `>metro>image-size`. This confines them to the
-mobile Metro build dependency graph. Follow up when Expo or Metro publishes a compatible fixed
-dependency and remove each waiver when its advisory disappears; any path outside that exact scope
-must fail the gate.
+Both current `image-size` advisories are build-time denial-of-service findings. The fix is
+published in `image-size` 2.0.3, but Metro 0.83 requires `image-size ^1.0.2` and calls the default
+export that 2.x removed, so the fixed release cannot replace it without breaking Metro. A local patch
+guards malformed ICNS entries and zero-sized image boxes in the meantime. The waivers are owned by
+`@mallenkb`, expire on 2026-11-06, and are accepted only when every path starts at `apps__mobile>`
+or `apps__tv>` and contains `>metro>image-size`. This confines them to the Metro build dependency
+graphs of the mobile and TV apps. Remove each waiver when Expo or Metro moves to a fixed
+`image-size` and the advisory disappears; any path outside that exact scope must fail the gate.
 
 - `GHSA-w3rx-r6r6-pgpr`: ICNS parser infinite-loop denial of service.
 - `GHSA-5p2g-fcmc-qvqq`: JXL and HEIF parser infinite-loop denial of service.

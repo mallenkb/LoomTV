@@ -2,12 +2,15 @@ import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util';
 import { canonicalProfileKind } from '@loom-media-server/video-contracts';
 import { migrateLegacyProfileKind } from '@loom-media-server/video-contracts/server';
+import { sharedKdfLimiter } from './kdf-admission.js';
 
 const MAX_PROFILES = 32;
 const MAX_PROGRESS = 20_000;
 const MAX_NAME_LENGTH = 80;
 const PROFILE_UNLOCK_TTL_MS = 30 * 60 * 1000;
 const MAX_PIN_FAILURES = 2_048;
+// Failed PINs allowed before each further failure adds a growing wait.
+const FREE_PIN_ATTEMPTS = 5;
 /** @type {(password: string, salt: Buffer, keylen: number, options: import('node:crypto').ScryptOptions) => Promise<Buffer>} */
 const scrypt = promisify(scryptCallback);
 
@@ -238,13 +241,17 @@ function legacySnapshot(state) {
   };
 }
 
-/** @param {{ store: import('./server-state-types.js').StateStore; validateAccount?: (accountId: string) => Promise<boolean> }} options */
-export function createHeadlessClientState({ store, validateAccount = async () => false }) {
+/** @param {{ store: import('./server-state-types.js').StateStore; validateAccount?: (accountId: string) => Promise<boolean>; kdfLimiter?: ReturnType<typeof import('./kdf-admission.js').createKdfLimiter> }} options */
+export function createHeadlessClientState({ store, validateAccount = async () => false, kdfLimiter = sharedKdfLimiter }) {
   if (!store) throw new Error('createHeadlessClientState requires the canonical state store.');
   /** @type {Map<string, {revision: number; expiresAt: number}>} */
   const unlockedSelections = new Map();
   /** @type {Map<string, {failures: number; blockedUntil: number; lastAttemptAt: number}>} */
   const pinFailures = new Map();
+  // PIN attempts per failure key that are between the lock check and
+  // recording their result.
+  /** @type {Map<string, number>} */
+  const inFlightPins = new Map();
   /** @param {string} accountId @param {string} deviceId @param {string} profileId */
   const unlockKey = (accountId, deviceId, profileId) => `${accountId}\u0000${deviceId}\u0000${profileId}`;
   const prunePinState = () => {
@@ -320,6 +327,16 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     }
     return restrictedProfileContext(state, accountId, profile, assignment, media, {
       deviceId: normalizedDeviceId, selectionRevision: selection.revision,
+    });
+  };
+
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {string | undefined} deviceId */
+  const scopedContext = (state, accountId, profileId, media, deviceId) => {
+    const { profile, assignment } = requireProfile(state, profileId, accountId, false);
+    const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
+    return restrictedProfileContext(state, accountId, profile, assignment, media, {
+      deviceId: String(deviceId || `invitation:${profileId}`).slice(0, 128),
+      selectionRevision: Number(restrictions?.revision || 0),
     });
   };
 
@@ -440,6 +457,8 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
       const before = store.readClientState();
       const { profile } = requireProfile(before, profileId, accountId, false);
+      /** @type {string | null | undefined} */
+      let verifiedPinHash;
       if (profile.hasPin) {
         prunePinState();
         const remoteAddress = String(address || 'unknown').slice(0, 128);
@@ -449,25 +468,55 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
           `device\u0000${accountId}\u0000${normalizedDeviceId}\u0000${profileId}`,
         ];
         const failureStates = failureKeys.map((key) => pinFailures.get(key)).filter((entry) => entry !== undefined);
-        const current = Date.now();
+        const attemptStartedAt = Date.now();
         const blockedUntil = Math.max(0, ...failureStates.map((entry) => entry.blockedUntil));
-        if (blockedUntil > current) throw Object.assign(new Error('That PIN could not be accepted.'), {
-          status: 429, code: 'profile_locked', retryAfter: Math.max(1, Math.ceil((blockedUntil - current) / 1000)),
+        if (blockedUntil > attemptStartedAt) throw Object.assign(new Error('That PIN could not be accepted.'), {
+          status: 429, code: 'profile_locked', retryAfter: Math.max(1, Math.ceil((blockedUntil - attemptStartedAt) / 1000)),
         });
+        // Attempts still being checked count against the free-attempt budget,
+        // so a concurrent burst cannot try more PINs than the lock allows.
+        const failuresSoFar = Math.max(0, ...failureStates.map((entry) => entry.failures));
+        const inFlight = Math.max(0, ...failureKeys.map((key) => inFlightPins.get(key) || 0));
+        if (failuresSoFar + inFlight >= FREE_PIN_ATTEMPTS) throw Object.assign(new Error('Another PIN attempt is still being checked. Try again shortly.'), {
+          status: 429, code: 'pin_in_progress', retryAfter: 1,
+        });
+        for (const key of failureKeys) inFlightPins.set(key, (inFlightPins.get(key) || 0) + 1);
         const credential = before.profileCredentials.find((item) => item.profileId === profileId);
-        if (!await verifyPin(pin, credential)) {
-          const failures = Math.max(0, ...failureStates.map((entry) => entry.failures)) + 1;
-          const delayMs = failures < 5 ? 0 : Math.min(15 * 60 * 1000, 30_000 * 2 ** (failures - 5));
+        let accepted;
+        try {
+          accepted = await kdfLimiter.run(() => verifyPin(pin, credential));
+        } finally {
+          for (const key of failureKeys) {
+            const remaining = (inFlightPins.get(key) || 1) - 1;
+            if (remaining > 0) inFlightPins.set(key, remaining); else inFlightPins.delete(key);
+          }
+        }
+        if (!accepted) {
+          // Count from the current state, not the pre-check snapshot, so
+          // concurrent failures each add one.
+          const current = Date.now();
+          const failures = Math.max(0, ...failureKeys.map((key) => pinFailures.get(key)?.failures || 0)) + 1;
+          const delayMs = failures < FREE_PIN_ATTEMPTS ? 0 : Math.min(15 * 60 * 1000, 30_000 * 2 ** (failures - FREE_PIN_ATTEMPTS));
           for (const key of failureKeys) pinFailures.set(key, { failures, blockedUntil: current + delayMs, lastAttemptAt: current });
           throw Object.assign(new Error('That PIN could not be accepted.'), {
             status: delayMs ? 429 : 403, code: 'profile_locked', ...(delayMs ? { retryAfter: Math.ceil(delayMs / 1000) } : {}),
           });
         }
-        for (const key of failureKeys) pinFailures.delete(key);
+        // Clear only failures recorded before this attempt began; a failure
+        // that finished while this one was being checked still counts.
+        for (const key of failureKeys) {
+          if ((pinFailures.get(key)?.lastAttemptAt ?? 0) <= attemptStartedAt) pinFailures.delete(key);
+        }
+        verifiedPinHash = credential?.pinHash ?? null;
       }
       let selectedRevision = 0;
       const selected = store.mutateClientState((state) => {
         const { profile } = requireProfile(state, profileId, accountId, false);
+        // The PIN may have changed or been removed while it was being checked.
+        if (verifiedPinHash !== undefined
+          && state.profileCredentials.find((item) => item.profileId === profileId)?.pinHash !== verifiedPinHash) {
+          throw Object.assign(new Error('The profile PIN changed. Enter the new PIN.'), { status: 409, code: 'profile_pin_changed' });
+        }
         const existing = state.selections.find((item) => item.accountId === accountId && item.deviceId === normalizedDeviceId);
         if (existing) { existing.profileId = profileId; existing.revision += 1; existing.selectedAt = Date.now(); }
         else state.selections.push({ accountId, deviceId: normalizedDeviceId, profileId, revision: 0, automaticSignIn: false, selectedAt: Date.now() });
@@ -485,13 +534,28 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     },
     /** @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} [media] @param {string | undefined} [deviceId] */
     async requireScopedProfile(accountId, profileId, media = undefined, deviceId = undefined) {
+      return scopedContext(store.readClientState(), accountId, profileId, media, deviceId);
+    },
+    /**
+     * Check many items against the active profile with one client-state read.
+     * The returned function applies the same rules as requireActivePlaybackProfile.
+     * @param {string} accountId @param {string | undefined} deviceId
+     */
+    async activePlaybackProfileChecker(accountId, deviceId) {
       const state = store.readClientState();
-      const { profile, assignment } = requireProfile(state, profileId, accountId, false);
-      const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
-      return restrictedProfileContext(state, accountId, profile, assignment, media, {
-        deviceId: String(deviceId || `invitation:${profileId}`).slice(0, 128),
-        selectionRevision: Number(restrictions?.revision || 0),
-      });
+      playbackContext(state, accountId, deviceId, undefined);
+      /** @param {import('./server-state-types.js').ProfileMedia} media */
+      return (media) => playbackContext(state, accountId, deviceId, media);
+    },
+    /**
+     * Check many items against an invitation's profile with one client-state read.
+     * @param {string} accountId @param {string} profileId @param {string | undefined} [deviceId]
+     */
+    async scopedProfileChecker(accountId, profileId, deviceId = undefined) {
+      const state = store.readClientState();
+      scopedContext(state, accountId, profileId, undefined, deviceId);
+      /** @param {import('./server-state-types.js').ProfileMedia} media */
+      return (media) => scopedContext(state, accountId, profileId, media, deviceId);
     },
     /** @param {string} accountId @param {string | undefined} deviceId */
     async getActiveProfileState(accountId, deviceId) {
@@ -671,6 +735,25 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     },
     /** @param {string} profileId @param {string} mediaId @param {{position?: unknown; duration?: unknown; watched?: unknown}} input @param {string} accountId */
     async saveProgress(profileId, mediaId, input, accountId, canSeeAll = false) {
+      // Playback sends this every few seconds. The SQLite store updates one
+      // row; stores without the targeted method use the full mutation below.
+      if (typeof store.saveWatchProgress === 'function') {
+        const mediaKey = String(mediaId).slice(0, 128);
+        const positionSeconds = safeNumber(input.position);
+        const durationSeconds = safeNumber(input.duration);
+        const updatedAt = Date.now();
+        const { watched } = store.saveWatchProgress({
+          profileId, mediaId: mediaKey, positionSeconds, durationSeconds,
+          ...(typeof input.watched === 'boolean' ? { watched: input.watched } : {}),
+          updatedAt, maxPerProfile: MAX_PROGRESS,
+        }, ({ exists, assignments }) => {
+          if (!exists) throw Object.assign(new Error('Profile was not found.'), { status: 404, code: 'profile_not_found' });
+          if (!canSeeAll && !assignments.some((item) => item.accountId === accountId)) {
+            throw Object.assign(new Error('That profile is not available to this account.'), { status: 403, code: 'profile_forbidden' });
+          }
+        });
+        return { position: positionSeconds, duration: durationSeconds, watched, updatedAt };
+      }
       return store.mutateClientState((state) => {
         requireProfile(state, profileId, accountId, canSeeAll);
         const mediaKey = String(mediaId).slice(0, 128);

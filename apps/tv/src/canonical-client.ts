@@ -21,6 +21,7 @@ export type LibraryItem = {
 };
 
 type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
+export type DiscoveryDocument = { apiVersion: string; serverVersion: string; certificateFingerprint?: string };
 
 function normalizedBaseUrl(value: string): string {
   const text = value.trim().replace(/\/+$/, '');
@@ -69,10 +70,30 @@ export class CanonicalTvClient {
 
   private endpoint(path: string): string { return `${this.transportBaseUrl}${path}`; }
 
-  async discover() {
-    return payload<{ apiVersion: string; serverVersion: string; certificateFingerprint?: string }>(
-      await fetch(this.endpoint('/api/v1/discovery')),
-    );
+  // The server sends the discovery document as a plain object, not inside the
+  // { ok, data } envelope the other routes use. Accept both shapes.
+  async discover(): Promise<DiscoveryDocument> {
+    const response = await fetch(this.endpoint('/api/v1/discovery'));
+    const body: unknown = await response.json().catch(() => null);
+    const envelope = body as Partial<Envelope<unknown>> | null;
+    if (!response.ok || envelope?.ok === false) {
+      const failure = envelope as Extract<Envelope<unknown>, { ok: false }> | null;
+      throw Object.assign(new Error(failure?.error?.message || 'The server rejected the request.'), {
+        code: failure?.error?.code || 'request_failed', status: response.status,
+      });
+    }
+    const document = envelope?.ok === true ? (envelope as { data: unknown }).data : body;
+    const candidate = document as Partial<DiscoveryDocument> | null;
+    if (!candidate || typeof candidate.apiVersion !== 'string' || typeof candidate.serverVersion !== 'string') {
+      throw Object.assign(new Error('This address did not answer as a Loom server.'), {
+        code: 'invalid_discovery', status: response.status,
+      });
+    }
+    return {
+      apiVersion: candidate.apiVersion,
+      serverVersion: candidate.serverVersion,
+      ...(typeof candidate.certificateFingerprint === 'string' ? { certificateFingerprint: candidate.certificateFingerprint } : {}),
+    };
   }
 
   async requestPairing(deviceName: string) {

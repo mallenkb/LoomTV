@@ -4,9 +4,31 @@ import { hasPermission, isLocalNetworkAddress } from './auth-policy.js';
 const INVITATION_PERMISSIONS = Object.freeze(['library.read', 'stream', 'downloads']);
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** @type {Readonly<Record<string, number>>} */
-const RATE_LIMITS = Object.freeze({ credential: 30, pairing: 12, media: 600, download: 600, admin: 120, compatibility: 300, public: 180 });
+// pairingStatus covers GET polls for one pending approval. A client polling
+// every 1.5 seconds for the whole five-minute approval window makes 200 of
+// them, so allow a few concurrent pairings per address. Creating pairing
+// requests stays on the strict pairing budget.
+const RATE_LIMITS = Object.freeze({ credential: 30, pairing: 12, pairingStatus: 600, media: 600, download: 600, admin: 120, compatibility: 300, public: 180 });
 const INVITATION_SESSION_IDLE_MS = 30 * 60 * 1000;
 const MAX_SCOPE_IDS = 512;
+
+/**
+ * The rate-limit class for a request. Setup shares the credential class:
+ * claiming a server is as sensitive as signing in to one. Polling one pending
+ * pairing approval has its own class so valid polls cannot use up the budget
+ * for creating pairing requests.
+ * @param {string | undefined} method @param {string} pathname
+ */
+export function remoteRouteClass(method, pathname) {
+  if (pathname.startsWith('/api/v1/auth') || pathname.startsWith('/api/v1/setup')) return 'credential';
+  if (method === 'GET' && /^\/api\/v1\/pairing\/requests\/[^/]+$/.test(pathname)) return 'pairingStatus';
+  if (pathname.startsWith('/api/v1/pairing')) return 'pairing';
+  if (pathname.startsWith('/api/v1/downloads')) return 'download';
+  if (pathname.startsWith('/api/media') || pathname.startsWith('/hls/') || pathname === '/stream') return 'media';
+  if (pathname.startsWith('/api/admin') || pathname.startsWith('/admin')) return 'admin';
+  if (pathname.startsWith('/api/v2')) return 'compatibility';
+  return 'public';
+}
 
 /** @param {number} status @param {string} code @param {string} message @param {{retryAfter?: number}} [details] */
 function remoteError(status, code, message, details = {}) {
@@ -336,6 +358,22 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     return getClientState().requireScopedProfile(principal.id, principal.invitationProfileId, media, deviceId);
   }
 
+  /**
+   * invitationProfileContext for many items with one client-state read.
+   * @param {import('./server-media-types.js').Principal} principal
+   */
+  async function invitationProfileChecker(principal) {
+    if (principal?.authentication !== 'invitation-session') return null;
+    if (!principal.invitationProfileId) throw remoteError(403, 'permission_denied', 'Invitation profile is unavailable.');
+    const check = await getClientState().scopedProfileChecker(principal.id, principal.invitationProfileId, principal.deviceId ?? undefined);
+    /** @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource} media */
+    return (media) => {
+      if (principal.invitationMediaIds && !principal.invitationMediaIds.includes(media.id)) throw remoteError(403, 'permission_denied', 'Media is outside the invitation scope.');
+      if (!principal.rootIds?.includes(media.rootId || '')) throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+      return check(media);
+    };
+  }
+
   /** @param {import('./server-media-types.js').DownloadInput} input @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
   async function createDownload(input, principal, req) {
     const requestContext = assertPrincipal(req, principal, 'download');
@@ -436,7 +474,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
 
   return {
     context, preflight, assertPrincipal, policy, updatePolicy, audit,
-    createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext,
+    createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext, invitationProfileChecker,
     listInvitations: (/** @type {import('./server-media-types.js').Principal} */ principal) => store.listInvitations(principal.id),
     /** @param {string} id @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
     revokeInvitation(id, principal, req) {

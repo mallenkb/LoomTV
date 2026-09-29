@@ -618,10 +618,36 @@
         return listCache;
       }
 
+      // The progress route returns { progress: { [mediaId]: { position,
+      // duration, watched, updatedAt } } }. Accept a list too, so a response
+      // from an older server still loads.
+      function normalizeProgress(progress) {
+        const entries = Array.isArray(progress)
+          ? progress
+          : progress && typeof progress === 'object'
+            ? Object.entries(progress).map(([mediaId, entry]) => ({ ...entry, mediaId }))
+            : [];
+        return entries
+          .filter((entry) => entry && typeof entry.mediaId === 'string' && entry.mediaId)
+          .map((entry) => ({
+            mediaId: entry.mediaId,
+            position: Number(entry.position) || 0,
+            duration: Number(entry.duration) || 0,
+            watched: entry.watched === true,
+            updatedAt: Number(entry.updatedAt) || 0,
+          }));
+      }
+
+      // Returns null when progress could not be loaded, so the view can say so
+      // instead of showing an empty Continue watching row.
       async function loadProgress() {
         if (!selectedProfile) return [];
-        const data = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress`).catch(() => ({ progress: [] }));
-        return Array.isArray(data.progress) ? data.progress : [];
+        try {
+          const data = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress`);
+          return normalizeProgress(data.progress);
+        } catch {
+          return null;
+        }
       }
 
       async function loadInvitations() {
@@ -735,7 +761,12 @@
         setBusy('libraryStatus', 'Loading your library…');
 
         try {
-          const [items, progress] = await Promise.all([loadLibrary(options.force), loadProgress()]);
+          const [items, loadedProgress] = await Promise.all([loadLibrary(options.force), loadProgress()]);
+          const progress = loadedProgress || [];
+          const showLibraryStatus = (text) => {
+            if (loadedProgress) return setStatus('libraryStatus', text);
+            setStatus('libraryStatus', `${text ? `${text} ` : ''}Watch progress could not be loaded. Reload to try again.`, 'error');
+          };
           await loadLists().catch(() => listCache);
           const progressById = new Map(progress.map((entry) => [entry.mediaId, entry]));
 
@@ -750,14 +781,14 @@
               ${continueItems.length ? `<section class="rail" aria-labelledby="continueHeading"><h2 id="continueHeading">Continue watching</h2><ul class="grid">${continueItems.map((item) => mediaCard(item, progressById)).join('')}</ul></section>` : ''}
               <section class="rail" aria-labelledby="recentHeading"><h2 id="recentHeading">Recently added</h2>${recent.length ? `<ul class="grid">${recent.map((item) => mediaCard(item, progressById)).join('')}</ul>` : '<div class="empty">No media indexed yet. Add a library root, then scan.</div>'}</section>`;
             bindCards($('viewBody'));
-            setStatus('libraryStatus', `${items.length} item${items.length === 1 ? '' : 's'} in your library.`);
+            showLibraryStatus(`${items.length} item${items.length === 1 ? '' : 's'} in your library.`);
             return;
           }
 
           if (view === 'movies') {
             const movies = items.filter((item) => item.kind === 'movie' || item.kind === 'video');
             renderGrid(movies, progressById, 'No movies in this profile’s library.');
-            setStatus('libraryStatus', `${movies.length} movie${movies.length === 1 ? '' : 's'}.`);
+            showLibraryStatus(`${movies.length} movie${movies.length === 1 ? '' : 's'}.`);
             return;
           }
 
@@ -777,14 +808,14 @@
                 button.onclick = () => { lastFocused = button; openSeries(button.dataset.series); };
               }
             }
-            setStatus('libraryStatus', `${series.length} series.`);
+            showLibraryStatus(`${series.length} series.`);
             return;
           }
 
           if (view === 'lists') {
             const saved = items.filter((item) => listCache.watchlist.includes(item.id) || listCache.favorite.includes(item.id));
             renderGrid(saved, progressById, 'Nothing saved yet. Use "Add to list" on any title.');
-            setStatus('libraryStatus', `${saved.length} saved title${saved.length === 1 ? '' : 's'}.`);
+            showLibraryStatus(`${saved.length} saved title${saved.length === 1 ? '' : 's'}.`);
             return;
           }
 
@@ -792,12 +823,12 @@
             const query = String(options.query || '').trim().toLowerCase();
             if (!query) {
               $('viewBody').innerHTML = '<div class="empty">Type a title and choose Search.</div>';
-              setStatus('libraryStatus', '');
+              showLibraryStatus('');
               return;
             }
             const matches = items.filter((item) => String(item.title || '').toLowerCase().includes(query));
             renderGrid(matches, progressById, `Nothing in your library matches “${query}”.`);
-            setStatus('libraryStatus', `${matches.length} result${matches.length === 1 ? '' : 's'} for “${query}”.`);
+            showLibraryStatus(`${matches.length} result${matches.length === 1 ? '' : 's'} for “${query}”.`);
           }
         } catch (error) {
           handleFailure('libraryStatus', error);

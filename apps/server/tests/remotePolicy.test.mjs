@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRemotePolicyService } from '../src/remote-policy.js';
+import { createRemotePolicyService, remoteRouteClass } from '../src/remote-policy.js';
 
 function fixture({ address = '127.0.0.1', clientState = {} } = {}) {
   const events = [];
@@ -79,4 +79,28 @@ test('invitation profile bindings treat a null device ID as absent', async () =>
 
   assert.equal(await service.invitationProfileContext(principal, media), profile);
   assert.deepEqual(calls, [['issuer-1', 'profile-1', media, undefined]]);
+});
+
+test('polling one pairing approval does not use up the pairing creation budget', () => {
+  const { service } = fixture({ address: '198.51.100.20' });
+  const request = { headers: {} };
+  const create = remoteRouteClass('POST', '/api/v1/pairing/requests');
+  const poll = remoteRouteClass('GET', '/api/v1/pairing/requests/request-1');
+  assert.equal(create, 'pairing');
+  assert.equal(poll, 'pairingStatus');
+  assert.equal(remoteRouteClass('POST', '/api/v1/pairing/requests/request-1/approve'), 'pairing');
+
+  service.preflight({ ...request }, create);
+  // A 1.5-second poll for the full five-minute approval window.
+  for (let index = 0; index < 200; index += 1) service.preflight({ ...request }, poll);
+  // Creation still has its own strict budget: 12 per ten minutes in total.
+  for (let index = 0; index < 11; index += 1) service.preflight({ ...request }, create);
+  assert.throws(() => service.preflight({ ...request }, create), { code: 'rate_limited', status: 429 });
+});
+
+test('pairing status polls remain rate limited', () => {
+  const { service } = fixture({ address: '198.51.100.21' });
+  const poll = remoteRouteClass('GET', '/api/v1/pairing/requests/request-1');
+  for (let index = 0; index < 600; index += 1) service.preflight({ headers: {} }, poll);
+  assert.throws(() => service.preflight({ headers: {} }, poll), { code: 'rate_limited', status: 429 });
 });

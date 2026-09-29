@@ -58,6 +58,7 @@ export function createTranscodeCacheQuota(options = {}) {
   const reservations = new Map();
   /** @type {Promise<QuotaStatus> | null} */
   let scanPromise = null;
+  let lastScanAt = 0;
   /** @type {QuotaStatus} */
   let lastStatus = {
     state: 'unknown',
@@ -160,6 +161,7 @@ export function createTranscodeCacheQuota(options = {}) {
           next.violations = violationsFor(next);
           next.state = next.violations.length ? 'over-quota' : 'within-quota';
           lastStatus = next;
+          lastScanAt = now();
           return next;
         })
         .catch((error) => {
@@ -174,6 +176,19 @@ export function createTranscodeCacheQuota(options = {}) {
         .finally(() => { scanPromise = null; });
     }
     return scanPromise;
+  }
+
+  /**
+   * The quota status from a cache walk no older than maxAgeMs, walking again
+   * only when it is older. HLS segment and playlist requests use this;
+   * admission and reservations always walk.
+   * @param {number} maxAgeMs
+   */
+  async function recentStatus(maxAgeMs) {
+    const fresh = lastScanAt > 0 && now() - lastScanAt <= maxAgeMs
+      && (lastStatus.state === 'within-quota' || lastStatus.state === 'over-quota');
+    if (!fresh) await status();
+    return currentStatus();
   }
 
   async function checkAdmission() {
@@ -260,6 +275,7 @@ export function createTranscodeCacheQuota(options = {}) {
     minFreeBytes,
     sweepIntervalMs,
     status,
+    recentStatus,
     checkAdmission,
     reserve,
     release,

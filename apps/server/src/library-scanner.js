@@ -151,8 +151,8 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { sign
   }
 }
 
-/** @param {{ loadState: () => Promise<ScannerState>, saveState: (state: ScannerState) => Promise<unknown>, appendLog: (level: string, message: string, details: Record<string, string | number>) => Promise<unknown>, probeMedia?: ((filePath: string, options: { sourceId: string, signal: AbortSignal }) => Promise<MediaProbe | null>) | null, resolveIdentity?: ((locator: string, alias: string) => { mediaId: string, sourceId?: string, seriesId?: string } | null) | null }} options */
-export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, probeMedia = null, resolveIdentity = null }) {
+/** @param {{ loadState: () => Promise<ScannerState>, saveState: (state: ScannerState) => Promise<unknown>, saveScanProgress?: ((progress: { scanId: string, scannedFiles: number, indexedFiles: number }) => Promise<unknown>) | null, appendLog: (level: string, message: string, details: Record<string, string | number>) => Promise<unknown>, probeMedia?: ((filePath: string, options: { sourceId: string, signal: AbortSignal }) => Promise<MediaProbe | null>) | null, resolveIdentity?: ((locator: string, alias: string) => { mediaId: string, sourceId?: string, seriesId?: string } | null) | null }} options */
+export function createHeadlessLibraryScanner({ loadState, saveState, saveScanProgress = null, appendLog, probeMedia = null, resolveIdentity = null }) {
   /** @type {{ controller: AbortController, promise: Promise<ScanStatus | null | undefined> } | null} */
   let activeScan = null;
 
@@ -243,10 +243,15 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, 
           discovered.push(record);
           scannedFiles += 1;
           if (scannedFiles % CHECKPOINT_EVERY_FILES === 0) {
-            const current = await loadState();
-            if (current.scan?.id === scanId) {
-              current.scan = { ...current.scan, scannedFiles, indexedFiles: state.catalog.length + discovered.length };
-              await saveState(current);
+            const indexedFiles = state.catalog.length + discovered.length;
+            if (saveScanProgress) {
+              await saveScanProgress({ scanId, scannedFiles, indexedFiles });
+            } else {
+              const current = await loadState();
+              if (current.scan?.id === scanId) {
+                current.scan = { ...current.scan, scannedFiles, indexedFiles };
+                await saveState(current);
+              }
             }
           }
         },

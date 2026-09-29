@@ -1210,6 +1210,11 @@ export function createCanonicalStateStore({ dataDir }) {
       return { marker: redactedMarker(marker, availability), restoredAt };
     },
     readAdminState: () => readAdminState(requireDatabase()),
+    /** Replace only the scan status row; scan checkpoints use this. @param {import('./server-admin-types.js').Scan} scan */
+    updateScanState(scan) {
+      requireDatabase().prepare('INSERT OR REPLACE INTO scan_state(singleton,payload_json) VALUES(1,?)').run(json(scan));
+      return true;
+    },
     /** @param {import('./server-state-types.js').AdminState['backup']} state */
     updateBackupState(state) {
       requireDatabase().prepare('INSERT OR REPLACE INTO backup_state(singleton,payload_json) VALUES(1,?)').run(json(state));
@@ -1617,6 +1622,25 @@ export function createCanonicalStateStore({ dataDir }) {
         ...(row.modified_at_ms === null ? {} : { modifiedAtMs: Number(row.modified_at_ms) }),
       }));
     },
+    /** Every media source in one query, grouped by media ID in listMediaSources order. */
+    listMediaSourcesByMedia() {
+      /** @type {Map<string, import('./server-admin-types.js').MediaSourceSummary[]>} */
+      const grouped = new Map();
+      const rows = /** @type {Array<import('./server-state-types.js').SqlRows['media_sources']>} */ (requireDatabase().prepare(`SELECT s.id,s.media_id,s.root_id,s.state,s.file_extension,s.size_bytes,s.modified_at_ms,
+        s.indexed_at,s.last_seen_at FROM media_sources s
+        ORDER BY s.media_id,s.state='online' DESC,s.last_seen_at DESC,s.indexed_at DESC`).all());
+      for (const row of rows) {
+        const sources = grouped.get(row.media_id) || [];
+        sources.push({
+          id: row.id, mediaId: row.media_id, rootId: row.root_id, state: row.state,
+          extension: row.file_extension,
+          ...(row.size_bytes === null ? {} : { sizeBytes: Number(row.size_bytes) }),
+          ...(row.modified_at_ms === null ? {} : { modifiedAtMs: Number(row.modified_at_ms) }),
+        });
+        grouped.set(row.media_id, sources);
+      }
+      return grouped;
+    },
     /** @param {string} mediaId @param {string} sourceId @param {import('@loom-media-server/video-contracts').MediaProbe | import('./server-admin-types.js').Probe} probe */
     recordMediaProbe(mediaId, sourceId, probe) {
       const result = requireDatabase().prepare('UPDATE media_sources SET probe_json=? WHERE media_id=? AND id=?')
@@ -1651,6 +1675,41 @@ export function createCanonicalStateStore({ dataDir }) {
     replaceClientState: (state) => inTransaction(requireDatabase(), () => replaceClientState(requireDatabase(), state)),
     /** @param {import('./server-state-types.js').CanonicalState} state */
     replaceAllState: (state) => inTransaction(requireDatabase(), () => replaceAllState(requireDatabase(), state)),
+    /**
+     * Save one playback position without rewriting the rest of client state.
+     * The caller's authorize callback sees the profile's existence and its
+     * account assignments inside the same transaction as the write.
+     * @param {{ profileId: string; mediaId: string; positionSeconds: number; durationSeconds: number; watched?: boolean; updatedAt: number; maxPerProfile: number }} entry
+     * @param {(access: { exists: boolean; assignments: Array<{ accountId: string; access: string }> }) => void} authorize
+     */
+    saveWatchProgress(entry, authorize) {
+      const database = requireDatabase();
+      return inTransaction(database, () => {
+        const exists = Boolean(database.prepare('SELECT 1 AS found FROM profiles WHERE id=?').get(entry.profileId));
+        const assignments = /** @type {Array<{ accountId: string; access: string }>} */ (database.prepare(
+          'SELECT account_id AS accountId, access FROM profile_assignments WHERE profile_id=?',
+        ).all(entry.profileId));
+        authorize({ exists, assignments });
+        const previous = /** @type {{ watched: number } | undefined} */ (database.prepare(
+          'SELECT watched FROM watch_progress WHERE profile_id=? AND media_id=?',
+        ).get(entry.profileId, entry.mediaId));
+        const watched = typeof entry.watched === 'boolean' ? entry.watched
+          : previous?.watched === 1 || (entry.durationSeconds > 0 && entry.positionSeconds / entry.durationSeconds >= 0.9);
+        database.prepare(`INSERT INTO watch_progress(profile_id,media_id,position_seconds,duration_seconds,watched,updated_at)
+          VALUES(?,?,?,?,?,?) ON CONFLICT(profile_id,media_id) DO UPDATE SET position_seconds=excluded.position_seconds,
+          duration_seconds=excluded.duration_seconds,watched=excluded.watched,updated_at=excluded.updated_at`)
+          .run(entry.profileId, entry.mediaId, entry.positionSeconds, entry.durationSeconds, watched ? 1 : 0, entry.updatedAt);
+        const { count } = /** @type {{ count: number }} */ (database.prepare(
+          'SELECT COUNT(*) AS count FROM watch_progress WHERE profile_id=?',
+        ).get(entry.profileId));
+        if (Number(count) > entry.maxPerProfile) {
+          database.prepare(`DELETE FROM watch_progress WHERE profile_id=? AND media_id IN (
+            SELECT media_id FROM watch_progress WHERE profile_id=? ORDER BY updated_at DESC LIMIT -1 OFFSET ?)`)
+            .run(entry.profileId, entry.profileId, entry.maxPerProfile);
+        }
+        return { watched };
+      });
+    },
     /** @template T @param {(state: import('./server-state-types.js').ClientState) => T} mutation @returns {T} */
     mutateClientState(mutation) {
       return inTransaction(requireDatabase(), () => {

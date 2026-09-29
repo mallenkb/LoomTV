@@ -110,3 +110,120 @@ test('preference validation rejects non-numeric values without replacing saved p
   await assert.rejects(client.saveTrackPreferences(profile.id, 'movie-1', { audio: { enabled: true, index: '0' } }, owner.id), { code: 'invalid_request' });
   assert.deepEqual(await client.getProfilePreferences(profile.id, owner.id), { skipBackSeconds: 10 });
 });
+
+test('a progress heartbeat writes one row and leaves other profile tables alone', async (t) => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  await client.saveProfilePreferences(profile.id, { themeMode: 'light' }, owner.id);
+  await client.setProfileListEntry(profile.id, 'movie-1', 'watchlist', true, owner.id);
+  await client.saveTrackPreferences(profile.id, 'movie-1', { audio: { enabled: true, language: 'en', index: 0 } }, owner.id);
+
+  // Persistent triggers log any delete or rewrite of the neighbouring tables,
+  // which the former full-state replacement did on every heartbeat.
+  const observer = new DatabaseSync(path.join(dataDir, 'loomtv-canonical.sqlite'));
+  t.after(() => observer.close());
+  observer.exec('CREATE TABLE test_change_log (tbl TEXT NOT NULL)');
+  for (const table of ['profiles', 'profile_assignments', 'profile_preferences', 'profile_list_entries', 'track_preferences', 'watch_history']) {
+    observer.exec(`CREATE TRIGGER test_${table}_delete AFTER DELETE ON ${table} BEGIN INSERT INTO test_change_log VALUES ('${table}'); END;
+      CREATE TRIGGER test_${table}_update AFTER UPDATE ON ${table} BEGIN INSERT INTO test_change_log VALUES ('${table}'); END;`);
+  }
+  const changes = () => observer.prepare('SELECT tbl FROM test_change_log').all().map((row) => row.tbl);
+
+  const first = await client.saveProgress(profile.id, 'movie-1', { position: 30, duration: 100 }, owner.id);
+  assert.equal(first.watched, false);
+  const second = await client.saveProgress(profile.id, 'movie-1', { position: 95, duration: 100 }, owner.id);
+  assert.equal(second.watched, true, 'reaching 90% marks the title watched');
+  const rewound = await client.saveProgress(profile.id, 'movie-1', { position: 10, duration: 100 }, owner.id);
+  assert.equal(rewound.watched, true, 'watched stays set until explicitly cleared');
+  const cleared = await client.saveProgress(profile.id, 'movie-1', { position: 10, duration: 100, watched: false }, owner.id);
+  assert.equal(cleared.watched, false);
+  assert.deepEqual(changes(), [], 'heartbeats must not touch other profile tables');
+  assert.deepEqual(await client.listProgress(profile.id, owner.id), {
+    'movie-1': { position: 10, duration: 100, watched: false, updatedAt: cleared.updatedAt },
+  });
+
+  await assert.rejects(client.saveProgress(profile.id, 'movie-1', { position: 1, duration: 100 }, 'someone-else'), { status: 403, code: 'profile_forbidden' });
+  await assert.rejects(client.saveProgress('missing-profile', 'movie-1', { position: 1, duration: 100 }, owner.id), { status: 404, code: 'profile_not_found' });
+
+  // The triggers do catch full-state writes.
+  await client.saveProfilePreferences(profile.id, { themeMode: 'dark' }, owner.id);
+  assert.ok(changes().length > 0);
+});
+
+test('targeted progress saves keep only the newest entries per profile', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  const allow = () => {};
+  for (const [index, mediaId] of ['a', 'b', 'c', 'd'].entries()) {
+    store.saveWatchProgress({ profileId: profile.id, mediaId, positionSeconds: 5, durationSeconds: 100, updatedAt: 1000 + index, maxPerProfile: 3 }, allow);
+  }
+  assert.deepEqual(Object.keys(await client.listProgress(profile.id, owner.id)).sort(), ['b', 'c', 'd']);
+});
+
+test('library filtering checks every item against one client-state read', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  store.mutateClientState((state) => {
+    state.profileRestrictions.push({ profileId: profile.id, allowedRootIds: ['root-a'], allowUnrated: true, maximumAge: 12, country: 'US', revision: 1 });
+  });
+  const items = [
+    { id: 'allowed', rootId: 'root-a' },
+    { id: 'other-root', rootId: 'root-b' },
+    { id: 'rated-16', rootId: 'root-a', contentRatings: { US: { minimumAge: 16 } } },
+    { id: 'rated-7', rootId: 'root-a', maximumAge: 7 },
+  ];
+  const decide = async (run) => {
+    try { await run(); return 'allowed'; } catch (error) { return error.code; }
+  };
+  const expected = [];
+  for (const item of items) expected.push(await decide(() => client.requireActivePlaybackProfile(owner.id, undefined, item)));
+  assert.deepEqual(expected, ['allowed', 'permission_denied', 'permission_denied', 'allowed']);
+
+  let reads = 0;
+  const readClientState = store.readClientState;
+  store.readClientState = () => { reads += 1; return readClientState(); };
+  t.after(() => { store.readClientState = readClientState; });
+  const check = await client.activePlaybackProfileChecker(owner.id, undefined);
+  const actual = [];
+  for (const item of items) actual.push(await decide(() => check(item)));
+  assert.deepEqual(actual, expected, 'the snapshot checker must make the same decisions');
+  assert.equal(reads, 1);
+
+  const scoped = await client.scopedProfileChecker(owner.id, profile.id);
+  assert.deepEqual(await Promise.all(items.map((item) => decide(() => scoped(item)))), expected);
+  assert.equal(reads, 2);
+});
+
+test('bulk media source lookup matches the per-item lookup', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir });
+  t.after(() => store.stop());
+  await store.start();
+  const roots = [{ id: 'root-a', path: '/media/a', kind: 'movies', createdAt: 1 }];
+  const catalog = ['movie-1', 'movie-2', 'episode-1'].map((id, index) => ({
+    id, rootId: 'root-a', path: `/media/a/${id}.mkv`, relativePath: `${id}.mkv`, type: 'video',
+    kind: id.startsWith('episode') ? 'episode' : 'movie', title: id, extension: '.mkv',
+    sizeBytes: 100 + index, modifiedAtMs: 10 + index, available: index !== 1, indexedAt: 1000 + index,
+  }));
+  store.replaceAdminState({ owner, roots, catalog });
+  const grouped = store.listMediaSourcesByMedia();
+  assert.deepEqual([...grouped.keys()].sort(), ['episode-1', 'movie-1', 'movie-2']);
+  for (const item of catalog) assert.deepEqual(grouped.get(item.id), store.listMediaSources(item.id));
+  assert.equal(grouped.get('movie-2')[0].state, 'offline');
+});

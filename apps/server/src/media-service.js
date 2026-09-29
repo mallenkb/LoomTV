@@ -27,6 +27,9 @@ const MIME_TYPES = {
   '.ssa': 'text/x-ssa; charset=utf-8',
 };
 const DIRECT_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts']);
+// How stale a cache-quota walk may be for HLS requests. The background
+// sweep and new-session admission still walk the cache themselves.
+const REQUEST_QUOTA_STATUS_MAX_AGE_MS = 5_000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const MEDIA_TOKEN_TTL_MS = 5 * 60 * 1000;
 const PLAYLIST_WAIT_MS = 20_000;
@@ -724,7 +727,11 @@ export function createHeadlessMediaService({
   /** @param {import('./server-media-types.js').TranscodeSession} session */
   async function enforceSessionQuota(session) {
     try {
-      const current = await cacheQuota.status();
+      // Every playlist and segment request comes through here. Reuse a cache
+      // walk from the last few seconds instead of walking the cache each time.
+      const current = typeof cacheQuota.recentStatus === 'function'
+        ? await cacheQuota.recentStatus(REQUEST_QUOTA_STATUS_MAX_AGE_MS)
+        : await cacheQuota.status();
       const exceeded = (current.sessionBytes.get(session.id) || 0) > cacheQuota.maxSessionBytes
         || current.totalBytes + current.reservedBytes > cacheQuota.maxTotalBytes
         || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes + current.reservedBytes)
