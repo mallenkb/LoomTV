@@ -10,6 +10,7 @@ import { createAdminApiHandler, createAdminPage } from './admin-page.js';
 import { createCanonicalPersistence } from './canonical-persistence.js';
 import { createHeadlessMediaService } from './media-service.js';
 import { createPublicApiHandler, publicHealthSummary } from './public-api.js';
+import { remoteRouteClass } from './remote-policy.js';
 import { createLegacyV2CompatibilityHandler } from './legacy-v2-adapter.js';
 import { createBootstrapSecurity } from './secure-bootstrap.js';
 import { createDesktopSetupChannel } from './desktop-setup-channel.js';
@@ -350,15 +351,7 @@ export function createCanonicalVideoServer(options) {
         return;
       }
       const requestUrl = new URL(req.url || '/', `${transport}://${req.headers.host || 'localhost'}`);
-      // Setup shares the credential class: claiming a server is as sensitive as
-      // signing in to one, and must obey the same remote-access policy.
-      const routeClass = requestUrl.pathname.startsWith('/api/v1/auth') || requestUrl.pathname.startsWith('/api/v1/setup') ? 'credential'
-        : requestUrl.pathname.startsWith('/api/v1/pairing') ? 'pairing'
-          : requestUrl.pathname.startsWith('/api/v1/downloads') ? 'download'
-            : requestUrl.pathname.startsWith('/api/media') || requestUrl.pathname.startsWith('/hls/') || requestUrl.pathname === '/stream' ? 'media'
-              : requestUrl.pathname.startsWith('/api/admin') || requestUrl.pathname.startsWith('/admin') ? 'admin'
-                : requestUrl.pathname.startsWith('/api/v2') ? 'compatibility' : 'public';
-      req.__loomRemoteContext = remotePolicy.preflight(req, routeClass);
+      req.__loomRemoteContext = remotePolicy.preflight(req, remoteRouteClass(req.method, requestUrl.pathname));
       const usesDeviceCredential = /^LoomDevice\s+/i.test(String(req.headers.authorization || ''));
       const usesLegacyV2Credential = requestUrl.pathname.startsWith('/api/v2/');
       const usesLegacyStreamCapability = requestUrl.pathname === '/stream' || requestUrl.pathname.startsWith('/hls/');

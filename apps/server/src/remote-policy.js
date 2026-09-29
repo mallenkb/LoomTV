@@ -4,9 +4,31 @@ import { hasPermission, isLocalNetworkAddress } from './auth-policy.js';
 const INVITATION_PERMISSIONS = Object.freeze(['library.read', 'stream', 'downloads']);
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** @type {Readonly<Record<string, number>>} */
-const RATE_LIMITS = Object.freeze({ credential: 30, pairing: 12, media: 600, download: 600, admin: 120, compatibility: 300, public: 180 });
+// pairingStatus covers GET polls for one pending approval. A client polling
+// every 1.5 seconds for the whole five-minute approval window makes 200 of
+// them, so allow a few concurrent pairings per address. Creating pairing
+// requests stays on the strict pairing budget.
+const RATE_LIMITS = Object.freeze({ credential: 30, pairing: 12, pairingStatus: 600, media: 600, download: 600, admin: 120, compatibility: 300, public: 180 });
 const INVITATION_SESSION_IDLE_MS = 30 * 60 * 1000;
 const MAX_SCOPE_IDS = 512;
+
+/**
+ * The rate-limit class for a request. Setup shares the credential class:
+ * claiming a server is as sensitive as signing in to one. Polling one pending
+ * pairing approval has its own class so valid polls cannot use up the budget
+ * for creating pairing requests.
+ * @param {string | undefined} method @param {string} pathname
+ */
+export function remoteRouteClass(method, pathname) {
+  if (pathname.startsWith('/api/v1/auth') || pathname.startsWith('/api/v1/setup')) return 'credential';
+  if (method === 'GET' && /^\/api\/v1\/pairing\/requests\/[^/]+$/.test(pathname)) return 'pairingStatus';
+  if (pathname.startsWith('/api/v1/pairing')) return 'pairing';
+  if (pathname.startsWith('/api/v1/downloads')) return 'download';
+  if (pathname.startsWith('/api/media') || pathname.startsWith('/hls/') || pathname === '/stream') return 'media';
+  if (pathname.startsWith('/api/admin') || pathname.startsWith('/admin')) return 'admin';
+  if (pathname.startsWith('/api/v2')) return 'compatibility';
+  return 'public';
+}
 
 /** @param {number} status @param {string} code @param {string} message @param {{retryAfter?: number}} [details] */
 function remoteError(status, code, message, details = {}) {
