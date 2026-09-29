@@ -2,11 +2,11 @@
 
 This page is the release index for LoomTV. Each version links to its full notes. Installers and archives are published on [GitHub Releases](https://github.com/mallenkb/LoomTV/releases).
 
-## Unreleased
-
-Restores the automated test suites that the 1.0.189 release commit removed, and runs them in CI again before any release. Tests were updated for intended changes made since then: verified-only Live TV channel lists, the renamed idle memory trimmer, the LibVLC plugin cache, and the skipped database migration versions 16 and 17. No app behavior changes.
-
 ## Recent releases
+
+### [2.0.4](docs/releases/v2.0.4.md)
+
+Adds Intel Mac runtime support, fetches pinned native runtimes during builds, and restores automated tests and release-gate checks.
 
 ### [2.0.3](docs/releases/v2.0.3.md)
 
