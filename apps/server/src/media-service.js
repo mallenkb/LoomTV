@@ -9,6 +9,7 @@ import {
   DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS,
 } from './playback-session-registry.js';
 import { createTranscodeAdmission } from './transcode-admission.js';
+import { HLS_KEEP_BEHIND_SEGMENTS, HLS_PACING_INTERVAL_MS, HLS_SEGMENT_SECONDS, hlsPacingDecision, hlsSegmentIndex, prunableHlsSegments } from './hls-pacing.js';
 import { createTranscodeCacheQuota } from './transcode-cache-quota.js';
 import { canonicalPublicError } from './public-error.js';
 
@@ -554,7 +555,10 @@ function transcodeArgs(filePath, outputDir, health, profile) {
     if (profile.copyAudio) args.push('-c:a', 'copy');
     else args.push('-c:a', 'aac', '-b:a', `${profile.audioBitrateKbps}k`, '-ac', '2');
   }
-  args.push('-f', 'hls', '-hls_time', '2', '-hls_list_size', '45', '-hls_flags', 'delete_segments+independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
+  // An event playlist keeps every segment, so a late start, a long pause, or
+  // a backward seek still finds them. hls-pacing.js bounds how far the
+  // encoder runs ahead and trims large sessions behind the client.
+  args.push('-f', 'hls', '-hls_time', String(HLS_SEGMENT_SECONDS), '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
   return args;
 }
 
@@ -724,6 +728,46 @@ export function createHeadlessMediaService({
     return quotaSweepPromise;
   }
 
+  // Pausing a process needs POSIX job-control signals, which Windows lacks;
+  // there the encoder runs unpaced and the session quota still applies.
+  const canSuspendEncoder = globalThis.process?.platform !== 'win32';
+
+  /** @param {import('./server-media-types.js').TranscodeSession} session @param {'SIGSTOP' | 'SIGCONT'} signal */
+  function signalEncoder(session, signal) {
+    try { return session.process?.kill?.(signal) === true; } catch { return false; }
+  }
+
+  /** Pause or resume the encoder, and trim large sessions behind the client. @param {import('./server-media-types.js').TranscodeSession} session */
+  async function paceSession(session) {
+    if (session.cleaned || session.pacing) return;
+    session.pacing = true;
+    try {
+      const names = await fsPromises.readdir(session.outputDir).catch(() => []);
+      const indexes = names.map(hlsSegmentIndex).filter((index) => index !== null);
+      const producedIndex = indexes.length ? Math.max(...indexes) : -1;
+      const requestedIndex = session.lastRequestedSegment ?? null;
+      if (canSuspendEncoder && session.process) {
+        const decision = hlsPacingDecision({ producedIndex, requestedIndex, suspended: session.encoderSuspended === true });
+        if (decision === 'suspend' && signalEncoder(session, 'SIGSTOP')) session.encoderSuspended = true;
+        if (decision === 'resume' && signalEncoder(session, 'SIGCONT')) session.encoderSuspended = false;
+      }
+      if (requestedIndex !== null && requestedIndex > HLS_KEEP_BEHIND_SEGMENTS) {
+        const current = await cacheQuota.recentStatus(REQUEST_QUOTA_STATUS_MAX_AGE_MS).catch(() => null);
+        const prunable = prunableHlsSegments({
+          indexes, requestedIndex,
+          sessionBytes: current?.sessionBytes.get(session.id) || 0,
+          softLimitBytes: cacheQuota.maxSessionBytes / 2,
+        });
+        for (const index of prunable) {
+          if (session.cleaned) break;
+          await fsPromises.unlink(path.join(session.outputDir, `segment-${String(index).padStart(5, '0')}.ts`)).catch(() => undefined);
+        }
+      }
+    } finally {
+      session.pacing = false;
+    }
+  }
+
   /** @param {import('./server-media-types.js').TranscodeSession} session */
   async function enforceSessionQuota(session) {
     try {
@@ -869,8 +913,12 @@ export function createHeadlessMediaService({
     } finally {
       session.cleanupStarting = false;
     }
+    if (session.pacingTimer) clearIntervalFn(session.pacingTimer);
+    session.pacingTimer = null;
     session.cleanupPromise = Promise.resolve().then(async () => {
       try {
+        // A paused encoder acts on SIGTERM only after it is continued.
+        if (session.encoderSuspended) signalEncoder(session, 'SIGCONT');
         await terminateChild(session.process, termGraceMs);
         sessions.delete(session.id);
         const permit = session.permit;
@@ -904,6 +952,11 @@ export function createHeadlessMediaService({
     if (session.cleaned || stopping) throw cancelledError();
     const child = spawnProcess(transcoder.path || '', transcodeArgs(session.filePath, session.outputDir, transcoder.getHealth(), profile), { stdio: ['ignore', 'ignore', 'pipe'] });
     session.process = child;
+    session.encoderSuspended = false;
+    if (!session.pacingTimer) {
+      session.pacingTimer = setIntervalFn(() => { void paceSession(session); }, HLS_PACING_INTERVAL_MS);
+      session.pacingTimer?.unref?.();
+    }
     child.stderr?.on('data', (chunk) => {
       session.stderr = `${session.stderr}${chunk.toString()}`.slice(-4000);
     });
@@ -1514,6 +1567,12 @@ export function createHeadlessMediaService({
       }
       if (!await enforceSessionQuota(session)) return json(res, 507, { ok: false, error: 'transcode_cache_quota' });
       const filePath = path.join(session.outputDir, transcodeMatch[2]);
+      const requestedSegment = hlsSegmentIndex(transcodeMatch[2]);
+      if (requestedSegment !== null) {
+        session.lastRequestedSegment = requestedSegment;
+        // Resume a paused encoder as soon as the client catches up.
+        if (session.encoderSuspended) void paceSession(session);
+      }
       if (transcodeMatch[2] === 'index.m3u8') {
         const result = await servePlaylist(req, res, session);
         if (!res.destroyed && !session.cleaned) session.ready = true;
