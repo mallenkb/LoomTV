@@ -2,7 +2,7 @@
 
 Loom is a private media library for video, photos, music, and reading. The Electron app organizes files stored on your computer or an OS-mounted server folder.
 
-Loom does not provide media or streaming subscriptions. Use it only with files you own, created, or are allowed to access.
+Loom does not provide media or streaming subscriptions. Use it only with files and streams you own, created, or are allowed to access.
 
 [Release notes](CHANGELOG.md)
 
@@ -18,6 +18,7 @@ Loom does not provide media or streaming subscriptions. Use it only with files y
 - Serves the same library to the hosted web app, iOS and Android app, and Android TV or Fire TV app.
 - Supports direct streaming, transcoding, subtitles, offline downloads, and browser casting where the client allows it.
 - Runs inside the desktop app or as a headless service on a NAS or always-on computer.
+- Includes a Discover page for browsing public catalogs (TMDB, AniList, Cinemeta) and the Internet Archive's Feature Films collection. See [Discover and add-ons](#discover-and-add-ons).
 
 Video is the established library experience. Electron media expansion is starting with Photos, followed by Music, Audiobooks, Books, and Comics and manga. See the [execution plan](docs/multimedia-execution-plan.md) for scope and implementation status. These media types are not yet advertised as released support.
 
@@ -93,7 +94,7 @@ Local desktop playback uses this order:
 
 Browser and remote clients use authenticated direct playback when their capabilities match the file. Otherwise, the server remuxes or transcodes the video through HLS. Audio tracks, subtitle tracks, playback progress, and resume position remain part of the Loom session.
 
-Packaged releases stage their native playback resources during the build. Loom does not download LibVLC or mpv while the application is running.
+The desktop build downloads LibVLC, libmpv, and FFmpeg from a pinned GitHub release on this repository and checks each archive's SHA-256 before using it (`apps/desktop/native-runtimes.json`). The first `corepack pnpm start` downloads about 140 MB on macOS and 125 MB on Windows; later runs reuse a cache in `~/.cache/loom-native-runtimes`. The application itself never downloads LibVLC or mpv. The bundled libmpv requires macOS 26 or later; older Macs use LibVLC, then Chromium or HLS.
 
 ## Metadata
 
@@ -108,6 +109,17 @@ Provider setup is optional. TVmaze and Jikan work without user API keys. TMDB, F
 | OMDb | Fallback movie and TV details and ratings |
 
 Fetched metadata and selected artwork are stored with the library. Normal browsing reads that saved data instead of calling providers for every screen. A scan or manual metadata refresh can update it.
+
+## Discover and add-ons
+
+The Discover page shows titles from public catalogs so you can find something to add to your library or watch list. It uses TMDB and AniList for browsing and Cinemeta for metadata. None of these catalogs provides video.
+
+Two kinds of source can play from Discover:
+
+- The built-in Internet Archive catalog, limited to its Feature Films collection with adult content filtered out. The Internet Archive hosts these films for free public viewing.
+- Stremio-compatible add-ons you install yourself by manifest URL in Settings. Loom plays their HTTPS and HLS streams and always refuses torrent and peer-to-peer sources.
+
+Loom ships no add-on that provides commercial films or series. An add-on you install decides what it streams, so install only add-ons whose sources you are allowed to watch.
 
 ## Screenshots
 

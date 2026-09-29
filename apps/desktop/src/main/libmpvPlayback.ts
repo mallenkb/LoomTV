@@ -11,7 +11,7 @@ import type {
 } from '../shared/desktopProtocol.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
-import { finiteNumber, mpvColor, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
+import { finiteNumber, meetsMinimumMacOS, mpvColor, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
 import {
   createNativeViewHost,
   loadKoffi,
@@ -87,12 +87,32 @@ function bind(library: KoffiLibrary, name: string, result: string, args: string[
   return library.func(name, result, args) as NativeFunction;
 }
 
+// bundle-libmpv.cjs records the oldest macOS its libraries support. Check it
+// before loading so older systems fall back to HLS with a clear reason.
+function bundledMinimumMacOS(libraryPath: string): string | null {
+  try {
+    const inventory: unknown = JSON.parse(fs.readFileSync(path.join(path.dirname(libraryPath), 'libmpv-inventory.json'), 'utf8'));
+    const minimum = (inventory as { minimumMacOS?: unknown } | null)?.minimumMacOS;
+    return typeof minimum === 'string' ? minimum : null;
+  } catch {
+    return null;
+  }
+}
+
 function loadRuntime(force = false): Runtime | null {
   if (force) cachedRuntime = undefined;
   if (cachedRuntime !== undefined) return cachedRuntime;
   const paths = configuredPaths();
   if (!paths) {
     cachedWarning = 'The bundled libmpv library or native bridge is missing.';
+    cachedRuntime = null;
+    return null;
+  }
+  const minimumMacOS = bundledMinimumMacOS(paths.libraryPath);
+  // getSystemVersion exists only in Electron; plain Node runs skip the check.
+  const systemVersion = typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : null;
+  if (process.platform === 'darwin' && systemVersion && !meetsMinimumMacOS(systemVersion, minimumMacOS)) {
+    cachedWarning = `The bundled libmpv requires macOS ${minimumMacOS} or later.`;
     cachedRuntime = null;
     return null;
   }

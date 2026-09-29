@@ -26,6 +26,8 @@ corepack enable
 corepack pnpm install
 ```
 
+The first desktop start downloads the pinned LibVLC, libmpv, and FFmpeg runtimes (about 140 MB on macOS) and checks their SHA-256 hashes. See `apps/desktop/native-runtimes.json`.
+
 Run the desktop app:
 
 ```sh

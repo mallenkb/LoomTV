@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { mpvColor, normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
+import { meetsMinimumMacOS, mpvColor, normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
 
 test('mpv tracks normalize embedded and authorized external subtitles', () => {
   const externalPath = path.resolve('/tmp/loomtv-example.en.srt');
@@ -66,4 +66,13 @@ test('subtitle colors are converted to the #AARRGGBB form mpv accepts', () => {
   assert.equal(mpvColor('rgb(255, 255, 255)'), '#ffffffff');
   assert.equal(mpvColor('white'), null);
   assert.equal(mpvColor('rgba(0, 0, 0, nope)'), null);
+});
+
+test('libmpv loads only on macOS versions its bundle supports', () => {
+  assert.equal(meetsMinimumMacOS('26.0.0', '26.0'), true);
+  assert.equal(meetsMinimumMacOS('26.1', '26.0'), true);
+  assert.equal(meetsMinimumMacOS('27.2.1', '26.0'), true);
+  assert.equal(meetsMinimumMacOS('15.7.3', '26.0'), false);
+  assert.equal(meetsMinimumMacOS('12.0', '26.0'), false);
+  assert.equal(meetsMinimumMacOS('15.7', null), true);
 });

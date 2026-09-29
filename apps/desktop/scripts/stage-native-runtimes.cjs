@@ -22,7 +22,7 @@ Set LOOMTV_NATIVE_RUNTIME_SOURCE_ROOT to an absolute source-root and select
 targets with LOOMTV_NATIVE_RUNTIME_TARGETS (comma-separated), or use the
 single-target overrides LOOMTV_LIBVLC_SOURCE_DIR and
 The LibVLC override is required for darwin and win32. libmpv is staged as an
-in-process library by stage-libmpv.cjs; external player payloads are unsupported.
+in-process library downloaded by fetch-native-runtimes.cjs; external player payloads are unsupported.
 These overrides must be absolute and must be used with exactly one target.
 
 The output layout is resources/<engine>/<platform>/<arch>, which matches the

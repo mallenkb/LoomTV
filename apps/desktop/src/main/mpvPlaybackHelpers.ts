@@ -66,3 +66,19 @@ export function mpvColor(value: string): string | null {
   if (![red, green, blue, alpha].every(Number.isFinite)) return null;
   return `#${hexByte(Math.max(0, Math.min(1, alpha)) * 255)}${hexByte(red)}${hexByte(green)}${hexByte(blue)}`;
 }
+
+/**
+ * True when a macOS version string such as "26.0.1" is at least `minimum`
+ * ("26.0"). A missing or unreadable minimum does not block loading.
+ */
+export function meetsMinimumMacOS(systemVersion: string, minimum: string | null | undefined): boolean {
+  if (!minimum) return true;
+  const parse = (value: string) => value.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const system = parse(systemVersion);
+  const required = parse(minimum);
+  for (let index = 0; index < Math.max(system.length, required.length); index += 1) {
+    const difference = (system[index] ?? 0) - (required[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
+}

@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Explicit experiment build, not a packaging hook. This does not enable libmpv.
-if (process.platform !== 'darwin') throw new Error('The draft libmpv render bridge currently targets macOS only.');
+// Builds the render bridge. scripts/bundle-libmpv.cjs runs this when it bundles libmpv.
+if (process.platform !== 'darwin') throw new Error('The libmpv render bridge targets macOS only.');
 const root = path.dirname(fileURLToPath(import.meta.url));
 const include = process.env.LIBMPV_INCLUDE_DIR?.trim();
 if (!include || !path.isAbsolute(include)

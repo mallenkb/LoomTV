@@ -42,9 +42,14 @@ license does not replace those terms.
   VLC plugins and bundled dependencies may carry different terms. See
   `apps/desktop/resources/libvlc/NOTICE.md` and the upstream VideoLAN legal
   notices at <https://www.videolan.org/legal.html>.
-- **mpv:** Stock mpv is ordinarily GPL-2.0-or-later. The exact staged build
-  and linked libraries must be reviewed with the upstream notices. See
-  `apps/desktop/resources/mpv/NOTICE.md` and <https://github.com/mpv-player/mpv>.
+- **mpv:** macOS arm64 builds bundle Homebrew's libmpv 0.41.0 with its 46
+  dependency libraries, including GPL-2.0-or-later x264 and x265 through
+  FFmpeg. The bundle is GPL-covered. See
+  `apps/desktop/resources/mpv/NOTICE.md` for the per-library inventory and
+  <https://github.com/mpv-player/mpv>.
+- **Download source:** Builds fetch FFmpeg, LibVLC, and libmpv from the
+  `runtimes-2026-09` GitHub release on this repository and check each archive
+  against the SHA-256 in `apps/desktop/native-runtimes.json`.
 - **FFmpeg and FFprobe:** The bundled builds include GPL components and are
   distributed under GPL-3.0-or-later as applicable to the build and included
   libraries. Keep the matching license text and source information from

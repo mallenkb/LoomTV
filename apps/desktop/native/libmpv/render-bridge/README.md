@@ -1,17 +1,14 @@
-# Embedded libmpv draft
+# libmpv render bridge
 
-Status: incomplete and not connected to either desktop backend. Do not merge
-this as a completed MPV replacement. Both committed backends still use the
-external MPV fallback. No native playback success is claimed by this draft.
+`bridge.m` is a macOS render-API bridge with a C ABI for Electron. It is the
+second playback engine after LibVLC and before Chromium/HLS.
+`scripts/bundle-libmpv.cjs` builds it together with a self-contained libmpv,
+builds download that bundle (see `resources/mpv/README.md`), and
+`src/main/libmpvPlayback.ts` loads it.
 
-## Included code
-
-This draft leaves the pre-existing `../bridge.m` untouched.
-
-`bridge.m` is a macOS render-API bridge with a C ABI intended for Electron.
-It loads libmpv directly with `dlopen`; it contains no player-process
-launch path. It uses the installed upstream `mpv/client.h` and `mpv/render_gl.h`
-headers rather than a handwritten copy of their ABI.
+It loads libmpv directly with `dlopen` and has no player-process launch path.
+It uses the installed upstream `mpv/client.h` and `mpv/render_gl.h` headers
+rather than a handwritten copy of their ABI.
 
 Creation prepares an idle core without opening media or creating a window.
 Attach creates an NSOpenGLView inside a host-owned native child view. Commands
@@ -19,23 +16,28 @@ use the asynchronous client API. Polling drains a bounded number of events and
 returns allocated JSON. Shutdown frees the render context on AppKit's main
 thread before destroying the core on the worker thread.
 
-This is source code, not a verified native binary. OpenGL timing, fullscreen,
-Retina scaling, hardware decoding and teardown still require native tests.
-Windows and Linux render hosts are not implemented here.
+## Build
 
-## Build the experimental bridge
-
-On a macOS development machine with upstream libmpv headers installed:
+`corepack pnpm --filter loom-media-server-desktop libmpv:bundle` builds the
+bridge and the libmpv bundle together. To build only the bridge on macOS:
 
 ```sh
 LIBMPV_INCLUDE_DIR=/absolute/path/to/include \
-  node apps/desktop/native/libmpv/draft-render-bridge/build.mjs
+  node apps/desktop/native/libmpv/render-bridge/build.mjs
 ```
 
-The include directory must contain `mpv/client.h` and `mpv/render_gl.h`. The build
-script compiles the bridge only. It neither installs libmpv nor enables a new
-playback path. The output is ignored by Git. Runtime signing, dependency staging
-and distribution have not been implemented for this draft.
+The include directory must contain `mpv/client.h` and `mpv/render_gl.h`. The
+output is ignored by Git.
+
+## Release builds
+
+Release builds on macOS arm64 include the bridge and a self-contained libmpv.
+Homebrew builds its libraries for the running macOS version, so the bundle
+requires macOS 26; `libmpvPlayback.ts` checks the version recorded in
+`libmpv-inventory.json` and reports libmpv as unavailable on older systems,
+which then use Chromium/HLS after LibVLC. Supporting older macOS needs libmpv
+built from source with a lower deployment target. Windows and Linux render
+hosts are not implemented.
 
 ## C ABI rules for both hosts
 
@@ -65,45 +67,3 @@ LibVLC still requires a composited host. A partial successful reply with the wro
 surface is stopped instead of leaked. Delayed seeks and metadata probes are
 cancelled during disposal. The MPV adapter does not falsely report composition
 when the host still returns an external window.
-
-## Validation actually run
-
-On Linux with Node 22.16.0 and the globally installed TypeScript compiler:
-
-```sh
-tsc -p tsconfig.json
-NODE_PATH="$(npm root -g)" node --experimental-strip-types --test \
-  apps/desktop/tests/nativeSessionLease.test.ts \
-  apps/desktop/tests/nativePlaybackLifecycle.test.ts
-```
-
-The first command refers to the isolated validation workspace's tsconfig, not
-the repository-wide desktop tsconfig. It strictly typechecked NativeSessionLease.
-The second command ran 49 tests: 29 lease tests and 20 tests exercising the actual
-renderer adapter classes against a mocked desktop transport. The suite includes
-1,000 load/dispose iterations. All 49 passed. It does not test libmpv, LibVLC,
-Electron, an actual media file, audio output, GPU rendering or process RSS.
-
-The repository test command discovers the two new `.test.ts` entrypoints. Their
-case files use the existing TypeScript dependency to transpile the renderer
-classes for isolated transport tests.
-
-Not run: full desktop typechecking, full repository test suite, Electron build,
-Rust checks, native bridge compilation, packaged-app execution or
-manual playback. No performance or memory improvement is claimed.
-
-## Work still required before enabling libmpv
-
-1. Implement and connect the Electron worker adapter to this C ABI. Preserve source authorization, profile/remote scope checks and
-   the high-level command allowlist. Delete the executable launch/socket path.
-2. Reuse the existing LibVLC native child hosts and viewport/fullscreen updates.
-   Match startup pre-warm scheduling and measure first-play and repeat-play time.
-3. Replace executable discovery/settings with library discovery and migrate old
-   preferences without interpreting an executable as a shared library.
-4. Stage libmpv, the bridge, dependent libraries and licenses for both runtimes;
-   verify architectures, signing and clean-machine packaged startup.
-5. Force LibVLC failure, then libmpv failure, and verify the remaining browser/HLS
-   path without changing network playback authority. Verify real frames, sound,
-   pause, seek, subtitles, EOF/replay, rapid replacement, fullscreen and shutdown.
-6. Add native integration/stress tests and review callback/core lifetime under
-   sanitizers before declaring the migration ready.

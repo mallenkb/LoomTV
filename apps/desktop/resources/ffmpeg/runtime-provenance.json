@@ -25,16 +25,19 @@
       "provenance": [
         {
           "platform": "darwin",
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-arm64.tar.gz",
           "provider": "Martin Riedl's FFmpeg Build Server",
           "url": "https://ffmpeg.martin-riedl.de/",
           "revision": "N-124279-g0f6ba39122",
           "archiveUrls": [
             "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/snapshot/ffmpeg.zip"
           ],
+          "archiveUrlsArePinned": false,
           "configure": "--prefix=/Volumes/ffmpeg_arm64/out --pkg-config-flags=--static --extra-version='https://www.martin-riedl.de' --enable-gray --enable-libxml2 --enable-version3 --enable-gpl --enable-openssl --enable-libfreetype --enable-fontconfig --enable-libharfbuzz --enable-libsnappy --enable-libsrt --enable-libvmaf --enable-libass --enable-libklvanc --enable-libzimg --enable-libzvbi --enable-libaom --enable-libdav1d --enable-libopenh264 --enable-libopenjpeg --enable-librav1e --enable-libsvtav1 --enable-libvpx --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libtheora"
         },
         {
           "platform": "win32",
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-win32-x64.tar.gz",
           "provider": "CODEX FFMPEG by Gyan Doshi",
           "url": "https://www.gyan.dev/ffmpeg/builds/",
           "buildVersion": "ffmpeg-8.1.1-essentials_build",
@@ -49,15 +52,15 @@
           "path": "ffmpeg/mac/ffmpeg",
           "platform": "darwin",
           "architectures": ["arm64"],
-          "sha256": null,
-          "hashStatus": "not-recorded-in-current-notice"
+          "sha256": "3396b309cf94d7141bd2becd58d4fe3b0bfeab0a11bc088366f91aabf4b2d864",
+          "hashStatus": "recorded"
         },
         {
           "path": "ffmpeg/win/ffmpeg.exe",
           "platform": "win32",
           "architectures": ["x64"],
-          "sha256": null,
-          "hashStatus": "not-recorded-in-current-notice"
+          "sha256": "228d7a8556258de907fdb55f36850078ebc7680b84ec30d84ea02e99bec1d1eb",
+          "hashStatus": "recorded"
         }
       ]
     },
@@ -70,15 +73,18 @@
       "provenance": [
         {
           "platform": "darwin",
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-arm64.tar.gz",
           "provider": "Martin Riedl's FFmpeg Build Server",
           "url": "https://ffmpeg.martin-riedl.de/",
           "revision": "N-124279-g0f6ba39122",
           "archiveUrls": [
             "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/snapshot/ffprobe.zip"
-          ]
+          ],
+          "archiveUrlsArePinned": false
         },
         {
           "platform": "win32",
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-win32-x64.tar.gz",
           "provider": "CODEX FFMPEG by Gyan Doshi",
           "url": "https://www.gyan.dev/ffmpeg/builds/",
           "buildVersion": "ffmpeg-8.1.1-essentials_build",
@@ -93,15 +99,15 @@
           "path": "ffmpeg/mac/ffprobe",
           "platform": "darwin",
           "architectures": ["arm64"],
-          "sha256": null,
-          "hashStatus": "not-recorded-in-current-notice"
+          "sha256": "236d0fccac341014a6190cff30df42bcf52e2d0202a0b389a8d7c1b52e12e60c",
+          "hashStatus": "recorded"
         },
         {
           "path": "ffmpeg/win/ffprobe.exe",
           "platform": "win32",
           "architectures": ["x64"],
-          "sha256": null,
-          "hashStatus": "not-recorded-in-current-notice"
+          "sha256": "0fde260f5abd35c9cafd96f594cc76365a780c1b73a90e35b6a3409ea1db1bf0",
+          "hashStatus": "recorded"
         }
       ]
     },
