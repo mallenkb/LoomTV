@@ -28,10 +28,6 @@ function policyFixture(t) {
       scripts: { test: 'node --test' },
     });
   }
-  writeJson(path.join(root, 'packages/lan-protocol/package.json'), {
-    name: '@loom-media-server/lan-protocol',
-    scripts: { typecheck: 'tsc --noEmit' },
-  });
   return root;
 }
 
@@ -105,8 +101,14 @@ test('discovers literal and nested workspace patterns', (t) => {
 
 test('requires reclassification when an excluded package gains tests', (t) => {
   const root = policyFixture(t);
-  writeJson(path.join(root, 'packages/lan-protocol/package.json'), { scripts: { test: 'node --test' } });
-  assert.deepEqual(validateTestWorkspacePolicy(root), [
-    'packages/lan-protocol is excluded from test workspaces but has a test script',
+  writeJson(path.join(root, 'packages/docs-only/package.json'), {
+    name: '@loom-media-server/docs-only',
+    scripts: { typecheck: 'tsc --noEmit' },
+  });
+  const exclusions = { '.': 'root orchestration package', 'packages/docs-only': 'no tests' };
+  assert.deepEqual(validateTestWorkspacePolicy(root, exclusions), []);
+  writeJson(path.join(root, 'packages/docs-only/package.json'), { scripts: { test: 'node --test' } });
+  assert.deepEqual(validateTestWorkspacePolicy(root, exclusions), [
+    'packages/docs-only is excluded from test workspaces but has a test script',
   ]);
 });

@@ -94,7 +94,7 @@ Local desktop playback uses this order:
 
 Browser and remote clients use authenticated direct playback when their capabilities match the file. Otherwise, the server remuxes or transcodes the video through HLS. Audio tracks, subtitle tracks, playback progress, and resume position remain part of the Loom session.
 
-The desktop build downloads LibVLC, libmpv, and FFmpeg from a pinned GitHub release on this repository and checks each archive's SHA-256 before using it (`apps/desktop/native-runtimes.json`). The first `corepack pnpm start` downloads about 140 MB on macOS and 125 MB on Windows; later runs reuse a cache in `~/.cache/loom-native-runtimes`. The application itself never downloads LibVLC or mpv. The bundled libmpv requires macOS 26 or later; older Macs use LibVLC, then Chromium or HLS.
+The desktop build downloads LibVLC, libmpv, and FFmpeg for Apple silicon Macs and x64 Windows from a pinned GitHub release on this repository and checks each archive's SHA-256 before using it (`apps/desktop/native-runtimes.json`). The first `corepack pnpm start` downloads about 140 MB on macOS and 125 MB on Windows; later runs reuse a cache in `~/.cache/loom-native-runtimes`. The application itself never downloads LibVLC or mpv. The bundled libmpv requires macOS 26 or later; older Macs use LibVLC, then Chromium or HLS. Other machines, such as Intel Macs, get no bundled runtimes: `corepack pnpm start` warns and plays through Chromium or HLS, and packaging fails with an explicit error.
 
 ## Metadata
 
@@ -185,7 +185,7 @@ docs/            Deployment, architecture, status, security, and release notes
 scripts/         Release, policy, audit, and evidence tools
 ```
 
-The recursive test command covers every test-bearing workspace. `packages/lan-protocol` is intentionally typecheck-only and has no test script.
+The recursive test command covers every workspace. `scripts/verify-test-workspaces.cjs` fails the run if a workspace loses its test script or a new one is left unclassified.
 
 ## Packaging and releases
 

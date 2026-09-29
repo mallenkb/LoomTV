@@ -9,6 +9,7 @@ const EXPECTED_TEST_WORKSPACES = Object.freeze([
   'apps/mobile',
   'apps/server',
   'apps/tv',
+  'packages/lan-protocol',
   'packages/media-core',
   'packages/plugin-protocol',
   'packages/runtime-paths',
@@ -17,11 +18,10 @@ const EXPECTED_TEST_WORKSPACES = Object.freeze([
   'packages/video-migration',
 ]);
 
-// The repository root orchestrates workspace tests. lan-protocol is intentionally
-// typecheck-only until it has a test script of its own.
+// The repository root orchestrates workspace tests. Any other workspace listed
+// here must have no test script of its own.
 const TEST_WORKSPACE_EXCLUSIONS = Object.freeze({
   '.': 'root orchestration package',
-  'packages/lan-protocol': 'typecheck-only package with no test script',
 });
 
 function readJson(filePath) {
@@ -53,14 +53,14 @@ function discoverWorkspaceRoots(workspaceRoot, patterns) {
   return [...roots];
 }
 
-function validateTestWorkspacePolicy(workspaceRoot) {
+function validateTestWorkspacePolicy(workspaceRoot, exclusions = TEST_WORKSPACE_EXCLUSIONS) {
   const failures = [];
   const rootManifest = readJson(path.join(workspaceRoot, 'package.json'));
   const workspacePatterns = readWorkspacePatterns(workspaceRoot);
   const rootTest = rootManifest.scripts?.test || '';
   const discoveredWorkspaceRoots = discoverWorkspaceRoots(workspaceRoot, workspacePatterns);
   const expectedWorkspaces = new Set(EXPECTED_TEST_WORKSPACES);
-  const excludedWorkspaces = new Set(Object.keys(TEST_WORKSPACE_EXCLUSIONS));
+  const excludedWorkspaces = new Set(Object.keys(exclusions));
 
   if (!rootTest.includes('verify:test-workspaces')) {
     failures.push('root test script must run verify:test-workspaces');

@@ -6,10 +6,10 @@ import {
   lanPlaybackPlanRequestSchema,
   lanProgressSavePayloadSchema,
   lanProgressSaveRequestSchema,
-} from './src/schemas.ts';
-import { parseProgressSavePayload } from '../video-contracts/src/index.mjs';
-import { normalizeClientPlaybackCapabilities } from '../media-core/src/index.mjs';
-import { playbackPlanResultSchema } from '../../apps/desktop/src/lib/desktopDecoders.ts';
+} from '../src/schemas.ts';
+import { parseProgressSavePayload } from '../../video-contracts/src/index.mjs';
+import { normalizeClientPlaybackCapabilities } from '../../media-core/src/index.mjs';
+import { playbackPlanResultSchema } from '../../../apps/desktop/src/lib/desktopDecoders.ts';
 
 test('detail metadata defaults missing cast without accepting malformed values', () => {
   const item = { id: 'movie-1', type: 'movie', title: 'Movie', year: 2024, poster: '', backdrop: '', summary: '', rating: 0, genres: [], filePath: 'movie-1' };

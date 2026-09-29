@@ -7,6 +7,7 @@
     {
       "id": "ffmpeg-darwin-arm64",
       "platform": "darwin",
+      "arch": "arm64",
       "archive": "ffmpeg-darwin-arm64.tar.gz",
       "sha256": "9c359fef3aaa4264eebe975ee4cb10538199fff96cc7dbc1012a9b2505f5a85d",
       "size": 55247711,
@@ -17,6 +18,7 @@
     {
       "id": "ffmpeg-win32-x64",
       "platform": "win32",
+      "arch": "x64",
       "archive": "ffmpeg-win32-x64.tar.gz",
       "sha256": "63e8ee6ae06cac29aa7bb0c35cb35c509f935862877bc38079fa2b24262f3765",
       "size": 73870300,
@@ -27,6 +29,7 @@
     {
       "id": "libvlc-darwin-arm64",
       "platform": "darwin",
+      "arch": "arm64",
       "archive": "libvlc-darwin-arm64.tar.gz",
       "sha256": "5c6db97aade8b4d5f2c5b6065d73e8c1943588809257cab4665057779f5a7280",
       "size": 57404989,
@@ -37,6 +40,7 @@
     {
       "id": "libvlc-win32-x64",
       "platform": "win32",
+      "arch": "x64",
       "archive": "libvlc-win32-x64.tar.gz",
       "sha256": "1d1dea285083877bf8a1008ebc3895e3cde45aba5adaf21ee52f8e10d1f5ef39",
       "size": 52843680,
@@ -47,6 +51,7 @@
     {
       "id": "libmpv-darwin-arm64",
       "platform": "darwin",
+      "arch": "arm64",
       "archive": "libmpv-darwin-arm64.tar.gz",
       "sha256": "57bf887fdd0d0316c73a6ce13a6880c7fe09b7ce14a80f5193194540b136b398",
       "size": 25918789,

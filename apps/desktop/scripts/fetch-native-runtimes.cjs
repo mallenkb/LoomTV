@@ -7,9 +7,17 @@
 // resources folder re-extracts without downloading again. A stamp per runtime
 // records which archive is installed; a matching stamp skips the runtime.
 //
+// Runtimes are selected by platform and CPU architecture. A platform with
+// runtimes for other architectures only (for example an Intel Mac) gets a
+// warning, or an error with --required, which the packaging hooks pass so a
+// build never ships binaries its CPU cannot load.
+//
+// Usage: node scripts/fetch-native-runtimes.cjs [--required]
+//
 // Environment:
 //   LOOMTV_SKIP_NATIVE_RUNTIME_FETCH=1   keep whatever is in resources/ (local runtime work)
 //   LOOMTV_NATIVE_RUNTIME_PLATFORM       fetch for another platform (darwin, win32, linux)
+//   LOOMTV_NATIVE_RUNTIME_ARCH           fetch for another architecture (arm64, x64)
 //   LOOMTV_NATIVE_RUNTIME_CACHE          archive cache directory
 
 const crypto = require('node:crypto');
@@ -42,6 +50,8 @@ function readManifest() {
   }
   for (const runtime of manifest.runtimes) {
     if (!/^[a-z0-9-]+$/.test(runtime.id)
+      || !['darwin', 'win32', 'linux'].includes(runtime.platform)
+      || !['arm64', 'x64'].includes(runtime.arch)
       || !/^[a-f0-9]{64}$/.test(runtime.sha256)
       || !/^[A-Za-z0-9._-]+\.tar\.gz$/.test(runtime.archive)
       || !Number.isInteger(runtime.size)
@@ -201,15 +211,29 @@ function install(runtime, archive) {
 }
 
 async function main() {
+  const args = process.argv.slice(2);
+  const unknown = args.filter((arg) => arg !== '--required');
+  if (unknown.length > 0) throw new Error(`Unknown argument: ${unknown.join(' ')}`);
+  const required = args.includes('--required');
+
   if (environmentValue('LOOMTV_SKIP_NATIVE_RUNTIME_FETCH') === '1') {
     console.log('[native-runtimes] LOOMTV_SKIP_NATIVE_RUNTIME_FETCH=1; leaving resources/ unchanged.');
     return;
   }
   const manifest = readManifest();
   const platform = environmentValue('LOOMTV_NATIVE_RUNTIME_PLATFORM') || process.platform;
-  const runtimes = manifest.runtimes.filter((runtime) => runtime.platform === platform);
-  if (runtimes.length === 0) {
+  const arch = environmentValue('LOOMTV_NATIVE_RUNTIME_ARCH') || process.arch;
+  const forPlatform = manifest.runtimes.filter((runtime) => runtime.platform === platform);
+  if (forPlatform.length === 0) {
     console.log(`[native-runtimes] No bundled native runtimes for ${platform}.`);
+    return;
+  }
+  const runtimes = forPlatform.filter((runtime) => runtime.arch === arch);
+  if (runtimes.length === 0) {
+    const supported = [...new Set(forPlatform.map((runtime) => `${runtime.platform}-${runtime.arch}`))].join(', ');
+    const message = `No bundled native runtimes for ${platform}-${arch}; they exist only for ${supported}.`;
+    if (required) throw new Error(`${message} Build on a supported platform or add runtimes for ${platform}-${arch} to native-runtimes.json.`);
+    console.warn(`[native-runtimes] ${message} LibVLC, libmpv, and the bundled FFmpeg will be unavailable; playback falls back to Chromium or HLS, using a system FFmpeg if one is installed.`);
     return;
   }
   for (const runtime of runtimes) {
@@ -218,7 +242,7 @@ async function main() {
     install(runtime, archive);
     console.log(`[native-runtimes] Installed ${runtime.id} into resources/${runtime.destination}.`);
   }
-  console.log(`[native-runtimes] ${runtimes.length} runtime(s) for ${platform} match ${manifest.release}.`);
+  console.log(`[native-runtimes] ${runtimes.length} runtime(s) for ${platform}-${arch} match ${manifest.release}.`);
 }
 
 main().catch((error) => {
