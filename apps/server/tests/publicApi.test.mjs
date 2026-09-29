@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { createPublicApiHandler } from '../src/public-api.js';
+import { createRemotePolicyService } from '../src/remote-policy.js';
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -469,4 +472,103 @@ test('public and admin password routes share the credential-reset policy', async
   assert.deepEqual(ownerReset.payload, { changed: true });
   const revokedManager = await manager('GET', '/api/v1/auth/me');
   assert.equal(revokedManager.status, 401, 'an authorized owner reset must revoke the target session');
+});
+
+
+function invitationTranscodeApiFixture(principalOverrides = {}, startPlan = async () => ({ sessionId: 'hls-1' })) {
+  const principal = {
+    id: 'issuer-1', name: 'Guest', type: 'invitation', role: 'viewer', authentication: 'invitation-session',
+    invitationSessionId: 'invitation-session-1', invitationProfileId: 'profile-1', deviceId: 'tv-1',
+    permissions: ['library.read', 'stream'], devicePermissions: ['library.read', 'stream'],
+    rootIds: ['root-1'], deviceIds: null, maxSessions: null, invitationMediaIds: ['media-1'],
+    ...principalOverrides,
+  };
+  const calls = [];
+  let legacyCalls = 0;
+  const policy = createRemotePolicyService({
+    store: {}, proxyPolicy: { clientAddress: () => '127.0.0.1', isSecureRequest: () => true },
+    getAccount: async () => null, getAdminService: () => ({}),
+    getClientState: () => ({ requireScopedProfile: async () => ({ profileId: 'profile-1', deviceId: 'tv-1', selectionRevision: 0 }) }),
+  });
+  const handler = createPublicApiHandler({
+    service: {
+      authenticateRequest: async () => principal,
+      authorizePrincipal: async (_principal, permission) => principal.permissions.includes(permission),
+      getLibraryItem: async (id) => ({ id, rootId: 'root-1' }),
+    },
+    clientState: {}, pairingService: {},
+    remotePolicy: {
+      ...policy,
+      authenticateInvitation: async () => principal.authentication === 'invitation-session' ? principal : null,
+      assertPrincipal: () => ({}),
+    },
+    mediaService: {
+      startTranscodePlan: async (...args) => { calls.push(args); return startPlan(...args); },
+      handle: async (_req, res) => { legacyCalls += 1; res.writeHead(202); res.end('{}'); return true; },
+    },
+    getRuntimeHealth: async () => ({}), version: 'test',
+  });
+  function request(route) {
+    const req = Object.assign(new EventEmitter(), { method: 'POST', url: route, headers: { authorization: 'fixture' } });
+    const res = Object.assign(new EventEmitter(), {
+      statusCode: 0, body: '', writableEnded: false,
+      writeHead(status) { this.statusCode = status; },
+      end(body = '') { this.body = String(body); this.writableEnded = true; },
+    });
+    return { req, res };
+  }
+  return { handler, request, calls, get legacyCalls() { return legacyCalls; } };
+}
+
+test('canonical invitation HLS executes its scoped plan without granting legacy transcode access', async () => {
+  const fixture = invitationTranscodeApiFixture();
+  const allowed = fixture.request('/api/v1/media/media-1/transcode?planToken=server-plan');
+  assert.equal(await fixture.handler(allowed.req, allowed.res), true);
+  assert.equal(allowed.res.statusCode, 202);
+  assert.equal(fixture.calls.length, 1);
+  assert.equal(fixture.calls[0][0], 'media-1');
+  assert.equal(fixture.calls[0][1], 'server-plan');
+  assert.equal(fixture.calls[0][2].invitationSessionId, 'invitation-session-1');
+  assert.equal(fixture.calls[0][3].aborted, false);
+  assert.equal(allowed.req.listenerCount('aborted'), 0);
+  assert.equal(allowed.res.listenerCount('close'), 0);
+  for (const route of ['/api/v1/media/media-1/transcode', '/api/v1/media/media-2/transcode?planToken=server-plan']) {
+    const rejected = fixture.request(route);
+    await fixture.handler(rejected.req, rejected.res);
+    assert.ok([401, 403].includes(rejected.res.statusCode));
+  }
+  assert.equal(fixture.calls.length, 1);
+  assert.equal(fixture.legacyCalls, 0);
+});
+
+test('ordinary accounts still need transcode permission on canonical HLS startup', async () => {
+  const fixture = invitationTranscodeApiFixture({ authentication: 'account-session', type: 'user' });
+  const denied = fixture.request('/api/v1/media/media-1/transcode?planToken=server-plan');
+  await fixture.handler(denied.req, denied.res);
+  assert.equal(denied.res.statusCode, 403);
+  assert.equal(fixture.legacyCalls, 0);
+  const permitted = invitationTranscodeApiFixture({
+    authentication: 'account-session', type: 'user', permissions: ['stream', 'transcode'], devicePermissions: ['stream', 'transcode'],
+  });
+  const allowed = permitted.request('/api/v1/media/media-1/transcode?planToken=server-plan');
+  await permitted.handler(allowed.req, allowed.res);
+  assert.equal(allowed.res.statusCode, 202);
+  assert.equal(permitted.legacyCalls, 1);
+});
+
+test('invitation plan startup cancels on disconnect and removes its listeners', async () => {
+  let notifyStarted;
+  const started = new Promise((resolve) => { notifyStarted = resolve; });
+  const fixture = invitationTranscodeApiFixture({}, async (_mediaId, _token, _principal, signal) => {
+    notifyStarted();
+    await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('Disconnected'), { status: 499, code: 'request_cancelled' })), { once: true }));
+  });
+  const call = fixture.request('/api/v1/media/media-1/transcode?planToken=server-plan');
+  const handled = fixture.handler(call.req, call.res);
+  await started;
+  call.req.emit('aborted');
+  await handled;
+  assert.equal(fixture.calls[0][3].aborted, true);
+  assert.equal(call.req.listenerCount('aborted'), 0);
+  assert.equal(call.res.listenerCount('close'), 0);
 });

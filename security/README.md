@@ -39,8 +39,8 @@ fresh review. Expired waivers fail the gate.
 ## Live waivers
 
 Both current `image-size` advisories are build-time denial-of-service findings. The fix is
-published in `image-size` 2.0.3, but Metro 0.83 requires `image-size ^1.0.2` and calls the default
-export that 2.x removed, so the fixed release cannot replace it without breaking Metro. A local patch
+published in `image-size` 2.0.3, but Metro 0.83 requires `image-size ^1.0.2` and passes filenames to its synchronous API. Image-size
+2.0.3 requires image bytes through that API, so the fixed release cannot replace it without breaking Metro. A local patch
 guards malformed ICNS entries and zero-sized image boxes in the meantime. The waivers are owned by
 `@mallenkb`, expire on 2026-11-06, and are accepted only when every path starts at `apps__mobile>`
 or `apps__tv>` and contains `>metro>image-size`. This confines them to the Metro build dependency

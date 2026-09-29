@@ -1132,6 +1132,10 @@ export function createHeadlessAdminService(options) {
   // recording their result.
   /** @type {Map<string, number>} */
   const inFlightLogins = new Map();
+  // Generations order failures without relying on wall-clock resolution.
+  /** @type {WeakMap<AdminState['loginAttempts'][number], number>} */
+  const loginFailureGenerations = new WeakMap();
+  let loginFailureGeneration = 0;
   const kdfLimiter = options.kdfLimiter || sharedKdfLimiter;
 
   /** @param {string} identity @param {unknown} address @param {ReturnType<typeof userByName>} match */
@@ -1192,7 +1196,7 @@ export function createHeadlessAdminService(options) {
     );
     const lockedUntil = Math.max(0, ...entries.map((entry) => entry.lockedUntil));
     state.loginAttempts = state.loginAttempts.filter((entry) => !candidates.has(entry.key));
-    state.loginAttempts.push({
+    const reconciled = {
       key: keys.identity,
       failures,
       firstAttemptAt: Math.min(...entries.map((entry) => entry.firstAttemptAt)),
@@ -1200,29 +1204,36 @@ export function createHeadlessAdminService(options) {
       lockedUntil: failures >= MAX_LOGIN_ATTEMPTS && lockedUntil <= now
         ? now + LOGIN_LOCKOUT_MS
         : lockedUntil,
-    });
+    };
+    loginFailureGenerations.set(reconciled, Math.max(0, ...entries.map((entry) => loginFailureGenerations.get(entry) || 0)));
+    state.loginAttempts.push(reconciled);
   }
 
   /** @param {AdminState} state @param {Record<string, string>} keys */
   function rememberLoginFailure(state, keys, now = Date.now()) {
     pruneLoginAttempts(state, now);
+    const generation = ++loginFailureGeneration;
     for (const [kind, key] of Object.entries(keys)) {
       const current = state.loginAttempts.find((entry) => entry.key === key);
       if (!current || current.lastAttemptAt <= now - LOGIN_WINDOW_MS) {
-        state.loginAttempts.push({ key, failures: 1, firstAttemptAt: now, lastAttemptAt: now, lockedUntil: 0 });
+        const failure = { key, failures: 1, firstAttemptAt: now, lastAttemptAt: now, lockedUntil: 0 };
+        loginFailureGenerations.set(failure, generation);
+        state.loginAttempts.push(failure);
         continue;
       }
       const limit = kind === 'identity' ? MAX_LOGIN_ATTEMPTS : MAX_SHARED_ADDRESS_FAILURES;
       current.failures = Math.min(limit, current.failures + 1);
       current.lastAttemptAt = now;
+      loginFailureGenerations.set(current, generation);
       if (kind === 'identity' && current.failures >= MAX_LOGIN_ATTEMPTS) current.lockedUntil = now + LOGIN_LOCKOUT_MS;
     }
     state.loginAttempts = state.loginAttempts.slice(-256);
   }
 
-  /** @param {AdminState} state @param {string[]} keys */
-  function clearLoginAttempts(state, keys) {
-    state.loginAttempts = state.loginAttempts.filter((entry) => !keys.includes(entry.key));
+  /** @param {AdminState} state @param {string[]} keys @param {number} failuresBeforeAttempt */
+  function clearLoginAttempts(state, keys, failuresBeforeAttempt) {
+    state.loginAttempts = state.loginAttempts.filter((entry) => !keys.includes(entry.key)
+      || (loginFailureGenerations.get(entry) || 0) > failuresBeforeAttempt);
   }
 
   /** @param {AdminState} state @param {string | undefined} userId */
@@ -1558,9 +1569,10 @@ export function createHeadlessAdminService(options) {
         });
       }
       inFlightLogins.set(keys.identity, inFlight + 1);
+      const failuresBeforeAttempt = loginFailureGeneration;
+      const credential = match?.record ? { id: match.record.id, salt: match.record.salt, hash: match.record.hash } : null;
       let passwordValid;
       try {
-        const credential = match?.record;
         await loginDelay(loginThrottleDelayMs(loginFailureCount(state, keys.address, now)));
         const password = /** @type {string} */ (input.password);
         passwordValid = await kdfLimiter.run(() => (credential
@@ -1570,11 +1582,19 @@ export function createHeadlessAdminService(options) {
         const remaining = (inFlightLogins.get(keys.identity) || 1) - 1;
         if (remaining > 0) inFlightLogins.set(keys.identity, remaining); else inFlightLogins.delete(keys.identity);
       }
-      if (!match || !passwordValid || (match.type === 'user' && match.record.disabled)) {
-        rememberLoginFailure(state, { identity: keys.identity, address: keys.address }, now);
+      const currentMatch = userByName(state, identity || 'owner');
+      if (passwordValid && (!credential || !currentMatch || currentMatch.record.id !== credential.id
+        || currentMatch.record.salt !== credential.salt || currentMatch.record.hash !== credential.hash)) {
+        throw Object.assign(new Error('The account credentials changed. Sign in again.'), {
+          status: 409, code: 'credentials_changed',
+        });
+      }
+      if (!currentMatch || !passwordValid || (currentMatch.type === 'user' && currentMatch.record.disabled)) {
+        const completedAt = Date.now();
+        rememberLoginFailure(state, { identity: keys.identity, address: keys.address }, completedAt);
         await saveState(state);
         await appendLog('warn', 'Rejected sign-in attempt.', { identity: identity || 'owner' });
-        const lockedRetryAfter = loginLock(state, keys.identityCandidates, now);
+        const lockedRetryAfter = loginLock(state, keys.identityCandidates, Date.now());
         throw Object.assign(new Error(lockedRetryAfter
           ? 'Too many sign-in attempts. Try again later.'
           : 'The account name or password is incorrect.'), {
@@ -1583,7 +1603,7 @@ export function createHeadlessAdminService(options) {
           ...(lockedRetryAfter ? { retryAfter: lockedRetryAfter } : {}),
         });
       }
-      if (!isLocalNetworkAddress(address) && !hasPermission(match.principal, 'remote.access')) {
+      if (!isLocalNetworkAddress(address) && !hasPermission(currentMatch.principal, 'remote.access')) {
         throw Object.assign(new Error('Remote access is not enabled for this account.'), {
           status: 403, code: 'remote_access_disabled',
         });
@@ -1591,9 +1611,10 @@ export function createHeadlessAdminService(options) {
       // A valid login clears its identity failures, but not failures shared by
       // every client behind the same address. The latter decay as a throttle;
       // they never create a global hard lock for a NAT or reverse proxy.
-      clearLoginAttempts(state, keys.identityCandidates);
-      await saveState(state);
-      return issueToken(state, match.principal, deviceId);
+      clearLoginAttempts(state, keys.identityCandidates, failuresBeforeAttempt);
+      // issueToken checks current policy and records the session before its
+      // first await, so a credential reset cannot slip between these steps.
+      return issueToken(state, currentMatch.principal, deviceId);
     },
 
     /** @param {Principal | null | undefined} [principal] */

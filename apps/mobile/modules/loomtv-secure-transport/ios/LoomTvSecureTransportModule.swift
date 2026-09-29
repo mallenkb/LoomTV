@@ -340,15 +340,39 @@ private final class SecureLanProxy {
 
 private final class ProxyResponseSink {
   private let connection: NWConnection
+  private weak var task: URLSessionDataTask?
+  private let lock = NSLock()
+  private var buffer = LoomTvResponseBuffer()
+  private var suspended = false
+  private var closed = false
   private var wroteHeaders = false
 
-  init(connection: NWConnection) {
+  init(task: URLSessionDataTask, connection: NWConnection) {
+    self.task = task
     self.connection = connection
+    connection.stateUpdateHandler = { [weak self] state in
+      switch state {
+      case .failed, .cancelled: self?.cancel()
+      default: break
+      }
+    }
+  }
+
+  func cancel() {
+    lock.lock()
+    guard !closed else { lock.unlock(); return }
+    closed = true
+    buffer.cancel()
+    let currentTask = task
+    lock.unlock()
+    currentTask?.cancel()
+    connection.cancel()
   }
 
   func receive(response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
     guard let response = response as? HTTPURLResponse else {
       completionHandler(.cancel)
+      cancel()
       return
     }
     var value = "HTTP/1.1 \(response.statusCode) Response\r\n"
@@ -359,18 +383,66 @@ private final class ProxyResponseSink {
       }
     }
     value += "Connection: close\r\n\r\n"
+    lock.lock()
+    guard !closed else { lock.unlock(); completionHandler(.cancel); return }
     wroteHeaders = true
+    lock.unlock()
     connection.send(content: Data(value.utf8), completion: .contentProcessed { error in
-      completionHandler(error == nil ? .allow : .cancel)
+      self.lock.lock()
+      let allowed = error == nil && !self.closed
+      self.lock.unlock()
+      completionHandler(allowed ? .allow : .cancel)
+      if !allowed { self.cancel() }
     })
   }
 
   func receive(data: Data) {
-    connection.send(content: data, completion: .contentProcessed { _ in })
+    guard !data.isEmpty else { return }
+    lock.lock()
+    guard !closed else { lock.unlock(); return }
+    guard buffer.enqueue(data) else { lock.unlock(); cancel(); return }
+    if !suspended && buffer.shouldSuspend {
+      suspended = true
+      task?.suspend()
+    }
+    let next = buffer.nextChunk()
+    lock.unlock()
+    if let next { send(next) }
+  }
+
+  private func send(_ data: Data) {
+    // Exactly one body send can be awaiting its completion. That completion,
+    // rather than the URLSession producer, advances the response queue.
+    connection.send(content: data, completion: .contentProcessed { error in
+      if error != nil { self.cancel(); return }
+      self.lock.lock()
+      guard !self.closed else { self.lock.unlock(); return }
+      self.buffer.didSend(byteCount: data.count)
+      if self.suspended && self.buffer.shouldResume && !self.buffer.upstreamFinished {
+        self.suspended = false
+        self.task?.resume()
+      }
+      let next = self.buffer.nextChunk()
+      let finish = self.buffer.canFinish
+      if finish { self.closed = true }
+      self.lock.unlock()
+      if let next { self.send(next) }
+      else if finish { self.finishConnection() }
+    })
+  }
+
+  private func finishConnection() {
+    connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
+      self.connection.cancel()
+    })
   }
 
   func complete(error: Error?) {
+    lock.lock()
+    guard !closed else { lock.unlock(); return }
     if error != nil && !wroteHeaders {
+      closed = true
+      lock.unlock()
       let body = Data("The secure desktop connection failed.".utf8)
       let headers = Data((
         "HTTP/1.1 502 Secure Transport Error\r\n" +
@@ -380,10 +452,16 @@ private final class ProxyResponseSink {
       connection.send(content: headers + body, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
         self.connection.cancel()
       })
+    } else if error != nil {
+      lock.unlock()
+      cancel()
     } else {
-      connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
-        self.connection.cancel()
-      })
+      buffer.finishUpstream()
+      let finish = buffer.canFinish
+      if finish { closed = true }
+      lock.unlock()
+      // Completion can arrive with body chunks still queued locally.
+      if finish { finishConnection() }
     }
   }
 }
@@ -399,7 +477,7 @@ private final class PinnedProxySessionDelegate: NSObject, URLSessionDataDelegate
 
   func register(task: URLSessionDataTask, connection: NWConnection) {
     sinkLock.lock()
-    sinks[task.taskIdentifier] = ProxyResponseSink(connection: connection)
+    sinks[task.taskIdentifier] = ProxyResponseSink(task: task, connection: connection)
     sinkLock.unlock()
   }
 

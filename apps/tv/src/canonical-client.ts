@@ -23,6 +23,16 @@ export type LibraryItem = {
 type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
 export type DiscoveryDocument = { apiVersion: string; serverVersion: string; certificateFingerprint?: string };
 
+// expo-video 3.0.16 has no decoder capability query. Advertise only a
+// conservative SDR baseline; player errors get one server re-encode attempt.
+export function tvPlaybackCapabilities(forceTranscode = false) {
+  return {
+    containers: ['mp4'], videoCodecs: ['h264'], audioCodecs: ['aac'],
+    streamingProtocols: ['http', 'hls'], subtitleModes: ['burn-in'], hdrFormats: [],
+    maxWidth: 1920, maxHeight: 1080, forceTranscode,
+  };
+}
+
 function normalizedBaseUrl(value: string): string {
   const text = value.trim().replace(/\/+$/, '');
   const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
@@ -52,7 +62,6 @@ export class CanonicalTvClient {
   private readonly transportBaseUrl: string;
   private credential: Credential | null;
   private activeProfileId = '';
-  private invitationProfileId = '';
 
   constructor(baseUrl: string, credential: Credential | null = null, transportBaseUrl?: string) {
     this.baseUrl = normalizedBaseUrl(baseUrl);
@@ -126,11 +135,10 @@ export class CanonicalTvClient {
    * profile, progress, and list routes, so this client skips them.
    */
   useInvitationProfile(profileId: string) {
-    this.invitationProfileId = profileId;
     this.activeProfileId = profileId;
   }
 
-  get isInvitation() { return Boolean(this.invitationProfileId); }
+  get isInvitation() { return this.credential?.scheme === 'LoomInvitation'; }
 
   /** Validates the saved credential; invitation sessions also report their profile. */
   async me() {
@@ -207,7 +215,7 @@ export class CanonicalTvClient {
     ), { method: present ? 'PUT' : 'DELETE', headers: this.headers() }));
   }
 
-  async planPlayback(mediaId: string, startSeconds = 0, tracks: { audioTrackId?: string | null; subtitleTrackId?: string | null } = {}) {
+  async planPlayback(mediaId: string, startSeconds = 0, tracks: { audioTrackId?: string | null; subtitleTrackId?: string | null } = {}, forceTranscode = false) {
     return payload<{
       directUrl: string | null;
       directRenewUrl?: string;
@@ -221,15 +229,7 @@ export class CanonicalTvClient {
       headers: this.headers(true),
       body: JSON.stringify({
         startSeconds,
-        capabilities: {
-          containers: ['mp4', 'webm', 'mkv', 'ts'],
-          videoCodecs: ['h264', 'hevc', 'vp9', 'av1'],
-          audioCodecs: ['aac', 'ac3', 'eac3', 'opus', 'mp3'],
-          streamingProtocols: ['http', 'hls'],
-          subtitleModes: ['burn-in'],
-          maxWidth: 3840,
-          maxHeight: 2160,
-        },
+        capabilities: tvPlaybackCapabilities(forceTranscode),
         ...(tracks.audioTrackId !== undefined ? { audioTrackId: tracks.audioTrackId } : {}),
         ...(tracks.subtitleTrackId !== undefined ? { subtitleTrackId: tracks.subtitleTrackId } : {}),
       }),
@@ -256,13 +256,17 @@ export class CanonicalTvClient {
 
   async stopPlayback(mediaId: string, sessionId?: string) {
     if (!sessionId) return;
-    await fetch(this.endpoint(`/api/v1/media/${encodeURIComponent(mediaId)}/playback-session`), {
+    const response = await fetch(this.endpoint(`/api/v1/media/${encodeURIComponent(mediaId)}/playback-session`), {
       method: 'DELETE', headers: this.headers(true), body: JSON.stringify({ sessionId }),
     });
+    if (!response.ok && response.status !== 404) await payload(response);
   }
 
   async signOut() {
-    await fetch(this.endpoint('/api/v1/auth/session'), { method: 'DELETE', headers: this.headers() });
+    const response = await fetch(this.endpoint(this.isInvitation ? '/api/v1/invitations/session' : '/api/v1/auth/session'), {
+      method: 'DELETE', headers: this.headers(),
+    });
+    if (!response.ok) await payload(response);
     this.credential = null;
     this.activeProfileId = '';
   }

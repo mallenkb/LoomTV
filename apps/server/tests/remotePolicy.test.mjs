@@ -104,3 +104,25 @@ test('pairing status polls remain rate limited', () => {
   for (let index = 0; index < 600; index += 1) service.preflight({ headers: {} }, poll);
   assert.throws(() => service.preflight({ headers: {} }, poll), { code: 'rate_limited', status: 429 });
 });
+
+
+test('invitation HLS requires stream permission, a plan, and scoped media', async () => {
+  const calls = [];
+  const profile = { profileId: 'profile-1', selectionRevision: 3 };
+  const { service } = fixture({ clientState: { requireScopedProfile(...args) { calls.push(args); return profile; } } });
+  const principal = {
+    id: 'issuer-1', authentication: 'invitation-session', invitationSessionId: 'session-1',
+    permissions: ['library.read', 'stream'], devicePermissions: ['library.read', 'stream'],
+    rootIds: ['root-1'], invitationProfileId: 'profile-1', invitationMediaIds: ['media-1'], deviceId: 'tv-1',
+  };
+  const media = { id: 'media-1', rootId: 'root-1' };
+  assert.equal(await service.authorizeInvitationTranscode(principal, media, 'server-issued-plan'), profile);
+  assert.deepEqual(calls, [['issuer-1', 'profile-1', media, 'tv-1']]);
+  await assert.rejects(service.authorizeInvitationTranscode(principal, media, null), { status: 401, code: 'playback_session_invalid' });
+  await assert.rejects(service.authorizeInvitationTranscode({ ...principal, permissions: ['library.read'] }, media, 'plan'), { status: 403 });
+  await assert.rejects(service.authorizeInvitationTranscode(principal, { ...media, id: 'media-2' }, 'plan'), { status: 403 });
+  await assert.rejects(service.authorizeInvitationTranscode(principal, { ...media, rootId: 'root-2' }, 'plan'), { status: 403 });
+  await assert.rejects(service.authorizeInvitationTranscode({ ...principal, invitationSessionId: undefined }, media, 'plan'), { status: 403 });
+  assert.equal(service.supportedInvitationPermissions.includes('transcode'), false);
+  assert.equal(calls.length, 1, 'scope failures do not reach the profile store');
+});

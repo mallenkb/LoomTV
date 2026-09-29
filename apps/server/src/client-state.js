@@ -246,8 +246,9 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
   if (!store) throw new Error('createHeadlessClientState requires the canonical state store.');
   /** @type {Map<string, {revision: number; expiresAt: number}>} */
   const unlockedSelections = new Map();
-  /** @type {Map<string, {failures: number; blockedUntil: number; lastAttemptAt: number}>} */
+  /** @type {Map<string, {failures: number; blockedUntil: number; lastAttemptAt: number; generation: number}>} */
   const pinFailures = new Map();
+  let pinFailureGeneration = 0;
   // PIN attempts per failure key that are between the lock check and
   // recording their result.
   /** @type {Map<string, number>} */
@@ -469,15 +470,17 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         ];
         const failureStates = failureKeys.map((key) => pinFailures.get(key)).filter((entry) => entry !== undefined);
         const attemptStartedAt = Date.now();
+        const failuresBeforeAttempt = pinFailureGeneration;
         const blockedUntil = Math.max(0, ...failureStates.map((entry) => entry.blockedUntil));
         if (blockedUntil > attemptStartedAt) throw Object.assign(new Error('That PIN could not be accepted.'), {
           status: 429, code: 'profile_locked', retryAfter: Math.max(1, Math.ceil((blockedUntil - attemptStartedAt) / 1000)),
         });
-        // Attempts still being checked count against the free-attempt budget,
-        // so a concurrent burst cannot try more PINs than the lock allows.
+        // Reserve the remaining free attempts. After a cooldown, admit one
+        // retry while retaining the failures that determine its next delay.
         const failuresSoFar = Math.max(0, ...failureStates.map((entry) => entry.failures));
         const inFlight = Math.max(0, ...failureKeys.map((key) => inFlightPins.get(key) || 0));
-        if (failuresSoFar + inFlight >= FREE_PIN_ATTEMPTS) throw Object.assign(new Error('Another PIN attempt is still being checked. Try again shortly.'), {
+        const availableAttempts = Math.max(1, FREE_PIN_ATTEMPTS - failuresSoFar);
+        if (inFlight >= availableAttempts) throw Object.assign(new Error('Another PIN attempt is still being checked. Try again shortly.'), {
           status: 429, code: 'pin_in_progress', retryAfter: 1,
         });
         for (const key of failureKeys) inFlightPins.set(key, (inFlightPins.get(key) || 0) + 1);
@@ -497,7 +500,8 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
           const current = Date.now();
           const failures = Math.max(0, ...failureKeys.map((key) => pinFailures.get(key)?.failures || 0)) + 1;
           const delayMs = failures < FREE_PIN_ATTEMPTS ? 0 : Math.min(15 * 60 * 1000, 30_000 * 2 ** (failures - FREE_PIN_ATTEMPTS));
-          for (const key of failureKeys) pinFailures.set(key, { failures, blockedUntil: current + delayMs, lastAttemptAt: current });
+          const generation = ++pinFailureGeneration;
+          for (const key of failureKeys) pinFailures.set(key, { failures, blockedUntil: current + delayMs, lastAttemptAt: current, generation });
           throw Object.assign(new Error('That PIN could not be accepted.'), {
             status: delayMs ? 429 : 403, code: 'profile_locked', ...(delayMs ? { retryAfter: Math.ceil(delayMs / 1000) } : {}),
           });
@@ -505,7 +509,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         // Clear only failures recorded before this attempt began; a failure
         // that finished while this one was being checked still counts.
         for (const key of failureKeys) {
-          if ((pinFailures.get(key)?.lastAttemptAt ?? 0) <= attemptStartedAt) pinFailures.delete(key);
+          if ((pinFailures.get(key)?.generation ?? 0) <= failuresBeforeAttempt) pinFailures.delete(key);
         }
         verifiedPinHash = credential?.pinHash ?? null;
       }

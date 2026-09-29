@@ -1,6 +1,56 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CanonicalTvClient, isTvAuthorizationFailure } from '../src/canonical-client.ts';
+import { CanonicalTvClient, isTvAuthorizationFailure, tvPlaybackCapabilities } from '../src/canonical-client.ts';
+
+test('TV capabilities and its compatibility retry do not overclaim decoder support', async (context) => {
+  const requests = [];
+  context.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json({ ok: true, data: {} });
+  });
+  const client = new CanonicalTvClient('https://loomtv.local');
+  const tracks = { audioTrackId: 'stream:2', subtitleTrackId: null };
+  await client.planPlayback('movie-1', 137, tracks);
+  await client.planPlayback('movie-1', 137, tracks, true);
+  for (const request of requests) {
+    assert.deepEqual(request.capabilities.videoCodecs, ['h264']);
+    assert.deepEqual(request.capabilities.audioCodecs, ['aac']);
+    assert.deepEqual(request.capabilities.containers, ['mp4']);
+    assert.deepEqual(request.capabilities.hdrFormats, []);
+    assert.equal(request.capabilities.maxWidth, 1920);
+    assert.equal(request.capabilities.maxHeight, 1080);
+    assert.equal(request.startSeconds, 137);
+    assert.equal(request.audioTrackId, 'stream:2');
+    assert.equal(request.subtitleTrackId, null);
+  }
+  assert.equal(requests[0].capabilities.forceTranscode, false);
+  assert.equal(requests[1].capabilities.forceTranscode, true);
+  assert.equal(tvPlaybackCapabilities().forceTranscode, false);
+});
+
+test('an invitation skips profile state routes and revokes its own session on sign-out', async (context) => {
+  const requests = [];
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    requests.push({ url, init });
+    return Response.json({ ok: true, data: {} });
+  });
+  const client = new CanonicalTvClient('https://loomtv.local', { id: 'invitation-session', secret: 'secret', scheme: 'LoomInvitation' });
+  client.useInvitationProfile('fixed-profile');
+  assert.deepEqual(await client.progress('movie-1'), { progress: null });
+  assert.deepEqual(await client.saveProgress('movie-1', 90, 120), { progress: null });
+  assert.deepEqual(await client.listEntries(), { entries: [] });
+  assert.equal(requests.length, 0);
+  await client.signOut();
+  assert.equal(requests[0].url, 'https://loomtv.local/api/v1/invitations/session');
+  assert.equal(requests[0].init.method, 'DELETE');
+  assert.equal(requests[0].init.headers.Authorization, 'LoomInvitation invitation-session.secret');
+  assert.equal(client.isInvitation, false);
+});
+
+test('a rejected lease revocation fails before a playback recovery can proceed', async (context) => {
+  context.mock.method(globalThis, 'fetch', async () => Response.json({ ok: false, error: { code: 'rate_limited', message: 'Wait.' } }, { status: 429 }));
+  await assert.rejects(new CanonicalTvClient('https://loomtv.local').stopPlayback('movie-1', 'lease-1'), { code: 'rate_limited', status: 429 });
+});
 
 test('catalog merges canonical series once and derives availability from episodes', async (context) => {
   const episode = { id: 'episode-1', kind: 'episode', title: 'Pilot', available: false };

@@ -6,12 +6,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  HLS_KEEP_BEHIND_SEGMENTS,
   HLS_MAX_LEAD_SEGMENTS,
   HLS_RESUME_LEAD_SEGMENTS,
   hlsPacingDecision,
   hlsSegmentIndex,
-  prunableHlsSegments,
 } from '../src/hls-pacing.js';
 import { createHeadlessMediaService } from '../src/media-service.js';
 import { createPlaybackSessionRegistry } from '../src/playback-session-registry.js';
@@ -24,14 +22,11 @@ test('the encoder pauses far ahead of the client and resumes when it catches up'
   assert.equal(hlsPacingDecision({ producedIndex: 10, requestedIndex: 40, suspended: true }), 'resume', 'a forward seek resumes');
 });
 
-test('segments are trimmed only for large sessions and only well behind the client', () => {
-  const indexes = Array.from({ length: 400 }, (_, index) => index);
-  assert.deepEqual(prunableHlsSegments({ indexes, requestedIndex: 300, sessionBytes: 10, softLimitBytes: 100 }), []);
-  assert.deepEqual(prunableHlsSegments({ indexes, requestedIndex: null, sessionBytes: 1000, softLimitBytes: 100 }), []);
-  const pruned = prunableHlsSegments({ indexes, requestedIndex: 300, sessionBytes: 1000, softLimitBytes: 100 });
-  assert.equal(pruned.at(-1), 300 - HLS_KEEP_BEHIND_SEGMENTS - 1);
-  assert.equal(pruned.length, 300 - HLS_KEEP_BEHIND_SEGMENTS);
+test('segment names support indexes beyond five-digit minimum padding', () => {
   assert.equal(hlsSegmentIndex('segment-00042.ts'), 42);
+  assert.equal(hlsSegmentIndex('segment-100000.ts'), 100000);
+  assert.equal(hlsSegmentIndex('segment-9007199254740992.ts'), null);
+  assert.equal(hlsSegmentIndex('../segment-00042.ts'), null);
   assert.equal(hlsSegmentIndex('index.m3u8'), null);
 });
 
@@ -54,9 +49,20 @@ test('a full remux keeps its first segments and a playlist that starts at them',
   assert.equal(started.statusCode, 202, started.body);
   const lease = JSON.parse(started.body).data;
   const outputDir = outputDirFor(lease);
-  // The unpaced remux finishes almost at once; before, it deleted the
-  // first 90 seconds as it went.
-  assert.ok(await waitFor(async () => (await fs.readFile(path.join(outputDir, 'index.m3u8'), 'utf8').catch(() => '')).includes('#EXT-X-ENDLIST'), 60_000));
+  const playlistUrl = new URL(lease.playlistUrl, 'http://localhost');
+  // A slower remux may hit the lead limit before finishing. Advance the
+  // consumer through real files instead of depending on remux speed.
+  assert.ok(await waitFor(async () => {
+    const current = await fs.readFile(path.join(outputDir, 'index.m3u8'), 'utf8').catch(() => '');
+    const latest = (current.match(/^segment-\d+\.ts$/gm) || []).at(-1);
+    if (latest) {
+      const segment = response();
+      await service.handle({ method: 'HEAD', headers: {} }, segment,
+        new URL(`${latest}?token=${playlistUrl.searchParams.get('token')}`, playlistUrl));
+      assert.equal(segment.statusCode, 200, 'an advertised segment must exist');
+    }
+    return current.includes('#EXT-X-ENDLIST');
+  }, 60_000));
   const playlist = await fs.readFile(path.join(outputDir, 'index.m3u8'), 'utf8');
   assert.match(playlist, /#EXT-X-PLAYLIST-TYPE:EVENT/);
   assert.match(playlist, /#EXT-X-MEDIA-SEQUENCE:0/);
@@ -91,6 +97,13 @@ test('the encoder pauses ahead of the client and resumes when it catches up', {
   assert.ok(paused < HLS_MAX_LEAD_SEGMENTS + 20, `encoder reached segment ${paused} before pausing`);
   await new Promise((resolve) => { setTimeout(resolve, 1_500); });
   assert.equal(Math.max(...await segments(outputDir)), paused, 'a paused encoder must not keep writing');
+
+  const missing = response();
+  await service.handle({ method: 'HEAD', headers: {} }, missing,
+    new URL(`segment-99999.ts?token=${playlistUrl.searchParams.get('token')}`, playlistUrl));
+  assert.equal(missing.statusCode, 404);
+  await new Promise((resolve) => { setTimeout(resolve, 750); });
+  assert.equal(Math.max(...await segments(outputDir)), paused, 'a missing segment must not advance the consumer');
 
   const segment = response();
   await service.handle({ method: 'HEAD', headers: {} }, segment,

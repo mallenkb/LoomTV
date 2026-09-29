@@ -160,3 +160,44 @@ test('a PIN changed during the check is not accepted', async () => {
   await limiter.releaseNext();
   assert.equal((await attempt).code, 'profile_pin_changed');
 });
+
+
+test('PIN cooldown permits one retry and retains escalating backoff', async (context) => {
+  const limiter = heldLimiter();
+  const { client, profile } = await pinProfileStore(limiter);
+  let currentTime = Date.now();
+  context.mock.method(Date, 'now', () => currentTime);
+  async function check(pin) {
+    const attempt = client.selectProfile(profile.id, 'user-a', false, 'tv-1', pin).catch((error) => error);
+    await limiter.releaseNext();
+    return attempt;
+  }
+  for (let index = 0; index < 4; index += 1) assert.equal((await check('0000')).status, 403);
+  assert.equal((await check('0000')).retryAfter, 30);
+  currentTime += 30_001;
+  const retry = client.selectProfile(profile.id, 'user-a', false, 'tv-1', '0000').catch((error) => error);
+  await assert.rejects(client.selectProfile(profile.id, 'user-a', false, 'tv-2', '1234'), { code: 'pin_in_progress' });
+  await limiter.releaseNext();
+  assert.equal((await retry).retryAfter, 60);
+  currentTime += 60_001;
+  assert.equal((await check('1234')).id, profile.id);
+  assert.equal((await check('0000')).status, 403, 'successful recovery clears earlier failures');
+});
+
+test('PIN success preserves a newer failure even when timestamps are equal', async (context) => {
+  const limiter = heldLimiter();
+  const { client, profile } = await pinProfileStore(limiter);
+  const currentTime = Date.now();
+  context.mock.method(Date, 'now', () => currentTime);
+  const correct = client.selectProfile(profile.id, 'user-a', false, 'tv-1', '1234');
+  const wrong = client.selectProfile(profile.id, 'user-a', false, 'tv-1', 'invalid').catch((error) => error);
+  await limiter.releaseLast();
+  assert.equal((await wrong).status, 403);
+  await limiter.releaseNext();
+  await correct;
+  for (let index = 0; index < 4; index += 1) {
+    const attempt = client.selectProfile(profile.id, 'user-a', false, 'tv-1', '0000').catch((error) => error);
+    await limiter.releaseNext();
+    assert.equal((await attempt).status, index === 3 ? 429 : 403);
+  }
+});
