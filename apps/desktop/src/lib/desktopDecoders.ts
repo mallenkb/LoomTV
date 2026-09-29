@@ -455,6 +455,7 @@ const playbackCapabilitiesSchema = z.object({
   supportsHls: z.boolean(),
   supportsHdr: z.boolean(),
   supportsTextSubtitles: z.boolean(),
+  forceTranscode: z.boolean().default(false),
   maxWidth: finiteNumber,
   maxHeight: finiteNumber,
   maxVideoBitrateKbps: finiteNumber,
