@@ -30,11 +30,11 @@ test('AppRoot coordinates domain controllers and keeps composition hooks bounded
 });
 
 test('pairing preserves its large-text reflow and keyboard-safe scrolling contract', async () => {
-  const [appSourceText, stylesText] = await Promise.all([
-    readFile(new URL('../App.tsx', import.meta.url), 'utf8'),
+  const [pairingSourceText, stylesText] = await Promise.all([
+    readFile(new URL('../components/PairingScreen.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../mobileStyles.ts', import.meta.url), 'utf8'),
   ]);
-  const sourceFile = ts.createSourceFile('App.tsx', appSourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const sourceFile = ts.createSourceFile('PairingScreen.tsx', pairingSourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const pairingScreen = findNamedFunction(sourceFile, 'PairingScreen');
   assert.ok(pairingScreen?.body, 'PairingScreen must remain present');
   const pairingText = pairingScreen.getText(sourceFile);

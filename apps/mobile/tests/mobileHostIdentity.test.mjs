@@ -6,7 +6,7 @@ import { reconcileSavedHost, validatePairIdentity } from '../mobileHostIdentity.
 
 import fs from 'node:fs';
 
-const appSource = fs.readFileSync(new URL('../App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const lanClientInstanceSource = fs.readFileSync(new URL('../mobileLanClientInstance.ts', import.meta.url), 'utf8');
 const connectionSource = fs.readFileSync(new URL('../mobileConnection.ts', import.meta.url), 'utf8');
 const appConfig = JSON.parse(fs.readFileSync(new URL('../app.json', import.meta.url), 'utf8'));
 const lanClientSource = fs.readFileSync(new URL('../mobileLanClient.ts', import.meta.url), 'utf8');
@@ -47,7 +47,7 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
   assert.match(normalizeBaseUrl, /parsed\.protocol\s*!==\s*'https:'/);
   assert.match(discovery, /\^\[0-9a-f\]\{64\}\$/i);
   assert.match(discovery, /baseUrl:\s*`https:\/\//);
-  assert.match(appSource, /createMobileLanClient\(\(input, init\) => fetch\(secureLanUrl\(input\), init\)\)/);
+  assert.match(lanClientInstanceSource, /createMobileLanClient\(\(input, init\) => fetch\(secureLanUrl\(input\), init\)\)/);
   assert.match(lanClientSource, /fetchImpl\(input as string, \{ \.\.\.init, signal: controller\.signal \}\)/);
   assert.match(secureTransportSource, /parsed\.protocol\s*!==\s*'https:'/);
   assert.match(secureTransportSource, /transport\.start\(remoteOrigin, fingerprint\)/);
