@@ -18,7 +18,8 @@ lists each file with its Homebrew formula, version, and SHA-256.
 
 Homebrew builds these libraries for the macOS version they are installed on, so
 this payload requires macOS 26 or later. On older macOS versions libmpv does
-not load, and Loom goes from LibVLC straight to Chromium/HLS.
+not load, and Loom goes from LibVLC straight to Chromium/HLS. Intel Mac builds
+do not include libmpv and use the same order.
 
 | Homebrew formula | Version | Files |
 | --- | --- | --- |
