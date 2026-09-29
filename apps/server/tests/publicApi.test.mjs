@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import os from 'node:os';
 import http from 'node:http';
 import path from 'node:path';
@@ -7,6 +9,17 @@ import test from 'node:test';
 import { createCanonicalVideoServer } from '../src/server.js';
 
 const OWNER_PASSWORD = 'public-api-password';
+
+// Load the hosted web app's progress normalizer from its inline script.
+function webAppNormalizeProgress(progress) {
+  const html = readFileSync(new URL('../src/web-app.html', import.meta.url), 'utf8');
+  const from = html.indexOf('function normalizeProgress(');
+  const to = html.indexOf('// Returns null when progress could not be loaded', from);
+  assert.ok(from >= 0 && to > from);
+  const context = vm.createContext({});
+  vm.runInContext(html.slice(from, to), context);
+  return JSON.parse(JSON.stringify(context.normalizeProgress(progress)));
+}
 const BOOTSTRAP_SECRET = 'public-api-bootstrap-secret-32-bytes';
 
 async function startServer(options = {}) {
@@ -335,6 +348,14 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     assert.equal(read.payload.data.progress.watched, false);
     const listed = await authed('GET', `/api/v1/profiles/${profileId}/progress`);
     assert.deepEqual(listed.payload.data.progress[mediaId], read.payload.data.progress);
+    // The hosted web app must read this exact response shape.
+    assert.deepEqual(webAppNormalizeProgress(listed.payload.data.progress), [{
+      mediaId,
+      position: 61.5,
+      duration: 120,
+      watched: false,
+      updatedAt: read.payload.data.progress.updatedAt,
+    }]);
 
     for (const method of ['PUT', 'POST']) {
       for (const body of [{}, { position: 10 }, { duration: 120 }, { positionSeconds: 10, durationSeconds: 120 },
