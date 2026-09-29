@@ -246,7 +246,7 @@ test('remote profile polling refreshes personal state without overwriting pendin
 });
 
 test('player window handlers keep seeking above modals and defer the rest', () => {
-  const source = readFileSync(new URL('../src/components/VideoPlayer.tsx', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../src/components/VideoPlayer/usePlayerKeyboardShortcuts.ts', import.meta.url), 'utf8');
   const start = source.indexOf('    const ownsShortcut =');
   const end = source.indexOf('    return () => {', start);
   assert.ok(start > 0 && end > start);
