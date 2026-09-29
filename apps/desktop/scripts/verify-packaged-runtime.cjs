@@ -287,7 +287,7 @@ function nativePayloadRoot(component) {
 }
 
 function verifyMacArchitecture(candidate) {
-  const result = spawnSync('/usr/bin/lipo', ['-verify_arch', arch === 'x64' ? 'x86_64' : arch, candidate], { encoding: 'utf8' });
+  const result = spawnSync('/usr/bin/lipo', [candidate, '-verify_arch', arch === 'x64' ? 'x86_64' : arch], { encoding: 'utf8' });
   if (result.status !== 0) fail(`Wrong architecture for ${candidate}: ${result.stderr || result.error || ''}`);
 }
 
