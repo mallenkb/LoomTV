@@ -52,6 +52,7 @@ export class CanonicalTvClient {
   private readonly transportBaseUrl: string;
   private credential: Credential | null;
   private activeProfileId = '';
+  private invitationProfileId = '';
 
   constructor(baseUrl: string, credential: Credential | null = null, transportBaseUrl?: string) {
     this.baseUrl = normalizedBaseUrl(baseUrl);
@@ -111,13 +112,31 @@ export class CanonicalTvClient {
   }
 
   async acceptInvitation(invitationId: string, invitationSecret: string, deviceId: string) {
-    return payload<{ credential: Credential }>(await fetch(this.endpoint(
+    return payload<{ credential: Credential; scope?: { profileId?: string } }>(await fetch(this.endpoint(
       `/api/v1/invitations/${encodeURIComponent(invitationId)}/accept`,
     ), {
       method: 'POST',
       headers: { Authorization: `LoomInvite ${invitationSecret}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId }),
     }));
+  }
+
+  /**
+   * An invitation session watches as one fixed profile. The server refuses its
+   * profile, progress, and list routes, so this client skips them.
+   */
+  useInvitationProfile(profileId: string) {
+    this.invitationProfileId = profileId;
+    this.activeProfileId = profileId;
+  }
+
+  get isInvitation() { return Boolean(this.invitationProfileId); }
+
+  /** Validates the saved credential; invitation sessions also report their profile. */
+  async me() {
+    return payload<{ user: unknown; invitation?: { profileId?: string } }>(
+      await fetch(this.endpoint('/api/v1/auth/me'), { headers: this.headers() }),
+    );
   }
 
   async profiles() {
@@ -153,6 +172,7 @@ export class CanonicalTvClient {
   }
 
   async progress(mediaId: string) {
+    if (this.isInvitation) return { progress: null };
     if (!this.activeProfileId) throw new Error('Choose a profile before loading progress.');
     return payload<{ progress: { positionSeconds?: number; position?: number; durationSeconds?: number; duration?: number; watched?: boolean } | null }>(
       await fetch(this.endpoint(`/api/v1/profiles/${encodeURIComponent(this.activeProfileId)}/progress/${encodeURIComponent(mediaId)}`), { headers: this.headers() }),
@@ -160,6 +180,7 @@ export class CanonicalTvClient {
   }
 
   async saveProgress(mediaId: string, position: number, duration: number, watched?: boolean) {
+    if (this.isInvitation) return { progress: null };
     if (!this.activeProfileId) throw new Error('Choose a profile before saving progress.');
     return payload<{ progress: unknown }>(await fetch(
       this.endpoint(`/api/v1/profiles/${encodeURIComponent(this.activeProfileId)}/progress/${encodeURIComponent(mediaId)}`),
@@ -170,6 +191,7 @@ export class CanonicalTvClient {
   }
 
   async listEntries(kind?: ProfileListKind) {
+    if (this.isInvitation) return { entries: [] as ProfileListEntry[] };
     if (!this.activeProfileId) throw new Error('Choose a profile before loading My List.');
     const query = kind ? `?kind=${encodeURIComponent(kind)}` : '';
     return payload<{ entries: ProfileListEntry[] }>(await fetch(this.endpoint(
@@ -178,6 +200,7 @@ export class CanonicalTvClient {
   }
 
   async setListEntry(mediaId: string, kind: ProfileListKind, present: boolean) {
+    if (this.isInvitation) throw new Error('My List is not available with a shared invitation.');
     if (!this.activeProfileId) throw new Error('Choose a profile before changing a list.');
     return payload<{ entries: ProfileListEntry[] }>(await fetch(this.endpoint(
       `/api/v1/profiles/${encodeURIComponent(this.activeProfileId)}/lists/${encodeURIComponent(kind)}/${encodeURIComponent(mediaId)}`,

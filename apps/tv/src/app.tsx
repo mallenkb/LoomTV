@@ -41,7 +41,9 @@ const CONNECTION_KEY = 'loomtv-tv-connection-v1';
 const DEVICE_ID_KEY = 'loomtv-tv-device-id-v1';
 const colors = { background: '#090a0c', panel: '#17191d', panelFocus: '#2b2f36', text: '#f7f7f8', muted: '#a8adb8', accent: '#fc9c03', danger: '#ff6b6b' };
 
-type SavedConnection = { baseUrl: string; certificateFingerprint: string; credential: Credential };
+// invitationProfileId is set for invitation credentials, which watch as one
+// fixed profile and cannot list or select profiles.
+type SavedConnection = { baseUrl: string; certificateFingerprint: string; credential: Credential; invitationProfileId?: string };
 type PendingTrust = { baseUrl: string; certificateFingerprint: string; name: string };
 type ActivePlayback = {
   item: LibraryItem;
@@ -230,6 +232,21 @@ function TvApp() {
       const proxyBaseUrl = await startTvSecureTransport(saved.baseUrl, saved.certificateFingerprint);
       const restored = new CanonicalTvClient(saved.baseUrl, saved.credential, proxyBaseUrl);
       await restored.discover();
+      if (saved.credential.scheme === 'LoomInvitation') {
+        // auth/me is the one account route an invitation may call; it also
+        // confirms the session is still valid.
+        const me = await restored.me();
+        const profileId = me.invitation?.profileId || saved.invitationProfileId;
+        if (!profileId) throw Object.assign(new Error('The invitation has no profile.'), { status: 403 });
+        restored.useInvitationProfile(profileId);
+        const library = await restored.library();
+        if (generation !== pairingGeneration.current) return;
+        setBaseUrl(saved.baseUrl);
+        setClient(restored);
+        showInvitationLibrary(library.items);
+        setSavedConnectionRetry(null);
+        return;
+      }
       const restoredProfiles = await restored.profiles();
       if (generation !== pairingGeneration.current) return;
       setBaseUrl(saved.baseUrl);
@@ -357,18 +374,22 @@ function TvApp() {
         }
         const accepted = await next.acceptInvitation(invitationId.trim(), invitationSecret.trim(), deviceId);
         const credential = { ...accepted.credential, scheme: 'LoomInvitation' as const };
+        const invitationProfileId = accepted.scope?.profileId;
+        if (!invitationProfileId) throw new Error('The invitation does not name a profile to watch as.');
         next.setCredential(credential);
+        next.useInvitationProfile(invitationProfileId);
         await SecureStore.setItemAsync(CONNECTION_KEY, JSON.stringify({
           baseUrl: next.baseUrl,
           certificateFingerprint: pendingTrust.certificateFingerprint,
           credential,
+          invitationProfileId,
         } satisfies SavedConnection));
-        setProfiles((await next.profiles()).profiles);
+        const library = await next.library();
         setClient(next);
         setSavedConnectionRetry(null);
         setInvitationId('');
         setInvitationSecret('');
-        setScreen('profiles');
+        showInvitationLibrary(library.items);
         return;
       }
       const request = await next.requestPairing('LoomTV living-room client');
@@ -398,6 +419,18 @@ function TvApp() {
       setScreen('connect');
       setError(nextError instanceof Error ? nextError.message : 'Could not connect to the server.');
     } finally { setBusy(false); }
+  }
+
+  // Invitations skip the profile picker and My List.
+  function showInvitationLibrary(libraryItems: LibraryItem[]) {
+    setProfiles([]);
+    setItems(libraryItems);
+    setListEntries([]);
+    setQuery('');
+    setDetail(null);
+    setParentSeries(null);
+    setDetailOrigin('library');
+    setScreen('library');
   }
 
   async function chooseProfile(profile: Profile) {
@@ -558,11 +591,11 @@ function TvApp() {
               onPress={() => openBrowseScreen('library')}
               selected={screen === 'library' || (screen === 'detail' && detailOrigin === 'library')}
             />
-            <TvButton
+            {client?.isInvitation ? null : <TvButton
               label="My List"
               onPress={() => openBrowseScreen('my-list')}
               selected={screen === 'my-list' || (screen === 'detail' && detailOrigin === 'my-list')}
-            />
+            />}
           </> : null}
           {screen !== 'connect' && screen !== 'approval' ? <TvButton label="Sign out" onPress={() => void signOut()} /> : null}
         </View>
@@ -654,11 +687,11 @@ function TvApp() {
         <View style={styles.row}>
           {detail.kind !== 'series' ? <TvButton label="Play" onPress={() => void play(detail)} preferred /> : null}
           {detail.kind !== 'series' ? <TvButton label="Playback options" onPress={() => void loadPlaybackOptions(detail)} /> : null}
-          <TvButton
+          {client?.isInvitation ? null : <TvButton
             label={myListIds.has((parentSeries || detail).id) ? 'Remove from My List' : 'Add to My List'}
             onPress={() => void toggleMyList(parentSeries || detail)}
             selected={myListIds.has((parentSeries || detail).id)}
-          />
+          />}
           <TvButton
             label={parentSeries ? `Back to ${parentSeries.title}` : `Back to ${detailOrigin === 'my-list' ? 'My List' : 'Library'}`}
             onPress={returnFromDetail}
