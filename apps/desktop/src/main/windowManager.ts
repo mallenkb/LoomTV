@@ -131,6 +131,10 @@ export function createWindow(): void {
       nodeIntegration: false,
       webSecurity: true,
       sandbox: true,
+      // Loom's fields are searches, names, URLs, and API keys. Spellcheck only
+      // adds a loaded dictionary, and on Windows and Linux a download from
+      // Google's CDN the first time a field is focused.
+      spellcheck: false,
     },
   };
   const iconPath = getWindowIconPath();

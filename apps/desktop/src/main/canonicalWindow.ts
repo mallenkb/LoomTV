@@ -107,6 +107,7 @@ export function openCanonicalSetupWindow(onComplete: () => void): void {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      spellcheck: false,
     },
   });
 
