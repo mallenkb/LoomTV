@@ -110,6 +110,9 @@ export type RegistrySession = NonNullable<ReturnType<PlaybackRegistry['authorize
 export type Admission = ReturnType<typeof import('./transcode-admission.js').createTranscodeAdmission>;
 export type Quota = ReturnType<typeof import('./transcode-cache-quota.js').createTranscodeCacheQuota>;
 export interface TranscodeSession {
+  /** HLS pacing: last segment the client requested, encoder pause state, and the pacing tick. */
+  lastRequestedSegment?: number | null; encoderSuspended?: boolean; pacing?: boolean;
+  pacingTimer?: ReturnType<typeof setInterval> | null;
   id: string; registryId: string; itemId: string; sourceId: string; userId: string;
   mediaRootPath: string; filePath: string; fileId: FileIdentity; outputDir: string;
   backend: string; profile: NormalizedTranscodeProfile; playbackProfile: ProfileBinding | null;
