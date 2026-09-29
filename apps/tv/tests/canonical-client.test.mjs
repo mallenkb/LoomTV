@@ -87,3 +87,61 @@ test('TV discovery also accepts an envelope and rejects non-Loom answers', async
   await assert.rejects(client.discover(), { code: 'invalid_discovery' });
   await assert.rejects(client.discover(), { code: 'invalid_discovery' });
 });
+
+test('a TV invitation watches as its fixed profile against a real Loom server', async (context) => {
+  const { createCanonicalVideoServer } = await import('../../server/src/server.js');
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-tv-invitation-'));
+  context.after(() => fs.rm(base, { recursive: true, force: true }));
+  const paths = { dataDir: path.join(base, 'data'), cacheDir: path.join(base, 'cache'), mediaDir: null };
+  const mediaDir = path.join(base, 'media');
+  await Promise.all([paths.dataDir, paths.cacheDir, mediaDir].map((directory) => fs.mkdir(directory, { recursive: true })));
+  await fs.writeFile(path.join(mediaDir, 'Film (2020).mkv'), 'fake-video');
+  const bootstrapSecret = 'tv-invitation-bootstrap-secret-32-bytes';
+  const server = createCanonicalVideoServer({ host: '127.0.0.1', port: 0, paths, version: 'test', bootstrapSecret });
+  const address = await server.start();
+  context.after(() => server.stop());
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const call = async (method, route, body, token) => {
+    const response = await fetch(`${baseUrl}${route}`, {
+      method,
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+
+  const owner = await call('POST', '/api/v1/auth/owner', { name: 'Owner', password: 'tv-invitation-password', bootstrapSecret });
+  const token = owner.body.data.adminToken;
+  const root = await call('POST', '/api/v1/library/roots', { path: mediaDir }, token);
+  assert.equal(root.status, 201);
+  const rootId = root.body.data.root?.id ?? root.body.data.id;
+  await call('POST', '/api/v1/library/scan', {}, token);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if ((await call('GET', '/api/v1/library/scan', null, token)).body.data.state !== 'scanning') break;
+    await new Promise((resolve) => { setTimeout(resolve, 25); });
+  }
+  const profile = await call('POST', '/api/v1/profiles', { name: 'Guest room' }, token);
+  const profileId = profile.body.data.profile.id;
+  const invitation = await call('POST', '/api/v1/invitations', { profileId, rootIds: [rootId] }, token);
+  assert.equal(invitation.status, 201, JSON.stringify(invitation.body));
+
+  const tv = new CanonicalTvClient('https://loomtv.local', null, baseUrl);
+  const accepted = await tv.acceptInvitation(invitation.body.data.id, invitation.body.data.secret, 'tv-device-1');
+  assert.equal(accepted.scope?.profileId, profileId);
+  tv.setCredential({ ...accepted.credential, scheme: 'LoomInvitation' });
+
+  // Invitation credentials cannot list profiles; this is what failed before.
+  await assert.rejects(tv.profiles(), { status: 403 });
+
+  // Restoring a saved invitation validates it and recovers the profile.
+  const me = await tv.me();
+  assert.equal(me.invitation?.profileId, profileId);
+  tv.useInvitationProfile(profileId);
+  const library = await tv.library();
+  assert.equal(library.items.length, 1);
+  assert.deepEqual(await tv.progress(library.items[0].id), { progress: null });
+  assert.deepEqual(await tv.listEntries(), { entries: [] });
+});

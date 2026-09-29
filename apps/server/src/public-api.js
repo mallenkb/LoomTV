@@ -1416,7 +1416,12 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       }
       if (resource === 'auth' && segments[1] === 'me' && req.method === 'GET') {
         const principal = await requirePrincipal(req);
-        writeData(res, 200, { user: await service.getCurrentUser(principal) });
+        // Invitation sessions watch as one fixed profile and cannot list
+        // profiles, so report it here for clients restoring a saved session.
+        const invitation = principal.authentication === 'invitation-session' && principal.invitationProfileId
+          ? { invitation: { profileId: principal.invitationProfileId } }
+          : {};
+        writeData(res, 200, { user: await service.getCurrentUser(principal), ...invitation });
         return true;
       }
       if (resource === 'devices' && segments.length === 1 && req.method === 'GET') {
