@@ -7,10 +7,15 @@ const manifest = read('apps/mobile/android/app/src/main/AndroidManifest.xml');
 const gradle = read('apps/mobile/android/app/build.gradle');
 const forbidden = ['android.permission.READ_EXTERNAL_STORAGE','android.permission.WRITE_EXTERNAL_STORAGE','android.permission.SYSTEM_ALERT_WINDOW','android.permission.WRITE_SETTINGS'];
 const failures = [];
+// This is the source manifest. Permission removal directives protect the
+// merged app from permissions contributed by dependencies; they do not grant them.
+const permissionEntries = manifest.replace(/<!--[\s\S]*?-->/g, '').match(/<uses-permission(?:-sdk-\d+)?\b[^>]*>/g) || [];
+const attribute = (entry, name) => entry.match(new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`))?.[2];
 if (app.android?.allowBackup !== false) failures.push('Expo Android backups must be disabled.');
 for (const permission of forbidden) {
   if (!app.android?.blockedPermissions?.includes(permission)) failures.push(`Blocked permission missing: ${permission}`);
-  if (manifest.includes(`android:name="${permission}"`)) failures.push(`Forbidden merged permission: ${permission}`);
+  if (permissionEntries.some((entry) => attribute(entry, 'android:name') === permission
+    && attribute(entry, 'tools:node') !== 'remove')) failures.push(`Forbidden source permission: ${permission}`);
 }
 if (!manifest.includes('android:allowBackup="false"')) failures.push('Native Android backup must be disabled.');
 if (!manifest.includes('android:dataExtractionRules="@xml/data_extraction_rules"')) failures.push('Android data extraction rules are missing.');

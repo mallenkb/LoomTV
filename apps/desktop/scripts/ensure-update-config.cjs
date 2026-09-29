@@ -13,6 +13,20 @@ function resourcesPath(appOutDir, platform) {
   return path.join(appOutDir, 'resources');
 }
 
+// libmpv is bundled only for the targets listed in the runtime distribution
+// policy. The Mac extraResources copy mpv/lib into every Mac build, so remove it
+// from architectures that cannot load it (Intel Macs use LibVLC, then HLS).
+function pruneUnsupportedLibMpv(resources, platform, arch) {
+  const provenance = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'resources', 'ffmpeg', 'runtime-provenance.json'), 'utf8'));
+  const targets = provenance.distributionPolicy?.bundledNativePlaybackTargets?.mpv || [];
+  if (targets.includes(`${platform}-${arch}`)) return;
+  const libmpv = path.join(resources, 'mpv', 'lib');
+  if (fs.existsSync(libmpv)) {
+    fs.rmSync(libmpv, { recursive: true, force: true });
+    console.log(`[libmpv] Removed mpv/lib from the ${platform}-${arch} package; libmpv is bundled only for ${targets.join(', ') || 'no targets'}.`);
+  }
+}
+
 exports.default = async function ensureUpdateConfig(context) {
   const platform = context.electronPlatformName;
   const arch = typeof context.arch === 'string' ? context.arch : { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' }[context.arch];
@@ -26,6 +40,7 @@ exports.default = async function ensureUpdateConfig(context) {
       fs.rmSync(path.join(path.dirname(scannerDirectory), entry.name), { recursive: true, force: true });
     }
   }
+  pruneUnsupportedLibMpv(resourcesPath(context.appOutDir, platform), platform, arch);
   const target = path.join(resourcesPath(context.appOutDir, context.electronPlatformName), 'app-update.yml');
   const hadExistingConfig = fs.existsSync(target);
   const actual = hadExistingConfig ? fs.readFileSync(target, 'utf8') : undefined;

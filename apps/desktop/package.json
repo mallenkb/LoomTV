@@ -223,24 +223,24 @@
       "icon": "resources/icon.icns",
       "extraResources": [
         {
-          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/lib",
-          "to": "libvlc/darwin/arm64/lib"
+          "from": "resources/libvlc/darwin/${arch}/VLC.app/Contents/MacOS/lib",
+          "to": "libvlc/darwin/${arch}/lib"
         },
         {
-          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/plugins",
-          "to": "libvlc/darwin/arm64/plugins",
+          "from": "resources/libvlc/darwin/${arch}/VLC.app/Contents/MacOS/plugins",
+          "to": "libvlc/darwin/${arch}/plugins",
           "filter": [
             "**/*",
             "!libmacosx_plugin.dylib"
           ]
         },
         {
-          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/share",
-          "to": "libvlc/darwin/arm64/share"
+          "from": "resources/libvlc/darwin/${arch}/VLC.app/Contents/MacOS/share",
+          "to": "libvlc/darwin/${arch}/share"
         },
         {
-          "from": "resources/libvlc/darwin/arm64/packaged-runtime-manifest.json",
-          "to": "libvlc/darwin/arm64/runtime-manifest.json"
+          "from": "resources/libvlc/darwin/${arch}/packaged-runtime-manifest.json",
+          "to": "libvlc/darwin/${arch}/runtime-manifest.json"
         },
         {
           "from": "resources/ffmpeg/mac",

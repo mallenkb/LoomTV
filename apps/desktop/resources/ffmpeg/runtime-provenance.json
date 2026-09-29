@@ -9,7 +9,7 @@
     "ffmpegInvocation": "separate-command-line-executable",
     "mpvBundled": true,
     "bundledNativePlaybackTargets": {
-      "libvlc": ["darwin-arm64", "win32-x64"],
+      "libvlc": ["darwin-arm64", "darwin-x64", "win32-x64"],
       "mpv": ["darwin-arm64"]
     },
     "mpvDownloadedByLoomTV": false,
@@ -25,7 +25,7 @@
       "provenance": [
         {
           "platform": "darwin",
-          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-arm64.tar.gz",
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-universal.tar.gz",
           "provider": "Martin Riedl's FFmpeg Build Server",
           "url": "https://ffmpeg.martin-riedl.de/",
           "revision": "N-124279-g0f6ba39122",
@@ -34,6 +34,21 @@
           ],
           "archiveUrlsArePinned": false,
           "configure": "--prefix=/Volumes/ffmpeg_arm64/out --pkg-config-flags=--static --extra-version='https://www.martin-riedl.de' --enable-gray --enable-libxml2 --enable-version3 --enable-gpl --enable-openssl --enable-libfreetype --enable-fontconfig --enable-libharfbuzz --enable-libsnappy --enable-libsrt --enable-libvmaf --enable-libass --enable-libklvanc --enable-libzimg --enable-libzvbi --enable-libaom --enable-libdav1d --enable-libopenh264 --enable-libopenjpeg --enable-librav1e --enable-libsvtav1 --enable-libvpx --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libtheora"
+        },
+        {
+          "platform": "darwin",
+          "architectures": ["x64"],
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-universal.tar.gz",
+          "provider": "Martin Riedl's FFmpeg Build Server",
+          "url": "https://ffmpeg.martin-riedl.de/",
+          "revision": "N-122320-g38e89fe502",
+          "archiveUrls": [
+            "https://ffmpeg.martin-riedl.de/download/macos/amd64/1767299902_N-122320-g38e89fe502/ffmpeg.zip"
+          ],
+          "archiveSha256": "6f0736d424b7426f8cbb7bba5c5448d94c976c138c669593b1f40ba534ed192f",
+          "archiveUrlsArePinned": true,
+          "note": "The Intel slice of the universal binary. The build server publishes no Intel snapshot of the arm64 revision; this is its newest Intel snapshot. Built without --enable-version3 and --enable-openssl, so this slice is GPL-2.0-or-later and uses macOS Secure Transport for HTTPS.",
+          "configure": "--prefix=/Volumes/ffmpeg_amd64/out --pkg-config-flags=--static --extra-version='https://www.martin-riedl.de' --enable-gray --enable-libxml2 --enable-gpl --enable-libfreetype --enable-fontconfig --enable-libharfbuzz --enable-libsnappy --enable-libsrt --enable-libvmaf --enable-libass --enable-libklvanc --enable-libzimg --enable-libzvbi --enable-libaom --enable-libdav1d --enable-libopenh264 --enable-libopenjpeg --enable-librav1e --enable-libsvtav1 --enable-libvpx --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libtheora"
         },
         {
           "platform": "win32",
@@ -51,8 +66,8 @@
         {
           "path": "ffmpeg/mac/ffmpeg",
           "platform": "darwin",
-          "architectures": ["arm64"],
-          "sha256": "3396b309cf94d7141bd2becd58d4fe3b0bfeab0a11bc088366f91aabf4b2d864",
+          "architectures": ["arm64", "x64"],
+          "sha256": "bd4f844d9c9c7efde4bd1b0f678dce3caa746e6d3e373ee84196a5787310ff4d",
           "hashStatus": "recorded"
         },
         {
@@ -73,7 +88,7 @@
       "provenance": [
         {
           "platform": "darwin",
-          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-arm64.tar.gz",
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-universal.tar.gz",
           "provider": "Martin Riedl's FFmpeg Build Server",
           "url": "https://ffmpeg.martin-riedl.de/",
           "revision": "N-124279-g0f6ba39122",
@@ -81,6 +96,21 @@
             "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/snapshot/ffprobe.zip"
           ],
           "archiveUrlsArePinned": false
+        },
+        {
+          "platform": "darwin",
+          "architectures": ["x64"],
+          "loomArchive": "https://github.com/mallenkb/LoomTV/releases/download/runtimes-2026-09/ffmpeg-darwin-universal.tar.gz",
+          "provider": "Martin Riedl's FFmpeg Build Server",
+          "url": "https://ffmpeg.martin-riedl.de/",
+          "revision": "N-122320-g38e89fe502",
+          "archiveUrls": [
+            "https://ffmpeg.martin-riedl.de/download/macos/amd64/1767299902_N-122320-g38e89fe502/ffprobe.zip"
+          ],
+          "archiveSha256": "46852ce00ae6f722ed30be269f310ea96c106a4246f2905d3147c5e02293081c",
+          "archiveUrlsArePinned": true,
+          "note": "The Intel slice of the universal binary. The build server publishes no Intel snapshot of the arm64 revision; this is its newest Intel snapshot. Built without --enable-version3 and --enable-openssl, so this slice is GPL-2.0-or-later and uses macOS Secure Transport for HTTPS.",
+          "configure": "--prefix=/Volumes/ffmpeg_amd64/out --pkg-config-flags=--static --extra-version='https://www.martin-riedl.de' --enable-gray --enable-libxml2 --enable-gpl --enable-libfreetype --enable-fontconfig --enable-libharfbuzz --enable-libsnappy --enable-libsrt --enable-libvmaf --enable-libass --enable-libklvanc --enable-libzimg --enable-libzvbi --enable-libaom --enable-libdav1d --enable-libopenh264 --enable-libopenjpeg --enable-librav1e --enable-libsvtav1 --enable-libvpx --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libtheora"
         },
         {
           "platform": "win32",
@@ -98,8 +128,8 @@
         {
           "path": "ffmpeg/mac/ffprobe",
           "platform": "darwin",
-          "architectures": ["arm64"],
-          "sha256": "236d0fccac341014a6190cff30df42bcf52e2d0202a0b389a8d7c1b52e12e60c",
+          "architectures": ["arm64", "x64"],
+          "sha256": "872edfcd4bed29562ac346f79fffed3166733161714bb87d5b0004dffe3581e3",
           "hashStatus": "recorded"
         },
         {
