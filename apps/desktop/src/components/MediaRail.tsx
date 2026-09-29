@@ -15,7 +15,7 @@ import { Link } from '@/lib/navigation';
 /** Pointer travel before a press is treated as a drag rather than a click. */
 const DRAG_THRESHOLD = 12;
 
-export type RailVariant = 'classic' | 'modern';
+type RailVariant = 'classic' | 'modern';
 
 /**
  * Horizontal drag-to-scroll plus end detection for a poster rail.
@@ -24,7 +24,7 @@ export type RailVariant = 'classic' | 'modern';
  * means the drag threshold, the click suppression, and the arrow enablement stay
  * in sync between them.
  */
-export function useRailScroll() {
+function useRailScroll() {
   const railRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ active: false, dragged: false, startScrollLeft: 0, startX: 0, startY: 0 });
   const [isDragging, setIsDragging] = useState(false);

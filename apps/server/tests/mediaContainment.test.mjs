@@ -6,7 +6,7 @@ import test from 'node:test';
 import { createHeadlessAdminService, headlessAdminStateFilename } from '../src/admin-service.js';
 import { createHeadlessMediaService } from '../src/media-service.js';
 import { createBootstrapSecurity } from '../src/secure-bootstrap.js';
-import { createHeadlessServer } from '../src/server.js';
+import { createCanonicalVideoServer } from '../src/server.js';
 import { statContainedFile } from '../src/media-path-guard.js';
 
 const BOOTSTRAP_SECRET = 'containment-test-bootstrap-secret-32-bytes';
@@ -285,7 +285,7 @@ test('media routes contain paths end to end and reject encoded traversal at the 
       adapterGaps: [],
     }),
   };
-  const server = createHeadlessServer({
+  const server = createCanonicalVideoServer({
     host: '127.0.0.1', port: 0, paths, version: '0.0.0-test', bootstrapSecret: BOOTSTRAP_SECRET, transcoder,
   });
   const address = await server.start();

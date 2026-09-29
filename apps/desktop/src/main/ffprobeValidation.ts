@@ -4,7 +4,7 @@ import { parseRequiredJson } from './runtimeValidation.ts';
 const stringRecordSchema = z.record(z.string(), z.string());
 const dispositionSchema = z.record(z.string(), z.number().finite());
 
-export const ffprobeOutputSchema = z.object({
+const ffprobeOutputSchema = z.object({
   format: z.object({
     duration: z.string().optional(),
     bit_rate: z.string().optional(),

@@ -4,7 +4,7 @@ import os from 'node:os';
 import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
-import { createHeadlessServer } from '../src/server.js';
+import { createCanonicalVideoServer } from '../src/server.js';
 
 const OWNER_PASSWORD = 'public-api-password';
 const BOOTSTRAP_SECRET = 'public-api-bootstrap-secret-32-bytes';
@@ -18,7 +18,7 @@ async function startServer(options = {}) {
   };
   await fs.mkdir(paths.dataDir, { recursive: true });
   await fs.mkdir(paths.cacheDir, { recursive: true });
-  const server = createHeadlessServer({
+  const server = createCanonicalVideoServer({
     host: '127.0.0.1',
     port: 0,
     paths,

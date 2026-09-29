@@ -3,7 +3,7 @@ import { normalizeContentRating } from './contentRatings.ts';
 import type { ContentRating, EpisodeMeta, ProviderRatings } from './types.ts';
 import { z } from 'zod';
 
-export interface OMDbRating {
+interface OMDbRating {
   Source: string;
   Value: string;
 }
@@ -26,7 +26,7 @@ export interface OMDbResponse {
   Rated?: string;
 }
 
-export interface OMDbSeasonEpisode {
+interface OMDbSeasonEpisode {
   Title?: string;
   Released?: string;
   Episode?: string;
@@ -34,7 +34,7 @@ export interface OMDbSeasonEpisode {
   imdbID?: string;
 }
 
-export interface OMDbSeasonResponse {
+interface OMDbSeasonResponse {
   Response?: string;
   Title?: string;
   Season?: string;

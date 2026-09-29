@@ -29,7 +29,7 @@ export type MediaSessionCommand =
 
 export type MediaSessionCommandType = MediaSessionCommand['type'];
 
-export const MEDIA_SESSION_COMMAND_TYPES = [
+const MEDIA_SESSION_COMMAND_TYPES = [
   'play',
   'pause',
   'toggle',
@@ -138,7 +138,7 @@ function normalizeSkipSeconds(value: unknown): number {
   return Math.min(MAX_SKIP_SECONDS, parsed);
 }
 
-export function normalizeRate(value: unknown): number {
+function normalizeRate(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 1;
   return Math.min(MAX_RATE, Math.max(MIN_RATE, parsed));
@@ -156,7 +156,7 @@ function normalizeOptionalIndex(value: unknown): number | undefined {
   return Math.floor(parsed);
 }
 
-export function isMediaSessionCommandType(value: unknown): value is MediaSessionCommandType {
+function isMediaSessionCommandType(value: unknown): value is MediaSessionCommandType {
   return typeof value === 'string'
     && (MEDIA_SESSION_COMMAND_TYPES as ReadonlyArray<string>).includes(value);
 }

@@ -101,7 +101,7 @@ function frameEvidence(frame: Uint8Array, adaptiveBrightnessThreshold: number, c
   };
 }
 
-export function adaptiveLuminanceThreshold(rawFrames: Uint8Array, channels: 1 | 3 = 1): number {
+function adaptiveLuminanceThreshold(rawFrames: Uint8Array, channels: 1 | 3 = 1): number {
   if (!rawFrames.length) return 28;
   const samples: number[] = [];
   const stride = Math.max(1, Math.floor(rawFrames.length / 20_000));

@@ -1,5 +1,5 @@
 /** Owns one native playback session across asynchronous start and stop calls. */
-export type NativeStartResult = {
+type NativeStartResult = {
   ok: boolean;
   sessionId?: string;
   surface?: string;

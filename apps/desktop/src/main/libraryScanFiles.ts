@@ -306,7 +306,7 @@ export async function scanEpisodeFilesAsync(
     : left.episode - right.episode);
 }
 
-export async function extractSeasonsAsync(
+async function extractSeasonsAsync(
   folderPath: string,
   folderName: string,
   probe: AsyncMediaFileProbe,

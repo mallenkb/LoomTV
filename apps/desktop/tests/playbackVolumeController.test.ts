@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
+import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
 
 // The controller uses a constructor parameter property, which Node's type
 // stripping cannot run, so compile it the way the engine lifecycle tests do.
@@ -13,8 +13,8 @@ type Controller = {
 };
 type ApplyChanges = (volume: number, muted: boolean, changes: { volume: boolean; muted: boolean }) => Promise<void>;
 const source = readFileSync(new URL('../src/components/VideoPlayer/engines/PlaybackVolumeController.ts', import.meta.url), 'utf8');
-const compiled = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+const compiled = transpileModule(source, {
+  compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
 }).outputText;
 const moduleExports: { default?: new (apply: ApplyChanges) => Controller } = {};
 runInNewContext(compiled, { exports: moduleExports, module: { exports: moduleExports }, queueMicrotask, Promise });

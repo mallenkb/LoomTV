@@ -107,7 +107,7 @@ export interface WireEpisodeFile {
   localMetadata?: WireLocalMediaDetails;
 }
 
-export type WireSubtitleRecord = {
+type WireSubtitleRecord = {
   lang: string;
   label: string;
   url: string;
@@ -326,9 +326,9 @@ export interface OtherFolderGroup {
   folders: string[];
 }
 
-export type SkipAnalysisSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
-export type SkipAnalysisMode = 'full' | 'chapter-only' | 'providers-only';
-export type SkipAnalysisDurationLimit = { minSeconds: number; maxSeconds: number };
+type SkipAnalysisSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
+type SkipAnalysisMode = 'full' | 'chapter-only' | 'providers-only';
+type SkipAnalysisDurationLimit = { minSeconds: number; maxSeconds: number };
 export interface SkipAnalysisSettings {
   enabled: boolean;
   analyzeNewMedia: boolean;
@@ -576,10 +576,10 @@ export interface ProfileTransferResult {
 }
 
 export type StoredProgress = LanStoredProgress;
-export interface TrackPreference { enabled: boolean; index?: number; language?: string; title?: string; codec?: string; forced?: boolean }
+interface TrackPreference { enabled: boolean; index?: number; language?: string; title?: string; codec?: string; forced?: boolean }
 export interface PlaybackTrackPreferences { audio?: TrackPreference; subtitle?: TrackPreference }
 export type MediaSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
-export type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'skipdb' | 'chromaprint';
+type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'skipdb' | 'chromaprint';
 export interface MediaSegment {
   id: string;
   type: MediaSegmentType;
@@ -687,7 +687,7 @@ export type OfficialMetadataCandidate = OfficialArtworkResult & {
   episodePreview?: string[];
 };
 
-export type StremioPluginState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
+type StremioPluginState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
 
 export interface StremioPluginConfigurationField {
   key: string;
@@ -716,14 +716,14 @@ export interface StremioPluginAuditEntry {
   createdAt: number;
 }
 
-export interface StremioPluginCatalogExtra {
+interface StremioPluginCatalogExtra {
   name: string;
   isRequired: boolean;
   options?: readonly string[];
   optionsLimit?: number;
 }
 
-export interface StremioPluginCatalogDefinition {
+interface StremioPluginCatalogDefinition {
   type: string;
   id: string;
   name: string;
@@ -857,7 +857,7 @@ export interface StremioStreamRequest {
   extra?: Readonly<Record<string, string | number | boolean>>;
 }
 
-export interface StremioStreamItem {
+interface StremioStreamItem {
   url: string;
   title?: string;
   behaviorHints?: Readonly<Record<string, unknown>>;
@@ -928,7 +928,7 @@ export interface MediaRenamePreviewEntry {
   sidecars: { fromName: string; toName: string }[];
 }
 
-export interface MediaRenameSkip {
+interface MediaRenameSkip {
   mediaTitle: string;
   fileName: string;
   reason: string;

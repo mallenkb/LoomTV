@@ -15,7 +15,7 @@ const subtitleStyleOptionsSchema = z.object({
   backgroundEnabled: z.boolean().optional(),
 });
 
-export type H264HardwareEncoder =
+type H264HardwareEncoder =
   | 'h264_videotoolbox'
   | 'h264_nvenc'
   | 'h264_qsv'
@@ -35,7 +35,7 @@ export type HardwareVideoEncoder = H264HardwareEncoder
   | 'av1_vaapi'
   | 'av1_amf';
 
-export function appendH264EncoderOptions(args: string[], encoder: H264HardwareEncoder): void {
+function appendH264EncoderOptions(args: string[], encoder: H264HardwareEncoder): void {
   if (encoder === 'h264_videotoolbox') {
     args.push(
       '-allow_sw', '1',

@@ -14,7 +14,7 @@ import type {
 import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 import { parseStoredJson } from './runtimeValidation.ts';
 
-export type ProfileType = LanProfileType;
+type ProfileType = LanProfileType;
 export type ProfilePreferences = LanProfilePreferences;
 export type ProfileRestrictions = LanProfileRestrictions;
 export type ProfileListEntry = LanProfileListEntry;
@@ -92,8 +92,8 @@ export type DeviceProfileSelection = {
   selectionRevision: number;
 };
 
-export const DEFAULT_AVATAR_KEY = 'glyph-01';
-export const DEFAULT_COLOR_KEY = 'ember';
+const DEFAULT_AVATAR_KEY = 'glyph-01';
+const DEFAULT_COLOR_KEY = 'ember';
 
 const MAX_PROFILES = 10;
 const MAX_NAME_LENGTH = 30;

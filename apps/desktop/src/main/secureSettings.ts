@@ -2,7 +2,7 @@ import type { SettingsData } from './databasePlaybackRepository.ts';
 
 export const SECURE_SETTINGS_FIELD = '__loomtvSecureSettings';
 export const SECURE_SETTINGS_RECOVERY_FIELD = '__loomtvSecureSettingsRecovery';
-export const SECURE_SETTINGS_VERSION = 1;
+const SECURE_SETTINGS_VERSION = 1;
 export const SECRET_SETTINGS_KEYS = [
   'metadataApiKeys',
   'omdbApiKey',

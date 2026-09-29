@@ -49,7 +49,7 @@ export type KoffiRuntime = {
   struct: (fields: Record<string, KoffiTypeSpec>) => KoffiType;
   decode: (value: NativeValue, type: KoffiTypeSpec) => Record<string, NativeValue>;
 };
-export type NativeDrawable = bigint | number;
+type NativeDrawable = bigint | number;
 /** A native pointer result: an address, or null when the call returned NULL. */
 type NativeHandle = NativeDrawable | null;
 
@@ -67,7 +67,7 @@ export type LibVlcAvailability = {
 };
 
 export type LibVlcStartOptions = PlaybackStartOptions;
-export type LibVlcPlaybackState = PlaybackState;
+type LibVlcPlaybackState = PlaybackState;
 export type LibVlcCommand = PlaybackCommand;
 
 type LibVlcApi = {
@@ -479,7 +479,7 @@ function cachedRuntime(): RuntimeCache {
   return runtimeCache;
 }
 
-export function invalidateLibVlcRuntimeCache(): void {
+function invalidateLibVlcRuntimeCache(): void {
   runtimeCache = null;
 }
 

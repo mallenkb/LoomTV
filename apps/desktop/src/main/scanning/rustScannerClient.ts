@@ -6,7 +6,7 @@ import { SCANNER_PROTOCOL, type DiscoverySink, type DiscoveryOptions } from './d
 import { decodeScannerFrames, scannerCommandSchema } from './scannerProtocol.ts';
 
 export class ScannerEngineError extends Error {}
-export class ScannerFilesystemError extends Error {}
+class ScannerFilesystemError extends Error {}
 class ScannerCancelledError extends Error {}
 const active = new Map<ChildProcess, { stop: () => void; closed: Promise<void> }>();
 export function hasScannerProcesses(): boolean { return active.size > 0; }

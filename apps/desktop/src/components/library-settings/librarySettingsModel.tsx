@@ -13,7 +13,7 @@ import {
 
 export type LibraryKind = 'movies' | 'tvShows' | 'anime' | 'others';
 
-export type LibraryIconComponent = ComponentType<{ className?: string }>;
+type LibraryIconComponent = ComponentType<{ className?: string }>;
 
 export type LibraryTypeDefinition = {
   kind: LibraryKind;
@@ -56,7 +56,7 @@ export const LIBRARY_TYPE_DEFINITIONS: readonly LibraryTypeDefinition[] = [
   { kind: 'others', label: 'Other folders', description: 'Folders with automatic type detection', custom: true, icons: iconPairs.others },
 ];
 
-export function libraryTypeDefinition(kind: LibraryKind): LibraryTypeDefinition {
+function libraryTypeDefinition(kind: LibraryKind): LibraryTypeDefinition {
   return LIBRARY_TYPE_DEFINITIONS.find((definition) => definition.kind === kind) || LIBRARY_TYPE_DEFINITIONS[0];
 }
 

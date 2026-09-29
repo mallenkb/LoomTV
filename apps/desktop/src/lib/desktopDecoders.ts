@@ -65,13 +65,13 @@ export const desktopProfilePreferencesSchema = lanProfilePreferencesSchema;
 export const desktopProfileListSchema = z.array(lanProfileListEntrySchema);
 export const desktopProgressMapSchema = z.record(z.string(), lanStoredProgressSchema);
 export const desktopStoredProgressSchema = lanStoredProgressSchema;
-export const desktopErrorPayloadSchema = lanErrorPayloadSchema;
+const desktopErrorPayloadSchema = lanErrorPayloadSchema;
 export const okResultSchema = z.object({ ok: z.boolean() });
 export const resourceIdResultSchema = z.object({ resourceId: z.string().min(1) });
 export const portResultSchema = z.object({ port: nonNegativeNumber });
 export const stringRecordSchema = z.record(z.string(), z.string());
 
-export const iptvSourceIconSchema = z.enum([
+const iptvSourceIconSchema = z.enum([
   'general',
   'entertainment',
   'news',
@@ -98,7 +98,7 @@ const iptvSourceHealthSchema = z.object({
   total: nonNegativeNumber,
   checkedAt: nonNegativeNumber,
 });
-export const iptvSourceSummarySchema = z.object({
+const iptvSourceSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   iconId: iptvSourceIconSchema,

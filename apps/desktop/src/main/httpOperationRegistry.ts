@@ -81,7 +81,7 @@ type OperationDefinition<TSchema extends z.ZodType> = {
 
 const operation = <const TSchema extends z.ZodType>(definition: OperationDefinition<TSchema>) => definition;
 
-export const httpOperations = {
+const httpOperations = {
   lanUnpair: operation({ method: 'POST', path: '/api/v2/unpair', owner: 'profiles', scope: 'device:self', requestSchema: lanUnpairRequestSchema }),
   lanPlaybackPlan: operation({ method: 'POST', path: '/api/v2/playback-plan', owner: 'playback', scope: 'media:stream', requestSchema: lanPlaybackPlanRequestSchema }),
   lanStartHls: operation({ method: 'POST', path: '/api/v2/start-hls', owner: 'playback', scope: 'media:stream', requestSchema: lanStartHlsRequestSchema }),

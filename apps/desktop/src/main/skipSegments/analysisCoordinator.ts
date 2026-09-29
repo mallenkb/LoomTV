@@ -64,7 +64,7 @@ function isExcluded(item: MediaItem, revision: AnalysisRevision, settings: AppSe
   return configured.exclusions.paths.some((entry) => resolved === path.resolve(entry) || resolved.startsWith(`${path.resolve(entry)}${path.sep}`));
 }
 
-export function libraryAnalysisRevisions(library: LibraryData, settings: AppSettings): AnalysisRevision[] {
+function libraryAnalysisRevisions(library: LibraryData, settings: AppSettings): AnalysisRevision[] {
   const revisions: AnalysisRevision[] = [];
   for (const item of [...(library.tvShows || []), ...(library.animeShows || [])]) {
     for (const file of item.episodeFiles || []) {

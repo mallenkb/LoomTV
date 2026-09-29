@@ -22,7 +22,7 @@ export type PlaybackTrack = {
   source: 'embedded' | 'sidecar' | 'opensubtitles';
 };
 
-export type PlaybackDiagnostics = {
+type PlaybackDiagnostics = {
   hardwareDecoder?: string;
   hardwareDecode?: boolean;
   frameDrops?: number;

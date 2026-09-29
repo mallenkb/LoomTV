@@ -17,9 +17,9 @@ import type { MediaItem } from './metadata/types.ts';
 export type FirstSeen = { at: number; bulk: boolean };
 
 /** More new titles than this in one pass counts as a bulk import. */
-export const BULK_NEW_TITLES = 20;
+const BULK_NEW_TITLES = 20;
 /** More new episodes than this in one pass counts as a bulk import. */
-export const BULK_NEW_EPISODES = 150;
+const BULK_NEW_EPISODES = 150;
 
 /**
  * Every name a title goes by: each metadata ID it has, plus its name and

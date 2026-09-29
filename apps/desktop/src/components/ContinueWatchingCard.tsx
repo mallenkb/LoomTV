@@ -17,7 +17,7 @@ import type { StoredProgress } from '@/lib/desktopApi';
  * rather than per style. The card lays its own dark scrim over the artwork, so
  * the white title and the track read the same in light and dark themes.
  */
-export function latestProgressPercent(item: MediaItem, progress: Record<string, StoredProgress>): number {
+function latestProgressPercent(item: MediaItem, progress: Record<string, StoredProgress>): number {
   const candidates = [
     {
       filePath: item.filePath,

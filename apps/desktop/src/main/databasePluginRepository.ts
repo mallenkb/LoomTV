@@ -10,10 +10,10 @@ const MAX_ADDON_ID_LENGTH = 240;
 const installStateSchema = z.enum(['pending-review', 'enabled', 'disabled', 'broken']);
 const trustStateSchema = z.enum(['review-required', 'update-review-required', 'trusted', 'disabled', 'broken']);
 
-export type PersistedStremioInstallState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
-export type PersistedStremioTrustState = 'review-required' | 'update-review-required' | 'trusted' | 'disabled' | 'broken';
+type PersistedStremioInstallState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
+type PersistedStremioTrustState = 'review-required' | 'update-review-required' | 'trusted' | 'disabled' | 'broken';
 
-export type PersistedStremioAddonRecord = {
+type PersistedStremioAddonRecord = {
   addonId: string;
   state: PersistedStremioInstallState;
   [key: string]: unknown;
@@ -75,7 +75,7 @@ type StoredV2Envelope = {
   record: Omit<PersistedStremioAddonRecord, 'manifestUrl'>;
 };
 
-export class StremioPluginStorageError extends Error {
+class StremioPluginStorageError extends Error {
   readonly code = 'STREMIO_PLUGIN_STORAGE_INVALID';
 
   constructor(message: string, options?: { cause?: unknown }) {

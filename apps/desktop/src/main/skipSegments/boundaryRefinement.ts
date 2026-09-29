@@ -1,4 +1,4 @@
-export type BoundaryKind = 'chapter' | 'silence' | 'keyframe';
+type BoundaryKind = 'chapter' | 'silence' | 'keyframe';
 export type BoundaryPoint = { kind: BoundaryKind; timeMs: number };
 export type RefinedBoundary = { timeMs: number; kind: BoundaryKind | 'media-edge' | 'original'; originalMs: number };
 

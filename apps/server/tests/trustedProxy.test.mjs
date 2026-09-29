@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import test from 'node:test';
 import { createAdminApiHandler } from '../src/admin-page.js';
 import { createPublicApiHandler } from '../src/public-api.js';
-import { createHeadlessServer } from '../src/server.js';
+import { createCanonicalVideoServer } from '../src/server.js';
 import {
   createTrustedProxyPolicy,
   normalizeIpAddress,
@@ -124,7 +124,7 @@ test('trusted proxy configuration validates and canonicalizes IPv4, IPv6, and CI
 });
 
 test('malformed trust configuration aborts server construction', () => {
-  assert.throws(() => createHeadlessServer({
+  assert.throws(() => createCanonicalVideoServer({
     host: '127.0.0.1',
     port: 0,
     paths: { dataDir: '/unused', cacheDir: '/unused', mediaDir: null },

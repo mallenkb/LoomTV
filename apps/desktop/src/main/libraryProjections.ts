@@ -56,7 +56,7 @@ function projectArtworkSources(sources: string[] | undefined, reuseUnchanged: bo
     && normalized.every((source, index) => source === sources[index]) ? sources : normalized;
 }
 
-export function stripInlineArtworkFromItem(item: MediaItem, reuseUnchanged = false): MediaItem {
+function stripInlineArtworkFromItem(item: MediaItem, reuseUnchanged = false): MediaItem {
   const poster = durableArtworkSource(item.poster);
   const backdrop = durableArtworkSource(item.backdrop);
   const logo = durableArtworkSource(item.logo);

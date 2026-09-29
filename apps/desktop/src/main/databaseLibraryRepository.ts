@@ -199,7 +199,7 @@ function appendToMap<T>(map: Map<string, T[]>, mediaId: string, value: T): void 
   else map.set(mediaId, [value]);
 }
 
-export function hasLibraryData(database: BetterSqlite3.Database): boolean {
+function hasLibraryData(database: BetterSqlite3.Database): boolean {
   const row = parseDatabaseRow(database.prepare('SELECT COUNT(*) AS count FROM media_items').get(), countRowSchema, 'media count');
   const folders = parseDatabaseRow(database.prepare('SELECT COUNT(*) AS count FROM library_folders').get(), countRowSchema, 'folder count');
   return row.count > 0 || folders.count > 0;

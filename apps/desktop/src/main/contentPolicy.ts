@@ -34,7 +34,7 @@ function subtitleMatchesPath(source: string, candidate: string): boolean {
   return Boolean(resolved && sameLocalPath(resolved, candidate));
 }
 
-export function profileCanAccessMedia(profileId: string, item: MediaItem): boolean {
+function profileCanAccessMedia(profileId: string, item: MediaItem): boolean {
   const profile = getProfile(profileId);
   if (!profile) return false;
   if (profile.type !== 'kid') return true;
@@ -62,7 +62,7 @@ export function filterLibraryForProfile(library: LibraryData, profileId: string)
   };
 }
 
-export function mediaItemForPath(library: LibraryData, filePath: string): MediaItem | null {
+function mediaItemForPath(library: LibraryData, filePath: string): MediaItem | null {
   return [...library.movies, ...library.tvShows, ...library.animeShows].find((item) =>
     sameLocalPath(item.filePath, filePath)
     || item.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, filePath))

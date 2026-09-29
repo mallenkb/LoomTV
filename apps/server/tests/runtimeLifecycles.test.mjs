@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { createHeadlessServer } from '../src/server.js';
+import { createCanonicalVideoServer } from '../src/server.js';
 import { createPlaybackSessionRegistry } from '../src/playback-session-registry.js';
 import { createHeadlessMediaService, terminateChild } from '../src/media-service.js';
 import { createTranscodeAdmission } from '../src/transcode-admission.js';
@@ -277,7 +277,7 @@ test('server stop is bounded and idempotent with an incomplete HTTP request', as
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-shutdown-data-'));
   const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-shutdown-cache-'));
   const mediaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-shutdown-media-'));
-  const server = createHeadlessServer({
+  const server = createCanonicalVideoServer({
     host: '127.0.0.1',
     port: 0,
     version: 'test',

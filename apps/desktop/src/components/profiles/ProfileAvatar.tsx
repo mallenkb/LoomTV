@@ -20,7 +20,7 @@ function glyphVariant(avatarKey: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? ((parsed - 1) % 12) + 1 : 1;
 }
 
-export function profileAvatarUrl(avatarKey: string, colorKey = 'ember'): string {
+function profileAvatarUrl(avatarKey: string, colorKey = 'ember'): string {
   if (avatarKey.startsWith('data:image/')) return avatarKey;
   const variant = String(glyphVariant(avatarKey)).padStart(2, '0');
   const color = PROFILE_COLOR_PRESETS[colorKey] || PROFILE_COLOR_PRESETS.ember;

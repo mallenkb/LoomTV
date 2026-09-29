@@ -13,7 +13,7 @@ import { normalizeIptvLogoUrl } from '../../shared/iptvLogoUrl.ts';
  */
 
 /** Playlists this large are already pathological; refuse the rest of the file. */
-export const MAX_PLAYLIST_CHANNELS = 20_000;
+const MAX_PLAYLIST_CHANNELS = 20_000;
 const MAX_FIELD_LENGTH = 400;
 const MAX_URL_LENGTH = 2048;
 

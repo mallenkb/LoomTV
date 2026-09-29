@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Episodes that may play back to back with no input before asking. */
-export const STILL_WATCHING_AFTER_EPISODES = 2;
+const STILL_WATCHING_AFTER_EPISODES = 2;
 
 /**
  * Counts episodes that ended on their own with no key press, click, or

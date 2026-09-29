@@ -9,7 +9,7 @@ import { episodeSeenKeys, lookupFirstSeen, titleSeenKeys, type FirstSeen } from 
  * checked without Electron.
  */
 
-export type EpisodeRef = {
+type EpisodeRef = {
   season: number;
   episode: number;
   title: string;
@@ -19,7 +19,7 @@ export type EpisodeRef = {
   still?: string;
 };
 
-export type ShowEpisodeUpdates = {
+type ShowEpisodeUpdates = {
   mediaId: string;
   title: string;
   type: MediaItem['type'];
@@ -51,11 +51,11 @@ export type InsightInputs = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How long each badge lasts at most; each also ends once you start watching. */
-export const NEW_EPISODE_WINDOW_MS = 14 * DAY_MS;
-export const NEW_SEASON_WINDOW_MS = 21 * DAY_MS;
-export const NEWLY_ADDED_WINDOW_MS = 7 * DAY_MS;
+const NEW_EPISODE_WINDOW_MS = 14 * DAY_MS;
+const NEW_SEASON_WINDOW_MS = 21 * DAY_MS;
+const NEWLY_ADDED_WINDOW_MS = 7 * DAY_MS;
 
-export function localDate(ms: number): string {
+function localDate(ms: number): string {
   const date = new Date(ms);
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;

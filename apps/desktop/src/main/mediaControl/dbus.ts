@@ -61,7 +61,7 @@ export type DbusPointer = bigint;
 export type DbusLibrary = ReturnType<typeof createDbusBridge>;
 
 /** Shared-object names to try, newest ABI first. */
-export const LIBDBUS_CANDIDATES = ['libdbus-1.so.3', 'libdbus-1.so'] as const;
+const LIBDBUS_CANDIDATES = ['libdbus-1.so.3', 'libdbus-1.so'] as const;
 
 export function createDbusBridge(koffi: KoffiDbusRuntime) {
   let library: KoffiLibrary | null = null;

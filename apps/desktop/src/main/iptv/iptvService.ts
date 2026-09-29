@@ -83,7 +83,7 @@ async function waitForPlaybackIdle(): Promise<void> {
   while (isPlaybackActivityActive()) await sleep(HEALTH_PLAYBACK_POLL_MS);
 }
 
-export class IptvSourceError extends Error {
+class IptvSourceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'IptvSourceError';
@@ -96,7 +96,7 @@ export class IptvSourceError extends Error {
  * response. A plain-HTTP playlist is rejected here rather than at play time,
  * where the renderer's media policy would refuse it anyway.
  */
-export function normalizeIptvUrl(value: string, label: string): string {
+function normalizeIptvUrl(value: string, label: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new IptvSourceError(`Enter a ${label} URL.`);
   let parsed: URL;

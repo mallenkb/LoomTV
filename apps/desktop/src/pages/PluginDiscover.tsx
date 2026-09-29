@@ -1463,7 +1463,7 @@ export default function PluginDiscover() {
   return <DiscoverCatalog mode="discover" />;
 }
 
-export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) {
+function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) {
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
   const [pageQueryScope] = useState(queryScope);

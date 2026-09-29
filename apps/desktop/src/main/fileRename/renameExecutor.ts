@@ -110,7 +110,7 @@ function nearestExisting(target: string): string | null {
 }
 
 /** Both paths on one drive, so moving between them is a single atomic rename. */
-export function onSameDrive(left: string, right: string): boolean {
+function onSameDrive(left: string, right: string): boolean {
   const a = nearestExisting(left);
   const b = nearestExisting(right);
   if (!a || !b) return false;
@@ -141,7 +141,7 @@ export type RenameExecutorDeps = {
   onStepCompleted?: (completed: number) => void;
 };
 
-export class RenameError extends Error {
+class RenameError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RenameError';
@@ -157,7 +157,7 @@ function allItems(data: LibraryData): MediaItem[] {
  * in a `path=` query parameter, encoded either way LoomTV writes them
  * (`%20` from encodeURIComponent, `+` from URLSearchParams).
  */
-export function rewritePathReference(value: string, mapPath: (value: string) => string): string {
+function rewritePathReference(value: string, mapPath: (value: string) => string): string {
   // "/subtitle?path=..." starts with a slash too; a query makes it a URL.
   if (!/[?&]path=/.test(value)) return path.isAbsolute(value) ? mapPath(value) : value;
   // Absolute URLs (thumbnails, local images) are built with URLSearchParams;

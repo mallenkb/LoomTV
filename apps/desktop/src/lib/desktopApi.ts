@@ -147,39 +147,39 @@ import { z } from 'zod';
 import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 export type {
   ActiveProfileState,
-  ApiResult,
-  LibraryFolderKind,
+  
+  
   LibraryIndexPayload,
-  LibraryItemDetailsPayload,
+  
   LibraryPayload,
-  LibraryScanMode,
-  LibraryScanProgress,
-  LocalNetworkPairedDevice,
+  
+  
+  
   LocalNetworkPeer,
-  LocalNetworkStatus,
+  
   LocalSegmentAnalysisStatus,
-  ManualMediaSegmentInput,
+  
   ManagedMediaSegment,
   MediaSegment,
-  MediaSegmentRequest,
-  MediaSegmentResponse,
+  
+  
   MediaSegmentType,
-  MetadataApiKeys,
+  
   MetadataKeyTestResult,
-  StreamingProvider,
+  
   MpvAvailability,
   MpvCommand,
-  MpvPlaybackState,
+  
   MpvStartOptions,
-  OfficialArtworkResult,
+  
   OfficialArtworkRefreshTarget,
   OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
   OfficialStremioAddon,
-  PlaybackLogoResult,
-  PlaybackCapabilities,
-  PlaybackPlanResponse,
-  PlaybackTrackPreferences,
+  
+  
+  
+  
   ProfileCreateInput,
   ProfileListEntry,
   ProfileListKind,
@@ -188,31 +188,31 @@ export type {
   ProfileSummary,
   ProfileTransferResult,
   ProfileUpdateInput,
-  RemoteLibraryConnection,
-  RemoteLibraryRequest,
-  RemoteLibraryResponse,
-  SettingsPayload,
-  SkipAnalysisRunScope,
+  
+  
+  
+  
+  
   StoredProgress,
-  StreamUrlOptions,
-  StreamUrlResult,
+  
+  
   StremioPluginCatalogItem,
-  StremioPluginCatalogRequest,
-  StremioPluginCatalogResult,
-  StremioPluginConfigurationState,
+  
+  
+  
   StremioPluginAuditEntry,
-  StremioPluginIpcResult,
-  StremioPluginMetaRequest,
-  StremioPluginMetaResult,
+  
+  
+  
   StremioPluginReview,
   StremioPluginSummary,
-  TranscodeOptions,
-  TranscodeSession,
+  
+  
   UpdateState,
 } from '../shared/desktopProtocol.ts';
 export type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 
-export type LibVlcSurface = 'composited-window' | 'unavailable';
+type LibVlcSurface = 'composited-window' | 'unavailable';
 export type LibVlcAvailability = MpvAvailability & {
   enabled?: boolean;
   surface?: LibVlcSurface;
@@ -403,7 +403,7 @@ declare global {
   }
 }
 
-export class StremioPluginIpcError extends Error {
+class StremioPluginIpcError extends Error {
   readonly code: string;
   readonly retryable: boolean;
   readonly issues: readonly StremioPluginIpcIssue[];
