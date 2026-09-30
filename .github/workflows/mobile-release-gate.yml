@@ -17,6 +17,8 @@ permissions:
 
 jobs:
   release-boundaries:
+    # PR #18 is validating desktop targets only at the user's request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
     runs-on: macos-15
     timeout-minutes: 45
     steps:

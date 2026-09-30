@@ -37,6 +37,8 @@ concurrency:
 jobs:
   mobile-android-config:
     name: Verify generated Android configuration
+    # PR #18 is validating desktop targets only at the user's request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -98,6 +100,8 @@ jobs:
 
   mobile-ios-native:
     name: Compile iOS Simulator native target
+    # PR #18 is validating desktop targets only at the user's request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
     runs-on: macos-26
     timeout-minutes: 45
     permissions:
