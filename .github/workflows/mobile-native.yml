@@ -91,6 +91,11 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Verify Android transport admission and stop cleanup
+        env:
+          LOOMTV_REQUIRE_ANDROID_TRANSPORT_TEST: '1'
+        run: node --test apps/mobile/tests/mobileSecureTransportAndroidSessions.test.mjs
+
   mobile-ios-native:
     name: Compile iOS Simulator native target
     runs-on: macos-26
@@ -125,6 +130,11 @@ jobs:
 
       - name: Validate mobile release configuration
         run: corepack pnpm mobile:verify-release-config
+
+      - name: Verify native streaming and cancellation
+        run: |
+          swiftc --version
+          node --test apps/mobile/tests/mobileSecureTransportBackpressure.test.mjs apps/mobile/tests/mobileSecureTransportSessions.test.mjs
 
       - name: Regenerate iOS project from tracked Expo configuration
         run: corepack pnpm --filter @loom-media-server/mobile exec expo prebuild --clean --platform ios --no-install

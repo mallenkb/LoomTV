@@ -152,7 +152,7 @@ describe('production audit waiver policy', () => {
     )
   })
 
-  test('accepts pnpm internal report keys while requiring unique GHSA IDs', () => {
+  test('accepts separate vulnerable version records for the same GHSA', () => {
     assert.equal(
       validateAuditReport({
         advisories: {
@@ -180,8 +180,26 @@ describe('production audit waiver policy', () => {
           },
         },
       }),
-      'pnpm audit returned invalid metadata for advisory 5678',
+      null,
     )
+  })
+
+  test('rejects contradictory modules or severities for the same GHSA', () => {
+    for (const changed of [{ module_name: 'different' }, { severity: 'moderate' }]) {
+      const first = { github_advisory_id: 'GHSA-example', module_name: 'example', severity: 'high' }
+      assert.equal(
+        validateAuditReport({ advisories: { 1234: first, 5678: { ...first, ...changed } } }),
+        'pnpm audit returned conflicting metadata for advisory 5678',
+      )
+    }
+  })
+
+  test('repeated GHSA records retain every dependency path for waiver enforcement', () => {
+    const first = { ...advisory, github_advisory_id: 'GHSA-example', severity: 'high' }
+    const second = { ...first, findings: [{ paths: ['apps__desktop>metro>image-size'] }] }
+    assert.equal(validateAuditReport({ advisories: { 1234: first, 5678: second } }), null)
+    assert.equal(validateWaiver(first, waiver, '2026-08-08'), null)
+    assert.equal(validateWaiver(second, waiver, '2026-08-08'), 'dependency path escaped the documented scope')
   })
 
   test('identifies stale waivers after their advisories disappear', () => {

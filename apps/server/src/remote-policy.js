@@ -318,14 +318,19 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     }
     const liveScope = await authorizedInvitationScope(session.scope, issuer);
     if (!liveScope) throw remoteError(403, 'permission_denied', 'Invitation permissions are no longer available.');
-    store.touchInvitationSession(session.id, currentTime, currentTime + INVITATION_SESSION_IDLE_MS);
+    const seenAt = clock();
+    const idleExpiresAt = Math.min(session.absoluteExpiresAt, seenAt + INVITATION_SESSION_IDLE_MS);
+    if (!store.touchInvitationSession(session.id, seenAt, idleExpiresAt)) {
+      throw remoteError(401, 'session_expired', 'Invitation session is unavailable.');
+    }
     return {
       ...issuer, type: 'invitation', role: 'viewer', authentication: 'invitation-session',
       invitationSessionId: session.id, invitationId: session.invitationId, deviceId: session.deviceId,
       permissions: liveScope.permissions, devicePermissions: liveScope.permissions,
       rootIds: liveScope.rootIds, invitationMediaIds: liveScope.mediaIds,
       invitationProfileId: liveScope.profileId, invitationScope: liveScope,
-      sessionId: session.id, remoteRequestContext: requestContext,
+      sessionId: session.id, invitationSessionExpiresAt: idleExpiresAt, remoteRequestContext: requestContext,
+      invitationSessionAbsoluteExpiresAt: session.absoluteExpiresAt,
     };
   }
 
@@ -338,11 +343,19 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     if (!issuer || !hasPermission(issuer, 'sharing.manage')) return null;
     const liveScope = await authorizedInvitationScope(session.scope, issuer);
     if (!liveScope) return null;
+    // Account/profile reads can await. Recheck the session after them so a
+    // revocation or expiry during authorization cannot issue a new capability.
+    const currentSession = store.readInvitationSession(sessionId, true);
+    const resolvedAt = clock();
+    if (!currentSession || currentSession.revokedAt || currentSession.idleExpiresAt <= resolvedAt
+      || currentSession.absoluteExpiresAt <= resolvedAt) return null;
     return { ...issuer, type: 'invitation', role: 'viewer', authentication: 'invitation-session',
       invitationSessionId: session.id, invitationId: session.invitationId, deviceId: session.deviceId,
       permissions: liveScope.permissions, devicePermissions: liveScope.permissions, rootIds: liveScope.rootIds,
       invitationMediaIds: liveScope.mediaIds, invitationProfileId: liveScope.profileId,
-      invitationScope: liveScope, sessionId: session.id };
+      invitationScope: liveScope, sessionId: session.id,
+      invitationSessionExpiresAt: Math.min(currentSession.idleExpiresAt, currentSession.absoluteExpiresAt),
+      invitationSessionAbsoluteExpiresAt: currentSession.absoluteExpiresAt };
   }
 
   /** @param {import('./server-media-types.js').Principal | null | undefined} principal @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource} [media] */

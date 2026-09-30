@@ -59,6 +59,14 @@ jobs:
       - name: Typecheck
         run: corepack pnpm typecheck
 
+      - name: Install FFmpeg for media integration tests
+        # These integration regressions must execute, rather than skip when
+        # the runner image does not provide an encoder.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ffmpeg
+          ffmpeg -version
+
       - name: Test
         run: corepack pnpm test
 

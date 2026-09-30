@@ -234,7 +234,8 @@ function bindAuthenticationSession(profileContext, principal) {
   return {
     ...profileContext,
     remoteAccess: principal?.authentication === 'invitation-session' || hasPermission(principal, 'remote.access'),
-    ...(principal?.sessionId ? { authenticationSessionId: principal.sessionId } : {}),
+    ...(principal?.sessionId && principal.authentication !== 'invitation-session'
+      ? { authenticationSessionId: principal.sessionId } : {}),
     ...(principal?.invitationSessionId ? { invitationSessionId: principal.invitationSessionId } : {}),
   };
 }

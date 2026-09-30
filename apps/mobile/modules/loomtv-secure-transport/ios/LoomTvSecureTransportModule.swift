@@ -134,47 +134,35 @@ private final class SecureLanProxy {
   private var remoteOrigin: URL?
   private var certFingerprint: String?
   private var localSecret: String?
-  private var proxySession: URLSession?
-  private var proxySessionDelegate: PinnedProxySessionDelegate?
+  private var proxySessions: ProxySessionPool?
+  private static let maxLocalConnections = 32
+  private static let requestReceiveTimeoutSeconds: TimeInterval = 10
+  private final class LocalConnection {
+    let id = UUID()
+    let connection: NWConnection
+    var parsing = true
+    init(_ connection: NWConnection) { self.connection = connection }
+  }
+  private var localConnections: [LocalConnection] = []
 
   func start(origin: String, fingerprint: String) async throws -> String {
     let remote = try secureOrigin(origin)
     let normalized = try normalizedFingerprint(fingerprint)
     stateLock.lock()
-    if let listener, let port = listener.port, let localSecret, remoteOrigin == remote, certFingerprint == normalized {
+    if let listener, case .ready = listener.state, let port = listener.port,
+      let localSecret, remoteOrigin == remote, certFingerprint == normalized {
       stateLock.unlock()
       return "http://localhost:\(port.rawValue)/\(localSecret)"
     }
     stateLock.unlock()
-    stop()
 
     let parameters = NWParameters.tcp
     parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
     let nextListener = try NWListener(using: parameters, on: .any)
     let nextSecret = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-    let nextSessionDelegate = PinnedProxySessionDelegate(expectedFingerprint: normalized)
-    let sessionConfiguration = URLSessionConfiguration.ephemeral
-    sessionConfiguration.timeoutIntervalForRequest = 60
-    sessionConfiguration.timeoutIntervalForResource = 24 * 60 * 60
-    sessionConfiguration.httpMaximumConnectionsPerHost = 6
-    sessionConfiguration.httpShouldUsePipelining = true
-    let sessionDelegateQueue = OperationQueue()
-    sessionDelegateQueue.maxConcurrentOperationCount = 1
-    let nextSession = URLSession(
-      configuration: sessionConfiguration,
-      delegate: nextSessionDelegate,
-      delegateQueue: sessionDelegateQueue
-    )
-    stateLock.lock()
-    listener = nextListener
-    remoteOrigin = remote
-    certFingerprint = normalized
-    localSecret = nextSecret
-    proxySession = nextSession
-    proxySessionDelegate = nextSessionDelegate
-    stateLock.unlock()
+    let nextSessions = ProxySessionPool(expectedFingerprint: normalized)
     nextListener.newConnectionHandler = { [weak self, weak nextListener] connection in
-      guard let self, let nextListener else { connection.cancel(); return }
+      guard let self, let nextListener, self.admit(connection, listener: nextListener) else { connection.cancel(); return }
       self.receiveRequest(from: connection, listener: nextListener, accumulated: Data())
       connection.start(queue: self.queue)
     }
@@ -185,44 +173,123 @@ private final class SecureLanProxy {
       nextListener.stateUpdateHandler = { [weak self, weak nextListener] state in
         completionLock.lock()
         defer { completionLock.unlock() }
-        guard !completed, let nextListener else { return }
+        guard let self, let nextListener else {
+          if !completed {
+            completed = true
+            continuation.resume(throwing: SecureTransportError.listenerFailed)
+          }
+          return
+        }
+        self.stateLock.lock()
+        let current = self.listener === nextListener
+        self.stateLock.unlock()
+        // A concurrent start may supersede readiness still pending. Its older
+        // callback must neither return the new secret nor stop the new listener.
+        guard current else {
+          if !completed {
+            completed = true
+            continuation.resume(throwing: SecureTransportError.listenerFailed)
+          }
+          return
+        }
         switch state {
         case .ready:
+          guard !completed else { return }
           guard let port = nextListener.port else {
             completed = true
+            self.stop(expectedListener: nextListener)
             continuation.resume(throwing: SecureTransportError.listenerFailed)
             return
           }
           completed = true
           continuation.resume(returning: "http://localhost:\(port.rawValue)/\(nextSecret)")
         case .failed(let error):
-          completed = true
-          self?.stop()
-          continuation.resume(throwing: error)
+          self.stop(expectedListener: nextListener)
+          if !completed {
+            completed = true
+            continuation.resume(throwing: error)
+          }
         case .cancelled:
-          completed = true
-          continuation.resume(throwing: SecureTransportError.listenerFailed)
+          self.stop(expectedListener: nextListener)
+          if !completed {
+            completed = true
+            continuation.resume(throwing: SecureTransportError.listenerFailed)
+          }
         default:
           break
         }
       }
+      // Publish and start one generation atomically. A competing start/stop
+      // cannot cancel a listener before its state handler and queue are installed.
+      stateLock.lock()
+      let previousListener = listener
+      let previousSessions = proxySessions
+      let previousConnections = localConnections
+      localConnections.removeAll()
+      listener = nextListener
+      remoteOrigin = remote
+      certFingerprint = normalized
+      localSecret = nextSecret
+      proxySessions = nextSessions
       nextListener.start(queue: queue)
+      stateLock.unlock()
+      previousListener?.cancel()
+      previousSessions?.stop()
+      for entry in previousConnections { entry.connection.cancel() }
     }
   }
 
-  func stop() {
+  func stop() { stop(expectedListener: nil) }
+
+  private func stop(expectedListener: NWListener?) {
     stateLock.lock()
+    if let expectedListener, listener !== expectedListener { stateLock.unlock(); return }
     let current = listener
-    let currentSession = proxySession
+    let currentSessions = proxySessions
+    let currentConnections = localConnections
+    localConnections.removeAll()
     listener = nil
     remoteOrigin = nil
     certFingerprint = nil
     localSecret = nil
-    proxySession = nil
-    proxySessionDelegate = nil
+    proxySessions = nil
     stateLock.unlock()
     current?.cancel()
-    currentSession?.invalidateAndCancel()
+    currentSessions?.stop()
+    for entry in currentConnections { entry.connection.cancel() }
+  }
+
+  private func admit(_ connection: NWConnection, listener expected: NWListener) -> Bool {
+    stateLock.lock()
+    guard listener === expected else { stateLock.unlock(); return false }
+    localConnections.removeAll { entry in
+      switch entry.connection.state {
+      case .failed, .cancelled: return true
+      default: return false
+      }
+    }
+    guard localConnections.count < Self.maxLocalConnections else { stateLock.unlock(); return false }
+    let entry = LocalConnection(connection)
+    localConnections.append(entry)
+    stateLock.unlock()
+    // The deadline covers only request parsing, not playback or queued work.
+    queue.asyncAfter(deadline: .now() + Self.requestReceiveTimeoutSeconds) { [weak self, weak entry] in
+      guard let self, let entry else { return }
+      self.stateLock.lock()
+      let index = self.localConnections.firstIndex(where: { $0 === entry })
+      if entry.parsing, let index {
+        self.localConnections.remove(at: index)
+        self.stateLock.unlock()
+        entry.connection.cancel()
+      } else { self.stateLock.unlock() }
+    }
+    return true
+  }
+
+  private func parsed(_ connection: NWConnection) {
+    stateLock.lock()
+    localConnections.first(where: { $0.connection === connection })?.parsing = false
+    stateLock.unlock()
   }
 
   private func receiveRequest(from connection: NWConnection, listener expectedListener: NWListener, accumulated: Data) {
@@ -236,6 +303,7 @@ private final class SecureLanProxy {
       }
       do {
         if let request = try self.parseRequest(next) {
+          self.parsed(connection)
           self.forward(request, from: connection, listener: expectedListener)
           return
         }
@@ -293,11 +361,10 @@ private final class SecureLanProxy {
     stateLock.lock()
     let currentListener = listener
     let remote = remoteOrigin
-    let session = proxySession
-    let sessionDelegate = proxySessionDelegate
+    let sessions = proxySessions
     let secret = localSecret
     stateLock.unlock()
-    guard currentListener === expectedListener, let remote, let session, let sessionDelegate, let secret else {
+    guard currentListener === expectedListener, let remote, let sessions, let secret else {
       writeError(to: connection, status: 503, message: "Secure transport is restarting.")
       return
     }
@@ -320,9 +387,9 @@ private final class SecureLanProxy {
     remoteRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if !request.body.isEmpty { remoteRequest.httpBody = request.body }
 
-    let task = session.dataTask(with: remoteRequest)
-    sessionDelegate.register(task: task, connection: connection)
-    task.resume()
+    if !sessions.start(remoteRequest, connection: connection) {
+      writeError(to: connection, status: 503, message: "The secure transport is busy. Please retry.")
+    }
   }
 
   private func writeError(to connection: NWConnection, status: Int, message: String) {
@@ -341,13 +408,16 @@ private final class SecureLanProxy {
 private final class ProxyResponseSink {
   private let connection: NWConnection
   private weak var task: URLSessionDataTask?
-  private let lock = NSLock()
+  private let lock = NSCondition()
+  private let onClose: () -> Void
   private var buffer = LoomTvResponseBuffer()
   private var suspended = false
   private var closed = false
   private var wroteHeaders = false
+  private var released = false
 
-  init(task: URLSessionDataTask, connection: NWConnection) {
+  init(task: URLSessionDataTask, connection: NWConnection, onClose: @escaping () -> Void) {
+    self.onClose = onClose
     self.task = task
     self.connection = connection
     connection.stateUpdateHandler = { [weak self] state in
@@ -360,13 +430,23 @@ private final class ProxyResponseSink {
 
   func cancel() {
     lock.lock()
-    guard !closed else { lock.unlock(); return }
+    guard !released && !buffer.cancelled else { lock.unlock(); return }
     closed = true
     buffer.cancel()
+    lock.broadcast()
     let currentTask = task
     lock.unlock()
     currentTask?.cancel()
     connection.cancel()
+    release()
+  }
+
+  private func release() {
+    lock.lock()
+    guard !released else { lock.unlock(); return }
+    released = true
+    lock.unlock()
+    onClose()
   }
 
   func receive(response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
@@ -397,17 +477,35 @@ private final class ProxyResponseSink {
   }
 
   func receive(data: Data) {
-    guard !data.isEmpty else { return }
-    lock.lock()
-    guard !closed else { lock.unlock(); return }
-    guard buffer.enqueue(data) else { lock.unlock(); cancel(); return }
-    if !suspended && buffer.shouldSuspend {
-      suspended = true
-      task?.suspend()
+    // URLSession can coalesce several MiB into one callback after resuming.
+    // Only this transfer's serial delegate waits; other session lanes stay free.
+    // The framework owns the callback Data until this method returns. Our queue
+    // holds at most the high-water budget, including its outstanding socket send.
+    var offset = 0
+    while offset < data.count {
+      lock.lock()
+      while !closed && buffer.shouldSuspend {
+        _ = lock.wait(until: Date(timeIntervalSinceNow: 0.1))
+        // External task cancellation can precede its queued delegate callback.
+        if task?.state == .canceling || task?.error != nil {
+          lock.unlock()
+          cancel()
+          return
+        }
+      }
+      guard !closed else { lock.unlock(); return }
+      let end = min(data.count, offset + 64 * 1024)
+      let chunk = data.subdata(in: offset..<end)
+      guard buffer.enqueue(chunk) else { lock.unlock(); cancel(); return }
+      if !suspended && buffer.shouldSuspend {
+        suspended = true
+        task?.suspend()
+      }
+      let next = buffer.nextChunk()
+      lock.unlock()
+      if let next { send(next) }
+      offset = end
     }
-    let next = buffer.nextChunk()
-    lock.unlock()
-    if let next { send(next) }
   }
 
   private func send(_ data: Data) {
@@ -418,6 +516,7 @@ private final class ProxyResponseSink {
       self.lock.lock()
       guard !self.closed else { self.lock.unlock(); return }
       self.buffer.didSend(byteCount: data.count)
+      self.lock.broadcast()
       if self.suspended && self.buffer.shouldResume && !self.buffer.upstreamFinished {
         self.suspended = false
         self.task?.resume()
@@ -434,6 +533,7 @@ private final class ProxyResponseSink {
   private func finishConnection() {
     connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
       self.connection.cancel()
+      self.release()
     })
   }
 
@@ -451,6 +551,7 @@ private final class ProxyResponseSink {
       ).utf8)
       connection.send(content: headers + body, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
         self.connection.cancel()
+        self.release()
       })
     } else if error != nil {
       lock.unlock()
@@ -475,16 +576,30 @@ private final class PinnedProxySessionDelegate: NSObject, URLSessionDataDelegate
     self.expectedFingerprint = expectedFingerprint
   }
 
-  func register(task: URLSessionDataTask, connection: NWConnection) {
+  func register(task: URLSessionDataTask, connection: NWConnection, onClose: @escaping () -> Void) {
     sinkLock.lock()
-    sinks[task.taskIdentifier] = ProxyResponseSink(task: task, connection: connection)
+    let identifier = task.taskIdentifier
+    sinks[identifier] = ProxyResponseSink(task: task, connection: connection) { [weak self] in
+      if let self {
+        self.sinkLock.lock()
+        self.sinks.removeValue(forKey: identifier)
+        self.sinkLock.unlock()
+      }
+      onClose()
+    }
     sinkLock.unlock()
   }
 
-  private func sink(for task: URLSessionTask, remove: Bool = false) -> ProxyResponseSink? {
+  func cancelAll() {
+    sinkLock.lock()
+    let active = Array(sinks.values)
+    sinkLock.unlock()
+    for sink in active { sink.cancel() }
+  }
+
+  private func sink(for task: URLSessionTask) -> ProxyResponseSink? {
     sinkLock.lock()
     defer { sinkLock.unlock() }
-    if remove { return sinks.removeValue(forKey: task.taskIdentifier) }
     return sinks[task.taskIdentifier]
   }
 
@@ -519,7 +634,9 @@ private final class PinnedProxySessionDelegate: NSObject, URLSessionDataDelegate
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-    sink(for: task, remove: true)?.complete(error: error)
+    // Keep the sink registered until downstream EOF/cancel, even when the
+    // upstream task completed earlier. Stop must still find draining sinks.
+    sink(for: task)?.complete(error: error)
   }
 
   func urlSession(
@@ -530,5 +647,153 @@ private final class PinnedProxySessionDelegate: NSObject, URLSessionDataDelegate
     completionHandler: @escaping (URLRequest?) -> Void
   ) {
     completionHandler(nil)
+  }
+}
+
+// Six reusable lanes retain the previous connection limit without letting a slow
+// consumer block every URLSession delegate callback. A bounded FIFO absorbs
+// normal bursts; admission stays held until downstream drain or cancel.
+private final class ProxySessionPool {
+  static let capacity = 6
+  static let maxPendingRequests = 12
+  static let maxPendingBodyBytes = 4 * 1024 * 1024
+  static let pendingTimeoutSeconds: TimeInterval = 60
+
+  private final class Lane {
+    let delegate: PinnedProxySessionDelegate
+    let session: URLSession
+    var lease: UUID?
+
+    init(expectedFingerprint: String) {
+      delegate = PinnedProxySessionDelegate(expectedFingerprint: expectedFingerprint)
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.timeoutIntervalForRequest = 60
+      configuration.timeoutIntervalForResource = 24 * 60 * 60
+      configuration.httpMaximumConnectionsPerHost = 1
+      let queue = OperationQueue()
+      queue.maxConcurrentOperationCount = 1
+      session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
+    }
+  }
+
+  private final class Pending {
+    let request: URLRequest
+    let connection: NWConnection
+    let bodyBytes: Int
+    let deadline: DispatchTime
+
+    init(request: URLRequest, connection: NWConnection, deadline: DispatchTime = .now() + ProxySessionPool.pendingTimeoutSeconds) {
+      self.deadline = deadline
+      self.request = request
+      self.connection = connection
+      bodyBytes = request.httpBody?.count ?? 0
+    }
+  }
+
+  private let lock = NSLock()
+  private let lanes: [Lane]
+  private var pending: [Pending] = []
+  private var pendingBodyBytes = 0
+  private var stopped = false
+
+  init(expectedFingerprint: String) {
+    lanes = (0..<Self.capacity).map { _ in Lane(expectedFingerprint: expectedFingerprint) }
+  }
+
+  func start(_ request: URLRequest, connection: NWConnection) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !stopped else { return false }
+    // Detect a reset before response writes begin. Graceful request-side EOF
+    // is a valid TCP half-close and still permits the response to drain.
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak connection] data, _, _, error in
+      if error != nil || data?.isEmpty == false { connection?.cancel() }
+    }
+    if let lane = lanes.first(where: { $0.lease == nil }) {
+      begin(request, connection: connection, lane: lane)
+      return true
+    }
+    let entry = Pending(request: request, connection: connection)
+    guard pending.count < Self.maxPendingRequests,
+      entry.bodyBytes <= Self.maxPendingBodyBytes - pendingBodyBytes else { return false }
+    pending.append(entry)
+    pendingBodyBytes += entry.bodyBytes
+    DispatchQueue.global().asyncAfter(deadline: entry.deadline) { [weak self, weak entry] in
+      if let entry, self?.remove(entry) == true { entry.connection.cancel() }
+    }
+    connection.stateUpdateHandler = { [weak self, weak entry] state in
+      switch state {
+      case .failed, .cancelled:
+        if let entry { _ = self?.remove(entry) }
+      default: break
+      }
+    }
+    return true
+  }
+
+  // The pool lock covers admission and registration, including stop races.
+  private func begin(_ request: URLRequest, connection: NWConnection, lane: Lane) {
+    let lease = UUID()
+    lane.lease = lease
+    let task = lane.session.dataTask(with: request)
+    lane.delegate.register(task: task, connection: connection) { [weak self, weak lane] in
+      if let lane { self?.release(lane, lease: lease) }
+    }
+    task.resume()
+  }
+
+  private func release(_ lane: Lane, lease: UUID) {
+    var expired: [NWConnection] = []
+    lock.lock()
+    defer {
+      lock.unlock()
+      for connection in expired { connection.cancel() }
+    }
+    guard lane.lease == lease else { return }
+    lane.lease = nil
+    while !stopped && !pending.isEmpty {
+      let entry = pending.removeFirst()
+      pendingBodyBytes -= entry.bodyBytes
+      // The timer may run late under load. Never forward an expired request.
+      if DispatchTime.now() >= entry.deadline {
+        expired.append(entry.connection)
+        continue
+      }
+      switch entry.connection.state {
+      case .failed, .cancelled: continue
+      default:
+        begin(entry.request, connection: entry.connection, lane: lane)
+        return
+      }
+    }
+  }
+
+  @discardableResult
+  private func remove(_ entry: Pending) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard let index = pending.firstIndex(where: { $0 === entry }) else { return false }
+    pending.remove(at: index)
+    pendingBodyBytes -= entry.bodyBytes
+    return true
+  }
+
+  func stop() {
+    lock.lock()
+    guard !stopped else { lock.unlock(); return }
+    stopped = true
+    let waiting = pending
+    pending.removeAll()
+    pendingBodyBytes = 0
+    lock.unlock()
+    for entry in waiting {
+      entry.connection.stateUpdateHandler = nil
+      entry.connection.cancel()
+    }
+    for lane in lanes {
+      // Wake a blocked body callback before invalidation queues task completion.
+      lane.delegate.cancelAll()
+      lane.session.invalidateAndCancel()
+    }
   }
 }
