@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.7](docs/releases/v2.0.7.md)
+
+Corrects season-aware episode naming and loose-file organization, prioritizes new badges across library categories, and puts completed titles last.
+
 ### [2.0.6](docs/releases/v2.0.6.md)
 
 Improves TV invitation playback, native streaming reliability, mobile download cleanup, PIN recovery, and parental rating filters.

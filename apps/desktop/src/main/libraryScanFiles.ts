@@ -149,7 +149,7 @@ export async function getLibraryFolderSignatureAsync(
   return { signature: `${fileCount}:${hash.digest('hex')}`, fileCount };
 }
 
-function seasonFromRelativePath(root: string, directory: string): number | null {
+export function seasonFromRelativePath(root: string, directory: string): number | null {
   const relativeParts = path.relative(root, directory).split(path.sep).filter(Boolean).reverse();
   for (const part of [...relativeParts, path.basename(root)].filter(Boolean)) {
     const season = seasonNumberFromDirectoryName(part);
@@ -173,14 +173,11 @@ export function scanEpisodeFiles(folderPath: string, probe: MediaFileProbe = EMP
         const mediaProbe = probe(fullPath);
         if (!mediaProbe.localMetadata?.videoCodec) continue;
         const folderSeason = seasonFromRelativePath(folderPath, directory);
-        const parsed = parseEpisodeFileName(entry.name, mediaProbe.season ?? folderSeason ?? 1);
+        const parsed = parseEpisodeFileName(entry.name, folderSeason ?? mediaProbe.season ?? 1);
         if (!parsed) continue;
-        // A named Season 00/Specials folder is authoritative. This keeps
-        // files such as an AOT finale stored in Season 00 out of Season 4,
-        // even when the filename still contains its original S04E29 code.
-        const season = folderSeason === 0
-          ? 0
-          : mediaProbe.season ?? parsed.season ?? folderSeason ?? 1;
+        // Preserve the user's season folder even when a filename or embedded
+        // tag disagrees. Naming conflicts are left for review by the organizer.
+        const season = folderSeason ?? mediaProbe.season ?? parsed.season;
         files.push({
           season,
           episode: mediaProbe.episode ?? parsed.episode,
@@ -262,12 +259,10 @@ export async function scanEpisodeFilesAsync(
         const folderSeason = seasonFromRelativePath(folderPath, directory);
         const hint = scanInventory.getStore()?.get(fullPath)?.hints;
         const parsed = hint?.episode !== undefined
-          ? { episode: hint.episode, season: hint.season ?? mediaProbe.season ?? folderSeason ?? 1 }
-          : parseEpisodeFileName(fileName, mediaProbe.season ?? folderSeason ?? 1);
+          ? { episode: hint.episode, season: folderSeason ?? mediaProbe.season ?? hint.season ?? 1 }
+          : parseEpisodeFileName(fileName, folderSeason ?? mediaProbe.season ?? 1);
         if (!parsed) return null;
-        const season = folderSeason === 0
-          ? 0
-          : mediaProbe.season ?? parsed.season ?? folderSeason ?? 1;
+        const season = folderSeason ?? mediaProbe.season ?? parsed.season;
         return {
           season,
           episode: mediaProbe.episode ?? parsed.episode,

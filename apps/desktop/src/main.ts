@@ -428,9 +428,9 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-// 17: episode numbers in fansub names ("Show - 10 [1080p]") are now read, so
-// folders scanned before that must be read again.
-const SCAN_CACHE_VERSION = 17;
+// 19: season folders take precedence, and titles from conflicting filenames
+// stay provisional until matched to that season's provider episode metadata.
+const SCAN_CACHE_VERSION = 19;
 let libraryMutationVersion = 0;
 const activeScans = new Set<AbortController>();
 let cachedLibrary: LibraryData | null = null;

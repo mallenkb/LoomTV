@@ -37,6 +37,9 @@ export type LoggedOperation = RenameOperation & {
   /** Catalog path change when an episode file gains its own show folder. */
   mediaFrom?: string;
   mediaTo?: string;
+  /** A loose entry joined an existing show. Keep its identity for undo. */
+  joinedMedia?: MediaItem;
+  restoreJoinedMedia?: boolean;
 };
 
 function invert(operation: LoggedOperation): LoggedOperation {
@@ -44,7 +47,9 @@ function invert(operation: LoggedOperation): LoggedOperation {
   if (operation.role === 'rmdir') return { role: 'mkdir', from: '', to: operation.from, restore: true };
   return {
     ...operation, from: operation.to, to: operation.from,
-    ...(operation.mediaFrom && operation.mediaTo ? { mediaFrom: operation.mediaTo, mediaTo: operation.mediaFrom } : {}),
+    ...(operation.joinedMedia
+      ? { restoreJoinedMedia: !operation.restoreJoinedMedia }
+      : operation.mediaFrom && operation.mediaTo ? { mediaFrom: operation.mediaTo, mediaTo: operation.mediaFrom } : {}),
   };
 }
 
@@ -297,12 +302,12 @@ function remapStoredState(
 }
 
 /** The library with every stored path moved, and IDs re-derived from the new paths. */
-function remapLibrary(data: LibraryData, mapPath: (value: string) => string, mediaPaths: ReadonlyMap<string, string>): { data: LibraryData; aliases: Map<string, string> } {
+function remapLibrary(data: LibraryData, mapPath: (value: string) => string, mediaPaths: ReadonlyMap<string, string>, restoredItems: readonly MediaItem[]): { data: LibraryData; aliases: Map<string, string> } {
   const aliases = new Map<string, string>();
   const remapItem = (item: MediaItem): MediaItem => {
     let next = rewriteDeep(item, mapPath);
     const mediaPath = mediaPaths.get(item.filePath);
-    if (mediaPath) next.filePath = mediaPath;
+    if (mediaPath) next.filePath = mapPath(mediaPath);
     if (next.filePath !== item.filePath && item.id === createMediaItemId(item.filePath)) {
       const nextId = createMediaItemId(next.filePath);
       if (nextId !== item.id) {
@@ -317,12 +322,49 @@ function remapLibrary(data: LibraryData, mapPath: (value: string) => string, med
     }
     return next;
   };
+  const restoredPaths = new Set(restoredItems.flatMap((item) => (item.episodeFiles || []).map((file) => file.filePath)));
+  const remapShows = (items: MediaItem[]): MediaItem[] => {
+    const shows = new Map<string, MediaItem>();
+    // Prefer the established show's metadata over the incoming loose entry.
+    const ordered = [...items.filter((item) => !mediaPaths.has(item.filePath)), ...items.filter((item) => mediaPaths.has(item.filePath))];
+    for (const item of ordered) {
+      const next = remapItem(item);
+      const files = (next.episodeFiles || []).filter((file) => !restoredPaths.has(file.filePath));
+      if (files.length !== (next.episodeFiles || []).length) {
+        next.episodeFiles = files;
+        const keys = new Set(files.map((file) => `${file.season}:${file.episode}`));
+        next.episodes = (next.episodes || []).filter((episode) => keys.has(`${episode.season}:${episode.number}`));
+      }
+      const key = `${next.type}:${next.filePath}`;
+      const existing = shows.get(key);
+      if (!existing) shows.set(key, next);
+      else {
+        const unique = <T>(values: T[], getKey: (value: T) => string) => [...new Map(values.map((value) => [getKey(value), value])).values()];
+        existing.episodeFiles = unique([...(next.episodeFiles || []), ...(existing.episodeFiles || [])], (file) => `${file.filePath}:${file.season}:${file.episode}`);
+        existing.episodes = unique([...(next.episodes || []), ...(existing.episodes || [])], (episode) => `${episode.season}:${episode.number}`);
+        existing.seasons = unique([...(next.seasons || []), ...(existing.seasons || [])], (season) => String(season.number));
+        existing.subtitles = unique([...(next.subtitles || []), ...(existing.subtitles || [])], (subtitle) => subtitle.url);
+        if (next.id !== existing.id) aliases.set(next.id, existing.id);
+      }
+    }
+    for (const restored of restoredItems) {
+      if (items.some((item) => item.type === restored.type)) shows.set(`${restored.type}:${restored.filePath}`, restored);
+    }
+    return [...shows.values()].map((item) => ({
+      ...item,
+      seasons: (item.seasons || []).map((season) => ({
+        ...season, episodeCount: (item.episodeFiles || []).filter((file) => file.season === season.number).length,
+      })).sort((left, right) => left.number - right.number),
+      episodeFiles: item.episodeFiles?.slice().sort((left, right) => left.season - right.season || left.episode - right.episode),
+      episodes: item.episodes?.slice().sort((left, right) => left.season - right.season || left.number - right.number),
+    }));
+  };
   return {
     data: {
       ...data,
       movies: (data.movies || []).map(remapItem),
-      tvShows: (data.tvShows || []).map(remapItem),
-      animeShows: (data.animeShows || []).map(remapItem),
+      tvShows: remapShows(data.tvShows || []),
+      animeShows: remapShows(data.animeShows || []),
     },
     aliases,
   };
@@ -474,9 +516,10 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     const mapPath = createPathMapper(pathMoves(operations));
     const revisions = revisionChanges(data, mapPath);
     const mediaPaths = new Map(operations.flatMap((operation) => (
-      operation.mediaFrom && operation.mediaTo ? [[operation.mediaFrom, operation.mediaTo] as const] : []
+      !operation.restoreJoinedMedia && operation.mediaFrom && operation.mediaTo ? [[operation.mediaFrom, operation.mediaTo] as const] : []
     )));
-    const { data: next, aliases } = remapLibrary(data, mapPath, mediaPaths);
+    const restoredItems = operations.flatMap((operation) => operation.restoreJoinedMedia && operation.joinedMedia ? [operation.joinedMedia] : []);
+    const { data: next, aliases } = remapLibrary(data, mapPath, mediaPaths, restoredItems);
     // Undo may find that a removed empty folder has already been recreated.
     // Do not journal a no-op as a creation that rollback should remove.
     const diskOperations = operations.filter((operation) => !(
@@ -597,6 +640,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       const videos = new Set(entries.filter((entry) => entry.kind === 'file').map((entry) => entry.from));
       const folders = new Set(entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.from));
       const shows = new Map(entries.flatMap((entry) => entry.showFolder ? [[entry.from, entry.showFolder] as const] : []));
+      const libraryItems = allItems(deps.loadLibrary());
       // Folders a move needs are created first, parents before children.
       // Include a missing show parent as well as the season folder. Log each
       // creation separately so rollback and undo remove only empty folders.
@@ -619,7 +663,12 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
         ...orderOperations(entries).map((operation): LoggedOperation => ({
           ...operation,
           role: folders.has(operation.from) ? 'folder' : videos.has(operation.from) ? 'video' : 'sidecar',
-          ...(shows.has(operation.from) ? { mediaFrom: operation.from, mediaTo: shows.get(operation.from) } : {}),
+          ...(shows.has(operation.from) ? {
+            mediaFrom: operation.from, mediaTo: shows.get(operation.from),
+            ...(libraryItems.some((item) => item.filePath === shows.get(operation.from))
+              ? { joinedMedia: libraryItems.find((item) => item.filePath === operation.from) }
+              : {}),
+          } : {}),
         })),
       ];
       const batchId = randomUUID();

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isVideoFileName } from '../fileClassification.ts';
 import { parseEpisodeFileName } from '../scanClassification.ts';
+import { seasonFromRelativePath, seasonNumberFromDirectoryName } from '../libraryScanFiles.ts';
+import { cleanMediaTitle, normalizeTitleForMatch } from '../metadata/helpers.ts';
 import type { MediaItem } from '../metadata/types.ts';
 
 /**
@@ -123,8 +125,12 @@ function titleWithYear(title: string, year: number): string {
   return `${sanitizeNamePart(title)} (${year})`;
 }
 
-function seasonFolderName(season: number): string {
-  return `Season ${String(season).padStart(2, '0')}`;
+function seasonFolderName(season: number, title?: string): string {
+  const base = season === 0 ? 'Specials' : `Season ${String(season).padStart(2, '0')}`;
+  const subtitle = sanitizeNamePart((title || '')
+    .replace(/^(?:season|series|s)\s*0*\d+(?:\s*[:._-]\s*|\s+)?/i, '')
+    .replace(/^specials?(?:\s*[:._-]\s*|\s+)?/i, ''));
+  return subtitle ? `${base} - ${subtitle}` : base;
 }
 
 function episodeCode(season: number, episodes: readonly number[]): string {
@@ -325,7 +331,8 @@ function versionLabels(copies: readonly LocalDetails[]): string[] | null {
 
 /** The season a folder is named for ("Season 2", "S02", "Specials"), or null. */
 function seasonOfFolder(name: string): number | null {
-  if (/^specials?$/i.test(name.trim())) return 0;
+  const knownSeason = seasonNumberFromDirectoryName(name);
+  if (knownSeason !== null) return knownSeason;
   const match = name.match(/^(?:season|series|staffel|saison|temporada)\s*0*(\d{1,3})$/i) || name.match(/^s0*(\d{1,3})$/i);
   return match ? Number(match[1]) : null;
 }
@@ -437,7 +444,8 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     if (input.isRecentlyModified?.(filePath)) {
       return skip('The file changed in the last few minutes and may still be downloading, so it waits for the next sync.');
     }
-    // Keep organized names except provisional episode codes awaiting a title.
+    // Keep organized names except provisional episode codes awaiting a title
+    // or a season prefix confirmed wrong by the folder and episode metadata.
     // The file can still move into its folder.
     const keepName = hasOrganizedName(item.type, name) && !completeEpisodeTitle;
     const base = keepName ? name.slice(0, name.length - path.extname(name).length) : withinLimit(newBase);
@@ -604,8 +612,22 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     else claimTarget(ownFolder);
   }
 
-  // One show found in two folders is reported, never merged: merging two
-  // library entries could not be undone cleanly.
+  const isLooseEpisode = (item: MediaItem) => item.type !== 'movie'
+    && isVideoFileName(path.basename(item.filePath))
+    && roots.includes(path.dirname(path.resolve(item.filePath)))
+    && (item.episodeFiles?.length || 0) > 0
+    && (item.episodeFiles || []).every((file) => path.resolve(file.filePath) === path.resolve(item.filePath));
+  const sameShow = (left: MediaItem, right: MediaItem) => {
+    if (left.type !== right.type) return false;
+    const keys = ['tvdbId', 'tmdbId', 'tvmazeId'] as const;
+    const shared = keys.filter((key) => left.providerIds?.[key] && right.providerIds?.[key]);
+    if (shared.length) return shared.every((key) => left.providerIds?.[key] === right.providerIds?.[key]);
+    if (left.providerIds?.malId && left.providerIds.malId === right.providerIds?.malId) return true;
+    return normalizeTitleForMatch(cleanMediaTitle(left.title).title) === normalizeTitleForMatch(cleanMediaTitle(right.title).title);
+  };
+
+  // Keep separate, established show folders separate. A loose episode may
+  // join one existing show; its original catalog entry is recorded for undo.
   const splitShows = new Map<string, MediaItem[]>();
   for (const item of input.items) {
     if (item.type === 'movie') continue;
@@ -615,7 +637,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
   }
   const splitShowIds = new Map<string, string>();
   for (const items of splitShows.values()) {
-    if (items.length < 2) continue;
+    if (items.filter((item) => !isLooseEpisode(item)).length < 2) continue;
     for (const item of items) {
       const others = items.filter((other) => other !== item).map((other) => `"${path.basename(other.filePath)}"`).join(', ');
       splitShowIds.set(item.id, `This show is also in ${others}. Folders for one show are not merged automatically, so both are left as they are.`);
@@ -670,26 +692,53 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     }
     const files = item.episodeFiles || [];
     const itemPath = path.resolve(item.filePath);
-    const looseEpisode = isVideoFileName(path.basename(itemPath))
-      && roots.includes(path.dirname(itemPath))
-      && files.length > 0
-      && files.every((file) => path.resolve(file.filePath) === itemPath);
-    const showFolder = looseEpisode
+    const looseEpisode = isLooseEpisode(item);
+    let showFolder = looseEpisode
       ? path.join(path.dirname(itemPath), titleWithYear(item.title, item.year))
       : itemPath;
-    if (looseEpisode && nameTaken(path.dirname(showFolder), path.basename(showFolder), '')) {
-      skipItem(`A folder named "${path.basename(showFolder)}" already exists, so the episode is not moved into it.`);
-      continue;
+    let existingShow: MediaItem | undefined;
+    if (looseEpisode) {
+      const parent = path.dirname(itemPath);
+      const siblings = input.items.filter((other) => !isLooseEpisode(other) && path.dirname(path.resolve(other.filePath)) === parent);
+      const matches = new Set(siblings.filter((other) => sameShow(item, other) && list(other.filePath) !== null).map((other) => path.resolve(other.filePath)));
+      const title = normalizeTitleForMatch(cleanMediaTitle(item.title).title);
+      for (const name of list(parent) || []) {
+        const folder = path.join(parent, name);
+        if (normalizeTitleForMatch(cleanMediaTitle(name).title) !== title || list(folder) === null) continue;
+        const catalogItem = siblings.find((other) => path.resolve(other.filePath) === folder);
+        if (catalogItem && !sameShow(item, catalogItem)) {
+          skipItem(`The existing folder "${name}" has a different metadata match, so no additional show folder is created.`);
+          matches.clear();
+          matches.add('');
+          break;
+        }
+        matches.add(folder);
+      }
+      if (matches.has('')) continue;
+      if (matches.size > 1) {
+        skipItem('More than one existing folder matches this show, so the episode is left for review.');
+        continue;
+      }
+      if (matches.size === 1) {
+        showFolder = [...matches][0];
+        existingShow = siblings.find((other) => path.resolve(other.filePath) === showFolder);
+      } else if (nameTaken(parent, path.basename(showFolder), '')) {
+        skipItem(`The name "${path.basename(showFolder)}" is already in use, so no additional show folder is created.`);
+        continue;
+      }
     }
     const dedicated = looseEpisode || (!isProtectedFolder(showFolder)
       && files.length > 0
       && files.every((file) => isSameOrAncestor(showFolder, path.dirname(file.filePath)) && path.resolve(file.filePath) !== showFolder));
-    const metadataEpisodes = new Map((item.episodes || []).map((episode) => [`${episode.season}:${episode.number}`, episode]));
+    const allEpisodes = [...(item.episodes || []), ...(existingShow?.episodes || [])];
+    const metadataEpisodes = new Map(allEpisodes.map((episode) => [`${episode.season}:${episode.number}`, episode]));
     const metadataSeasonSizes = new Map<number, number>();
-    for (const episode of item.episodes || []) {
+    for (const episode of allEpisodes) {
       metadataSeasonSizes.set(episode.season, Math.max(metadataSeasonSizes.get(episode.season) || 0, episode.number));
     }
     const regularSeasons = [...metadataSeasonSizes.keys()].filter((season) => season > 0);
+    const seasonName = (season: number) => seasonFolderName(season, existingShow?.seasons?.find((entry) => entry.number === season)?.title
+      || item.seasons?.find((entry) => entry.number === season)?.title);
 
     // One file can hold two episodes (S01E01-E02); group by file first.
     const byFile = new Map<string, typeof files[number][]>();
@@ -724,6 +773,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       targetDirectory: string;
       createFolder: string | undefined;
       directory: string;
+      correctSeasonPrefix: boolean;
     }> = [];
     // A show folder is only renamed once an episode has confirmed the match.
     let confirmedEpisodes = 0;
@@ -733,6 +783,11 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       const skip = (reason: string) => skipped.push({ mediaId: item.id, mediaTitle: item.title, filePath, reason });
       const name = path.basename(filePath);
       const parsed = parseEpisodeFileName(name, first.season) || parseEpisodeFileName(withoutReleaseTags(name), first.season);
+      const folderSeason = seasonFromRelativePath(looseEpisode ? path.dirname(itemPath) : showFolder, path.dirname(filePath));
+      if (folderSeason !== null && folderSeason !== first.season) {
+        skip(`The season folder says Season ${folderSeason}, but the saved match says Season ${first.season}. Sync the library before organizing this file.`);
+        continue;
+      }
       if (!parsed) {
         skip('The file name has no episode number to confirm the match against.');
         continue;
@@ -741,8 +796,14 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
         skip('The file looks like a special or in-between episode, which is not renamed automatically.');
         continue;
       }
-      if (parsed.season !== first.season || parsed.episode !== first.episode) {
+      const correctSeasonPrefix = folderSeason === first.season && parsed.season !== first.season;
+      if ((!correctSeasonPrefix && parsed.season !== first.season) || parsed.episode !== first.episode) {
         skip(`The file name says ${episodeCode(parsed.season, [parsed.episode])}, but it is matched as ${episodeCode(first.season, [first.episode])}.`);
+        continue;
+      }
+      if (correctSeasonPrefix && files.some((other) => other.filePath !== filePath
+        && sorted.some((file) => file.season === other.season && file.episode === other.episode))) {
+        skip(`Another file already represents ${episodeCode(first.season, sorted.map((file) => file.episode))}. Resolve the duplicate before correcting this filename.`);
         continue;
       }
       const seasonSize = metadataSeasonSizes.get(first.season) || 0;
@@ -771,6 +832,14 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
         skip('The episode is not present in the matched show metadata.');
         continue;
       }
+      if (looseEpisode && existingShow?.episodeFiles?.some((file) => file.season === first.season && sorted.some((candidate) => candidate.episode === file.episode))) {
+        skip(`This show already contains ${episodeCode(first.season, sorted.map((file) => file.episode))}, so no duplicate is moved in.`);
+        continue;
+      }
+      if (correctSeasonPrefix && missingTitle) {
+        skip('The episode title for this season is unavailable, so the conflicting filename is left for a later sync.');
+        continue;
+      }
       const namedWordsFromFile = fileEpisodeTitle(name);
       const provisionalTitle = PLACEHOLDER_TITLE.test(namedWordsFromFile.join(' '));
       const namedWords = provisionalTitle ? [] : namedWordsFromFile;
@@ -780,7 +849,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
         skip('The episode title is unavailable, so the title in this file name cannot be confirmed.');
         continue;
       }
-      if (!episodeTitlesAgree(namedWords, titles.join(' '))) {
+      if (!correctSeasonPrefix && !episodeTitlesAgree(namedWords, titles.join(' '))) {
         // Already organized under an earlier title: left alone, not reported.
         if (hasOrganizedName(item.type, name)) continue;
         skip(`The file name calls this episode "${namedWords.join(' ')}", but the match is "${titles.join(' & ')}".`);
@@ -810,8 +879,17 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
           skip(`Season ${first.season} has more than one folder in this show, so the file is not moved.`);
           continue;
         }
-        targetDirectory = existing[0] || path.join(showFolder, first.season === 0 ? 'Specials' : seasonFolderName(first.season));
+        targetDirectory = existing[0] || path.join(showFolder, seasonName(first.season));
         if (!existing[0]) createFolder = targetDirectory;
+      }
+      if (looseEpisode && [targetDirectory, showFolder].some((folder) => (list(folder) || []).some((video) => {
+        if (!isVideoFileName(video)) return false;
+        const episode = parseEpisodeFileName(video, first.season);
+        return episode && (folder !== showFolder || episode.season === first.season)
+          && sorted.some((candidate) => candidate.episode === episode.episode);
+      }))) {
+        skip('An episode with this number already exists in the show or season folder, so no duplicate is moved in.');
+        continue;
       }
       const inShowFolder = dedicated && (targetDirectory === showFolder || path.dirname(targetDirectory) === showFolder);
       const code = episodeCode(first.season, sorted.map((file) => file.episode));
@@ -824,7 +902,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
         continue;
       }
       const recorded = sorted.flatMap((file) => subtitlePaths(file.subtitles));
-      passed.push({ filePath, first, code, base, untitledBase, placeholderBase, recorded, targetDirectory, createFolder, directory });
+      passed.push({ filePath, first, code, base, untitledBase, placeholderBase, recorded, targetDirectory, createFolder, directory, correctSeasonPrefix });
     }
 
     // Copies of one episode are kept side by side as versions, but only when
@@ -857,7 +935,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       const grouped = planAsGroup(() => {
         for (const copy of copies) {
           const currentBase = path.basename(copy.filePath, path.extname(copy.filePath));
-          const completeEpisodeTitle = currentBase === copy.untitledBase || currentBase === copy.placeholderBase;
+          const completeEpisodeTitle = copy.correctSeasonPrefix || currentBase === copy.untitledBase || currentBase === copy.placeholderBase;
           const result = planFile(item, code, copy.filePath, copy.base, copy.recorded, copy.targetDirectory, copy.createFolder, completeEpisodeTitle);
           results.set(copy, result);
           if (looseEpisode && result === 'planned') entries[entries.length - 1].showFolder = showFolder;
@@ -906,7 +984,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       const ownNames = new Set(ownHere.map((file) => path.basename(file.filePath)));
       const videos = (list(folder) || []).filter((entry) => isVideoFileName(entry) && !SAMPLE_NAME.test(entry));
       if (seasons.size !== 1 || !seasons.has(season) || videos.some((video) => !ownNames.has(video))) continue;
-      planFolder(item, 'Season folder', folder, season === 0 ? 'Specials' : seasonFolderName(season));
+      planFolder(item, 'Season folder', folder, seasonName(season));
     }
     planFolder(item, 'Show folder', showFolder, titleWithYear(item.title, item.year));
   }

@@ -96,13 +96,18 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
   const probeMediaFile = getBoundedLibraryProbe(unboundedProbeMediaFile);
 
   const makeLocalEpisodeMeta = (files: EpisodeFile[], seriesTitle?: string): EpisodeMeta[] => files.map((file) => {
+    const filenameEpisode = parseEpisodeFileName(path.basename(file.filePath), file.season);
+    const conflictingSeason = filenameEpisode !== null && filenameEpisode.season !== file.season;
     const filenameTitle = episodeTitleFromFileName(file.filePath);
     const fallback = path.basename(file.filePath, path.extname(file.filePath))
       .replace(/\b[Ss]\s*0*\d{1,2}\s*[._ -]*[Ee]\s*0*\d{1,3}\b/g, '')
       .replace(/[._-]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim() || `Episode ${file.episode}`;
-    const resolvedTitle = filenameTitle
+    // A title attached to the wrong season is not evidence for this episode.
+    // Keep it provisional until a provider matches the folder's season and
+    // episode number, so the organizer cannot confirm its own previous rename.
+    const resolvedTitle = conflictingSeason ? `Episode ${file.episode}` : filenameTitle
       || ((!looksLikeLocalEpisodeFileTitle(file.title, seriesTitle) && file.title) ? file.title : fallback);
     return {
       season: file.season,

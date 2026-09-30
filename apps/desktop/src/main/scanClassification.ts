@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { cleanMediaTitle } from './metadata/helpers.ts';
+import { cleanMediaTitle, normalizeTitleForMatch } from './metadata/helpers.ts';
 import { isConfidentAnimeSeasonMapping } from './animeSeasonMapping.ts';
 import { subtitleLanguageFromFileName } from './subtitleLanguage.ts';
 import { fetchJikanMetadata } from './metadata/jikan.ts';
@@ -41,21 +41,24 @@ export function parseEpisodeFileName(fileName: string, fallbackSeason: number): 
   if (seasonEpisode) {
     return { season: parseInt(seasonEpisode[1], 10), episode: parseInt(seasonEpisode[2], 10) };
   }
+  // Fansub releases may spell out the season instead of using SxxEyy.
+  const namedSeason = withoutExt.replace(/_/g, ' ').match(/(?:^|[\s.-])(?:season|series)\s*0*(\d{1,2})(?=$|[\s.-])/i);
+  const inferredSeason = namedSeason ? Number(namedSeason[1]) : fallbackSeason;
 
   const namedEpisode = withoutExt.match(/(?:episode|ep|e)\s*0*(\d{1,3})\b/i);
-  if (namedEpisode) return { season: fallbackSeason, episode: parseInt(namedEpisode[1], 10) };
+  if (namedEpisode) return { season: inferredSeason, episode: parseInt(namedEpisode[1], 10) };
 
   // Fansub style: "Show - 10 [1080p]", "Show_-_10_SUB_1080p", "Show - 10v2".
   // A year in that spot ("Show - 2019") is not an episode.
   const dashNumber = withoutExt.replace(/_/g, ' ').match(/\s-\s+(?!(?:19|20)\d\d(?!\d))0*(\d{1,4})(?:v\d)?(?=\s|$|[[(.])/);
-  if (dashNumber) return { season: fallbackSeason, episode: parseInt(dashNumber[1], 10) };
+  if (dashNumber) return { season: inferredSeason, episode: parseInt(dashNumber[1], 10) };
 
   const trailingNumber = withoutExt.match(/[-–_\s]+0*(\d{1,3})\s*$/);
-  if (trailingNumber) return { season: fallbackSeason, episode: parseInt(trailingNumber[1], 10) };
+  if (trailingNumber) return { season: inferredSeason, episode: parseInt(trailingNumber[1], 10) };
 
   const leadingNumber = withoutExt.match(/^\s*0*(\d{1,3})(?:\D|$)/);
   return leadingNumber
-    ? { season: fallbackSeason, episode: parseInt(leadingNumber[1], 10) }
+    ? { season: inferredSeason, episode: parseInt(leadingNumber[1], 10) }
     : null;
 }
 
@@ -124,7 +127,11 @@ function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle
     // first regular episodes.
     if (season === 0) continue;
     const best = [...titles.values()].sort((a, b) => b.count - a.count)[0];
-    result.set(season, best?.title || fallbackTitle);
+    const title = best?.title || fallbackTitle;
+    // Search later MAL seasons explicitly rather than assigning the first
+    // season's episode titles to a later local season with the same show name.
+    result.set(season, season > 1 && normalizeTitleForMatch(title) === normalizeTitleForMatch(fallbackTitle)
+      ? `${title} Season ${season}` : title);
   }
 
   if (!result.has(1)) result.set(1, fallbackTitle);
