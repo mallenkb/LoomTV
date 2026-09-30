@@ -95,6 +95,48 @@ test('expired bound authentication blocks reads and renewal even with another au
   }), { status: 401 });
 });
 
+test('invitation playback uses live invitation expiry and rejects account or changed invitation bindings', async (t) => {
+  let active = true;
+  let expiresAt = Date.now() + 60_000;
+  let principal = {
+    id: 'owner-1', type: 'invitation', authentication: 'invitation-session',
+    invitationSessionId: 'invitation-1', invitationProfileId: 'profile-1', deviceId: 'tv-1',
+  };
+  const binding = { invitationSessionId: 'invitation-1', profileId: 'profile-1', deviceId: 'tv-1' };
+  const { service } = await fixture(t, {
+    isSessionActive: async () => { throw new Error('Invitation IDs are not account session IDs'); },
+    getSessionExpiry: async () => { throw new Error('Invitation expiry comes from its live session'); },
+  }, {
+    remotePolicy: {
+      resolveInvitationPrincipal: async () => active ? {
+        ...principal, invitationSessionExpiresAt: expiresAt, invitationSessionAbsoluteExpiresAt: expiresAt,
+      } : null,
+      assertPrincipal: () => ({}),
+    },
+  });
+  const lease = await service.issuePlaybackToken('media-1', 'owner-1', 'direct', binding);
+  assert.equal(lease.absoluteExpiresAt, expiresAt);
+  assert.ok(lease.expiresAt <= expiresAt);
+  assert.equal(await service.renewPlaybackSession(lease.sessionId, { id: 'owner-1', type: 'owner' }, 'media-1'), null);
+  const other = { ...principal, invitationSessionId: 'invitation-2' };
+  assert.equal(await service.renewPlaybackSession(lease.sessionId, other, 'media-1'), null);
+  assert.equal(await service.stopPlaybackSession(lease.sessionId, other, 'media-1'), null);
+  expiresAt = Date.now() + 30_000;
+  const renewed = await service.renewPlaybackSession(lease.token, null, 'media-1');
+  assert.equal(renewed.absoluteExpiresAt, expiresAt, 'renewal honors a shorter current invitation lifetime');
+  principal = { ...principal, deviceId: 'tv-2' };
+  assert.equal(await service.renewPlaybackSession(renewed.token, null, 'media-1'), null);
+  principal = { ...principal, deviceId: 'tv-1' };
+  active = false;
+  assert.equal(await service.renewPlaybackSession(renewed.token, null, 'media-1'), null);
+  const res = response();
+  res.__loomtvPublicApi = true;
+  await service.handle({ method: 'HEAD', headers: {} }, res,
+    new URL(`http://localhost/api/media/items/media-1?token=${renewed.token}`));
+  assert.equal(res.statusCode, 401);
+  await assert.rejects(service.issuePlaybackToken('media-1', 'owner-1', 'direct', binding), { status: 401 });
+});
+
 test('HLS playlists embed capability URLs and reject listed IDs and expired authentication', async (t) => {
   let active = true;
   const expiresAt = Date.now() + 60_000;

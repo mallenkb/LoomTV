@@ -592,12 +592,22 @@ export function createHeadlessMediaService({
 
   /** @param {string} principalId @param {import('./server-media-types.js').ProfileBinding | null | undefined} profile */
   async function resolveBoundPrincipal(principalId, profile) {
+    if (profile?.invitationSessionId) {
+      const principal = await remotePolicy?.resolveInvitationPrincipal?.(profile.invitationSessionId);
+      return principal?.id === principalId && matchesInvitationBinding(principal, profile) ? principal : null;
+    }
     if (profile?.authenticationSessionId
       && !await adminService.isSessionActive?.(profile.authenticationSessionId, principalId)) return null;
-    if (profile?.invitationSessionId && remotePolicy?.resolveInvitationPrincipal) {
-      return remotePolicy.resolveInvitationPrincipal(profile.invitationSessionId);
-    }
     return adminService.getPrincipalById?.(principalId);
+  }
+
+  /** @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null | undefined} profile */
+  function matchesInvitationBinding(principal, profile) {
+    if (!profile?.invitationSessionId) return principal.authentication !== 'invitation-session';
+    return principal.authentication === 'invitation-session'
+      && principal.invitationSessionId === profile.invitationSessionId
+      && principal.invitationProfileId === profile.profileId
+      && principal.deviceId === profile.deviceId;
   }
 
   /** @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null | undefined} profileContext @param {import('./server-media-types.js').MediaSource} media @returns {Promise<import('./server-media-types.js').ProfileContext>} */
@@ -804,6 +814,18 @@ export function createHeadlessMediaService({
 
   /** @param {string} principalId @param {import('./server-media-types.js').ProfileBinding | null | undefined} profile */
   async function authenticationExpiry(principalId, profile) {
+    if (profile?.invitationSessionId) {
+      const principal = await resolveBoundPrincipal(principalId, profile);
+      const expiresAt = principal?.invitationSessionExpiresAt;
+      const absoluteExpiresAt = principal?.invitationSessionAbsoluteExpiresAt;
+      // Idle validity is checked live; only the nonextendable invitation
+      // lifetime limits the lease's own absolute cap.
+      if (typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt > now()
+        && typeof absoluteExpiresAt === 'number' && Number.isFinite(absoluteExpiresAt) && absoluteExpiresAt > now()) {
+        return absoluteExpiresAt;
+      }
+      throw playbackError('playback_session_invalid', 'The bound invitation session is no longer active.', 401);
+    }
     if (!profile?.authenticationSessionId) return Infinity;
     const sessionId = profile.authenticationSessionId;
     if (await adminService.isSessionActive?.(sessionId, principalId)) {
@@ -1093,7 +1115,7 @@ export function createHeadlessMediaService({
       quotaReservationId = id;
       await cacheQuota.reserve(id, principal.id);
       const outputDir = path.join(transcodeRoot, id);
-      if (principal.sessionId) {
+      if (principal.sessionId && principal.authentication !== 'invitation-session') {
         requestedProfile.profileContext = {
           ...requestedProfile.profileContext,
           authenticationSessionId: requestedProfile.profileContext?.authenticationSessionId || principal.sessionId,
@@ -1650,6 +1672,7 @@ export function createHeadlessMediaService({
       if (playbackRegistry.isSessionIdentifier?.(identifier) && !principal) return null;
       const resolvedPrincipal = principal || await resolveBoundPrincipal(current.principalId, current.profile);
       if (!resolvedPrincipal) return null;
+      if (!matchesInvitationBinding(resolvedPrincipal, current.profile)) return null;
       try { remotePolicy?.assertPrincipal?.(req, resolvedPrincipal, 'media'); } catch { return null; }
       const permitted = typeof adminService.authorizePrincipal !== 'function'
         || await adminService.authorizePrincipal(resolvedPrincipal, 'stream');
@@ -1701,6 +1724,7 @@ export function createHeadlessMediaService({
       const owner = principal?.type === 'owner' || principal?.role === 'owner';
       if (playbackRegistry.isSessionIdentifier?.(identifier) && !principal) return null;
       if (principal && principal.id !== current.principalId && !owner) return null;
+      if (principal && !owner && !matchesInvitationBinding(principal, current.profile)) return null;
       if (principal && !owner
         && typeof adminService.authorizePrincipal === 'function'
         && !await adminService.authorizePrincipal(principal, 'stream')) return null;

@@ -112,18 +112,25 @@ function validateAuditReport(report) {
   }
 
   const knownSeverities = new Set(['info', 'low', 'moderate', 'high', 'critical'])
-  const advisoryIds = new Set()
+  const advisoryIds = new Map()
   for (const [reportKey, advisory] of Object.entries(report.advisories)) {
     if (
       !plainRecord(advisory) ||
       !nonEmptyString(advisory.github_advisory_id) ||
-      advisoryIds.has(advisory.github_advisory_id) ||
       !nonEmptyString(advisory.module_name) ||
       !knownSeverities.has(advisory.severity)
     ) {
       return `pnpm audit returned invalid metadata for advisory ${reportKey}`
     }
-    advisoryIds.add(advisory.github_advisory_id)
+    const previous = advisoryIds.get(advisory.github_advisory_id)
+    if (previous && (
+      previous.module_name !== advisory.module_name || previous.severity !== advisory.severity
+    )) {
+      return `pnpm audit returned conflicting metadata for advisory ${reportKey}`
+    }
+    // npm can report one GHSA separately for each vulnerable major version.
+    // Keep every record so its dependency paths are assessed independently.
+    advisoryIds.set(advisory.github_advisory_id, advisory)
   }
 
   return null

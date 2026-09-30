@@ -20,9 +20,16 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
 
 class LoomTvSecureTransportModule : Module() {
@@ -136,64 +143,166 @@ private data class ProxyRequest(
   val contentLength: Int,
 )
 
-private class SecureLanProxy {
+// Track the actual TLS sockets, including sockets created after stop raced an
+// initial connection. Disconnecting HttpURLConnection alone permits reconnect.
+private class TrackingSocketFactory(
+  private val delegate: SSLSocketFactory,
+  private val register: (Socket) -> Unit,
+) : SSLSocketFactory() {
+  private fun tracked(socket: Socket): Socket {
+    try { register(socket); return socket } catch (error: Exception) {
+      try { socket.close() } catch (_: Exception) { }
+      throw error
+    }
+  }
+  override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
+  override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
+  override fun createSocket(): Socket = tracked(delegate.createSocket())
+  override fun createSocket(socket: Socket, host: String, port: Int, autoClose: Boolean): Socket =
+    tracked(delegate.createSocket(socket, host, port, autoClose))
+  override fun createSocket(host: String, port: Int): Socket = tracked(delegate.createSocket(host, port))
+  override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+    tracked(delegate.createSocket(host, port, localHost, localPort))
+  override fun createSocket(host: InetAddress, port: Int): Socket = tracked(delegate.createSocket(host, port))
+  override fun createSocket(host: InetAddress, port: Int, localHost: InetAddress, localPort: Int): Socket =
+    tracked(delegate.createSocket(host, port, localHost, localPort))
+}
+
+private class SecureLanProxy(private val pendingTimeoutNanos: Long = TimeUnit.SECONDS.toNanos(60)) {
+  private val lifecycleLock = Any()
   private val acceptExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-  private val requestExecutor: ExecutorService = Executors.newFixedThreadPool(8)
+  private val requestExecutor = ThreadPoolExecutor(8, 8, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(12))
+  private val deadlineExecutor = ScheduledThreadPoolExecutor(1).apply { removeOnCancelPolicy = true }
+  private val clients = mutableSetOf<Socket>()
+  private val upstreamSockets = mutableSetOf<Socket>()
+  private val upstreamConnections = mutableSetOf<HttpsURLConnection>()
   @Volatile private var serverSocket: ServerSocket? = null
   @Volatile private var remoteOrigin: URI? = null
   @Volatile private var certFingerprint: String? = null
-  @Volatile private var sslContext: SSLContext? = null
+  @Volatile private var socketFactory: SSLSocketFactory? = null
   @Volatile private var localSecret: String? = null
+  private var destroyed = false
 
-  @Synchronized
   fun start(origin: String, fingerprint: String): String {
-    val normalizedOrigin = secureOrigin(origin)
-    val normalizedFingerprint = normalizedFingerprint(fingerprint)
-    val currentServer = serverSocket
-    if (
-      currentServer != null
-      && !currentServer.isClosed
-      && remoteOrigin == normalizedOrigin
-      && certFingerprint == normalizedFingerprint
-      && localSecret != null
-    ) return "http://localhost:${currentServer.localPort}/${localSecret}"
+    synchronized(lifecycleLock) {
+      check(!destroyed) { "Secure transport is unavailable." }
+      val normalizedOrigin = secureOrigin(origin)
+      val normalizedFingerprint = normalizedFingerprint(fingerprint)
+      val currentServer = serverSocket
+      if (
+        currentServer != null
+        && !currentServer.isClosed
+        && remoteOrigin == normalizedOrigin
+        && certFingerprint == normalizedFingerprint
+        && localSecret != null
+      ) return "http://localhost:${currentServer.localPort}/${localSecret}"
 
-    stop()
-    val context = SSLContext.getInstance("TLS")
-    context.init(null, arrayOf(PinnedTrustManager(normalizedFingerprint)), null)
-    val nextServer = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
-    val nextSecret = UUID.randomUUID().toString().replace("-", "")
-    remoteOrigin = normalizedOrigin
-    certFingerprint = normalizedFingerprint
-    sslContext = context
-    localSecret = nextSecret
-    serverSocket = nextServer
-    acceptExecutor.execute { acceptLoop(nextServer) }
-    return "http://localhost:${nextServer.localPort}/${nextSecret}"
+      stop()
+      val context = SSLContext.getInstance("TLS")
+      context.init(null, arrayOf(PinnedTrustManager(normalizedFingerprint)), null)
+      val nextServer = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+      val nextSecret = UUID.randomUUID().toString().replace("-", "")
+      val factory = TrackingSocketFactory(context.socketFactory) { socket ->
+        synchronized(this) {
+          check(serverSocket === nextServer) { "Secure transport is restarting." }
+          upstreamSockets.removeAll { it.isClosed }
+          upstreamSockets.add(socket)
+        }
+      }
+      synchronized(this) {
+        remoteOrigin = normalizedOrigin
+        certFingerprint = normalizedFingerprint
+        socketFactory = factory
+        localSecret = nextSecret
+        serverSocket = nextServer
+      }
+      acceptExecutor.execute { acceptLoop(nextServer) }
+      return "http://localhost:${nextServer.localPort}/${nextSecret}"
+    }
   }
 
-  @Synchronized
   fun stop() {
-    val current = serverSocket
-    serverSocket = null
-    remoteOrigin = null
-    certFingerprint = null
-    sslContext = null
-    localSecret = null
-    try { current?.close() } catch (_: Exception) { }
+    synchronized(lifecycleLock) {
+      val stopped = synchronized(this) {
+        val current = serverSocket
+        serverSocket = null
+        remoteOrigin = null
+        certFingerprint = null
+        socketFactory = null
+        localSecret = null
+        requestExecutor.queue.forEach { (it as? RequestTask)?.deadline?.cancel(false) }
+        requestExecutor.queue.clear()
+        val sockets = clients.toList() + upstreamSockets.toList()
+        val connections = upstreamConnections.toList()
+        clients.clear()
+        upstreamSockets.clear()
+        upstreamConnections.clear()
+        Triple(current, sockets, connections)
+      }
+      try { stopped.first?.close() } catch (_: Exception) { }
+      for (socket in stopped.second) try { socket.close() } catch (_: Exception) { }
+      for (connection in stopped.third) connection.disconnect()
+    }
   }
 
   fun destroy() {
-    stop()
-    acceptExecutor.shutdownNow()
-    requestExecutor.shutdownNow()
+    synchronized(lifecycleLock) {
+      stop()
+      destroyed = true
+      acceptExecutor.shutdownNow()
+      requestExecutor.shutdownNow()
+      deadlineExecutor.shutdownNow()
+    }
+  }
+
+  private inner class RequestTask(val socket: Socket, val expectedServer: ServerSocket) : Runnable {
+    val expiresAt = System.nanoTime() + pendingTimeoutNanos
+    @Volatile var started = false
+    @Volatile var deadline: ScheduledFuture<*>? = null
+    override fun run() {
+      started = true
+      deadline?.cancel(false)
+      try {
+        if (System.nanoTime() >= expiresAt) writeProxyError(socket, 503, "The secure transport request expired. Please retry.")
+        else handleClient(socket, expectedServer)
+      } finally {
+        deadline?.cancel(false)
+        synchronized(this@SecureLanProxy) { clients.remove(socket) }
+        try { socket.close() } catch (_: Exception) { }
+      }
+    }
   }
 
   private fun acceptLoop(expectedServer: ServerSocket) {
     while (!expectedServer.isClosed && serverSocket === expectedServer) {
       try {
         val socket = expectedServer.accept()
-        requestExecutor.execute { handleClient(socket, expectedServer) }
+        val task = RequestTask(socket, expectedServer)
+        val admitted = synchronized(this) {
+          if (serverSocket !== expectedServer) false else {
+            clients.add(socket)
+            try {
+              requestExecutor.execute(task)
+              if (!task.started) {
+                task.deadline = deadlineExecutor.schedule({
+                  val expired = synchronized(this) {
+                    requestExecutor.remove(task).also { if (it) clients.remove(socket) }
+                  }
+                  if (expired) {
+                    writeProxyError(socket, 503, "The secure transport request expired. Please retry.")
+                    try { socket.close() } catch (_: Exception) { }
+                  }
+                }, maxOf(0L, task.expiresAt - System.nanoTime()), TimeUnit.NANOSECONDS)
+                if (task.started) task.deadline?.cancel(false)
+              }
+              true
+            } catch (_: RejectedExecutionException) { clients.remove(socket); false }
+          }
+        }
+        if (!admitted) {
+          writeProxyError(socket, 503, "The secure transport is busy. Please retry.")
+          try { socket.close() } catch (_: Exception) { }
+        }
       } catch (_: Exception) {
         if (!expectedServer.isClosed) continue
       }
@@ -204,9 +313,9 @@ private class SecureLanProxy {
     socket.soTimeout = 60_000
     socket.use { client ->
       val remote = remoteOrigin
-      val context = sslContext
+      val factory = socketFactory
       val secret = localSecret
-      if (serverSocket !== expectedServer || remote == null || context == null || secret == null) {
+      if (serverSocket !== expectedServer || remote == null || factory == null || secret == null) {
         writeProxyError(client, 503, "Secure transport is restarting.")
         return
       }
@@ -220,7 +329,7 @@ private class SecureLanProxy {
           return
         }
         val forwardedTarget = request.target.removePrefix(prefix).ifEmpty { "/" }
-        forwardRequest(remote, context, request.copy(target = forwardedTarget), input, output)
+        forwardRequest(remote, factory, expectedServer, request.copy(target = forwardedTarget), input, output)
       } catch (_: Exception) {
         writeProxyError(client, 502, "The secure desktop connection failed.")
       }
@@ -265,50 +374,63 @@ private class SecureLanProxy {
 
   private fun forwardRequest(
     origin: URI,
-    context: SSLContext,
+    factory: SSLSocketFactory,
+    expectedServer: ServerSocket,
     request: ProxyRequest,
     localInput: BufferedInputStream,
     localOutput: BufferedOutputStream,
   ) {
     val remoteUrl = URL(origin.toString() + request.target)
     val connection = remoteUrl.openConnection() as HttpsURLConnection
-    connection.sslSocketFactory = context.socketFactory
+    connection.sslSocketFactory = factory
     connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
     connection.instanceFollowRedirects = false
     connection.connectTimeout = 10_000
     connection.readTimeout = 60_000
     connection.requestMethod = request.method
-    connection.setRequestProperty("Connection", "keep-alive")
-    connection.setRequestProperty("Accept-Encoding", "identity")
-    for ((name, value) in request.headers) {
-      if (name.lowercase(Locale.US) !in HOP_BY_HOP_HEADERS && !name.equals("content-length", true)) {
-        connection.addRequestProperty(name, value)
-      }
+    synchronized(this) {
+      check(serverSocket === expectedServer) { "Secure transport is restarting." }
+      upstreamConnections.add(connection)
     }
-    if (request.contentLength > 0) {
-      connection.doOutput = true
-      connection.setFixedLengthStreamingMode(request.contentLength)
-      connection.outputStream.use { remoteOutput ->
-        copyExactly(localInput, remoteOutput, request.contentLength.toLong())
+    try {
+      connection.setRequestProperty("Connection", "keep-alive")
+      connection.setRequestProperty("Accept-Encoding", "identity")
+      for ((name, value) in request.headers) {
+        if (name.lowercase(Locale.US) !in HOP_BY_HOP_HEADERS && !name.equals("content-length", true)) {
+          connection.addRequestProperty(name, value)
+        }
       }
-    }
+      if (request.contentLength > 0) {
+        connection.doOutput = true
+        connection.setFixedLengthStreamingMode(request.contentLength)
+        connection.outputStream.use { remoteOutput ->
+          copyExactly(localInput, remoteOutput, request.contentLength.toLong())
+        }
+      }
 
-    val status = connection.responseCode
-    val reason = connection.responseMessage?.replace(Regex("[\r\n]"), " ") ?: "Response"
-    val responseHeaders = StringBuilder("HTTP/1.1 $status $reason\r\n")
-    connection.headerFields.forEach { (name, values) ->
-      if (name != null && name.lowercase(Locale.US) !in HOP_BY_HOP_HEADERS) {
-        values.orEmpty().forEach { value -> responseHeaders.append(name).append(": ").append(value).append("\r\n") }
+      val status = connection.responseCode
+      val reason = connection.responseMessage?.replace(Regex("[\r\n]"), " ") ?: "Response"
+      val responseHeaders = StringBuilder("HTTP/1.1 $status $reason\r\n")
+      connection.headerFields.forEach { (name, values) ->
+        if (name != null && name.lowercase(Locale.US) !in HOP_BY_HOP_HEADERS) {
+          values.orEmpty().forEach { value -> responseHeaders.append(name).append(": ").append(value).append("\r\n") }
+        }
       }
-    }
-    responseHeaders.append("Connection: close\r\n\r\n")
-    localOutput.write(responseHeaders.toString().toByteArray(Charsets.ISO_8859_1))
-    localOutput.flush()
-    if (request.method == "HEAD") return
-    val responseInput = try { connection.inputStream } catch (_: Exception) { connection.errorStream }
-    responseInput?.use { source ->
-      source.copyTo(localOutput, COPY_BUFFER_BYTES)
+      responseHeaders.append("Connection: close\r\n\r\n")
+      localOutput.write(responseHeaders.toString().toByteArray(Charsets.ISO_8859_1))
       localOutput.flush()
+      if (request.method == "HEAD") return
+      val responseInput = try { connection.inputStream } catch (_: Exception) { connection.errorStream }
+      responseInput?.use { source ->
+        source.copyTo(localOutput, COPY_BUFFER_BYTES)
+        localOutput.flush()
+      }
+    } finally {
+      connection.disconnect()
+      synchronized(this) {
+        upstreamConnections.remove(connection)
+        upstreamSockets.removeAll { it.isClosed }
+      }
     }
   }
 

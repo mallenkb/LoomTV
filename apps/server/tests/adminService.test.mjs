@@ -14,6 +14,7 @@ import { createBootstrapSecurity } from '../src/secure-bootstrap.js';
 import { createHeadlessMediaService } from '../src/media-service.js';
 import { createPlaybackSessionRegistry } from '../src/playback-session-registry.js';
 import { createCanonicalStateStore } from '../src/canonical-state-store.js';
+import { createHeadlessClientState } from '../src/client-state.js';
 import { createMediaItemId } from '@loom-media-server/media-core';
 
 const OWNER_PASSWORD = 'correct-horse-battery';
@@ -124,6 +125,66 @@ test('a failed canonical scan write leaves the cached and persisted catalog unch
   assert.equal((await waitForScan(service, principal)).state, 'failed');
   assert.deepEqual(await service.listLibraryItems(principal), before);
   assert.deepEqual(store.readAdminState().catalog.map((item) => item.id), before.map((item) => item.id));
+});
+
+test('catalog ratings survive projection and quick rescans while child restrictions stay live', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-catalog-ratings-'));
+  const store = createCanonicalStateStore({ dataDir });
+  await store.start();
+  const rootPath = path.join(dataDir, 'library');
+  await fs.mkdir(rootPath);
+  const ratings = [
+    { US: { minimumAge: 8, label: 'PG', source: 'fixture' }, GB: { minimumAge: 12, label: '12', source: 'fixture' } },
+    { US: { minimumAge: 18, label: 'R', source: 'fixture' } },
+    null,
+  ];
+  const sources = await Promise.all(ratings.map(async (_rating, index) => {
+    const locator = path.join(rootPath, `movie-${index}.mkv`);
+    await fs.writeFile(locator, 'movie fixture');
+    const stats = await fs.stat(locator);
+    return { id: `source-${index}`, mediaId: `movie-${index}`, rootId: 'root-1', relativePath: path.basename(locator),
+      locator, state: 'online', fileExtension: 'mkv', sizeBytes: stats.size, modifiedAtMs: stats.mtimeMs, indexedAt: 123 };
+  }));
+  store.replaceAllState({
+    adminState: { owner: { id: 'owner-1', name: 'Owner', salt: 'salt', hash: 'hash', createdAt: 123 },
+      roots: [{ id: 'root-1', path: rootPath, kind: 'movies', createdAt: 123 }] },
+    catalogItems: ratings.map((contentRatings, index) => ({ id: `movie-${index}`, kind: 'movie', title: `Movie ${index}`,
+      ...(contentRatings ? { contentRatings } : {}), createdAt: 123, updatedAt: 123 })),
+    mediaSources: sources,
+    mediaIdentityAliases: sources.map((source) => ({ namespace: 'desktop-path-hash', alias: createMediaItemId(source.locator), mediaId: source.mediaId, createdAt: 123 })),
+    clientState: {
+      profiles: [{ id: 'child-1', name: 'Child', kind: 'child', createdAt: 123, updatedAt: 123 }],
+      assignments: [{ profileId: 'child-1', accountId: 'owner-1', access: 'manage', createdAt: 123 }],
+      selections: [{ profileId: 'child-1', accountId: 'owner-1', deviceId: 'account:owner-1', revision: 1 }],
+      profileRestrictions: [{ profileId: 'child-1', allowedRootIds: ['root-1'], country: 'US', maximumAge: 12, allowUnrated: false, revision: 1 }],
+    },
+  });
+  const { service } = await makeService({ dataDir, options: { stateStore: store } });
+  const client = createHeadlessClientState({ store });
+  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const principal = await service.getPrincipalById('owner-1');
+  async function assertRatedCatalog(activeService) {
+    const items = await activeService.listLibraryItems(principal);
+    assert.deepEqual(items.find((item) => item.id === 'movie-0').contentRatings, ratings[0], 'country, label, and rating provenance survive the scanner projection');
+    assert.deepEqual(items.find((item) => item.id === 'movie-1').contentRatings, ratings[1]);
+    const check = await client.activePlaybackProfileChecker('owner-1', 'account:owner-1');
+    assert.equal(check(items.find((item) => item.id === 'movie-0')).profileId, 'child-1');
+    assert.throws(() => check(items.find((item) => item.id === 'movie-1')), { code: 'permission_denied' });
+    assert.throws(() => check(items.find((item) => item.id === 'movie-2')), { code: 'permission_denied' });
+    return items;
+  }
+  await assertRatedCatalog(service);
+  await service.startLibraryScan({ mode: 'quick' }, principal);
+  assert.equal((await waitForScan(service, principal)).state, 'completed');
+  await assertRatedCatalog(service);
+  const reopened = (await makeService({ dataDir, options: { stateStore: store } })).service;
+  t.after(() => reopened.stop());
+  const items = await assertRatedCatalog(reopened);
+  store.mutateClientState((state) => { state.profileRestrictions[0].maximumAge = 6; state.profileRestrictions[0].revision += 1; });
+  const tightened = await client.activePlaybackProfileChecker('owner-1', 'account:owner-1');
+  assert.throws(() => tightened(items.find((item) => item.id === 'movie-0')), { code: 'permission_denied' }, 'a new request applies the current age restriction');
+  store.mutateClientState((state) => { state.selections[0].profileId = null; });
+  await assert.rejects(client.activePlaybackProfileChecker('owner-1', 'account:owner-1'), { code: 'profile_required' });
 });
 
 function fileSystemError(code) {

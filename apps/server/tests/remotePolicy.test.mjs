@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { createRemotePolicyService, remoteRouteClass } from '../src/remote-policy.js';
 
 function fixture({ address = '127.0.0.1', clientState = {} } = {}) {
@@ -48,6 +49,65 @@ test('an invitation without a bound profile fails before client-state access', a
     id: 'issuer-1', authentication: 'invitation-session', rootIds: ['root-1'],
   }, { id: 'media-1', rootId: 'root-1' }), { code: 'permission_denied', status: 403 });
   assert.equal(profileReads, 0);
+});
+
+test('invitation resolution returns its shorter live expiry and rechecks revocation after profile authorization', async () => {
+  let currentTime = 1000;
+  let revokedAt = null;
+  let revokeDuringProfileCheck = false;
+  const session = {
+    id: 'invitation-1', invitationId: 'share-1', issuerAccountId: 'issuer-1', deviceId: 'tv-1',
+    idleExpiresAt: 50_000, absoluteExpiresAt: 30_000,
+    scope: { profileId: 'profile-1', rootIds: ['root-1'], mediaIds: null, permissions: ['library.read', 'stream'] },
+  };
+  const service = createRemotePolicyService({
+    store: { readInvitationSession: () => ({ ...session, revokedAt }) },
+    proxyPolicy: { clientAddress: () => '127.0.0.1', isSecureRequest: () => true },
+    getAccount: async () => ({ id: 'issuer-1', type: 'owner', rootIds: null }),
+    getAdminService: () => ({}),
+    getClientState: () => ({ requireScopedProfile: async () => {
+      if (revokeDuringProfileCheck) revokedAt = currentTime;
+      return { profileId: 'profile-1' };
+    } }),
+    clock: () => currentTime,
+  });
+  assert.equal((await service.resolveInvitationPrincipal(session.id)).invitationSessionExpiresAt, 30_000);
+  session.idleExpiresAt = 20_000;
+  assert.equal((await service.resolveInvitationPrincipal(session.id)).invitationSessionExpiresAt, 20_000);
+  revokeDuringProfileCheck = true;
+  assert.equal(await service.resolveInvitationPrincipal(session.id), null);
+  revokedAt = null;
+  revokeDuringProfileCheck = false;
+  currentTime = 20_000;
+  assert.equal(await service.resolveInvitationPrincipal(session.id), null, 'expiry is inclusive');
+});
+
+test('invitation authentication refuses a session that expires during its profile check', async () => {
+  const id = '12345678-1234-1234-1234-123456789012';
+  const secret = 'a'.repeat(32);
+  let currentTime = 1000;
+  let touchTime;
+  const session = {
+    id, invitationId: 'share-1', issuerAccountId: 'issuer-1', deviceId: 'tv-1',
+    secretHash: createHash('sha256').update(secret).digest('hex'),
+    idleExpiresAt: 1500, absoluteExpiresAt: 5000,
+    scope: { profileId: 'profile-1', rootIds: ['root-1'], mediaIds: null, permissions: ['library.read', 'stream'] },
+  };
+  const service = createRemotePolicyService({
+    store: {
+      readInvitationSession: () => session,
+      touchInvitationSession: (_id, seenAt) => { touchTime = seenAt; return seenAt < session.idleExpiresAt; },
+    },
+    proxyPolicy: { clientAddress: () => '127.0.0.1', isSecureRequest: () => true },
+    getAccount: async () => ({ id: 'issuer-1', type: 'owner', rootIds: null }),
+    getAdminService: () => ({}),
+    getClientState: () => ({ requireScopedProfile: async () => { currentTime = 1500; return { profileId: 'profile-1' }; } }),
+    clock: () => currentTime,
+  });
+  await assert.rejects(service.authenticateInvitation({ headers: { authorization: `LoomInvitation ${id}.${secret}` } }), {
+    status: 401, code: 'session_expired',
+  });
+  assert.equal(touchTime, 1500, 'the atomic touch checks the completion time instead of the earlier request time');
 });
 
 test('valid invitation profile bindings preserve the media and device restrictions', async () => {
