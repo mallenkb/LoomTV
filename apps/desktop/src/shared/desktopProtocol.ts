@@ -950,6 +950,11 @@ export interface MediaRenameBatch {
   examples: { fromName: string; toName: string }[];
 }
 
+/** Exact paths saved before and after a rename, retained after undo. */
+export interface MediaRenameRecord extends MediaRenameBatch {
+  changes: { kind: 'video' | 'sidecar' | 'folder'; fromPath: string; toPath: string }[];
+}
+
 export interface LibraryEpisodeRef {
   season: number;
   episode: number;

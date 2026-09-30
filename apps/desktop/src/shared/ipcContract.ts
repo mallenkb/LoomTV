@@ -33,6 +33,7 @@ import type {
   MediaSegmentType,
   MediaRenameApplyResult,
   MediaRenameBatch,
+  MediaRenameRecord,
   MediaRenamePreview,
   MediaRenameStatus,
   LibraryEpisodeUpdates,
@@ -116,7 +117,8 @@ export interface IpcContract {
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
   'library:rename-preview': { args: []; result: MediaRenamePreview };
   'library:rename-apply': { args: [entryIds: string[]]; result: MediaRenameApplyResult };
-  'library:rename-history': { args: []; result: MediaRenameBatch[] };
+  'library:rename-history': { args: [offset?: number]; result: MediaRenameBatch[] };
+  'library:rename-record': { args: [batchId: string]; result: MediaRenameRecord | null };
   'library:rename-undo': { args: [batchId: string]; result: MediaRenameBatch[] };
   'library:rename-status': { args: []; result: MediaRenameStatus };
   'library:episode-updates': { args: []; result: LibraryEpisodeUpdates };

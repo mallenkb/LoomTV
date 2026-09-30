@@ -32,6 +32,7 @@ import type {
   IptvSourceSummary,
   MediaRenameApplyResult,
   MediaRenameBatch,
+  MediaRenameRecord,
   MediaRenamePreview,
   MediaRenameStatus,
   LibraryEpisodeUpdates,
@@ -267,7 +268,8 @@ export type DesktopBridgeApi = {
       setIptvPageActive?: (active: boolean) => Promise<void>;
       previewMediaRenames?: () => Promise<MediaRenamePreview>;
       applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
-      listMediaRenames?: () => Promise<MediaRenameBatch[]>;
+      listMediaRenames?: (offset?: number) => Promise<MediaRenameBatch[]>;
+      getMediaRenameRecord?: (batchId: string) => Promise<MediaRenameRecord | null>;
       undoMediaRename?: (batchId: string) => Promise<MediaRenameBatch[]>;
       mediaRenameStatus?: () => Promise<MediaRenameStatus>;
       libraryEpisodeUpdates?: () => Promise<LibraryEpisodeUpdates>;
@@ -1389,9 +1391,14 @@ const desktopTransport = {
     return window.desktopApi.applyMediaRenames(entryIds);
   },
 
-  async listMediaRenames(): Promise<MediaRenameBatch[]> {
+  async listMediaRenames(offset = 0): Promise<MediaRenameBatch[]> {
     if (!window.desktopApi?.listMediaRenames) return [];
-    return window.desktopApi.listMediaRenames();
+    return window.desktopApi.listMediaRenames(offset);
+  },
+
+  async getMediaRenameRecord(batchId: string): Promise<MediaRenameRecord | null> {
+    if (!window.desktopApi?.getMediaRenameRecord) throw new Error('Rename records are only available in the desktop app.');
+    return window.desktopApi.getMediaRenameRecord(batchId);
   },
 
   /** New, upcoming, and missing episodes. */

@@ -1835,7 +1835,19 @@ const mediaRenameHandlers = {
     };
   },
   applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
-  listMediaRenames: () => mediaRenameExecutor.history().map(mediaRenameBatchForRenderer),
+  listMediaRenames: (offset = 0) => mediaRenameExecutor.history(20, offset).map(mediaRenameBatchForRenderer),
+  getMediaRenameRecord: (batchId: string) => {
+    const batch = mediaRenameExecutor.record(batchId);
+    if (!batch) return null;
+    return {
+      ...mediaRenameBatchForRenderer(batch),
+      changes: batch.operations.flatMap((operation) => (
+        operation.role === 'video' || operation.role === 'sidecar' || operation.role === 'folder'
+          ? [{ kind: operation.role, fromPath: operation.from, toPath: operation.to }]
+          : []
+      )),
+    };
+  },
   undoMediaRename: (batchId: string) => {
     mediaRenameExecutor.undo(batchId);
     return mediaRenameExecutor.history().map(mediaRenameBatchForRenderer);

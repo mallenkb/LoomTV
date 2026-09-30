@@ -366,7 +366,8 @@ export interface IpcHandlerDependencies<
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => IpcResult<'iptv:set-favorite'>;
   previewMediaRenames: () => IpcResult<'library:rename-preview'>;
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
-  listMediaRenames: () => IpcResult<'library:rename-history'>;
+  listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
+  getMediaRenameRecord: (batchId: string) => IpcResult<'library:rename-record'>;
   undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
   mediaRenameStatus: () => IpcResult<'library:rename-status'>;
   libraryEpisodeUpdates: () => Promise<IpcResult<'library:episode-updates'>>;
@@ -854,10 +855,14 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.applyMediaRenames(entryIds);
   }, z.tuple([z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(20_000)]));
-  handleNoArgs('library:rename-history', () => {
+  handle('library:rename-history', (_event, offset) => {
     deps.authorizeSettingsWrite();
-    return deps.listMediaRenames();
-  });
+    return deps.listMediaRenames(offset);
+  }, z.tuple([z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()]));
+  handle('library:rename-record', (_event, batchId) => {
+    deps.authorizeSettingsWrite();
+    return deps.getMediaRenameRecord(batchId);
+  }, z.tuple([z.string().uuid()]));
   handleNoArgs('library:episode-updates', () => deps.libraryEpisodeUpdates());
   handleNoArgs('library:health', () => {
     deps.authorizeSettingsWrite();

@@ -6,9 +6,10 @@ import { useConfirm } from '@/components/ConfirmProvider';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
-import type { MediaRenameBatch, MediaRenamePreview, MediaRenamePreviewEntry, MediaRenameStatus } from '@/shared/desktopProtocol';
+import RenameRecordDialog from './RenameRecordDialog';
+import type { MediaRenameBatch, MediaRenameRecord, MediaRenamePreview, MediaRenamePreviewEntry, MediaRenameStatus } from '@/shared/desktopProtocol';
 
-const HISTORY_SHOWN = 5;
+const HISTORY_PAGE_SIZE = 20;
 type OrganizeMode = MediaRenameStatus['mode'];
 const MODE_OPTIONS: Array<{ value: OrganizeMode; label: string }> = [
   { value: 'ask', label: 'Ask me' },
@@ -44,15 +45,54 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
   const [history, setHistory] = useState<MediaRenameBatch[]>([]);
   const [organize, setOrganize] = useState<MediaRenameStatus | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [busy, setBusy] = useState<'preview' | 'apply' | 'undo' | 'mode' | null>(null);
+  const [busy, setBusy] = useState<'preview' | 'apply' | 'undo' | 'mode' | 'history' | null>(null);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [record, setRecord] = useState<MediaRenameRecord | null>(null);
+  const historyGeneration = useRef(0);
   const [showSkipped, setShowSkipped] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
   const reload = useCallback(async () => {
+    const generation = ++historyGeneration.current;
     const [nextStatus, nextHistory] = await Promise.all([desktopApi.mediaRenameStatus(), desktopApi.listMediaRenames()]);
+    if (generation !== historyGeneration.current) return;
     setOrganize(nextStatus);
     setHistory(nextHistory);
+    setHasOlder(nextHistory.length === HISTORY_PAGE_SIZE);
+  }, []);
+
+  const loadOlder = useCallback(async () => {
+    const generation = historyGeneration.current;
+    setBusy('history');
+    setError('');
+    try {
+      const older = await desktopApi.listMediaRenames(history.length);
+      if (generation !== historyGeneration.current) return;
+      setHistory((current) => {
+        const known = new Set(current.map((batch) => batch.id));
+        return [...current, ...older.filter((batch) => !known.has(batch.id))];
+      });
+      setHasOlder(older.length === HISTORY_PAGE_SIZE);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
+  }, [history.length]);
+
+  const viewNames = useCallback(async (batch: MediaRenameBatch) => {
+    setBusy('history');
+    setError('');
+    try {
+      const next = await desktopApi.getMediaRenameRecord(batch.id);
+      if (!next) throw new Error('That rename record could not be found.');
+      setRecord(next);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
   }, []);
 
   // Re-read after mounting, after every sync finishes, and after an
@@ -157,7 +197,8 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
     setStatus('');
     try {
       await desktopApi.undoMediaRename(batch.id);
-      setStatus('The rename was undone.');
+      setRecord((current) => current?.id === batch.id ? { ...current, undoneAt: Date.now() } : current);
+      setStatus('The rename was undone. Its original names are still in rename history.');
       await reload();
       await refreshLibrary();
     } catch (cause) {
@@ -191,7 +232,7 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
             <div>
               <p className="text-sm font-semibold text-white">Organize files after sync</p>
               <p className="mt-0.5 text-xs text-[var(--loom-muted)]">
-                Rename and move matched files to the names LoomTV shows. Doubtful matches are never touched, and every batch can be undone.
+                Rename and move matched files to the names LoomTV shows. Original names and locations are saved in rename history, including after undo.
               </p>
             </div>
           </div>
@@ -221,37 +262,61 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
                   Undo
                 </Button>
               ) : null}
-              {history.length > 1 ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => void viewNames(lastBatch)} disabled={busy !== null}>
+                View original names
+              </Button>
+              {history.length > 1 || hasOlder ? (
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowHistory((value) => !value)}>
-                  {showHistory ? 'Hide earlier' : 'Earlier renames'}
+                  {showHistory ? 'Hide history' : 'Rename history'}
                 </Button>
               ) : null}
             </span>
           </div>
         ) : null}
         {showHistory ? (
-          <div className="space-y-2">
-            {history.slice(1, HISTORY_SHOWN + 1).map((batch) => (
+          <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+            <p className="text-xs text-[var(--loom-muted)]">Records stay available after undo. Undo newer batches first to restore the earliest recorded names.</p>
+            {history.slice(1).map((batch) => (
               <div key={batch.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-bg)] p-2.5 text-xs">
                 <div className="min-w-0">
                   <p className="text-[var(--loom-text)]">{batchSummary(batch)}</p>
                   {batch.examples[0] ? <p className="mt-0.5 truncate text-[var(--loom-muted)]">{batch.examples[0].fromName} → {batch.examples[0].toName}</p> : null}
                 </div>
-                {batch.undoneAt ? (
-                  <span className="text-[var(--loom-muted)]">Undone</span>
-                ) : (
-                  <Button type="button" variant="outline" size="sm" onClick={() => void undo(batch)} disabled={disabled || busy !== null} className="gap-1.5">
-                    <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    Undo
+                <span className="flex shrink-0 items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => void viewNames(batch)} disabled={busy !== null}>
+                    View original names
                   </Button>
-                )}
+                  {batch.undoneAt ? (
+                    <span className="text-[var(--loom-muted)]">Undone</span>
+                  ) : (
+                    <Button type="button" variant="outline" size="sm" onClick={() => void undo(batch)} disabled={disabled || busy !== null} className="gap-1.5">
+                      <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Undo
+                    </Button>
+                  )}
+                </span>
               </div>
             ))}
+            {hasOlder ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadOlder()} disabled={busy !== null}>
+                {busy === 'history' ? 'Loading…' : 'Load older renames'}
+              </Button>
+            ) : null}
           </div>
         ) : null}
         {status ? <p role="status" className="text-xs text-[var(--loom-muted)]">{status}</p> : null}
         {error && preview === null ? <p role="alert" className="text-xs text-red-200">{error}</p> : null}
       </div>
+
+      {record ? (
+        <RenameRecordDialog
+          record={record}
+          disabled={disabled || busy !== null}
+          error={error}
+          onClose={() => { if (busy === null) setRecord(null); }}
+          onUndo={() => void undo(record)}
+        />
+      ) : null}
 
       <Dialog
         open={preview !== null}

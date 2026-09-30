@@ -718,10 +718,13 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       return rows.length;
     },
 
-    history(limit = 20): RenameBatchRecord[] {
+    // Records are kept after undo so the original paths remain a reference.
+    record: readBatch,
+
+    history(limit = 20, offset = 0): RenameBatchRecord[] {
       const rows = deps.getDatabase()
-        .prepare('SELECT id, created_at, undone_at, operations_json FROM media_rename_batches ORDER BY created_at DESC LIMIT ?')
-        .all(limit) as Array<{ id: string; created_at: number; undone_at: number; operations_json: string }>;
+        .prepare('SELECT id, created_at, undone_at, operations_json FROM media_rename_batches ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?')
+        .all(limit, offset) as Array<{ id: string; created_at: number; undone_at: number; operations_json: string }>;
       return rows.map((row) => ({
         id: row.id,
         createdAt: row.created_at,
