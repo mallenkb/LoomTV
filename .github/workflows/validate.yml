@@ -53,14 +53,39 @@ jobs:
       - name: Test workflow trust policy
         run: corepack pnpm test:workflow-policy
 
-      - name: Lint
+      # PR #18 is validating desktop targets only at the user's request.
+      - name: Lint all workspaces
+        if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
         run: corepack pnpm lint
 
-      - name: Typecheck
+      - name: Lint desktop app
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
+        run: corepack pnpm --filter loom-media-server-desktop lint
+
+      - name: Typecheck all workspaces
+        if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
         run: corepack pnpm typecheck
 
-      - name: Test
+      - name: Typecheck desktop app
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
+        run: corepack pnpm --filter loom-media-server-desktop typecheck
+
+      - name: Install FFmpeg for media integration tests
+        if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
+        # These integration regressions must execute, rather than skip when
+        # the runner image does not provide an encoder.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ffmpeg
+          ffmpeg -version
+
+      - name: Test all workspaces
+        if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
         run: corepack pnpm test
+
+      - name: Test desktop app
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
+        run: corepack pnpm --filter loom-media-server-desktop test
 
   rust:
     name: Test and audit Rust
@@ -108,6 +133,8 @@ jobs:
 
   container:
     name: Build and smoke test headless container
+    # PR #18 is validating desktop targets only at the user's request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

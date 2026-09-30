@@ -16,6 +16,8 @@ export interface Principal extends AdminPrincipal {
   deviceId?: string | null;
   sessionId?: string;
   invitationSessionId?: string;
+  invitationSessionExpiresAt?: number;
+  invitationSessionAbsoluteExpiresAt?: number;
   invitationId?: string;
   invitationProfileId?: string;
   invitationMediaIds?: string[] | null;

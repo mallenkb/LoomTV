@@ -1026,6 +1026,7 @@ export function createHeadlessAdminService(options) {
           ...(item.sourceId ? { sourceId: item.sourceId } : {}),
           ...(item.localMetadata && Array.isArray(item.localMetadata.tracks)
             ? { localMetadata: /** @type {import('./library-scanner.js').MediaProbe} */ (item.localMetadata) } : {}),
+          ...(item.contentRatings ? { contentRatings: item.contentRatings } : {}),
           ...(item.subtitleSidecars ? { subtitleSidecars: item.subtitleSidecars } : {}),
           ...(item.seriesId ? { seriesId: item.seriesId } : {}),
           ...(item.seasonNumber !== undefined ? { seasonNumber: item.seasonNumber } : {}),
