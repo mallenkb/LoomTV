@@ -130,6 +130,9 @@ test('native session lanes drain large callbacks, isolate slow consumers, and bo
     const port = Number(match[1]);
     return {
       child,
+      diagnostics() {
+        return { halfCloseReads: output.split('\n').filter((line) => line.startsWith('HALF_CLOSE_')).slice(-4), stderr: error.slice(-2_000) };
+      },
       async admitted(target) {
         await until(() => output.split('\n').includes(`ADMITTED ${target}`), `request ${target} must be admitted`);
       },
@@ -202,8 +205,13 @@ test('native session lanes drain large callbacks, isolate slow consumers, and bo
   assert.equal(oversized.hash, createHash('sha256').update(Buffer.alloc(oversized.bodyBytes, 0x5a)).digest('hex'));
   assert.equal(oversized.ended, true);
   const halfClosed = await first.request('/small/half-close', { halfClose: true }).done;
-  assert.equal(halfClosed.status, 200, 'request-side FIN must allow the response');
+  assert.equal(halfClosed.status, 200, `request-side FIN must allow the response: ${JSON.stringify({ result: halfClosed, native: first.diagnostics() })}`);
   assert.equal(halfClosed.bodyBytes, 5);
+  assert.equal(halfClosed.ended, true);
+  const eofObserved = await first.request('/small/half-close-observed', { halfClose: true }).done;
+  assert.equal(eofObserved.status, 200, `EOF consumed before pool admission must still allow the response: ${JSON.stringify({ result: eofObserved, native: first.diagnostics() })}`);
+  assert.equal(eofObserved.bodyBytes, 5);
+  assert.equal(eofObserved.ended, true);
 
   const cancelling = first.request('/bulk/cancel-wait', { paused: true });
   await until(() => (produced.get('/bulk/cancel-wait') ?? 0) >= 1024 * 1024, 'cancel test must have a stalled producer');

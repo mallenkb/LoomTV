@@ -295,6 +295,7 @@ private final class SecureLanProxy {
   private func receiveRequest(from connection: NWConnection, listener expectedListener: NWListener, accumulated: Data) {
     connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
       guard let self else { connection.cancel(); return }
+      guard error == nil else { connection.cancel(); return }
       var next = accumulated
       if let data { next.append(data) }
       if next.count > maxHeaderBytes + maxRequestBodyBytes {
@@ -304,14 +305,14 @@ private final class SecureLanProxy {
       do {
         if let request = try self.parseRequest(next) {
           self.parsed(connection)
-          self.forward(request, from: connection, listener: expectedListener)
+          self.forward(request, from: connection, listener: expectedListener, requestReadComplete: isComplete)
           return
         }
       } catch {
         self.writeError(to: connection, status: 400, message: "Invalid local request.")
         return
       }
-      if isComplete || error != nil {
+      if isComplete {
         connection.cancel()
         return
       }
@@ -357,7 +358,7 @@ private final class SecureLanProxy {
     )
   }
 
-  private func forward(_ request: ProxyRequest, from connection: NWConnection, listener expectedListener: NWListener) {
+  private func forward(_ request: ProxyRequest, from connection: NWConnection, listener expectedListener: NWListener, requestReadComplete: Bool) {
     stateLock.lock()
     let currentListener = listener
     let remote = remoteOrigin
@@ -387,7 +388,7 @@ private final class SecureLanProxy {
     remoteRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if !request.body.isEmpty { remoteRequest.httpBody = request.body }
 
-    if !sessions.start(remoteRequest, connection: connection) {
+    if !sessions.start(remoteRequest, connection: connection, requestReadComplete: requestReadComplete) {
       writeError(to: connection, status: 503, message: "The secure transport is busy. Please retry.")
     }
   }
@@ -700,14 +701,17 @@ private final class ProxySessionPool {
     lanes = (0..<Self.capacity).map { _ in Lane(expectedFingerprint: expectedFingerprint) }
   }
 
-  func start(_ request: URLRequest, connection: NWConnection) -> Bool {
+  func start(_ request: URLRequest, connection: NWConnection, requestReadComplete: Bool) -> Bool {
     lock.lock()
     defer { lock.unlock() }
     guard !stopped else { return false }
-    // Detect a reset before response writes begin. Graceful request-side EOF
-    // is a valid TCP half-close and still permits the response to drain.
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak connection] data, _, _, error in
-      if error != nil || data?.isEmpty == false { connection?.cancel() }
+    // Detect a reset before response writes begin, unless parsing already
+    // consumed request-side EOF. Scheduling another receive past that terminal
+    // event can report an error even though a valid half-close still allows writes.
+    if !requestReadComplete {
+      connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak connection] data, _, _, error in
+        if error != nil || data?.isEmpty == false { connection?.cancel() }
+      }
     }
     if let lane = lanes.first(where: { $0.lease == nil }) {
       begin(request, connection: connection, lane: lane)

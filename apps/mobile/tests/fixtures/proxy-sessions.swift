@@ -152,8 +152,13 @@ private final class ProxyFixture {
       guard let self else { return }
       var bytes = accumulated
       if let data { bytes.append(data) }
+      if String(data: bytes, encoding: .utf8)?.contains("/small/half-close") == true {
+        print("HALF_CLOSE_INITIAL bytes=\(bytes.count) complete=\(complete) error=\(String(describing: error))")
+        fflush(stdout)
+      }
+      guard error == nil else { connection.cancel(); return }
       guard let text = String(data: bytes, encoding: .utf8), text.contains("\r\n\r\n") else {
-        if complete || error != nil { connection.cancel() }
+        if complete { connection.cancel() }
         else { self.read(connection, accumulated: bytes) }
         return
       }
@@ -205,12 +210,27 @@ private final class ProxyFixture {
         let count = Int(line.components(separatedBy: ":")[1].trimmingCharacters(in: .whitespaces)), count > 0 {
         request.httpBody = Data(repeating: 0, count: count)
       }
-      if self.pool.start(request, connection: connection) {
-        print("ADMITTED \(path)")
-        fflush(stdout)
+      if path == "/small/half-close-observed", !complete {
+        // Deterministically deliver the already-consumed-EOF admission case,
+        // even when this OS delivered request bytes and FIN in separate reads.
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { data, _, eof, error in
+          print("HALF_CLOSE_EOF bytes=\(data?.count ?? 0) complete=\(eof) error=\(String(describing: error))")
+          fflush(stdout)
+          guard error == nil, eof, data?.isEmpty != false else { connection.cancel(); return }
+          self.submit(request, path: path, connection: connection, requestReadComplete: true)
+        }
       } else {
-        self.reply(connection, status: 503, body: "busy")
+        self.submit(request, path: path, connection: connection, requestReadComplete: complete)
       }
+    }
+  }
+
+  private func submit(_ request: URLRequest, path: String, connection: NWConnection, requestReadComplete: Bool) {
+    if pool.start(request, connection: connection, requestReadComplete: requestReadComplete) {
+      print("ADMITTED \(path)")
+      fflush(stdout)
+    } else {
+      reply(connection, status: 503, body: "busy")
     }
   }
 
