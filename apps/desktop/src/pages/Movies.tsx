@@ -12,8 +12,14 @@ import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
+import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
+import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 
 export default function Movies() {
+  return <EpisodeUpdatesProvider><MoviesContent /></EpisodeUpdatesProvider>;
+}
+
+function MoviesContent() {
   const { state, addLibraryFolder } = useLibrary();
   const { movies: allMovies, libraryFolderGroups, isLoading, isScanning } = state;
   const movies = useMemo(
@@ -27,11 +33,12 @@ export default function Movies() {
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const [libraryActionError, setLibraryActionError] = useState('');
   const progress = useProgressSnapshot();
+  const orderItems = useLibraryItemOrder();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
-  const filteredMovies = useMemo(() => movies
+  const filteredMovies = useMemo(() => orderItems(movies
     .filter((item) => matchesMediaItem(item, normalizedQuery))
-    .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)), [activeFilter, listState, movies, normalizedQuery, progress]);
+    .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState))), [activeFilter, listState, movies, normalizedQuery, orderItems, progress]);
   const handleAddFolder = async () => {
     setLibraryActionError('');
     try {

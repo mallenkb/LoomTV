@@ -19,6 +19,7 @@ import {
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
+import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 
 export default function MyList() {
   return <EpisodeUpdatesProvider><MyListContent /></EpisodeUpdatesProvider>;
@@ -33,6 +34,7 @@ function MyListContent() {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const progress = useProgressSnapshot();
+  const orderItems = useLibraryItemOrder();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const savedItems = useMemo(() => {
@@ -51,10 +53,10 @@ function MyListContent() {
       .filter((item): item is MediaItem => Boolean(item));
   }, [lists, state.animeShows, state.movies, state.tvShows]);
   const filteredItems = useMemo(
-    () => savedItems
+    () => orderItems(savedItems
       .filter((item) => matchesMediaItem(item, normalizedQuery))
-      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
-    [activeFilter, listState, normalizedQuery, progress, savedItems],
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState))),
+    [activeFilter, listState, normalizedQuery, orderItems, progress, savedItems],
   );
   const watchedLocalItems = useMemo(() => {
     const allItems = [...state.movies, ...state.tvShows, ...state.animeShows];

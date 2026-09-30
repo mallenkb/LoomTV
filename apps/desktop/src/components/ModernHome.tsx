@@ -27,7 +27,7 @@ import {
   selectContinueWatchingItems,
   type LibraryFilter,
 } from '@/lib/libraryFilters';
-import { useHomeRailOrder } from '@/lib/homeRailOrder';
+import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { useModalLayer } from '@/components/ui/dialog';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
@@ -768,7 +768,7 @@ function heroDurationLabel(seconds?: number): string {
 }
 
 function PosterRail({ title, items, from }: { title: string; items: MediaItem[]; from: string }) {
-  const orderForHome = useHomeRailOrder();
+  const orderForHome = useLibraryItemOrder();
   const ordered = useMemo(() => orderForHome(items), [items, orderForHome]);
   const titleHref = title === 'Anime' ? '/anime' : title === 'TV Shows' ? '/tv' : title === 'Movies' ? '/movies' : undefined;
   return (

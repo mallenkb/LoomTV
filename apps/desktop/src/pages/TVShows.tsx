@@ -14,6 +14,7 @@ import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { availableSeasonCount } from '@/components/MediaPosterCard.helpers';
 import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
+import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 
 interface TVShowsProps {
   kind?: 'series' | 'anime';
@@ -39,11 +40,12 @@ function TVShowsContent({ kind = 'series' }: TVShowsProps) {
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const [libraryActionError, setLibraryActionError] = useState('');
   const progress = useProgressSnapshot();
+  const orderItems = useLibraryItemOrder();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
-  const filteredShows = useMemo(() => tvShows
+  const filteredShows = useMemo(() => orderItems(tvShows
     .filter((item) => matchesMediaItem(item, normalizedQuery))
-    .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)), [activeFilter, listState, normalizedQuery, progress, tvShows]);
+    .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState))), [activeFilter, listState, normalizedQuery, orderItems, progress, tvShows]);
   const handleAddFolder = async () => {
     setLibraryActionError('');
     try {

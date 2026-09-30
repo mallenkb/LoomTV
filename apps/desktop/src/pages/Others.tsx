@@ -21,6 +21,8 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 import { assignOtherFolderToGroup, createOtherFolderGroup, normalizeOtherFolderGroups, otherFolderGroupForFolder, type OtherFolderGroups } from '@/lib/otherFolderGroups';
+import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
+import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 
 type OthersProps = {
   onPlay: (
@@ -36,6 +38,10 @@ type OthersProps = {
 };
 
 export default function Others({ onPlay }: OthersProps) {
+  return <EpisodeUpdatesProvider><OthersContent onPlay={onPlay} /></EpisodeUpdatesProvider>;
+}
+
+function OthersContent({ onPlay }: OthersProps) {
   const { state, addLibraryFolderPath, updateLibraryFolder } = useLibrary();
   const { isLoading, libraryFolderGroups } = state;
   const { lists } = useProfiles();
@@ -71,6 +77,7 @@ export default function Others({ onPlay }: OthersProps) {
   const [newGroupIcon, setNewGroupIcon] = useState<OtherFolderIconId>('folder');
   const [libraryActionError, setLibraryActionError] = useState('');
   const progress = useProgressSnapshot();
+  const orderItems = useLibraryItemOrder();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const editableFolder = visibleFolders.length === 1 ? visibleFolders[0] : null;
   const visibleTitle = selectedGroup?.name || (editableFolder
@@ -98,10 +105,10 @@ export default function Others({ onPlay }: OthersProps) {
     [state.animeShows, state.movies, state.tvShows, visibleFolders],
   );
   const filteredItems = useMemo(
-    () => items
+    () => orderItems(items
       .filter((item) => matchesMediaItem(item, normalizedQuery))
-      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
-    [activeFilter, items, listState, normalizedQuery, progress],
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState))),
+    [activeFilter, items, listState, normalizedQuery, orderItems, progress],
   );
   const handleAddFolder = async () => {
     setNewGroupName('');

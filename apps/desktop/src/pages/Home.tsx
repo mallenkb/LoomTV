@@ -24,7 +24,7 @@ import {
 } from '@/lib/libraryFilters';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
-import { useHomeRailOrder } from '@/lib/homeRailOrder';
+import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -112,7 +112,7 @@ function DefaultHome() {
       .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
     [activeFilter, listState, movies, normalizedQuery, progress],
   );
-  const orderForHome = useHomeRailOrder();
+  const orderForHome = useLibraryItemOrder();
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
   const showMoviesSection = isLoading || filteredMovies.length > 0;

@@ -8,16 +8,16 @@ import { isLocalItemWatched } from '@/lib/watched';
 import { newBadgeFor } from '@/lib/newBadges';
 
 /**
- * Order for the Home rails: titles with a "new" badge first (newest first),
+ * Order for library grids and Home rails: titles with a "new" badge first (newest first),
  * finished titles last, and everything else in between in its usual order.
  * Uses the same rules as the poster badges.
  */
-export function useHomeRailOrder(): (items: readonly MediaItem[]) => MediaItem[] {
+export function useLibraryItemOrder(): <T extends MediaItem>(items: readonly T[]) => T[] {
   const { watchedKeys } = useProfiles();
   const progress = useProgressSnapshot();
   const { newEpisodesByShow, newSeasonByShow, newlyAdded } = usePosterEpisodeUpdates();
 
-  return useCallback((items: readonly MediaItem[]) => {
+  return useCallback(<T extends MediaItem>(items: readonly T[]) => {
     const ranked = items.map((item, index) => {
       const watched = matchesLibraryFilter(item, 'watched', progress) || isLocalItemWatched(item, watchedKeys);
       if (watched) return { item, index, rank: 2, newest: 0 };
