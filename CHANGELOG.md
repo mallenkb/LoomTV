@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.6](docs/releases/v2.0.6.md)
+
+Improves TV invitation playback, native streaming reliability, mobile download cleanup, PIN recovery, and parental rating filters.
+
 ### [2.0.5](docs/releases/v2.0.5.md)
 
 Fixes TV server discovery and hosted web playback progress, hardens server request handling, and corrects the image-size security waiver.
