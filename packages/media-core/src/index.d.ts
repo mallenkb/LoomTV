@@ -39,6 +39,7 @@ export interface ClientPlaybackCapabilitiesInput {
   supportsHls?: unknown;
   supportsHdr?: unknown;
   supportsTextSubtitles?: unknown;
+  forceTranscode?: unknown;
   maxWidth?: unknown;
   maxHeight?: unknown;
   maxVideoBitrateKbps?: unknown;
@@ -55,6 +56,7 @@ export interface NormalizedClientPlaybackCapabilities {
   supportsHls: boolean;
   supportsHdr: boolean;
   supportsTextSubtitles: boolean;
+  forceTranscode: boolean;
   maxWidth: number;
   maxHeight: number;
   maxVideoBitrateKbps: number;

@@ -135,6 +135,7 @@ export type LanPlaybackCapabilities = {
   supportsHls?: boolean;
   supportsHdr?: boolean;
   supportsTextSubtitles?: boolean;
+  forceTranscode?: boolean;
   maxWidth?: number;
   maxHeight?: number;
   maxVideoBitrateKbps?: number;

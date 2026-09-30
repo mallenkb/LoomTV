@@ -430,6 +430,7 @@ export type PairingStatus =
 
 export interface ClientCapabilities {
   contractVersion: 1;
+  forceTranscode?: boolean;
   containers: string[];
   videoCodecs: string[];
   audioCodecs: string[];

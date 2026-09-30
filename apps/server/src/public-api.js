@@ -18,6 +18,7 @@ import {
 import { canonicalPublicError, errorDetails } from './public-error.js';
 import { createCastSessionRegistry } from './cast-session-registry.js';
 import { publicCatalog } from './public-catalog.js';
+import { requestAbortSignal } from './media-service.js';
 
 export const PUBLIC_API_PREFIX = CANONICAL_API_PREFIX;
 export const PUBLIC_API_VERSION = CANONICAL_API_VERSION;
@@ -1416,7 +1417,12 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
       }
       if (resource === 'auth' && segments[1] === 'me' && req.method === 'GET') {
         const principal = await requirePrincipal(req);
-        writeData(res, 200, { user: await service.getCurrentUser(principal) });
+        // Invitation sessions watch as one fixed profile and cannot list
+        // profiles, so report it here for clients restoring a saved session.
+        const invitation = principal.authentication === 'invitation-session' && principal.invitationProfileId
+          ? { invitation: { profileId: principal.invitationProfileId } }
+          : {};
+        writeData(res, 200, { user: await service.getCurrentUser(principal), ...invitation });
         return true;
       }
       if (resource === 'devices' && segments.length === 1 && req.method === 'GET') {
@@ -1849,8 +1855,26 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         if (segments[2] === 'download') {
           throw requestError(410, 'download_not_allowed', 'Create an offline download lease through POST /api/v1/downloads.');
         }
-        if (segments[2] === 'transcode') await requirePrincipal(req, 'transcode');
-        else if (!url.searchParams.get('token')) throw requestError(401, 'playback_session_invalid', 'A server-issued media capability is required.');
+        if (segments[2] === 'transcode') {
+          const principal = await requirePrincipal(req);
+          if (principal.authentication === 'invitation-session') {
+            if (req.method !== 'POST') return false;
+            const planToken = url.searchParams.get('planToken');
+            const item = await service.getLibraryItem(mediaId, principal);
+            if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
+            await remotePolicy.authorizeInvitationTranscode(principal, item, planToken);
+            const lifecycle = requestAbortSignal(req, res);
+            try {
+              writeData(res, 202, await mediaService.startTranscodePlan(mediaId, /** @type {string} */ (planToken), principal, lifecycle.signal));
+            } finally {
+              lifecycle.cleanup();
+            }
+            return true;
+          }
+          if (!await service.authorizePrincipal(principal, 'transcode')) {
+            throw requestError(403, 'permission_denied', 'This account is not allowed to perform that action.');
+          }
+        } else if (!url.searchParams.get('token')) throw requestError(401, 'playback_session_invalid', 'A server-issued media capability is required.');
         return handleMedia(req, res, url, mediaId, segments[2]);
       }
       if (resource === 'sessions' && segments.length === 1 && req.method === 'GET') {

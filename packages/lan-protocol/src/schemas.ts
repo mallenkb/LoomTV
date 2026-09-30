@@ -344,6 +344,7 @@ export const lanPlaybackCapabilitiesSchema = z.object({
   supportsHls: z.boolean().optional(),
   supportsHdr: z.boolean().optional(),
   supportsTextSubtitles: z.boolean().optional(),
+  forceTranscode: z.boolean().optional(),
   maxWidth: nonNegativeNumber.optional(),
   maxHeight: nonNegativeNumber.optional(),
   maxVideoBitrateKbps: nonNegativeNumber.optional(),

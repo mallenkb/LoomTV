@@ -24,6 +24,7 @@ import {
   type ProfileListEntry,
 } from './canonical-client.ts';
 import { discoveredTvServer, type DiscoveredTvServer } from './discovery.ts';
+import { createPlaybackRecoveryGate } from './playback-recovery.ts';
 import {
   backDestination,
   preferredFocusableId,
@@ -41,9 +42,13 @@ const CONNECTION_KEY = 'loomtv-tv-connection-v1';
 const DEVICE_ID_KEY = 'loomtv-tv-device-id-v1';
 const colors = { background: '#090a0c', panel: '#17191d', panelFocus: '#2b2f36', text: '#f7f7f8', muted: '#a8adb8', accent: '#fc9c03', danger: '#ff6b6b' };
 
-type SavedConnection = { baseUrl: string; certificateFingerprint: string; credential: Credential };
+// invitationProfileId is set for invitation credentials, which watch as one
+// fixed profile and cannot list or select profiles.
+type SavedConnection = { baseUrl: string; certificateFingerprint: string; credential: Credential; invitationProfileId?: string };
 type PendingTrust = { baseUrl: string; certificateFingerprint: string; name: string };
 type ActivePlayback = {
+  generation: number;
+  tracks: { audioTrackId?: string | null; subtitleTrackId?: string | null };
   item: LibraryItem;
   url: string;
   action: 'direct' | 'hls';
@@ -116,12 +121,16 @@ function TvCard({ item, width, preferred, onFocus, onPress }: {
   );
 }
 
-function Player({ playback, client, onClose, onError }: {
+function Player({ playback, client, onClose, onError, onPlaybackFailure, feedback }: {
   playback: ActivePlayback;
   client: CanonicalTvClient;
   onClose: () => void;
   onError: (message: string) => void;
+  onPlaybackFailure: (position: number, message: string) => void;
+  feedback: string;
 }) {
+  const handledError = useRef(false);
+  const observedPosition = useRef<number | null>(null);
   const [expiresAt, setExpiresAt] = useState(playback.expiresAt || 0);
   const sourceOffset = playback.action === 'hls' ? playback.startSeconds : 0;
   const player = useVideoPlayer(playback.url, (instance) => {
@@ -131,8 +140,27 @@ function Player({ playback, client, onClose, onError }: {
   });
 
   useEffect(() => {
+    const failed = (message: string) => {
+      if (handledError.current) return;
+      handledError.current = true;
+      player.pause();
+      const currentTime = Number.isFinite(player.currentTime) ? Math.max(0, player.currentTime) : 0;
+      const position = currentTime > 0
+        ? sourceOffset + currentTime : observedPosition.current ?? playback.startSeconds;
+      onPlaybackFailure(position, message);
+    };
+    const status = player.addListener('statusChange', ({ status, error }) => {
+      if (status === 'error') failed(error?.message || 'The television could not decode this stream.');
+    });
+    // Loading can fail before the effect subscribes.
+    if (player.status === 'error') failed('The television could not decode this stream.');
+    return () => status.remove();
+  }, [onPlaybackFailure, playback.startSeconds, player, sourceOffset]);
+
+  useEffect(() => {
     let lastSaved = playback.startSeconds - sourceOffset;
     const update = player.addListener('timeUpdate', ({ currentTime }) => {
+      if (Number.isFinite(currentTime)) observedPosition.current = sourceOffset + currentTime;
       if (Math.abs(currentTime - lastSaved) < 15) return;
       lastSaved = currentTime;
       const duration = playback.durationSeconds || (Number.isFinite(player.duration) ? sourceOffset + player.duration : 0);
@@ -150,8 +178,9 @@ function Player({ playback, client, onClose, onError }: {
     let cancelled = false;
     const delay = Math.max(1_000, expiresAt - Date.now() - 60_000);
     const timer = setTimeout(() => {
+      if (handledError.current) return;
       void client.renewPlayback(playback.item.id, playback.action, playback.sessionId as string).then(async (renewed) => {
-        if (cancelled) return;
+        if (cancelled || handledError.current) return;
         const position = player.currentTime;
         const wasPlaying = player.playing;
         await player.replaceAsync(renewed.url);
@@ -168,6 +197,7 @@ function Player({ playback, client, onClose, onError }: {
   return (
     <View style={styles.playerScreen}>
       <VideoView accessibilityLabel={`Playing ${playback.item.title}`} contentFit="contain" nativeControls player={player} style={styles.video} />
+      {feedback ? <View style={styles.playerFeedback}><Text accessibilityRole="alert" style={styles.error}>{feedback}</Text></View> : null}
       <View style={styles.playerClose}><TvButton label="Back to details" onPress={() => {
         const duration = playback.durationSeconds || (Number.isFinite(player.duration) ? sourceOffset + player.duration : 0);
         void client.saveProgress(playback.item.id, sourceOffset + player.currentTime, duration).catch(() => undefined);
@@ -209,6 +239,7 @@ function TvApp() {
   });
   const [lastFocusedEpisodeId, setLastFocusedEpisodeId] = useState('');
   const pairingGeneration = useRef(0);
+  const playbackRecovery = useRef(createPlaybackRecoveryGate());
 
   const myListIds = useMemo(() => new Set(
     listEntries
@@ -230,6 +261,21 @@ function TvApp() {
       const proxyBaseUrl = await startTvSecureTransport(saved.baseUrl, saved.certificateFingerprint);
       const restored = new CanonicalTvClient(saved.baseUrl, saved.credential, proxyBaseUrl);
       await restored.discover();
+      if (saved.credential.scheme === 'LoomInvitation') {
+        // auth/me is the one account route an invitation may call; it also
+        // confirms the session is still valid.
+        const me = await restored.me();
+        const profileId = me.invitation?.profileId || saved.invitationProfileId;
+        if (!profileId) throw Object.assign(new Error('The invitation has no profile.'), { status: 403 });
+        restored.useInvitationProfile(profileId);
+        const library = await restored.library();
+        if (generation !== pairingGeneration.current) return;
+        setBaseUrl(saved.baseUrl);
+        setClient(restored);
+        showInvitationLibrary(library.items);
+        setSavedConnectionRetry(null);
+        return;
+      }
       const restoredProfiles = await restored.profiles();
       if (generation !== pairingGeneration.current) return;
       setBaseUrl(saved.baseUrl);
@@ -238,7 +284,9 @@ function TvApp() {
       setSavedConnectionRetry(null);
       setScreen('profiles');
     } catch (nextError) {
+      if (generation !== pairingGeneration.current) return;
       await stopTvSecureTransport().catch(() => undefined);
+      if (generation !== pairingGeneration.current) return;
       setBaseUrl(saved.baseUrl);
       setClient(null);
       setProfiles([]);
@@ -252,7 +300,7 @@ function TvApp() {
         setError('The saved LoomTV server is unavailable. Check the server and network, then retry.');
       }
     } finally {
-      setBusy(false);
+      if (generation === pairingGeneration.current) setBusy(false);
     }
   }, []);
 
@@ -314,6 +362,8 @@ function TvApp() {
       if (destination === 'exit') return false;
       if (screen === 'approval') pairingGeneration.current += 1;
       if (screen === 'player' && playback && client) {
+        playbackRecovery.current.cancel();
+        setBusy(false);
         void client.stopPlayback(playback.item.id, playback.sessionId).catch(() => undefined);
         setPlayback(null);
       }
@@ -356,19 +406,25 @@ function TvApp() {
           await SecureStore.setItemAsync(DEVICE_ID_KEY, deviceId);
         }
         const accepted = await next.acceptInvitation(invitationId.trim(), invitationSecret.trim(), deviceId);
+        if (generation !== pairingGeneration.current) return;
         const credential = { ...accepted.credential, scheme: 'LoomInvitation' as const };
+        const invitationProfileId = accepted.scope?.profileId;
+        if (!invitationProfileId) throw new Error('The invitation does not name a profile to watch as.');
         next.setCredential(credential);
+        next.useInvitationProfile(invitationProfileId);
         await SecureStore.setItemAsync(CONNECTION_KEY, JSON.stringify({
           baseUrl: next.baseUrl,
           certificateFingerprint: pendingTrust.certificateFingerprint,
           credential,
+          invitationProfileId,
         } satisfies SavedConnection));
-        setProfiles((await next.profiles()).profiles);
+        const library = await next.library();
+        if (generation !== pairingGeneration.current) return;
         setClient(next);
         setSavedConnectionRetry(null);
         setInvitationId('');
         setInvitationSecret('');
-        setScreen('profiles');
+        showInvitationLibrary(library.items);
         return;
       }
       const request = await next.requestPairing('LoomTV living-room client');
@@ -395,9 +451,22 @@ function TvApp() {
       }
       throw new Error('Pairing expired. Try again.');
     } catch (nextError) {
+      if (generation !== pairingGeneration.current) return;
       setScreen('connect');
       setError(nextError instanceof Error ? nextError.message : 'Could not connect to the server.');
-    } finally { setBusy(false); }
+    } finally { if (generation === pairingGeneration.current) setBusy(false); }
+  }
+
+  // Invitations skip the profile picker and My List.
+  function showInvitationLibrary(libraryItems: LibraryItem[]) {
+    setProfiles([]);
+    setItems(libraryItems);
+    setListEntries([]);
+    setQuery('');
+    setDetail(null);
+    setParentSeries(null);
+    setDetailOrigin('library');
+    setScreen('library');
   }
 
   async function chooseProfile(profile: Profile) {
@@ -460,15 +529,23 @@ function TvApp() {
 
   async function play(item: LibraryItem) {
     if (!client) return;
+    const generation = playbackRecovery.current.begin();
+    const tracks = { audioTrackId, subtitleTrackId };
     setBusy(true);
     setError('');
     try {
       const progress = await client.progress(item.id).catch(() => ({ progress: null }));
       const record = progress.progress;
       const startSeconds = Math.max(0, Number(record?.positionSeconds ?? record?.position ?? 0));
-      const plan = await client.planPlayback(item.id, startSeconds, { audioTrackId, subtitleTrackId });
+      if (!playbackRecovery.current.isCurrent(generation)) return;
+      const plan = await client.planPlayback(item.id, startSeconds, tracks);
       if (plan.directUrl) {
+        if (!playbackRecovery.current.isCurrent(generation)) {
+          await client.stopPlayback(item.id, plan.directSessionId).catch(() => undefined);
+          return;
+        }
         setPlayback({
+          generation, tracks,
           item, url: client.absoluteUrl(plan.directUrl), action: 'direct',
           sessionId: plan.directSessionId, expiresAt: plan.directExpiresAt, startSeconds, durationSeconds: plan.probe.durationSeconds,
         });
@@ -476,14 +553,54 @@ function TvApp() {
         return;
       }
       if (!plan.transcodeUrl) throw new Error('This video cannot be played by this television.');
+      if (!playbackRecovery.current.isCurrent(generation)) return;
       const started = await client.startTranscode(plan.transcodeUrl);
+      if (!playbackRecovery.current.isCurrent(generation)) {
+        await client.stopPlayback(item.id, started.sessionId).catch(() => undefined);
+        return;
+      }
       setPlayback({
+        generation, tracks,
         item, url: started.playlistUrl, action: 'hls', sessionId: started.sessionId,
         expiresAt: started.expiresAt, startSeconds, durationSeconds: plan.probe.durationSeconds,
       });
       setScreen('player');
-    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : 'Playback could not start.'); }
-    finally { setBusy(false); }
+    } catch (nextError) {
+      if (playbackRecovery.current.isCurrent(generation)) setError(nextError instanceof Error ? nextError.message : 'Playback could not start.');
+    } finally { if (playbackRecovery.current.isCurrent(generation)) setBusy(false); }
+  }
+
+  async function recoverPlayback(failed: ActivePlayback, position: number, message: string) {
+    if (!client || !playbackRecovery.current.isCurrent(failed.generation)) return;
+    if (!playbackRecovery.current.claim(failed.generation)) {
+      setError(`Playback failed after the compatibility retry. ${message} Choose Back to details to try again.`);
+      void client.stopPlayback(failed.item.id, failed.sessionId).catch(() => undefined);
+      return;
+    }
+    setError('Playback failed. Trying a compatible stream once...');
+    setBusy(true);
+    try {
+      // Revoke the failing capability before admitting another playback lease.
+      await client.stopPlayback(failed.item.id, failed.sessionId);
+      if (!playbackRecovery.current.isCurrent(failed.generation)) return;
+      const plan = await client.planPlayback(failed.item.id, position, failed.tracks, true);
+      if (plan.plan.mode !== 'transcode' || !plan.transcodeUrl) throw new Error('The server cannot provide a compatible re-encoded stream.');
+      if (!playbackRecovery.current.isCurrent(failed.generation)) return;
+      const started = await client.startTranscode(plan.transcodeUrl);
+      if (!playbackRecovery.current.isCurrent(failed.generation)) {
+        await client.stopPlayback(failed.item.id, started.sessionId).catch(() => undefined);
+        return;
+      }
+      setPlayback({
+        ...failed, action: 'hls', url: started.playlistUrl, sessionId: started.sessionId,
+        expiresAt: started.expiresAt, startSeconds: position, durationSeconds: plan.probe.durationSeconds,
+      });
+      setError('');
+    } catch (nextError) {
+      if (playbackRecovery.current.isCurrent(failed.generation)) {
+        setError(`Playback could not be recovered. ${nextError instanceof Error ? nextError.message : message} Choose Back to details to try again.`);
+      }
+    } finally { if (playbackRecovery.current.isCurrent(failed.generation)) setBusy(false); }
   }
 
   async function loadPlaybackOptions(item: LibraryItem) {
@@ -492,12 +609,15 @@ function TvApp() {
     setError('');
     try {
       const plan = await client.planPlayback(item.id, 0);
+      // Reading tracks can issue a direct lease even though playback has not begun.
+      await client.stopPlayback(item.id, plan.directSessionId).catch(() => undefined);
       setPlaybackTracks(plan.probe.tracks || []);
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : 'Playback options are unavailable.'); }
     finally { setBusy(false); }
   }
 
   async function signOut() {
+    playbackRecovery.current.cancel();
     const generation = ++pairingGeneration.current;
     const previousClient = client;
     setClient(null); setProfiles([]); setItems([]); setListEntries([]); setDetail(null); setParentSeries(null);
@@ -535,11 +655,15 @@ function TvApp() {
     key={playback.sessionId || playback.url}
     client={client}
     onClose={() => {
+      playbackRecovery.current.cancel();
+      setBusy(false);
       void client.stopPlayback(playback.item.id, playback.sessionId).catch(() => undefined);
       setPlayback(null);
       setScreen('detail');
     }}
     onError={setError}
+    onPlaybackFailure={(position, message) => { void recoverPlayback(playback, position, message); }}
+    feedback={error}
     playback={playback}
   />;
 
@@ -558,11 +682,11 @@ function TvApp() {
               onPress={() => openBrowseScreen('library')}
               selected={screen === 'library' || (screen === 'detail' && detailOrigin === 'library')}
             />
-            <TvButton
+            {client?.isInvitation ? null : <TvButton
               label="My List"
               onPress={() => openBrowseScreen('my-list')}
               selected={screen === 'my-list' || (screen === 'detail' && detailOrigin === 'my-list')}
-            />
+            />}
           </> : null}
           {screen !== 'connect' && screen !== 'approval' ? <TvButton label="Sign out" onPress={() => void signOut()} /> : null}
         </View>
@@ -654,11 +778,11 @@ function TvApp() {
         <View style={styles.row}>
           {detail.kind !== 'series' ? <TvButton label="Play" onPress={() => void play(detail)} preferred /> : null}
           {detail.kind !== 'series' ? <TvButton label="Playback options" onPress={() => void loadPlaybackOptions(detail)} /> : null}
-          <TvButton
+          {client?.isInvitation ? null : <TvButton
             label={myListIds.has((parentSeries || detail).id) ? 'Remove from My List' : 'Add to My List'}
             onPress={() => void toggleMyList(parentSeries || detail)}
             selected={myListIds.has((parentSeries || detail).id)}
-          />
+          />}
           <TvButton
             label={parentSeries ? `Back to ${parentSeries.title}` : `Back to ${detailOrigin === 'my-list' ? 'My List' : 'Library'}`}
             onPress={returnFromDetail}
@@ -702,4 +826,5 @@ const styles = StyleSheet.create({
   playerScreen: { flex: 1, backgroundColor: '#000' },
   video: { flex: 1 },
   playerClose: { position: 'absolute', top: 36, left: 48 },
+  playerFeedback: { position: 'absolute', bottom: 48, left: 48, right: 48, padding: 16, backgroundColor: colors.panel },
 });

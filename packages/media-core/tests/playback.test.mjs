@@ -14,6 +14,23 @@ function probe(format, videoCodec = 'h264', audioCodec = 'aac', options) {
 
 const movFamily = 'mov,mp4,m4a,3gp,3g2,mj2';
 
+test('a compatibility retry forces encoding through repeated normalization', () => {
+  assert.equal(normalizeClientPlaybackCapabilities().forceTranscode, false);
+  assert.equal(normalizeClientPlaybackCapabilities({ forceTranscode: 'true' }).forceTranscode, false);
+  const capabilities = normalizeClientPlaybackCapabilities(normalizeClientPlaybackCapabilities({ forceTranscode: true }));
+  for (const container of ['mp4', 'mkv']) {
+    const media = probe({ format_name: container });
+    const plan = playbackPlanForMedia(media, { capabilities });
+    assert.equal(plan.mode, 'transcode');
+    assert.equal(plan.sourceAction, 'transcode');
+    assert.equal(plan.copyVideo, false);
+    assert.equal(plan.copyAudio, false);
+    assert.equal(plan.outputVideoCodec, 'h264');
+    assert.equal(plan.outputAudioCodec, 'aac');
+    assert.equal(plan.reasonCode, 'transcode_client_recovery');
+  }
+});
+
 test('ffprobe MP4 family uses filename and brand hints without making MOV direct safe', () => {
   for (const format of [
     { format_name: movFamily, filename: '/media/movie.MP4' },

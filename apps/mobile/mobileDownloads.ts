@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import { createDownloadResumable } from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 
 export type MobileDownloadCapability = {
@@ -34,6 +35,11 @@ let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let attemptSequence = 0;
 const mutations = new Map<string, Promise<unknown>>();
 const hostGenerations = new Map<string, number>();
+const activeTransfers = new Map<string, Set<AbortController>>();
+
+function cancelledDownload(): Error {
+  return Object.assign(new Error('The download was cancelled.'), { name: 'AbortError' });
+}
 
 function serializeDownload<T>(key: string, operation: () => Promise<T>): Promise<T> {
   const pending = (mutations.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
@@ -122,16 +128,31 @@ type SaveDownloadInput = {
   capability: MobileDownloadCapability;
   contentUrl: string;
   isCurrent?: () => boolean;
+  signal?: AbortSignal;
 };
 
 export function saveMobileDownload(input: SaveDownloadInput): Promise<MobileDownload> {
   const generation = hostGenerations.get(input.hostDeviceId) || 0;
-  const isCurrent = () => generation === (hostGenerations.get(input.hostDeviceId) || 0) && (input.isCurrent?.() ?? true);
-  return serializeDownload(input.hostDeviceId, () => commitMobileDownload({ ...input, isCurrent }));
+  const controller = new AbortController();
+  const transfers = activeTransfers.get(input.hostDeviceId) || new Set<AbortController>();
+  transfers.add(controller);
+  activeTransfers.set(input.hostDeviceId, transfers);
+  const abort = () => controller.abort();
+  input.signal?.addEventListener('abort', abort, { once: true });
+  if (input.signal?.aborted) abort();
+  const isCurrent = () => !controller.signal.aborted
+    && generation === (hostGenerations.get(input.hostDeviceId) || 0) && (input.isCurrent?.() ?? true);
+  return serializeDownload(input.hostDeviceId, () => commitMobileDownload({ ...input, signal: controller.signal, isCurrent }))
+    .finally(() => {
+      input.signal?.removeEventListener('abort', abort);
+      transfers.delete(controller);
+      if (!transfers.size) activeTransfers.delete(input.hostDeviceId);
+    });
 }
 
 export function clearMobileDownloads(hostDeviceId: string): Promise<void> {
   hostGenerations.set(hostDeviceId, (hostGenerations.get(hostDeviceId) || 0) + 1);
+  for (const controller of activeTransfers.get(hostDeviceId) || []) controller.abort();
   return serializeDownload(hostDeviceId, async () => {
     const db = await database();
     const rows = await db.getAllAsync<DownloadRow>('SELECT * FROM mobile_downloads WHERE host_device_id=?', hostDeviceId);
@@ -144,12 +165,16 @@ export function clearMobileDownloads(hostDeviceId: string): Promise<void> {
 }
 
 async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDownload> {
-  if (input.isCurrent?.() === false) throw new Error('The download was cancelled.');
+  const assertCurrent = () => {
+    if (input.signal?.aborted || input.isCurrent?.() === false) throw cancelledDownload();
+  };
+  assertCurrent();
   const db = await database();
-  const previous = await db.getFirstAsync<{ uri: string }>(
-    'SELECT uri FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=?',
+  const previous = await db.getFirstAsync<DownloadRow>(
+    'SELECT * FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=?',
     input.hostDeviceId, input.profileId, input.capability.mediaId,
   );
+  assertCurrent();
   const directory = new Directory(
     Paths.document,
     'loomtv-downloads',
@@ -159,15 +184,34 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
     `attempt-${Date.now()}-${++attemptSequence}`,
   );
   directory.create({ idempotent: true, intermediates: true });
+  const file = new File(directory, 'media');
+  let cancelTransfer: Promise<void> | undefined;
+  let transferring = true;
+  let directoryCommitted = false;
+  let task: ReturnType<typeof createDownloadResumable> | undefined;
+  let rejectCancelled: (error: Error) => void = () => {};
+  const cancellation = new Promise<never>((_, reject) => { rejectCancelled = reject; });
+  const abort = () => {
+    if (!transferring || cancelTransfer || !task) return;
+    // Cancellation must release the host queue even if downloadAsync never settles.
+    cancelTransfer = task.cancelAsync();
+    void cancelTransfer.then(() => rejectCancelled(cancelledDownload()), rejectCancelled);
+  };
+  input.signal?.addEventListener('abort', abort, { once: true });
   try {
-    const file = await File.downloadFileAsync(input.contentUrl, directory, {
+    assertCurrent();
+    task = createDownloadResumable(input.contentUrl, file.uri, {
       headers: { Authorization: mobileDownloadAuthorization(input.capability) },
-      idempotent: false,
     });
+    const result = await Promise.race([task.downloadAsync(), cancellation]);
+    transferring = false;
+    assertCurrent();
+    if (!result) throw cancelledDownload();
+    if (result.status < 200 || result.status >= 300) throw new Error('The server could not complete this download. Please retry.');
     if (input.capability.sizeBytes > 0 && file.size !== input.capability.sizeBytes) {
       throw new Error('The downloaded file is incomplete. Please retry.');
     }
-    if (input.isCurrent?.() === false) throw new Error('The download was cancelled.');
+    assertCurrent();
     const createdAt = Date.now();
     const sizeBytes = Number(file.size || input.capability.sizeBytes || 0);
     await db.runAsync(
@@ -183,6 +227,23 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
       sizeBytes,
       createdAt,
     );
+    directoryCommitted = true;
+    // A scope change can happen while the asynchronous database write finishes.
+    // Restore the preceding copy before cleaning this attempt's file.
+    if (input.signal?.aborted || input.isCurrent?.() === false) {
+      if (previous) {
+        await db.runAsync(
+          'UPDATE mobile_downloads SET title=?,uri=?,size_bytes=?,created_at=? WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
+          previous.title, previous.uri, previous.size_bytes, previous.created_at,
+          input.hostDeviceId, input.profileId, input.capability.mediaId, file.uri,
+        );
+      } else {
+        await db.runAsync('DELETE FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
+          input.hostDeviceId, input.profileId, input.capability.mediaId, file.uri);
+      }
+      directoryCommitted = false;
+      throw cancelledDownload();
+    }
     // Commit the new file before removing the previous copy.
     if (previous?.uri && previous.uri !== file.uri) {
       try {
@@ -200,9 +261,15 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
       createdAt,
     };
   } catch (error) {
+    // Wait for native cancellation, rather than the original transfer, before
+    // deleting files the native task may still be writing.
+    if (cancelTransfer) await cancelTransfer.catch(() => undefined);
     // This attempt owns only its staging directory, never the shared media root.
-    try { if (directory.exists) directory.delete(); } catch { /* Preserve the original failure. */ }
+    // If restoring metadata failed, retain the file its database row still owns.
+    try { if (!directoryCommitted && directory.exists) directory.delete(); } catch { /* Preserve the original failure. */ }
     throw error;
+  } finally {
+    input.signal?.removeEventListener('abort', abort);
   }
 }
 

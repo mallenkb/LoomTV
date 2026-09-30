@@ -139,6 +139,7 @@ export function normalizeClientPlaybackCapabilities(input = {}) {
     supportsHls: streamingProtocols.includes('hls'),
     supportsHdr: hdrFormats.length > 0,
     supportsTextSubtitles: subtitleModes.includes('text') || subtitleModes.includes('external'),
+    forceTranscode: input.forceTranscode === true,
     maxWidth: boundedInteger(input.maxWidth, 0, 0, 16_384),
     maxHeight: boundedInteger(input.maxHeight, 0, 0, 16_384),
     maxVideoBitrateKbps: boundedInteger(input.maxVideoBitrateKbps, 0, 0, 500_000),
@@ -258,6 +259,7 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
 
   const codec = 'h264';
   const reasons = [];
+  if (capabilities.forceTranscode) reasons.push('client playback recovery');
   if (!httpSupported) reasons.push('HTTP transport');
   if (!containerSupported) reasons.push(`${facts.container || 'unknown'} container`);
   if (!videoSupported) reasons.push(`${facts.videoCodec || 'unknown'} video`);
@@ -266,8 +268,8 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
   if (!bitrateSupported) reasons.push('client bitrate');
   if (!hdrSupported) reasons.push('HDR tone mapping');
   if (burnSubtitles) reasons.push('subtitle burn-in');
-  const direct = sourceDirectCompatible && !burnSubtitles;
-  const remux = !direct && selectedVideoCodec === 'h264' && videoSupported
+  const direct = !capabilities.forceTranscode && sourceDirectCompatible && !burnSubtitles;
+  const remux = !capabilities.forceTranscode && !direct && selectedVideoCodec === 'h264' && videoSupported
     && sizeSupported && bitrateSupported && hdrSupported && !burnSubtitles;
   const mode = direct ? 'direct' : remux ? 'remux' : 'transcode';
   if (mode !== 'direct' && !capabilities.supportsHls) throw playbackUnavailable(
@@ -280,7 +282,8 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
     'playback_codec_unsupported', 'The canonical MPEG-TS HLS audio rendition requires AAC support.', 422,
   );
   const reasonCode = direct ? 'direct_compatible'
-    : remux ? (audioSupported ? 'remux_container' : 'remux_audio')
+    : capabilities.forceTranscode ? 'transcode_client_recovery'
+      : remux ? (audioSupported ? 'remux_container' : 'remux_audio')
       : !videoSupported ? 'transcode_video_codec'
         : !sizeSupported ? 'transcode_dimensions'
           : !bitrateSupported ? 'transcode_bitrate'

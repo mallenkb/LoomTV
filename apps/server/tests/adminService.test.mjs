@@ -806,3 +806,42 @@ test('a concurrent sign-in burst runs no more password checks than the lock budg
   assert.equal(results.filter((error) => error.code === 'invalid_credentials' || error.code === 'login_locked').length, 5);
   await assert.rejects(service.createSession({ password: OWNER_PASSWORD, address: '127.0.0.1' }), { status: 429, code: 'login_locked' });
 });
+
+
+test('successful sign-in preserves a failure completed during its check', async (context) => {
+  const held = [];
+  const kdfLimiter = { run: (work) => new Promise((resolve, reject) => { held.push(() => work().then(resolve, reject)); }) };
+  const { service, dataDir } = await onboardedService({ options: { kdfLimiter, loginDelay: async () => {} } });
+  context.after(async () => { await service.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const correct = service.createSession({ password: OWNER_PASSWORD, address: '127.0.0.1' });
+  await new Promise((resolve) => { setImmediate(resolve); });
+  const wrong = service.createSession({ password: 'incorrect-password', address: '127.0.0.1' }).catch((error) => error);
+  await new Promise((resolve) => { setImmediate(resolve); });
+  assert.equal(held.length, 2);
+  held.pop()();
+  assert.equal((await wrong).code, 'invalid_credentials');
+  held.shift()();
+  await correct;
+  const persisted = JSON.parse(await fs.readFile(path.join(dataDir, headlessAdminStateFilename), 'utf8'));
+  assert.deepEqual(persisted.loginAttempts.map((entry) => entry.failures), [1, 1], 'identity and address failures both survive');
+});
+
+test('password reset invalidates a sign-in whose verification already succeeded', async (context) => {
+  let reportVerified;
+  let resume;
+  const verified = new Promise((resolve) => { reportVerified = resolve; });
+  const release = new Promise((resolve) => { resume = resolve; });
+  const kdfLimiter = { run: async (work) => {
+    const result = await work();
+    reportVerified();
+    await release;
+    return result;
+  } };
+  const { service, dataDir, principal } = await onboardedService({ options: { kdfLimiter, loginDelay: async () => {} } });
+  context.after(async () => { await service.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const attempt = service.createSession({ password: OWNER_PASSWORD, address: '127.0.0.1' }).catch((error) => error);
+  await verified;
+  await service.changePassword({ currentPassword: OWNER_PASSWORD, newPassword: 'replacement-owner-password' }, principal);
+  resume();
+  assert.equal((await attempt).code, 'credentials_changed');
+});

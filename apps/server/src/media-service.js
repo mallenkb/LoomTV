@@ -9,6 +9,7 @@ import {
   DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS,
 } from './playback-session-registry.js';
 import { createTranscodeAdmission } from './transcode-admission.js';
+import { HLS_PACING_INTERVAL_MS, HLS_SEGMENT_SECONDS, hlsPacingDecision, hlsSegmentIndex } from './hls-pacing.js';
 import { createTranscodeCacheQuota } from './transcode-cache-quota.js';
 import { canonicalPublicError } from './public-error.js';
 
@@ -303,7 +304,7 @@ function externalSubtitleTracks(source) {
 }
 
 /** @param {import('./server-media-types.js').MediaRequest} req @param {import('./server-media-types.js').MediaResponse} res */
-function requestAbortSignal(req, res) {
+export function requestAbortSignal(req, res) {
   const controller = new AbortController();
   const abort = () => {
     if (!res.writableEnded) controller.abort();
@@ -509,7 +510,10 @@ function hardwareArgs(health, backend, codec, profile) {
 function transcodeArgs(filePath, outputDir, health, profile) {
   const hardware = profile.hardware ? hardwareArgs(health, profile.backend, profile.codec, profile) : null;
   const seek = profile.startSeconds > 0 ? ['-ss', String(profile.startSeconds)] : [];
-  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...seek, ...(hardware?.beforeInput || []), '-i', filePath];
+  // Windows lacks POSIX process suspension. Bound input rate instead of
+  // allowing a fast remux to fill the session cache before playback.
+  const inputPacing = globalThis.process?.platform === 'win32' ? ['-re'] : [];
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...inputPacing, ...seek, ...(hardware?.beforeInput || []), '-i', filePath];
   const videoMap = profile.selectedVideoTrackIndex === undefined ? '0:v:0?' : `0:${profile.selectedVideoTrackIndex}`;
   const audioMap = profile.selectedAudioTrackIndex === undefined ? null : `0:${profile.selectedAudioTrackIndex}`;
   if (profile.burnSubtitles && profile.selectedSubtitleTrackIndex !== undefined && profile.subtitleKind === 'bitmap') {
@@ -554,7 +558,11 @@ function transcodeArgs(filePath, outputDir, health, profile) {
     if (profile.copyAudio) args.push('-c:a', 'copy');
     else args.push('-c:a', 'aac', '-b:a', `${profile.audioBitrateKbps}k`, '-ac', '2');
   }
-  args.push('-f', 'hls', '-hls_time', '2', '-hls_list_size', '45', '-hls_flags', 'delete_segments+independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
+  // An event playlist keeps every segment, so a late start, a long pause, or
+  // a backward seek still finds them. hls-pacing.js bounds how far the
+  // encoder runs ahead. Quota exhaustion tears down the whole session,
+  // rather than removing files still named by the EVENT playlist.
+  args.push('-f', 'hls', '-hls_time', String(HLS_SEGMENT_SECONDS), '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
   return args;
 }
 
@@ -724,6 +732,37 @@ export function createHeadlessMediaService({
     return quotaSweepPromise;
   }
 
+  // Pausing a process needs POSIX job-control signals, which Windows lacks;
+  // there transcodeArgs uses real-time input pacing and quotas still apply.
+  const canSuspendEncoder = globalThis.process?.platform !== 'win32';
+
+  /** @param {import('./server-media-types.js').TranscodeSession} session @param {'SIGSTOP' | 'SIGCONT'} signal */
+  function signalEncoder(session, signal) {
+    try { return session.process?.kill?.(signal) === true; } catch { return false; }
+  }
+
+  /** Pause or resume the encoder. @param {import('./server-media-types.js').TranscodeSession} session */
+  async function paceSession(session) {
+    const encoder = session.process;
+    if (session.cleaned || session.pacing || !encoder || !canSuspendEncoder) return;
+    session.pacing = true;
+    try {
+      const names = await fsPromises.readdir(session.outputDir).catch(() => []);
+      if (session.cleaned || stopping || session.process !== encoder || typeof encoder.exitCode === 'number') return;
+      let producedIndex = -1;
+      for (const name of names) {
+        const index = hlsSegmentIndex(name);
+        if (index !== null && index > producedIndex) producedIndex = index;
+      }
+      const requestedIndex = session.lastRequestedSegment ?? null;
+      const decision = hlsPacingDecision({ producedIndex, requestedIndex, suspended: session.encoderSuspended === true });
+      if (decision === 'suspend' && signalEncoder(session, 'SIGSTOP')) session.encoderSuspended = true;
+      if (decision === 'resume' && signalEncoder(session, 'SIGCONT')) session.encoderSuspended = false;
+    } finally {
+      session.pacing = false;
+    }
+  }
+
   /** @param {import('./server-media-types.js').TranscodeSession} session */
   async function enforceSessionQuota(session) {
     try {
@@ -869,8 +908,12 @@ export function createHeadlessMediaService({
     } finally {
       session.cleanupStarting = false;
     }
+    if (session.pacingTimer) clearIntervalFn(session.pacingTimer);
+    session.pacingTimer = null;
     session.cleanupPromise = Promise.resolve().then(async () => {
       try {
+        // A paused encoder acts on SIGTERM only after it is continued.
+        if (session.encoderSuspended) signalEncoder(session, 'SIGCONT');
         await terminateChild(session.process, termGraceMs);
         sessions.delete(session.id);
         const permit = session.permit;
@@ -904,6 +947,11 @@ export function createHeadlessMediaService({
     if (session.cleaned || stopping) throw cancelledError();
     const child = spawnProcess(transcoder.path || '', transcodeArgs(session.filePath, session.outputDir, transcoder.getHealth(), profile), { stdio: ['ignore', 'ignore', 'pipe'] });
     session.process = child;
+    session.encoderSuspended = false;
+    if (!session.pacingTimer) {
+      session.pacingTimer = setIntervalFn(() => { void paceSession(session); }, HLS_PACING_INTERVAL_MS);
+      session.pacingTimer?.unref?.();
+    }
     child.stderr?.on('data', (chunk) => {
       session.stderr = `${session.stderr}${chunk.toString()}`.slice(-4000);
     });
@@ -912,7 +960,12 @@ export function createHeadlessMediaService({
     });
     child.once('exit', (code) => {
       session.exitCode = code;
-      if (session.process === child) session.process = null;
+      if (session.process === child) {
+        session.process = null;
+        session.encoderSuspended = false;
+        if (session.pacingTimer) clearIntervalFn(session.pacingTimer);
+        session.pacingTimer = null;
+      }
       if (session.cleaned || stopping) return;
       if (code === 0) {
         const permit = session.permit;
@@ -964,12 +1017,22 @@ export function createHeadlessMediaService({
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
     if (requestedProfile.planToken) {
       const stored = transcodePlans.get(requestedProfile.planToken);
-      transcodePlans.delete(requestedProfile.planToken);
       if (!stored || stored.expiresAt <= now() || stored.itemId !== itemId || stored.principalId !== principal.id) {
         throw playbackError('playback_session_invalid', 'The playback plan is expired or does not belong to this account.', 401);
       }
+      const binding = stored.profileContext;
+      const invitation = principal.authentication === 'invitation-session';
+      if (invitation || binding?.invitationSessionId) {
+        if (!invitation || !binding?.invitationSessionId
+          || binding.invitationSessionId !== principal.invitationSessionId
+          || binding.profileId !== principal.invitationProfileId
+          || binding.deviceId !== principal.deviceId) {
+          throw playbackError('permission_denied', 'The playback plan does not belong to this invitation session.', 403);
+        }
+      }
+      transcodePlans.delete(requestedProfile.planToken);
       requestedProfile = { ...stored.execution, profileContext: stored.profileContext };
-    } else if (requestedProfile.canonicalPlanRequired) {
+    } else if (requestedProfile.canonicalPlanRequired || principal.authentication === 'invitation-session') {
       throw playbackError('playback_session_invalid', 'A server-issued playback plan is required.', 401);
     }
     const item = await adminService.resolveMediaPath(itemId, principal, requestedProfile.sourceId);
@@ -1473,7 +1536,7 @@ export function createHeadlessMediaService({
       res.writeHead(204, { 'Cache-Control': 'no-store' });
       return res.end();
     }
-    const transcodeMatch = pathname.match(/^\/api\/media\/transcode\/([0-9a-f-]{36})\/(index\.m3u8|segment-\d{5}\.ts)$/i);
+    const transcodeMatch = pathname.match(/^\/api\/media\/transcode\/([0-9a-f-]{36})\/(index\.m3u8|segment-\d{5,}\.ts)$/i);
     if (transcodeMatch && (req.method === 'GET' || req.method === 'HEAD')) {
       // Hls.js refreshes its loader headers when a lease rotates, which lets
       // the client hand off the new capability without rebuilding the media
@@ -1514,6 +1577,7 @@ export function createHeadlessMediaService({
       }
       if (!await enforceSessionQuota(session)) return json(res, 507, { ok: false, error: 'transcode_cache_quota' });
       const filePath = path.join(session.outputDir, transcodeMatch[2]);
+      const requestedSegment = hlsSegmentIndex(transcodeMatch[2]);
       if (transcodeMatch[2] === 'index.m3u8') {
         const result = await servePlaylist(req, res, session);
         if (!res.destroyed && !session.cleaned) session.ready = true;
@@ -1521,6 +1585,10 @@ export function createHeadlessMediaService({
       }
       return serveFile(req, res, configuredCacheDir, filePath, mimeFor(filePath), false, {}, null, () => {
         touchTranscodeSession(session, { activate: true });
+        if (requestedSegment !== null) {
+          session.lastRequestedSegment = requestedSegment;
+          if (session.encoderSuspended) void paceSession(session);
+        }
       });
     }
     const itemMatch = pathname.match(/^\/api\/media\/items\/([a-f0-9]{32})(?:\/(download))?$/i);

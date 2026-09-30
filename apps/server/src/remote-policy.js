@@ -359,6 +359,22 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
   }
 
   /**
+   * Invitations may execute only a server-issued playback plan for their scope.
+   * The media service validates the opaque plan token and its session binding.
+   * @param {import('./server-media-types.js').Principal} principal
+   * @param {import('./server-media-types.js').LibraryItem} media
+   * @param {string | null} planToken
+   */
+  async function authorizeInvitationTranscode(principal, media, planToken) {
+    if (principal.authentication !== 'invitation-session' || !principal.invitationSessionId
+      || !hasPermission(principal, 'stream')) {
+      throw remoteError(403, 'permission_denied', 'Invitation streaming permission is required.');
+    }
+    if (!planToken) throw remoteError(401, 'playback_session_invalid', 'A server-issued playback plan is required.');
+    return invitationProfileContext(principal, media);
+  }
+
+  /**
    * invitationProfileContext for many items with one client-state read.
    * @param {import('./server-media-types.js').Principal} principal
    */
@@ -474,7 +490,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
 
   return {
     context, preflight, assertPrincipal, policy, updatePolicy, audit,
-    createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext, invitationProfileChecker,
+    createInvitation, acceptInvitation, authenticateInvitation, resolveInvitationPrincipal, invitationProfileContext, authorizeInvitationTranscode, invitationProfileChecker,
     listInvitations: (/** @type {import('./server-media-types.js').Principal} */ principal) => store.listInvitations(principal.id),
     /** @param {string} id @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').AuthRequest} req */
     revokeInvitation(id, principal, req) {

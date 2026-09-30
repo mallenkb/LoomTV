@@ -8,7 +8,7 @@ import {
   lanProgressSaveRequestSchema,
 } from '../src/schemas.ts';
 import { parseProgressSavePayload } from '../../video-contracts/src/index.mjs';
-import { normalizeClientPlaybackCapabilities } from '../../media-core/src/index.mjs';
+import { normalizeClientPlaybackCapabilities, playbackPlanForMedia } from '../../media-core/src/index.mjs';
 import { playbackPlanResultSchema } from '../../../apps/desktop/src/lib/desktopDecoders.ts';
 
 test('detail metadata defaults missing cast without accepting malformed values', () => {
@@ -41,6 +41,8 @@ test('LAN requests and desktop responses preserve normalized playback capabiliti
   for (const input of [
     { streamingProtocols: ['http'], subtitleModes: ['burn-in'], hdrFormats: [] },
     { streamingProtocols: ['http', 'hls'], subtitleModes: ['text', 'bitmap', 'external', 'burn-in'], hdrFormats: ['hdr10', 'hdr10-plus', 'hlg', 'dolby-vision'] },
+    { forceTranscode: false },
+    { forceTranscode: true },
   ]) {
     const capabilities = normalizeClientPlaybackCapabilities(input);
     assert.deepEqual(lanPlaybackCapabilitiesSchema.parse(capabilities), capabilities);
@@ -52,4 +54,38 @@ test('LAN requests and desktop responses preserve normalized playback capabiliti
     assert.deepEqual(response.data.capabilities, capabilities);
   }
   assert.deepEqual(lanPlaybackCapabilitiesSchema.parse({ supportsHls: true }), { supportsHls: true });
+});
+
+test('LAN compatibility retries force encoding while ordinary playback stays direct', () => {
+  const media = {
+    container: 'mp4', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080,
+    tracks: [
+      { id: 'video-0', index: 0, kind: 'video', codec: 'h264' },
+      { id: 'audio-1', index: 1, kind: 'audio', codec: 'aac' },
+    ],
+  };
+  for (const forceTranscode of [false, true]) {
+    const request = lanPlaybackPlanRequestSchema.parse({ mediaId: 'movie-1', capabilities: { forceTranscode } });
+    const capabilities = normalizeClientPlaybackCapabilities(request.capabilities);
+    const plan = playbackPlanForMedia(media, { capabilities });
+    assert.equal(plan.mode, forceTranscode ? 'transcode' : 'direct');
+    assert.equal(plan.copyVideo, !forceTranscode);
+    assert.equal(plan.copyAudio, !forceTranscode);
+    const response = playbackPlanResultSchema.parse({ ok: true, data: {
+      mediaCoreContractVersion: 1, capabilities, plan,
+    } });
+    assert.equal(response.data.capabilities.forceTranscode, forceTranscode);
+  }
+  for (const forceTranscode of ['true', 'false', 0, null]) {
+    assert.equal(lanPlaybackCapabilitiesSchema.safeParse({ forceTranscode }).success, false);
+  }
+});
+
+test('desktop decoders default older host responses to ordinary playback', () => {
+  const capabilities = normalizeClientPlaybackCapabilities();
+  delete capabilities.forceTranscode;
+  const response = playbackPlanResultSchema.parse({ ok: true, data: {
+    mediaCoreContractVersion: 1, capabilities, plan: { mode: 'direct', reason: 'Compatible', sourceAction: 'direct' },
+  } });
+  assert.equal(response.data.capabilities.forceTranscode, false);
 });
