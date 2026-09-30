@@ -32,6 +32,8 @@ export type RenamePlanEntry = {
   sidecars: RenameOperation[];
   /** A folder the move needs that does not exist yet ("Season 02"). */
   createFolder?: string;
+  /** A loose episode becomes a show whose catalog path is this new folder. */
+  showFolder?: string;
 };
 
 type RenameSkip = {
@@ -608,7 +610,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
   for (const item of input.items) {
     if (item.type === 'movie') continue;
     const ids = item.providerIds;
-    const key = ids?.tvdbId ? `tvdb:${ids.tvdbId}` : ids?.tmdbId ? `tmdb:${ids.tmdbId}` : ids?.tvmazeId ? `tvmaze:${ids.tvmazeId}` : '';
+    const key = ids?.tvdbId ? `tvdb:${ids.tvdbId}` : ids?.tmdbId ? `tmdb:${ids.tmdbId}` : ids?.tvmazeId ? `tvmaze:${ids.tvmazeId}` : ids?.malId ? `mal:${ids.malId}` : '';
     if (key) splitShows.set(`${item.type}:${key}`, [...(splitShows.get(`${item.type}:${key}`) || []), item]);
   }
   const splitShowIds = new Map<string, string>();
@@ -666,11 +668,22 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       skipItem('No metadata match.');
       continue;
     }
-    const showFolder = path.resolve(item.filePath);
     const files = item.episodeFiles || [];
-    const dedicated = !isProtectedFolder(showFolder)
+    const itemPath = path.resolve(item.filePath);
+    const looseEpisode = isVideoFileName(path.basename(itemPath))
+      && roots.includes(path.dirname(itemPath))
       && files.length > 0
-      && files.every((file) => isSameOrAncestor(showFolder, path.dirname(file.filePath)) && path.resolve(file.filePath) !== showFolder);
+      && files.every((file) => path.resolve(file.filePath) === itemPath);
+    const showFolder = looseEpisode
+      ? path.join(path.dirname(itemPath), titleWithYear(item.title, item.year))
+      : itemPath;
+    if (looseEpisode && nameTaken(path.dirname(showFolder), path.basename(showFolder), '')) {
+      skipItem(`A folder named "${path.basename(showFolder)}" already exists, so the episode is not moved into it.`);
+      continue;
+    }
+    const dedicated = looseEpisode || (!isProtectedFolder(showFolder)
+      && files.length > 0
+      && files.every((file) => isSameOrAncestor(showFolder, path.dirname(file.filePath)) && path.resolve(file.filePath) !== showFolder));
     const metadataEpisodes = new Map((item.episodes || []).map((episode) => [`${episode.season}:${episode.number}`, episode]));
     const metadataSeasonSizes = new Map<number, number>();
     for (const episode of item.episodes || []) {
@@ -787,7 +800,8 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       let createFolder: string | undefined;
       const currentSeason = directory === showFolder ? null : seasonOfFolder(path.basename(directory));
       const misplaced = dedicated && (
-        directory === showFolder
+        looseEpisode
+        || directory === showFolder
         || (path.dirname(directory) === showFolder && currentSeason !== null && currentSeason !== first.season)
       );
       if (misplaced) {
@@ -846,6 +860,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
           const completeEpisodeTitle = currentBase === copy.untitledBase || currentBase === copy.placeholderBase;
           const result = planFile(item, code, copy.filePath, copy.base, copy.recorded, copy.targetDirectory, copy.createFolder, completeEpisodeTitle);
           results.set(copy, result);
+          if (looseEpisode && result === 'planned') entries[entries.length - 1].showFolder = showFolder;
           if (result === 'rejected') {
             rejected = copy;
             return false;
@@ -875,6 +890,10 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       }
     }
 
+    if (looseEpisode) {
+      if (confirmedEpisodes > 0) claimTarget(showFolder);
+      continue;
+    }
     if (!dedicated || confirmedEpisodes === 0) continue;
     // Name a season folder only when everything left in it after the moves
     // is this show's episodes of one season.

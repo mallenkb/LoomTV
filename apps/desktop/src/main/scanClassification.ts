@@ -59,9 +59,12 @@ export function parseEpisodeFileName(fileName: string, fallbackSeason: number): 
     : null;
 }
 
-function seriesTitleFromEpisodeFileName(fileName: string): string | null {
+export function seriesTitleFromEpisodeFileName(fileName: string): string | null {
   const withoutExt = fileName.replace(/\.(3gp|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|mts|mxf|ogm|ogv|ts|vob|webm|wmv)$/i, '');
-  const match = withoutExt.match(/^(.+?)[._ -]+[Ss]\s*\d{1,2}\s*[._ -]*[Ee]\s*\d{1,3}\b/);
+  const normalized = withoutExt.replace(/\[[^\]]*\]/g, ' ').replace(/_/g, ' ');
+  const match = normalized.match(/^(.+?)[. -]+[Ss]\s*\d{1,2}\s*[._ -]*[Ee]\s*\d{1,3}\b/)
+    || normalized.match(/^(.+?)\s-\s+(?!(?:19|20)\d\d(?!\d))\d{1,4}(?:v\d)?(?=\s|$|[[(.])/)
+    || normalized.match(/^(.+?)[. -]+(?:episode|ep|e)\s*\d{1,3}\b/i);
   if (!match) return null;
   const title = cleanMediaTitle(match[1]).title;
   return title && !/^(season|series|episode|ep)$/i.test(title) ? title : null;

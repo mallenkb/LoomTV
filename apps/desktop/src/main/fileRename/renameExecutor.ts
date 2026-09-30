@@ -34,12 +34,18 @@ export type LoggedOperation = RenameOperation & {
   role: 'video' | 'sidecar' | 'folder' | 'mkdir' | 'rmdir';
   /** Recreating a removed folder: one that is already there is fine. */
   restore?: boolean;
+  /** Catalog path change when an episode file gains its own show folder. */
+  mediaFrom?: string;
+  mediaTo?: string;
 };
 
 function invert(operation: LoggedOperation): LoggedOperation {
   if (operation.role === 'mkdir') return { role: 'rmdir', from: operation.to, to: '' };
   if (operation.role === 'rmdir') return { role: 'mkdir', from: '', to: operation.from, restore: true };
-  return { ...operation, from: operation.to, to: operation.from };
+  return {
+    ...operation, from: operation.to, to: operation.from,
+    ...(operation.mediaFrom && operation.mediaTo ? { mediaFrom: operation.mediaTo, mediaTo: operation.mediaFrom } : {}),
+  };
 }
 
 /** Do not treat permissions or I/O errors as proof that a path is absent. */
@@ -291,10 +297,12 @@ function remapStoredState(
 }
 
 /** The library with every stored path moved, and IDs re-derived from the new paths. */
-function remapLibrary(data: LibraryData, mapPath: (value: string) => string): { data: LibraryData; aliases: Map<string, string> } {
+function remapLibrary(data: LibraryData, mapPath: (value: string) => string, mediaPaths: ReadonlyMap<string, string>): { data: LibraryData; aliases: Map<string, string> } {
   const aliases = new Map<string, string>();
   const remapItem = (item: MediaItem): MediaItem => {
     let next = rewriteDeep(item, mapPath);
+    const mediaPath = mediaPaths.get(item.filePath);
+    if (mediaPath) next.filePath = mediaPath;
     if (next.filePath !== item.filePath && item.id === createMediaItemId(item.filePath)) {
       const nextId = createMediaItemId(next.filePath);
       if (nextId !== item.id) {
@@ -465,7 +473,10 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     const data = deps.loadLibrary();
     const mapPath = createPathMapper(pathMoves(operations));
     const revisions = revisionChanges(data, mapPath);
-    const { data: next, aliases } = remapLibrary(data, mapPath);
+    const mediaPaths = new Map(operations.flatMap((operation) => (
+      operation.mediaFrom && operation.mediaTo ? [[operation.mediaFrom, operation.mediaTo] as const] : []
+    )));
+    const { data: next, aliases } = remapLibrary(data, mapPath, mediaPaths);
     // Undo may find that a removed empty folder has already been recreated.
     // Do not journal a no-op as a creation that rollback should remove.
     const diskOperations = operations.filter((operation) => !(
@@ -585,8 +596,22 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       }
       const videos = new Set(entries.filter((entry) => entry.kind === 'file').map((entry) => entry.from));
       const folders = new Set(entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.from));
+      const shows = new Map(entries.flatMap((entry) => entry.showFolder ? [[entry.from, entry.showFolder] as const] : []));
       // Folders a move needs are created first, parents before children.
-      const created = [...new Set(entries.flatMap((entry) => (entry.createFolder ? [entry.createFolder] : [])))]
+      // Include a missing show parent as well as the season folder. Log each
+      // creation separately so rollback and undo remove only empty folders.
+      const missingFolders = new Set<string>();
+      for (const entry of entries) {
+        if (!entry.createFolder) continue;
+        let folder = entry.createFolder;
+        while (!pathExists(folder)) {
+          missingFolders.add(folder);
+          const parent = path.dirname(folder);
+          if (parent === folder) throw new RenameError('The destination has no accessible parent folder.');
+          folder = parent;
+        }
+      }
+      const created = [...missingFolders]
         .sort((left, right) => left.split(path.sep).length - right.split(path.sep).length)
         .map((folder): LoggedOperation => ({ role: 'mkdir', from: '', to: folder }));
       const operations: LoggedOperation[] = [
@@ -594,6 +619,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
         ...orderOperations(entries).map((operation): LoggedOperation => ({
           ...operation,
           role: folders.has(operation.from) ? 'folder' : videos.has(operation.from) ? 'video' : 'sidecar',
+          ...(shows.has(operation.from) ? { mediaFrom: operation.from, mediaTo: shows.get(operation.from) } : {}),
         })),
       ];
       const batchId = randomUUID();

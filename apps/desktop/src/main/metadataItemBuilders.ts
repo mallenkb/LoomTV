@@ -27,6 +27,8 @@ import {
   isSeriesMetadata,
   mergeLocalSeasonsWithMetadata,
   mergeOfficialSeasonMetadata,
+  parseEpisodeFileName,
+  seriesTitleFromEpisodeFileName,
 } from './scanClassification.ts';
 import type { BuildMovieItemRequest, BuildTVItemRequest } from './libraryScanner.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
@@ -459,13 +461,16 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const probe = await probeMediaFile(fullPath);
     const providerIds = mergeProviderIds(existing?.providerIds || {}, probe.providerIds || {}, parseMetadataProviderIds(`${fullPath} ${fileName}`));
 
-    const rawFileTitle = titleFallback || parsedFile.title;
-    const fileTitle = usefulLocalTitle(titleFallback) || usefulLocalTitle(parsedFile.title);
+    const shouldUseShowProviders = forcedType === 'tv' || forcedType === 'anime';
+    const parsedEpisode = shouldUseShowProviders ? parseEpisodeFileName(fileName, 1) : null;
+    const seriesTitle = parsedEpisode ? seriesTitleFromEpisodeFileName(fileName) : null;
+    const rawFileTitle = seriesTitle || titleFallback || parsedFile.title;
+    const fileTitle = usefulLocalTitle(seriesTitle) || usefulLocalTitle(titleFallback) || usefulLocalTitle(parsedFile.title);
     const embeddedMovieTitle = usefulLocalTitle(probe.embeddedTitle);
     const trustedEmbeddedTitle = isTrustedLocalTagTitle(fileTitle, embeddedMovieTitle, rawFileTitle)
       ? embeddedMovieTitle
       : null;
-    const searchTitle = existing?.title || trustedEmbeddedTitle || fileTitle || rawFileTitle;
+    const searchTitle = seriesTitle || existing?.title || trustedEmbeddedTitle || fileTitle || rawFileTitle;
     const localTitleCandidates = uniqueLocalTitles([
       searchTitle,
       trustedEmbeddedTitle,
@@ -474,7 +479,6 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     ]);
     const searchYear = existing?.year || year || parsedFile.year || probe.year;
 
-    const shouldUseShowProviders = forcedType === 'tv' || forcedType === 'anime';
     const likelyAnime = forcedType === 'anime' || isLikelyAnimePath(fullPath, searchTitle);
     const canUseMovieMetadata = !shouldUseShowProviders || likelyAnime;
 
@@ -715,16 +719,18 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     };
 
     if (finalType === 'anime' || finalType === 'tv') {
+      const season = useShowMetadata ? parsedEpisode?.season ?? probe.season ?? 1 : 1;
+      const episodeNumber = useShowMetadata ? parsedEpisode?.episode ?? probe.episode ?? 1 : 1;
       const omdbCompletedEpisodes = completedSeries
         ? await fetchOMDbSeasonEpisodes(
           matchedOmdbData?.imdbID || providerIds.imdbId,
-          [1],
+          [season],
           omdbApiKey,
         )
         : [];
       const singleEpisode = mergeEpisodeMetadataSources([{
-        season: 1,
-        number: 1,
+        season,
+        number: episodeNumber,
         title: '',
         summary: '',
         still: '',
@@ -746,7 +752,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         matchedTVDBMeta?.seasons,
       );
       const seasons = mergeLocalSeasonsWithMetadata(
-        [{ number: 1, title: 'Season 1', episodeCount: 1 }],
+        [{ number: season, title: season === 0 ? 'Specials' : `Season ${season}`, episodeCount: 1 }],
         remoteSeasons,
       );
       const episodeStill = singleEpisode?.still || officialBackdrop || embeddedPoster || localThumbnail;
@@ -755,8 +761,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         ...baseItem,
         seasons,
         episodes: [{
-          season: 1, number: 1,
-          title: singleEpisode?.title || resolvedTitle,
+          season, number: episodeNumber,
+          title: singleEpisode?.title || (useShowMetadata ? `Episode ${episodeNumber}` : resolvedTitle),
           summary: singleEpisode?.summary || summary,
           still: episodeStill,
           rating: singleEpisode?.rating || rating,
@@ -764,11 +770,12 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
           localMetadata: probe.localMetadata,
         }],
         episodeFiles: [{
-          season: 1,
-          episode: 1,
+          season,
+          episode: episodeNumber,
           filePath: fullPath,
-          title: singleEpisode?.title || resolvedTitle,
+          title: singleEpisode?.title || (useShowMetadata ? `Episode ${episodeNumber}` : resolvedTitle),
           localMetadata: probe.localMetadata,
+          subtitles,
         }],
       };
     }
