@@ -26,6 +26,8 @@ const requests: MetadataProviderRequest[] = [
   { provider: 'anilist', query: '{ GenreCollection }' },
   { provider: 'jikan', path: 'top/anime' },
   { provider: 'tvmaze', path: 'schedule' },
+  { provider: 'tvmaze', path: 'shows/42155' },
+  { provider: 'tvmaze', path: 'lookup/shows', query: { thetvdb: '359274' } },
 ];
 
 test('public discovery works despite conflicting secrets and never reads credentials', async () => {
@@ -59,4 +61,16 @@ test('authenticated providers still reject conflicting credentials', async () =>
   });
   await assert.rejects(request({ provider: 'tmdb', path: 'movie/popular' }), SecureSettingsCorruptError);
   await assert.rejects(request({ provider: 'omdb', query: { i: 'tt1234567' } }), SecureSettingsCorruptError);
+});
+
+test('TVmaze subtitle cross-references stay on fixed, bounded provider paths', async () => {
+  const request = createMetadataProviderGateway({ loadMetadataOfflineMode: () => false,
+    loadSettings: () => { throw new Error('Unexpected credential access'); }, getMetadataApiKey: () => undefined });
+  const show = await request({ provider: 'tvmaze', path: 'shows/42155' }) as { requestedUrl: string };
+  const lookup = await request({ provider: 'tvmaze', path: 'lookup/shows', query: { thetvdb: '359274' } }) as { requestedUrl: string };
+  assert.equal(show.requestedUrl, 'https://api.tvmaze.com/shows/42155');
+  assert.equal(lookup.requestedUrl, 'https://api.tvmaze.com/lookup/shows?thetvdb=359274');
+  for (const path of ['shows/0', 'shows/12345678901', 'shows/42155/episodes', 'shows/../users', 'https://example.com']) {
+    await assert.rejects(request({ provider: 'tvmaze', path }), /path is not allowed/);
+  }
 });

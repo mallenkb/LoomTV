@@ -11,7 +11,7 @@ type GatewayDependencies = {
 
 const TMDB_PATH_PATTERN = /^[a-z0-9_/-]+$/i;
 const JIKAN_PATHS = new Set(['anime', 'genres/anime', 'seasons/now', 'top/anime']);
-const TVMAZE_PATHS = new Set(['schedule', 'schedule/web', 'search/shows']);
+const TVMAZE_PATHS = new Set(['schedule', 'schedule/web', 'search/shows', 'lookup/shows']);
 const finiteNumber = z.number().finite();
 export const metadataProviderRequestSchema: z.ZodType<MetadataProviderRequest> = z.discriminatedUnion('provider', [
   z.object({ provider: z.literal('cinemeta'), path: z.string().min(1).max(4000) }),
@@ -113,7 +113,7 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
     }
 
     if (request.provider === 'tvmaze') {
-      if (!TVMAZE_PATHS.has(request.path)) throw new Error('TVmaze path is not allowed.');
+      if (!TVMAZE_PATHS.has(request.path) && !/^shows\/[1-9]\d{0,9}$/.test(request.path)) throw new Error('TVmaze path is not allowed.');
       const url = queryUrl(`https://api.tvmaze.com/${request.path}`, request.query);
       const response = await safeFetch(url, {
         headers: { accept: 'application/json', 'user-agent': 'LoomTV/desktop' },

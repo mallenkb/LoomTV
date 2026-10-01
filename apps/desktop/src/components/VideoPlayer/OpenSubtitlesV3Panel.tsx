@@ -6,7 +6,7 @@ import {
 } from '../../lib/openSubtitlesV3';
 
 export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelect }: {
-  resolveVideo: () => Promise<SubtitleVideo>;
+  resolveVideo: (signal: AbortSignal) => Promise<SubtitleVideo>;
   selectedId?: string;
   onSelect: (subtitle: OnlineSubtitle, text: string, signal: AbortSignal) => Promise<void>;
 }) {
@@ -40,7 +40,7 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     setDownloading(null);
     setError('');
     try {
-      const video = await resolveVideo();
+      const video = await resolveVideo(controller.signal);
       if (controller.signal.aborted) return;
       const found = await findOnlineSubtitles(video, controller.signal);
       if (!controller.signal.aborted) setResults(found);
@@ -105,7 +105,7 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
           style={{ border: 'none', boxShadow: 'none', outline: 'none', appearance: 'none', WebkitAppearance: 'none' }}
           className="min-w-0 flex-1 !border-0 !bg-transparent !p-0 text-xs text-white !shadow-none !outline-none !ring-0 placeholder:text-white/50" />
       </label>
-      {results === null && <p className="text-xs text-white/60">Searches OpenSubtitles v3 using this title's IMDb ID. Downloads only the subtitle you select.</p>}
+      {results === null && <p className="text-xs text-white/60">Finds the matching title on IMDb, then searches OpenSubtitles v3 for this video. Downloads only the subtitle you select.</p>}
       {error && <p role="alert" className="text-xs text-amber-200">{error}</p>}
       <div role="status" className="text-xs text-white/60">
         {downloading ? 'Downloading subtitle...' : results?.length === 0 ? 'No subtitles found for this title.'

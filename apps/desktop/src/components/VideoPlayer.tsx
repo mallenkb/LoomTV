@@ -101,6 +101,8 @@ import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
 import PlayerSettingsPanel from './VideoPlayer/PlayerSettingsPanel';
 import OpenSubtitlesV3Panel from './VideoPlayer/OpenSubtitlesV3Panel';
 import type { OnlineSubtitle, SubtitleVideo } from '../lib/openSubtitlesV3';
+import { hasSubtitleImdbId, resolveOnlineSubtitleVideo } from '../lib/subtitleVideoResolver';
+import { cachedDesktopRead } from '@/lib/queryClient';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
 import { isAssDialogueTrack, isAssSignsTrack, parseAssDialogueCues } from './VideoPlayer/subtitleCues';
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
@@ -4342,16 +4344,24 @@ export default function VideoPlayer({
                 <OpenSubtitlesV3Panel
                   key={onlinePlaybackKey}
                   selectedId={activeOnlineCaption?.subtitle.id}
-                  resolveVideo={async (): Promise<SubtitleVideo> => {
+                  resolveVideo={async (signal): Promise<SubtitleVideo> => {
                     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
                     let item = items.find(candidate => candidate.id === mediaId)
                       || items.find(candidate => candidate.filePath === filePath || candidate.episodeFiles?.some(episode => episode.filePath === filePath));
                     const lookupId = mediaId || item?.id;
-                    if (!item?.providerIds?.imdbId && lookupId) {
+                    if (!hasSubtitleImdbId(item?.providerIds?.imdbId) && lookupId) {
                       item = (await desktopApi.getLibraryItem(lookupId))?.item || item;
                     }
-                    if (!item?.providerIds?.imdbId) throw new Error('Match this title to an IMDb entry in your library before searching for subtitles.');
-                    return { imdbId: item.providerIds.imdbId, type: item.type === 'movie' ? 'movie' : 'series', season: currentSeason, episode: currentEpisode };
+                    signal.throwIfAborted();
+                    if (!item) throw new Error('This video needs a library match before searching for subtitles.');
+                    const identity = { title: item.title, year: item.year, type: item.type, providerIds: item.providerIds };
+                    const resolved = await cachedDesktopRead('subtitle-identity', [identity], async () => {
+                      const video = await resolveOnlineSubtitleVideo(identity, { season: currentSeason, episode: currentEpisode }, desktopApi.requestMetadataProvider);
+                      // Share the title lookup across episodes, never their coordinates.
+                      return { imdbId: video.imdbId, type: video.type };
+                    }, 60 * 60 * 1000);
+                    signal.throwIfAborted();
+                    return { ...resolved, season: currentSeason, episode: currentEpisode };
                   }}
                   onSelect={async (subtitle, text, signal) => {
                     const cues = parseVttCues(text);
