@@ -62,6 +62,12 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
     setHasOlder(nextHistory.length === HISTORY_PAGE_SIZE);
   }, []);
 
+  useEffect(() => {
+    if (disabled || busy || organize?.mode !== 'auto' || !organize.waitingFiles) return;
+    const timer = window.setTimeout(() => { void reload().catch(() => undefined); }, 10_000);
+    return () => window.clearTimeout(timer);
+  }, [disabled, busy, organize, reload]);
+
   const loadOlder = useCallback(async () => {
     const generation = historyGeneration.current;
     setBusy('history');
@@ -221,7 +227,11 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
         ? 'Files keep their current names.'
         : pending > 0
           ? `${pending.toLocaleString()} ${pending === 1 ? 'file can' : 'files can'} be renamed to match ${pending === 1 ? 'its title' : 'their titles'}.`
-          : 'Everything is organized.';
+          : organize.waitingFiles
+            ? 'Waiting for files to remain unchanged for 10 minutes before organizing.'
+            : organize.skippedFiles
+              ? 'Some files are waiting or need review. Open the preview for details.'
+              : 'Everything is organized.';
 
   return (
     <>

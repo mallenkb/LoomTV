@@ -141,13 +141,14 @@ export function omdbProviderRatings(metadata: OMDbResponse | null | undefined): 
   };
 }
 
-export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey?: string): Promise<OMDbResponse | null> {
+export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey?: string, mediaType?: 'movie' | 'series'): Promise<OMDbResponse | null> {
   if (!omdbApiKey) return null;
   try {
     const attempts = year ? [year, undefined] : [undefined];
     for (const attemptYear of attempts) {
       const yearParam = attemptYear ? `&y=${attemptYear}` : '';
-      const url = `https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}`;
+      const typeParam = mediaType ? `&type=${mediaType}` : '';
+      const url = `https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}${typeParam}`;
       const res = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'], retries: 2 });
       const data = omdbResponseSchema.parse(await res.json());
       if (data.Response !== 'False') return data;

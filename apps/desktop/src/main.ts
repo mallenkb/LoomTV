@@ -428,9 +428,8 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-// 19: season folders take precedence, and titles from conflicting filenames
-// stay provisional until matched to that season's provider episode metadata.
-const SCAN_CACHE_VERSION = 19;
+// 20: refresh show years using series providers and reject movie-only OMDb matches.
+const SCAN_CACHE_VERSION = 20;
 let libraryMutationVersion = 0;
 const activeScans = new Set<AbortController>();
 let cachedLibrary: LibraryData | null = null;
@@ -1878,9 +1877,13 @@ const mediaRenameHandlers = {
   },
   mediaRenameStatus: () => {
     const lastBatch = mediaRenameExecutor.history(1)[0];
+    const mode = loadSettings().organizeFilesAfterSync || 'auto';
+    const plan = mediaRenameExecutor.plan({ automatic: mode === 'auto' });
     return {
-      mode: loadSettings().organizeFilesAfterSync || 'auto',
-      pendingFiles: mediaRenameExecutor.plan().entries.filter((entry) => entry.kind === 'file').length,
+      mode,
+      pendingFiles: plan.entries.filter((entry) => entry.kind === 'file').length,
+      waitingFiles: plan.waitingFiles,
+      skippedFiles: plan.skipped.length,
       lastBatch: lastBatch ? mediaRenameBatchForRenderer(lastBatch) : null,
       lastAutomaticError,
     };

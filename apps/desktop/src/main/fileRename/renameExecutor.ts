@@ -431,7 +431,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       .map((row) => [row.file_path, row.rejected_name.toLowerCase()]),
   );
 
-  function plan(options: { automatic?: boolean } = {}): RenamePlan & { retryAfterMs?: number } {
+  function plan(options: { automatic?: boolean } = {}): RenamePlan & { waitingFiles: number; retryAfterMs?: number } {
     const data = deps.loadLibrary();
     const locks = lockedTargets();
     const now = Date.now();
@@ -462,11 +462,8 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       },
       isLocked: (filePath, targetName) => locks.get(filePath) === targetName.toLowerCase(),
     });
-    const delays = result.skipped.flatMap((skip) => {
-      const delay = deferred.get(skip.filePath);
-      return delay === undefined ? [] : [delay];
-    });
-    return { ...result, ...(delays.length ? { retryAfterMs: Math.max(1000, Math.min(...delays) + 1000) } : {}) };
+    const delays = [...deferred.values()];
+    return { ...result, waitingFiles: deferred.size, ...(delays.length ? { retryAfterMs: Math.max(1000, Math.min(...delays) + 1000) } : {}) };
   }
 
   const openJournal = (batchId: string, direction: 'apply' | 'undo', operations: readonly LoggedOperation[]): string => {

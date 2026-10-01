@@ -998,6 +998,8 @@ export interface MediaRenameStatus {
   mode: 'ask' | 'auto' | 'off';
   /** Files the preview would rename or move right now. */
   pendingFiles: number;
+  waitingFiles?: number;
+  skippedFiles?: number;
   lastBatch: MediaRenameBatch | null;
   /** When the last automatic run failed, why. */
   lastAutomaticError: string;

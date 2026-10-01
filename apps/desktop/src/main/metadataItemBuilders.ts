@@ -67,6 +67,12 @@ export type MetadataItemBuilderDependencies = {
   orderedArtworkCandidates: (...urls: Array<string | null | undefined>) => string[];
 };
 
+/** A same-named movie must not supply a show's year, artwork, or ratings. */
+function compatibleOmdbMetadata(data: OMDbResponse | null, type?: 'movie' | 'series'): OMDbResponse | null {
+  const remoteType = data?.Type?.trim().toLowerCase();
+  return type && remoteType && remoteType !== type ? null : data;
+}
+
 export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies) {
   const {
     extractSeasons,
@@ -211,7 +217,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       providerIds.imdbId
         ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey)
         : Promise.resolve(null),
-      providerIds.imdbId ? Promise.resolve(null) : fetchOMDbMetadata(searchTitle, searchYear, omdbApiKey),
+      providerIds.imdbId ? Promise.resolve(null) : fetchOMDbMetadata(searchTitle, searchYear, omdbApiKey, 'series'),
       likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, searchTitle) : Promise.resolve(null),
       likelyAnime ? fetchJikanMetadata(searchTitle, Number(providerIds.malId) || undefined) : Promise.resolve(null),
       providerIds.tmdbId
@@ -227,8 +233,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         ? deps.fetchTVMetadataById(Number(providerIds.tvmazeId), searchTitle, searchYear)
         : fetchTVMetadata(searchTitle, searchYear)),
     ]);
-    const matchedOmdbData = omdbById
-      || (remoteMatchesAnyLocalTitle(localTitleCandidates, omdbBySearch?.Title) ? omdbBySearch : null);
+    const matchedOmdbData = compatibleOmdbMetadata(omdbById, 'series')
+      || (remoteMatchesAnyLocalTitle(localTitleCandidates, omdbBySearch?.Title) ? compatibleOmdbMetadata(omdbBySearch, 'series') : null);
     const matchedAniListMeta = (providerIds.malId && String(anilistMeta?.malId) === providerIds.malId) || remoteMatchesAnyLocalTitle(
       localTitleCandidates,
       anilistMeta?.title,
@@ -358,11 +364,11 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || matchedOmdbData?.Title || searchTitle || cleanTitle;
 
     const resolvedYear =
-      (matchedOmdbData?.Year ? parseInt(matchedOmdbData.Year, 10) : 0)
-      || (finalType === 'anime' ? (matchedAniListMeta?.year || matchedJikanMeta?.year || 0) : 0)
+      (finalType === 'anime' ? (matchedAniListMeta?.year || matchedJikanMeta?.year || 0) : 0)
       || (matchedTmdbTVMeta?.year ?? 0)
       || (matchedTVMeta?.year ?? 0)
       || (matchedTVDBMeta?.year ?? 0)
+      || (matchedOmdbData?.Year ? parseInt(matchedOmdbData.Year, 10) : 0)
       || searchYear || year;
     const jikanEpisodesForLocalSeasons = finalType === 'anime'
       ? await fetchJikanEpisodesForLocalAnimeSeasons(episodeFiles, searchTitle, matchedJikanMeta)
@@ -485,6 +491,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const searchYear = existing?.year || year || parsedFile.year || probe.year;
 
     const likelyAnime = forcedType === 'anime' || isLikelyAnimePath(fullPath, searchTitle);
+    const omdbType = forcedType === 'movie' ? 'movie' : forcedType === 'tv' || parsedEpisode ? 'series' : undefined;
     const canUseMovieMetadata = !shouldUseShowProviders || likelyAnime;
 
     // Fetch provider metadata in parallel. Single files forced into TV/anime
@@ -499,7 +506,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       providerIds.imdbId
         ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey)
         : Promise.resolve(null),
-      providerIds.imdbId ? Promise.resolve(null) : fetchOMDbMetadata(searchTitle, searchYear, omdbApiKey),
+      providerIds.imdbId ? Promise.resolve(null) : fetchOMDbMetadata(searchTitle, searchYear, omdbApiKey, omdbType),
       shouldUseShowProviders && likelyAnime
         ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, searchTitle)
         : Promise.resolve(null),
@@ -526,8 +533,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     // agree with one of the local title candidates.
     const matchedTmdbData = tmdbById
       || (remoteMatchesAnyLocalTitle(localTitleCandidates, tmdbBySearch?.title) ? tmdbBySearch : null);
-    const matchedOmdbData = omdbById
-      || (remoteMatchesAnyLocalTitle(localTitleCandidates, omdbBySearch?.Title) ? omdbBySearch : null);
+    const matchedOmdbData = compatibleOmdbMetadata(omdbById, omdbType)
+      || (remoteMatchesAnyLocalTitle(localTitleCandidates, omdbBySearch?.Title) ? compatibleOmdbMetadata(omdbBySearch, omdbType) : null);
     const matchedAniListMeta = (providerIds.malId && String(anilistMeta?.malId) === providerIds.malId) || remoteMatchesAnyLocalTitle(localTitleCandidates, anilistMeta?.title)
       || anilistMeta?.aliases?.some((alias) => remoteMatchesAnyLocalTitle(localTitleCandidates, alias))
       ? anilistMeta

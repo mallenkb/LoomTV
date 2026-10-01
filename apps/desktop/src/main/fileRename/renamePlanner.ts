@@ -353,6 +353,34 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
   const roots = input.libraryRoots.map((root) => path.resolve(root));
   const isProtectedFolder = (folder: string) => roots.some((root) => isSameOrAncestor(folder, root));
 
+  // A parent rename also moves every child, including downloads not in the catalog.
+  const folderWaitReason = (folder: string): string | undefined => {
+    const pending = [{ directory: folder, depth: 0 }];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const next = pending.pop();
+      if (!next) break;
+      const { directory, depth } = next;
+      if (visited.has(directory)) continue;
+      visited.add(directory);
+      if (visited.size > 1024 || depth > 16) return 'The folder is too deeply nested to organize automatically.';
+      for (const name of list(directory) || []) {
+        if (name.startsWith('.')) continue;
+        const child = path.join(directory, name);
+        const incomplete = /\.(?:fdmdownload|crdownload|part|partial|download|!qb|!ut)$/i;
+        if (incomplete.test(name) && isVideoFileName(name.replace(incomplete, ''))) {
+          return `"${name}" is still downloading. Folder changes wait until the download finishes.`;
+        }
+        if (isVideoFileName(name)) {
+          if (input.isRecentlyModified?.(child)) return `"${name}" changed in the last 10 minutes. Folder changes wait until copying finishes.`;
+        } else if (!SIDECAR_EXTENSIONS.has(path.extname(name).toLowerCase()) && list(child) !== null) {
+          pending.push({ directory: child, depth: depth + 1 });
+        }
+      }
+    }
+    return undefined;
+  };
+
   // Every path the plan will create, so two moves never land on one name.
   const plannedTargets = new Set<string>();
   const claimTarget = (target: string) => plannedTargets.add(target.toLowerCase());
@@ -494,6 +522,11 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     if (isProtectedFolder(folder)) return;
     const name = path.basename(folder);
     if (name === targetName) return;
+    const reason = folderWaitReason(folder);
+    if (reason) {
+      skipped.push({ mediaId: item.id, mediaTitle: item.title, filePath: folder, reason });
+      return;
+    }
     const parent = path.dirname(folder);
     if (nameTaken(parent, targetName, name)) {
       skipped.push({ mediaId: item.id, mediaTitle: item.title, filePath: folder, reason: `A folder named "${targetName}" already exists.` });
@@ -693,6 +726,13 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const files = item.episodeFiles || [];
     const itemPath = path.resolve(item.filePath);
     const looseEpisode = isLooseEpisode(item);
+    if (!looseEpisode && !isProtectedFolder(itemPath)) {
+      const reason = folderWaitReason(itemPath);
+      if (reason || files.length === 0) {
+        skipItem(reason || 'No completed episodes were found. Folder changes wait until episodes are available.');
+        continue;
+      }
+    }
     let showFolder = looseEpisode
       ? path.join(path.dirname(itemPath), titleWithYear(item.title, item.year))
       : itemPath;
