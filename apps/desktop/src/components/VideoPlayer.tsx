@@ -453,6 +453,16 @@ export default function VideoPlayer({
       volumeCommandRef.current = null;
     };
   }, [filePath]);
+  const [originalFileName, setOriginalFileName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setOriginalFileName(null);
+    if (!filePath || isLiveStream) return undefined;
+    desktopApi.getOriginalFileName(filePath)
+      .then((original) => { if (!cancelled) setOriginalFileName(original); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [filePath, isLiveStream]);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
   const [episodePanelWidth, setEpisodePanelWidth] = useState(DEFAULT_EPISODE_PANEL_WIDTH);
@@ -3605,6 +3615,7 @@ export default function VideoPlayer({
 
   const activePlaybackEngine = nativePlaybackActive ? nativeEngineKind : 'browser';
   const playbackInformation = {
+    originalFile: originalFileName || undefined,
     engine: activePlaybackEngine === 'libvlc'
       ? 'LibVLC'
       : activePlaybackEngine === 'mpv'

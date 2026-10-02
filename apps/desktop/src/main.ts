@@ -88,6 +88,7 @@ import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
 import { parseIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
+import { createOriginalNameStore } from './main/fileRename/originalNames.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
 import { loadShowSchedules } from './main/showSchedule.ts';
@@ -1802,8 +1803,10 @@ const iptvService = createIptvService({ getDatabase: getIptvDatabase, findFFmpeg
 // Renaming files to their matched names. The executor moves every path-,
 // ID-, and revision-keyed record with the files and refuses to run while a
 // scan could be writing the same library.
+const originalNames = createOriginalNameStore(getMediaRenameDatabase);
 const mediaRenameExecutor = createRenameExecutor({
   getDatabase: getMediaRenameDatabase,
+  recordOriginalNames: (moves) => originalNames.recordMoves(moves),
   loadLibrary,
   saveLibraryMutation,
   remapMediaIds: remapLibraryMediaReferences,
@@ -1849,6 +1852,7 @@ const mediaRenameHandlers = {
   },
   applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
   listMediaRenames: (offset = 0) => mediaRenameExecutor.history(20, offset).map(mediaRenameBatchForRenderer),
+  originalFileName: (filePath: string) => originalNames.originalPath(filePath),
   getMediaRenameRecord: (batchId: string) => {
     const batch = mediaRenameExecutor.record(batchId);
     if (!batch) return null;
@@ -2667,6 +2671,16 @@ app.whenReady().then(async () => {
     if (recovered) console.warn(`[rename] Reversed ${recovered} rename batch(es) that were interrupted before finishing.`);
   } catch (error) {
     console.warn('Interrupted rename recovery will retry on the next launch:', describeErrorForLog(error));
+  }
+  // Renames made before original names were recorded per file.
+  try {
+    if (originalNames.isEmpty()) {
+      const history = mediaRenameExecutor.history(Number.MAX_SAFE_INTEGER).reverse();
+      const recorded = history.length ? originalNames.backfillFromHistory(history) : 0;
+      if (recorded) console.info(`[rename] Recorded original names for ${recorded} file(s) from rename history.`);
+    }
+  } catch (error) {
+    console.warn('Original file names will be recorded on the next launch:', describeErrorForLog(error));
   }
 
   // ── loomtv:// media protocol handlers ───────────────────────────────────────

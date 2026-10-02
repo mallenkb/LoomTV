@@ -272,6 +272,7 @@ export type DesktopBridgeApi = {
       applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
       listMediaRenames?: (offset?: number) => Promise<MediaRenameBatch[]>;
       getMediaRenameRecord?: (batchId: string) => Promise<MediaRenameRecord | null>;
+      getOriginalFileName?: (filePath: string) => Promise<string | null>;
       undoMediaRename?: (batchId: string) => Promise<MediaRenameBatch[]>;
       mediaRenameStatus?: () => Promise<MediaRenameStatus>;
       libraryEpisodeUpdates?: () => Promise<LibraryEpisodeUpdates>;
@@ -1413,6 +1414,12 @@ const desktopTransport = {
   async listMediaRenames(offset = 0): Promise<MediaRenameBatch[]> {
     if (!window.desktopApi?.listMediaRenames) return [];
     return window.desktopApi.listMediaRenames(offset);
+  },
+
+  /** The file's name before LoomTV first renamed it, or null. */
+  async getOriginalFileName(filePath: string): Promise<string | null> {
+    if (!window.desktopApi?.getOriginalFileName || !filePath) return null;
+    return window.desktopApi.getOriginalFileName(filePath);
   },
 
   async getMediaRenameRecord(batchId: string): Promise<MediaRenameRecord | null> {

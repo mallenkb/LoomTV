@@ -154,6 +154,7 @@ const desktopApi = {
   applyMediaRenames: (entryIds: string[]) => ipcRenderer.invoke('library:rename-apply', entryIds),
   listMediaRenames: (offset = 0) => ipcRenderer.invoke('library:rename-history', offset),
   getMediaRenameRecord: (batchId: string) => ipcRenderer.invoke('library:rename-record', batchId),
+  getOriginalFileName: (filePath: string) => ipcRenderer.invoke('library:original-file-name', filePath),
   undoMediaRename: (batchId: string) => ipcRenderer.invoke('library:rename-undo', batchId),
   mediaRenameStatus: () => ipcRenderer.invoke('library:rename-status'),
   libraryEpisodeUpdates: () => ipcRenderer.invoke('library:episode-updates'),

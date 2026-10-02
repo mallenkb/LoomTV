@@ -369,6 +369,7 @@ export interface IpcHandlerDependencies<
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
   listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
   getMediaRenameRecord: (batchId: string) => IpcResult<'library:rename-record'>;
+  originalFileName: (filePath: string) => IpcResult<'library:original-file-name'>;
   undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
   mediaRenameStatus: () => IpcResult<'library:rename-status'>;
   libraryEpisodeUpdates: () => Promise<IpcResult<'library:episode-updates'>>;
@@ -866,6 +867,11 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.getMediaRenameRecord(batchId);
   }, z.tuple([z.string().uuid()]));
+  handle('library:original-file-name', (_event, filePath) => {
+    // Only library media; the answer reveals a name the file once had.
+    deps.authorizeMediaPath(filePath);
+    return deps.originalFileName(filePath);
+  }, z.tuple([nonEmptyString.max(4096)]));
   handleNoArgs('library:episode-updates', () => deps.libraryEpisodeUpdates());
   handleNoArgs('library:health', () => {
     deps.authorizeSettingsWrite();

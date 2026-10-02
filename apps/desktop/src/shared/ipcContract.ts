@@ -121,6 +121,7 @@ export interface IpcContract {
   'library:rename-apply': { args: [entryIds: string[]]; result: MediaRenameApplyResult };
   'library:rename-history': { args: [offset?: number]; result: MediaRenameBatch[] };
   'library:rename-record': { args: [batchId: string]; result: MediaRenameRecord | null };
+  'library:original-file-name': { args: [filePath: string]; result: string | null };
   'library:rename-undo': { args: [batchId: string]; result: MediaRenameBatch[] };
   'library:rename-status': { args: []; result: MediaRenameStatus };
   'library:episode-updates': { args: []; result: LibraryEpisodeUpdates };
