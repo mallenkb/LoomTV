@@ -43,6 +43,7 @@ export const IPTV_FAVORITES_MIGRATION_VERSION = 22;
 /** v23 caches each show's full episode list for new, upcoming, and missing episodes. */
 export const SHOW_SCHEDULE_CACHE_MIGRATION_VERSION = 23;
 export const LIBRARY_FIRST_SEEN_MIGRATION_VERSION = 24;
+export const ORGANIZE_CONFIDENCE_MIGRATION_VERSION = 25;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -395,6 +396,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateIptvFavorites(database);
   migrateShowScheduleCache(database);
   migrateLibraryFirstSeen(database);
+  migrateOrganizeConfidence(database);
 }
 
 /**
@@ -1444,5 +1446,45 @@ function migrateLibraryFirstSeen(database: BetterSqlite3.Database): void {
     }
     database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
       .run(LIBRARY_FIRST_SEEN_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+/**
+ * Organize safeguards: each file's original name (written once), the
+ * metadata sources that confirmed a match, and recoverable cleanup batches.
+ */
+function migrateOrganizeConfidence(database: BetterSqlite3.Database): void {
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS media_original_names (
+        identity TEXT PRIMARY KEY,
+        original_path TEXT NOT NULL,
+        current_path TEXT NOT NULL,
+        recorded_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_media_original_names_current ON media_original_names(current_path);
+
+      CREATE TABLE IF NOT EXISTS media_match_confirmations (
+        media_id TEXT PRIMARY KEY,
+        checked_at INTEGER NOT NULL,
+        result_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS library_cleanup_batches (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        restored_at INTEGER NOT NULL DEFAULT 0,
+        items_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS subtitle_check_cache (
+        sidecar_path TEXT PRIMARY KEY,
+        signature TEXT NOT NULL,
+        verdict_json TEXT NOT NULL,
+        checked_at INTEGER NOT NULL
+      );
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(ORGANIZE_CONFIDENCE_MIGRATION_VERSION, Date.now());
   })();
 }

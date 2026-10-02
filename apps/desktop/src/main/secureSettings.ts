@@ -97,12 +97,19 @@ export function loadOrInitializeSettings<T>(deps: {
   readLegacy: () => SettingsData | null;
   normalize: (settings: SettingsData) => T;
   save: (settings: T) => void;
+  /**
+   * Fields normalize() generates when absent. A record without them, such as
+   * one whose credentials could not be decrypted, is saved so the generated
+   * values stay the same on every later load.
+   */
+  generatedFields?: readonly string[];
 }): T {
   const database = deps.loadDatabase();
   const stored = database ?? deps.readLegacy();
   if (stored) assertValidSettingsSecrets(stored);
   const normalized = deps.normalize(stored ?? {});
-  if (!database || Number(database.localNetworkSecurityEpoch) !== 2) deps.save(normalized);
+  const missingGenerated = Boolean(database && deps.generatedFields?.some((field) => !database[field]));
+  if (!database || Number(database.localNetworkSecurityEpoch) !== 2 || missingGenerated) deps.save(normalized);
   return normalized;
 }
 
@@ -195,11 +202,27 @@ export function writeSecureSettings(settings: SettingsData, codec: SecureSetting
   return output;
 }
 
+/** The public settings of a record whose credentials cannot be decrypted. */
+function withoutSecrets(stored: SettingsData): SettingsData {
+  const output = { ...stored };
+  delete output[SECURE_SETTINGS_FIELD];
+  delete output[SECURE_SETTINGS_RECOVERY_FIELD];
+  for (const key of SECRET_SETTINGS_KEYS) delete output[key];
+  return output;
+}
+
 export function createSecureSettingsPersistence(store: {
   load: () => SettingsData | null;
   save: (settings: SettingsData) => void;
   transaction: <T>(action: () => T) => T;
-}, codec: SecureSettingsCodec) {
+}, codec: SecureSettingsCodec, hooks: {
+  /**
+   * The saved credentials could not be decrypted, for example because the
+   * local key file was lost and recreated. Loading continues without them;
+   * the next save keeps the unreadable envelope in the recovery list.
+   */
+  onUnreadable?: (error: SecureSettingsCorruptError) => void;
+} = {}) {
   function protectedRecord(settings: SettingsData, stored: SettingsData | null): SettingsData {
     const output = writeSecureSettings(settings, codec);
     const previous = stored?.[SECURE_SETTINGS_RECOVERY_FIELD];
@@ -220,13 +243,32 @@ export function createSecureSettingsPersistence(store: {
     load: (): SettingsData | null => store.transaction(() => {
       const stored = store.load();
       if (!stored) return null;
-      const result = readSecureSettings(stored, codec);
+      let result: SecureSettingsRead;
+      try {
+        result = readSecureSettings(stored, codec);
+      } catch (error) {
+        // A locked or unsafe secret store still fails closed. Only a record
+        // that cannot be decrypted degrades, and only with the hook told.
+        if (!(error instanceof SecureSettingsCorruptError)) throw error;
+        hooks.onUnreadable?.(error);
+        return withoutSecrets(stored);
+      }
       if (result.needsMigration) store.save(protectedRecord(result.settings, stored));
       return result.settings;
     }),
     save: (settings: SettingsData): void => store.transaction(() => {
       const stored = store.load();
-      const current = stored ? readSecureSettings(stored, codec).settings : {};
+      let current: SettingsData = {};
+      let unreadable: unknown;
+      if (stored) {
+        try {
+          current = readSecureSettings(stored, codec).settings;
+        } catch (error) {
+          if (!(error instanceof SecureSettingsCorruptError)) throw error;
+          current = withoutSecrets(stored);
+          unreadable = stored[SECURE_SETTINGS_FIELD];
+        }
+      }
       const retainedSecrets = Object.fromEntries(SECRET_SETTINGS_KEYS
         .filter((key) => hasOwn(current, key))
         .map((key) => [key, current[key]]));
@@ -234,7 +276,24 @@ export function createSecureSettingsPersistence(store: {
       for (const key of SECRET_SETTINGS_KEYS) {
         if (incoming[key] === undefined) delete incoming[key];
       }
-      store.save(protectedRecord({ ...retainedSecrets, ...incoming }, stored));
+      const record = protectedRecord({ ...retainedSecrets, ...incoming }, unreadable === undefined ? stored : withoutSecrets(stored ?? {}));
+      if (unreadable !== undefined) {
+        // Never discard credentials Loom cannot read: the original key file
+        // may come back. Keep earlier recovery entries as well.
+        const previous = stored?.[SECURE_SETTINGS_RECOVERY_FIELD];
+        const legacySecrets = stored ? collectSecrets(stored) : {};
+        let legacy: unknown;
+        try {
+          if (Object.keys(legacySecrets).length > 0) legacy = writeSecureSettings(legacySecrets, codec)[SECURE_SETTINGS_FIELD];
+        } catch (error) {
+          if (!(error instanceof SecureSettingsCorruptError)) throw error;
+        }
+        record[SECURE_SETTINGS_RECOVERY_FIELD] = [
+          ...(Array.isArray(previous) ? previous : []),
+          { unreadable, ...(legacy === undefined ? {} : { legacy }), quarantinedAt: Date.now() },
+        ];
+      }
+      store.save(record);
     }),
   };
 }

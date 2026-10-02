@@ -4,7 +4,8 @@ import fsPromises from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { parseRequiredJson } from './runtimeValidation.ts';
@@ -90,14 +91,20 @@ function transcodeRoot(): string {
   return path.join(app.getPath('userData'), 'transcodes');
 }
 
-function listProcessRows(): Array<{ pid: number; command: string }> {
+const execFileAsync = promisify(execFile);
+
+// Asynchronous on purpose: this runs during startup, and the Windows query
+// (PowerShell plus CIM) takes up to a few seconds, which blocked the main
+// process while the window was trying to appear.
+async function listProcessRows(): Promise<Array<{ pid: number; command: string }>> {
   if (process.platform === 'win32') {
     try {
       const script = 'Get-CimInstance Win32_Process -Filter "Name = \'ffmpeg.exe\'" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress';
-      const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+      const output = (await execFileAsync('powershell.exe', ['-NoProfile', '-Command', script], {
         encoding: 'utf8',
         timeout: 3000,
-      }).trim();
+        windowsHide: true,
+      })).stdout.trim();
       if (!output) return [];
       const processRowSchema = z.object({
         ProcessId: z.number().finite().optional(),
@@ -118,9 +125,10 @@ function listProcessRows(): Array<{ pid: number; command: string }> {
   }
 
   try {
-    const output = execFileSync('ps', ['-ax', '-o', 'pid=,command='], {
+    const { stdout: output } = await execFileAsync('ps', ['-ax', '-o', 'pid=,command='], {
       encoding: 'utf8',
       timeout: 3000,
+      maxBuffer: 16 * 1024 * 1024,
     });
     return output
       .split(/\r?\n/)
@@ -139,10 +147,10 @@ function commandIncludesPath(command: string, targetPath: string): boolean {
   return command.includes(targetPath) || normalizedCommand.includes(normalizedPath);
 }
 
-function cleanupStaleTranscodeProcesses(): void {
+async function cleanupStaleTranscodeProcesses(): Promise<void> {
   const root = transcodeRoot();
   let killed = 0;
-  for (const row of listProcessRows()) {
+  for (const row of await listProcessRows()) {
     if (row.pid === process.pid) continue;
     if (!/ffmpeg(?:\.exe)?/i.test(row.command)) continue;
     if (!commandIncludesPath(row.command, root)) continue;
@@ -167,7 +175,7 @@ function cleanupStaleTranscodeProcesses(): void {
 export async function cleanupOldTranscodes(): Promise<void> {
   const root = transcodeRoot();
   try {
-    cleanupStaleTranscodeProcesses();
+    await cleanupStaleTranscodeProcesses();
     await fsPromises.mkdir(root, { recursive: true });
     for (const entry of await fsPromises.readdir(root)) {
       await fsPromises.rm(path.join(root, entry), {

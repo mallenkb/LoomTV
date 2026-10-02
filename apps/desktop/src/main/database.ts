@@ -21,7 +21,7 @@ import {
   type CachedArtwork,
   type FetchedArtworkBytes,
 } from './databaseArtworkRepository.ts';
-import { createDatabaseThumbnailRepository, type CachedThumbnail } from './databaseThumbnailRepository.ts';
+import { createThumbnailCache, type CachedThumbnail } from './thumbnailCache.ts';
 import { compactDatabaseIfWasteful, trimFreePages } from './databaseCompaction.ts';
 import {
   loadLibrary as loadLibraryRecord,
@@ -134,7 +134,7 @@ export type { PersistedStremioAddonSnapshot } from './databasePluginRepository.t
 
 let db: BetterSqlite3.Database | null = null;
 let artworkRepository: ReturnType<typeof createDatabaseArtworkRepository> | null = null;
-let thumbnailRepository: ReturnType<typeof createDatabaseThumbnailRepository> | null = null;
+let thumbnailRepository: ReturnType<typeof createThumbnailCache> | null = null;
 let segmentRepository: ReturnType<typeof createDatabaseSegmentsRepository> | null = null;
 let pluginSecretStore: PluginSecretStore | null = null;
 
@@ -190,16 +190,38 @@ export function checkpointDatabaseForQuit(): void {
   }
 }
 
+let freePageTrimTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Return free pages a bounded step at a time until none are left. One step
+ * per launch took many launches to give back a large deletion, such as the
+ * thumbnail BLOBs moving out of the database.
+ */
+function scheduleFreePageTrim(database: BetterSqlite3.Database, delayMs = 1_000): void {
+  if (freePageTrimTimer) return;
+  freePageTrimTimer = setTimeout(() => {
+    freePageTrimTimer = null;
+    if (db !== database) return;
+    try {
+      if (trimFreePages(database) > 0) scheduleFreePageTrim(database);
+      else database.pragma('wal_checkpoint(PASSIVE)');
+    } catch (error) {
+      console.warn('[database] Free page trim failed:', error);
+    }
+  }, delayMs);
+  freePageTrimTimer.unref();
+}
+
 function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
   const timer = setTimeout(() => {
     if (db !== database) return;
     try {
       database.pragma('optimize');
-      trimFreePages(database);
       database.pragma('wal_checkpoint(PASSIVE)');
     } catch (error) {
       console.warn('[database] Idle maintenance failed:', error);
     }
+    scheduleFreePageTrim(database, 0);
   }, 30_000);
   timer.unref();
 }
@@ -242,6 +264,26 @@ function backupBeforeProfilesMigration(database: BetterSqlite3.Database): void {
       `LoomTV could not create a pre-migration database backup: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
+  }
+}
+
+export function isProfilesMigrationComplete(): boolean {
+  return !profilesMigrationPending(getDb());
+}
+
+/** The committed canonical migration id, or null when there is none or it cannot be read. */
+export function readCommittedCanonicalMigrationId(): string | null {
+  const canonicalPath = path.join(app.getPath('userData'), 'loomtv-canonical.sqlite');
+  if (!fs.existsSync(canonicalPath)) return null;
+  let canonical: BetterSqlite3.Database | null = null;
+  try {
+    canonical = new BetterSqlite3(canonicalPath, { readonly: true, fileMustExist: true });
+    const row = canonical.prepare("SELECT id FROM migration_markers WHERE state = 'committed'").get() as { id?: unknown } | undefined;
+    return typeof row?.id === 'string' && row.id ? row.id : null;
+  } catch {
+    return null;
+  } finally {
+    canonical?.close();
   }
 }
 
@@ -392,8 +434,18 @@ function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkReposito
   return artworkRepository;
 }
 
-function getThumbnailRepository(): ReturnType<typeof createDatabaseThumbnailRepository> {
-  thumbnailRepository ||= createDatabaseThumbnailRepository(getDb());
+function thumbnailCacheDirectory(): string {
+  return path.join(app.getPath('userData'), 'thumbnail-cache');
+}
+
+function getThumbnailRepository(): ReturnType<typeof createThumbnailCache> {
+  const database = getDb();
+  thumbnailRepository ||= createThumbnailCache({
+    directory: thumbnailCacheDirectory(),
+    database,
+    scheduleMigration: true,
+    onLegacyDrained: () => scheduleFreePageTrim(database),
+  });
   return thumbnailRepository;
 }
 
@@ -473,13 +525,27 @@ export function getMediaRenameDatabase(): BetterSqlite3.Database {
   return getDb();
 }
 
+let unreadableSecureSettingsPending = false;
+
 function secureSettingsPersistence() {
   const database = getDb();
   return createSecureSettingsPersistence({
     load: () => loadSettingsRecord(database),
     save: (settings) => saveSettingsRecord(database, settings),
     transaction: (action) => database.transaction(action)(),
-  }, secureSettingsCodec);
+  }, secureSettingsCodec, {
+    onUnreadable: (error) => {
+      if (!unreadableSecureSettingsPending) console.warn('[settings] Saved credentials could not be decrypted; continuing without them:', error.message);
+      unreadableSecureSettingsPending = true;
+    },
+  });
+}
+
+/** True once per launch in which saved credentials could not be decrypted. */
+export function takeUnreadableSecureSettingsWarning(): boolean {
+  const pending = unreadableSecureSettingsPending;
+  unreadableSecureSettingsPending = false;
+  return pending;
 }
 
 export function loadSettingsFromDatabase(): SettingsData | null {
@@ -1388,7 +1454,8 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM app_settings;
   `))();
 
-  for (const cacheDirectory of [artworkCacheDirectory(), pluginArtworkCacheDirectory()]) {
+  thumbnailRepository?.clear();
+  for (const cacheDirectory of [artworkCacheDirectory(), pluginArtworkCacheDirectory(), thumbnailCacheDirectory()]) {
     try {
       fs.rmSync(cacheDirectory, { recursive: true, force: true });
     } catch (error) {

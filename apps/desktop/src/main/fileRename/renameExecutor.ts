@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
 import { createMediaItemId } from '../libraryItemHelpers.ts';
 import { mediaFileRevision } from '../skipSegments/fileIdentity.ts';
+import { createFileSettling } from './fileSettling.ts';
 import type { LibraryData } from '../appContracts.ts';
 import type { MediaItem } from '../metadata/types.ts';
 import {
@@ -150,7 +151,19 @@ export type RenameExecutorDeps = {
   libraryRoots: (data: LibraryData) => string[];
   /** Called after each disk step is journaled; lets a test stop the process mid-batch. */
   onStepCompleted?: (completed: number) => void;
+  /** The metadata sources' verdict on an item's match, or null while unchecked. */
+  verifyMatch?: (item: MediaItem) => { status: 'confirmed' | 'waiting' | 'conflict'; note: string; knownTitles: string[] } | null;
+  /** Keeps each file's first name; called after every batch that moved files. */
+  recordOriginalNames?: (moves: ReadonlyArray<{ from: string; to: string }>) => void;
 };
+
+/** Every video and sidecar move in a batch, from its old path to where it ended up. */
+function fileMoves(operations: readonly LoggedOperation[]): Array<{ from: string; to: string }> {
+  const mapPath = createPathMapper(pathMoves(operations));
+  return operations
+    .filter((operation) => operation.role === 'video' || operation.role === 'sidecar')
+    .map((operation) => ({ from: operation.from, to: mapPath(operation.from) }));
+}
 
 class RenameError extends Error {
   constructor(message: string) {
@@ -422,10 +435,9 @@ function performOnDisk(operations: readonly LoggedOperation[], onStep: (complete
   }
 }
 
-/** A file changed more recently than this is left for a later automatic run. */
-const RECENT_CHANGE_MS = 10 * 60 * 1000;
-
 export function createRenameExecutor(deps: RenameExecutorDeps) {
+  // Kept across runs: a file still being written is looked at again shortly.
+  const settling = createFileSettling();
   const lockedTargets = (): Map<string, string> => new Map(
     (deps.getDatabase().prepare('SELECT file_path, rejected_name FROM media_rename_locks').all() as Array<{ file_path: string; rejected_name: string }>)
       .map((row) => [row.file_path, row.rejected_name.toLowerCase()]),
@@ -439,14 +451,14 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     const result = planRenames({
       ...(options.automatic ? {
         isRecentlyModified: (filePath: string) => {
-          try {
-            const remaining = RECENT_CHANGE_MS - (now - fs.statSync(filePath).mtimeMs);
-            if (remaining > 0) deferred.set(filePath, remaining);
-            return remaining > 0;
-          } catch {
-            return true;
-          }
+          const remaining = settling.waitMs(filePath, now);
+          if (remaining > 0) deferred.set(filePath, remaining);
+          return remaining > 0;
         },
+      } : {}),
+      ...(deps.verifyMatch ? {
+        verify: deps.verifyMatch,
+        knownTitles: (item: MediaItem) => deps.verifyMatch?.(item)?.knownTitles ?? [],
       } : {}),
       // A movie that shares a folder with others gets a folder of its own.
       movieFolders: true,
@@ -605,6 +617,15 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     return { id: row.id, createdAt: row.created_at, undoneAt: row.undone_at, operations: JSON.parse(row.operations_json) as LoggedOperation[] };
   }
 
+  // The files are already in place; a failure here must not undo the batch.
+  function recordOriginals(operations: readonly LoggedOperation[]): void {
+    try {
+      deps.recordOriginalNames?.(fileMoves(operations));
+    } catch (error) {
+      console.warn('[rename] Could not record original file names:', error instanceof Error ? error.message : error);
+    }
+  }
+
   return {
     plan,
 
@@ -619,7 +640,10 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
      * changed in the last few minutes wait. Null when there is nothing to do.
      */
     applyAutomatic(): { batchId: string; renamed: number; retryAfterMs?: number } | null {
-      const { entries, retryAfterMs } = plan({ automatic: true });
+      const planned = plan({ automatic: true });
+      const retryAfterMs = planned.retryAfterMs;
+      // Only matches two sources agree on are applied without review.
+      const entries = planned.entries.filter((entry) => !entry.verification || entry.verification.status === 'confirmed');
       if (entries.length === 0) return retryAfterMs === undefined ? null : { batchId: '', renamed: 0, retryAfterMs };
       return { ...this.apply(entries.map((entry) => entry.id)), retryAfterMs };
     },
@@ -675,6 +699,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
           .run(batchId, Date.now(), JSON.stringify(operations));
       });
       removeEmptiedFolders(entries, createPathMapper(pathMoves(operations)), batchId, operations);
+      recordOriginals(operations);
       return { batchId, renamed: videos.size };
     },
 
@@ -686,7 +711,8 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       const batch = readBatch(batchId);
       if (!batch) throw new RenameError('That rename could not be found.');
       if (batch.undoneAt) throw new RenameError('That rename was already undone.');
-      execute(inverted(batch.operations), batchId, 'undo', (database) => {
+      const reversal = inverted(batch.operations);
+      execute(reversal, batchId, 'undo', (database) => {
         const now = Date.now();
         database.prepare('UPDATE media_rename_batches SET undone_at = ? WHERE id = ?').run(now, batchId);
         const lock = database.prepare('INSERT OR REPLACE INTO media_rename_locks (file_path, rejected_name, created_at) VALUES (?, ?, ?)');
@@ -694,6 +720,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
           if (operation.role === 'video') lock.run(operation.from, path.basename(operation.to), now);
         }
       });
+      recordOriginals(reversal);
       return { restored: batch.operations.filter((operation) => operation.role === 'video').length };
     },
 

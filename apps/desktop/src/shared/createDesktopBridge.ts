@@ -10,6 +10,7 @@ import type {
 } from './mediaControlProtocol';
 import type {
   LibraryIndexPayload,
+  LibraryIndexUnchanged,
   LibraryItemDetailsPayload,
   LibraryScanMode,
   LibraryScanProgress,
@@ -46,6 +47,7 @@ import type { IpcContract, IpcEventContract } from './ipcContract';
 
 type CompactLibraryBridgeApi = {
   getLibraryIndex: () => Promise<LibraryIndexPayload>;
+  getLibraryIndexIfChanged: (knownFingerprint?: string) => Promise<LibraryIndexPayload | LibraryIndexUnchanged>;
   getLibraryItem: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
 };
 
@@ -85,6 +87,7 @@ const desktopApi = {
   },
   getLibrary: () => ipcRenderer.invoke('library:get'),
   getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
+  getLibraryIndexIfChanged: (knownFingerprint?: string) => ipcRenderer.invoke('library:get-index-if-changed', knownFingerprint),
   getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),
   scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
   onLibraryScanProgress: (callback: (progress: LibraryScanProgress) => void) => {
@@ -151,6 +154,9 @@ const desktopApi = {
   applyMediaRenames: (entryIds: string[]) => ipcRenderer.invoke('library:rename-apply', entryIds),
   listMediaRenames: (offset = 0) => ipcRenderer.invoke('library:rename-history', offset),
   getMediaRenameRecord: (batchId: string) => ipcRenderer.invoke('library:rename-record', batchId),
+  getOriginalFileName: (filePath: string) => ipcRenderer.invoke('library:original-file-name', filePath),
+  libraryCleanupHistory: () => ipcRenderer.invoke('library:cleanup-history'),
+  restoreLibraryCleanup: (batchId: string) => ipcRenderer.invoke('library:cleanup-restore', batchId),
   undoMediaRename: (batchId: string) => ipcRenderer.invoke('library:rename-undo', batchId),
   mediaRenameStatus: () => ipcRenderer.invoke('library:rename-status'),
   libraryEpisodeUpdates: () => ipcRenderer.invoke('library:episode-updates'),

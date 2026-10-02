@@ -223,3 +223,77 @@ test('existing database settings win over retained JSON and defaults require abs
   }), {});
   assert.equal(writes, 1);
 });
+
+test('undecryptable credentials degrade to public settings and are kept for recovery', (t) => {
+  const database = new BetterSqlite3(':memory:');
+  t.after(() => database.close());
+  database.exec('CREATE TABLE app_settings (id INTEGER PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');
+  const original = fixture();
+  const stored = writeSecureSettings({ ...secrets, theme: 'light' }, original.codec);
+  const earlierRecovery = [{ encrypted: 'older' }];
+  saveSettings(database, { ...stored, [SECURE_SETTINGS_RECOVERY_FIELD]: earlierRecovery });
+  // A recreated key file: the same store, but nothing it wrote decrypts.
+  const replacement = fixture();
+  const unreadable: SecureSettingsCorruptError[] = [];
+  const persistence = createSecureSettingsPersistence({
+    load: () => loadSettings(database),
+    save: (settings) => saveSettings(database, settings),
+    transaction: (action) => database.transaction(action)(),
+  }, replacement.codec, { onUnreadable: (error) => unreadable.push(error) });
+
+  const before = loadSettings(database);
+  assert.deepEqual(persistence.load(), { theme: 'light' });
+  assert.equal(unreadable.length, 1);
+  assert.deepEqual(loadSettings(database), before, 'loading alone never rewrites the row');
+
+  persistence.save({ theme: 'dark', tmdbApiKey: 'new-key' });
+  const persisted = loadSettings(database);
+  assert.ok(persisted);
+  const recovery = persisted[SECURE_SETTINGS_RECOVERY_FIELD] as Array<Record<string, unknown>>;
+  assert.deepEqual(recovery[0], earlierRecovery[0]);
+  assert.deepEqual(recovery[1].unreadable, stored[SECURE_SETTINGS_FIELD]);
+  assert.equal(typeof recovery[1].quarantinedAt, 'number');
+  assert.deepEqual(persistence.load(), { theme: 'dark', tmdbApiKey: 'new-key' });
+  assert.equal(unreadable.length, 1, 'the warning fires only while the envelope is unreadable');
+  // The original key still opens the quarantined copy.
+  assert.equal(readSecureSettings({ [SECURE_SETTINGS_FIELD]: recovery[1].unreadable }, original.codec).settings.tmdbApiKey, secrets.tmdbApiKey);
+});
+
+test('a locked secret store still fails closed instead of degrading', (t) => {
+  const database = new BetterSqlite3(':memory:');
+  t.after(() => database.close());
+  database.exec('CREATE TABLE app_settings (id INTEGER PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');
+  const f = fixture();
+  saveSettings(database, writeSecureSettings({ ...secrets, theme: 'light' }, f.codec));
+  let warned = false;
+  const persistence = createSecureSettingsPersistence({
+    load: () => loadSettings(database),
+    save: (settings) => saveSettings(database, settings),
+    transaction: (action) => database.transaction(action)(),
+  }, f.codec, { onUnreadable: () => { warned = true; } });
+  f.lock();
+  assert.throws(() => persistence.load(), SecureSettingsUnavailableError);
+  assert.throws(() => persistence.save({ theme: 'dark' }), SecureSettingsUnavailableError);
+  assert.equal(warned, false);
+});
+
+test('a record missing generated LAN fields is saved so they stay stable', () => {
+  let writes = 0;
+  const current = { theme: 'light', localNetworkSecurityEpoch: 2 };
+  loadOrInitializeSettings({
+    loadDatabase: () => current,
+    readLegacy: () => null,
+    normalize: (value) => ({ ...value, localNetworkHmacSecret: 'ab'.repeat(32) }),
+    save: () => { writes++; },
+    generatedFields: ['localNetworkHmacSecret'],
+  });
+  assert.equal(writes, 1);
+  loadOrInitializeSettings({
+    loadDatabase: () => ({ ...current, localNetworkHmacSecret: 'ab'.repeat(32) }),
+    readLegacy: () => null,
+    normalize: (value) => value,
+    save: () => { writes++; },
+    generatedFields: ['localNetworkHmacSecret'],
+  });
+  assert.equal(writes, 1);
+});

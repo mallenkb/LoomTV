@@ -127,6 +127,8 @@ interface PlayerSettingsPanelProps {
   displaySleepTimeoutError?: string;
   setDisplaySleepTimeoutMinutes: (minutes: number) => void;
   playbackInformation: {
+    /** The file's name before LoomTV first renamed it. */
+    originalFile?: string;
     engine: string;
     mode: string;
     hardwareDecode: string;
@@ -406,6 +408,7 @@ export default function PlayerSettingsPanel({
                       ]),
                       ['Hardware decode', playbackInformation.hardwareDecode],
                       ['Encode backend', playbackInformation.encodeBackend],
+                      ...(playbackInformation.originalFile ? [['Original file', playbackInformation.originalFile]] : []),
                     ].map(([label, value]) => (
                       <div key={label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
                         <dt className="text-white/70">{label}</dt>

@@ -36,6 +36,11 @@ export type RenamePlanEntry = {
   createFolder?: string;
   /** A loose episode becomes a show whose catalog path is this new folder. */
   showFolder?: string;
+  /**
+   * What the metadata sources said about the match. Only confirmed entries
+   * are applied automatically; the rest wait for review in the preview.
+   */
+  verification?: { status: 'confirmed' | 'waiting' | 'conflict' | 'unchecked'; note: string };
 };
 
 type RenameSkip = {
@@ -62,9 +67,16 @@ export type RenamePlannerInput = {
   sameDrive: (left: string, right: string) => boolean;
   /** Give a movie that shares a folder with others a folder of its own. */
   movieFolders?: boolean;
+  /** Other titles the matched sources know this item by (original or translated). */
+  knownTitles?: (item: MediaItem) => readonly string[];
   /**
-   * Automatic runs only: true for a file changed moments ago, which may still
-   * be downloading or seeding. Such a file waits for a later sync.
+   * The sources' verdict on an item's match, or null while it has not been
+   * checked. Without this function every planned entry counts as confirmed.
+   */
+  verify?: (item: MediaItem) => { status: 'confirmed' | 'waiting' | 'conflict'; note: string } | null;
+  /**
+   * Automatic runs only: true for a file that is still being copied or
+   * downloaded. It is looked at again shortly and organized once finished.
    */
   isRecentlyModified?: (filePath: string) => boolean;
 };
@@ -204,6 +216,33 @@ function withoutReleaseTags(name: string): string {
 
 function words(value: string): string[] {
   return value.toLowerCase().replace(/['’]/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+const ROMAN_NUMERALS: Record<string, string> = { ii: '2', iii: '3', iv: '4', v: '5', vi: '6', vii: '7', viii: '8', ix: '9', x: '10' };
+
+/** Words that carry a title's meaning: no articles, Roman numerals as digits. */
+function titleWords(value: string): string[] {
+  return words(value.replace(/&/g, ' and '))
+    .map((word) => ROMAN_NUMERALS[word] || word)
+    .filter((word) => !STOPWORDS.has(word));
+}
+
+/**
+ * Whether the title in a file's name and a matched title name the same thing.
+ * Most of the shorter one's words must appear in the longer one, so extra
+ * words ("Lee Cronin's The Mummy" for "The Mummy", a franchise prefix) pass
+ * but a different film with the same year and runtime does not. A file name
+ * without any title words cannot disagree.
+ */
+export function titleAgrees(fileTitle: string, matchTitles: readonly string[]): boolean {
+  const fileWords = titleWords(fileTitle);
+  if (fileWords.length === 0) return true;
+  return matchTitles.some((title) => {
+    const known = titleWords(title);
+    if (known.length === 0) return false;
+    const shared = known.filter((word) => fileWords.some((other) => sameWord(word, other))).length;
+    return shared / Math.min(known.length, fileWords.length) >= 0.6;
+  });
 }
 
 /** "stone" and "stones", "emerge" and "emerges" count as the same word. */
@@ -372,7 +411,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
           return `"${name}" is still downloading. Folder changes wait until the download finishes.`;
         }
         if (isVideoFileName(name)) {
-          if (input.isRecentlyModified?.(child)) return `"${name}" changed in the last 10 minutes. Folder changes wait until copying finishes.`;
+          if (input.isRecentlyModified?.(child)) return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
         } else if (!SIDECAR_EXTENSIONS.has(path.extname(name).toLowerCase()) && list(child) !== null) {
           pending.push({ directory: child, depth: depth + 1 });
         }
@@ -470,7 +509,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const moving = targetDirectory !== directory;
     if (!(list(directory) || []).includes(name)) return skip('The file is no longer where the library expects it.');
     if (input.isRecentlyModified?.(filePath)) {
-      return skip('The file changed in the last few minutes and may still be downloading, so it waits for the next sync.');
+      return skip('The file is still being copied or downloaded. It is organized as soon as it finishes.');
     }
     // Keep organized names except provisional episode codes awaiting a title
     // or a season prefix confirmed wrong by the folder and episode metadata.
@@ -563,6 +602,10 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const { titleTokens, tagText } = splitAtYear(stem, item.year);
     if (titleLostWords(item.title, titleTokens)) {
       return { reason: `The library title "${item.title}" is missing words from the file's own title.` };
+    }
+    const fileTitle = cleanMediaTitle(titleTokens.join(' ')).title;
+    if (!titleAgrees(fileTitle, [item.title, ...(input.knownTitles?.(item) || [])])) {
+      return { reason: `The file is called "${fileTitle}", which does not match "${item.title}".` };
     }
     // Editions and split parts only count in the release-tag part after the
     // year; before it they are the title ("The Godfather Part 2").
@@ -1029,6 +1072,16 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     planFolder(item, 'Show folder', showFolder, titleWithYear(item.title, item.year));
   }
 
+  if (input.verify) {
+    const byId = new Map(input.items.map((item) => [item.id, item]));
+    for (const entry of entries) {
+      const item = byId.get(entry.mediaId);
+      const verdict = item ? input.verify(item) : null;
+      entry.verification = verdict
+        ? { status: verdict.status, note: verdict.note }
+        : { status: 'unchecked', note: 'The match has not been checked with the metadata sources yet.' };
+    }
+  }
   return { entries, skipped };
 }
 

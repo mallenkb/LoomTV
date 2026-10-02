@@ -24,6 +24,7 @@ const TEST_FLAG = 'LOOMTV_UNIFIED_DESKTOP';
 const BOOTSTRAP_SECRET_NAME = 'canonical-bootstrap.secure.json';
 
 let host: ReturnType<typeof createCanonicalServerHost> | null = null;
+const CANONICAL_PORT_ATTEMPTS = 10;
 let identity: LanTlsIdentity | null = null;
 let origin = '';
 let bootstrapSecret: string | null = null;
@@ -254,13 +255,16 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
     );
     const configuredPort = Number.parseInt(String(process.env.LOOMTV_CANONICAL_PORT || ''), 10);
 
-    host = createCanonicalServerHost({
+    const explicitPort = Number.isInteger(configuredPort) && configuredPort > 0;
+    // The desktop LAN media server already owns 3848. Keep the unified
+    // administration server on its own default port so enabling the test
+    // cannot silently hide the admin entry after an EADDRINUSE failure.
+    const preferredPort = explicitPort ? configuredPort : 3948;
+    const tlsIdentity = identity;
+    const hostOptions = (port: number): Parameters<typeof createCanonicalServerHost>[0] => ({
       migrationReady: true,
       host: '0.0.0.0',
-      // The desktop LAN media server already owns 3848. Keep the unified
-      // administration server on its own default port so enabling the test
-      // cannot silently hide the admin entry after an EADDRINUSE failure.
-      port: Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 3948,
+      port,
       paths: {
         dataDir,
         cacheDir: path.join(dataDir, 'canonical-cache'),
@@ -271,8 +275,8 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
       ffprobePath: findFFprobe() || undefined,
       requireSecureTransport: true,
       requireBootstrapSecret: false,
-      tls: { cert: identity.certificatePem, key: identity.privateKeyPem },
-      certificateFingerprint: identity.certFingerprint,
+      tls: { cert: tlsIdentity.certificatePem, key: tlsIdentity.privateKeyPem },
+      certificateFingerprint: tlsIdentity.certFingerprint,
       bootstrapSecret: bootstrapSecret || undefined,
       desktopSetupToken,
       pickFolder: async () => {
@@ -294,7 +298,27 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
       setupHtmlPath: packagedAsset('setup.html', path.join(sourceAssets, 'setup.html')),
       compatibilityHandler: async () => false,
     });
-    const address = await host.start();
+    // Clients find this server through the LAN advertisement, so another
+    // program holding 3948 should move it rather than leave it off. An
+    // explicitly configured port stays exact.
+    const candidatePorts = explicitPort
+      ? [preferredPort]
+      : Array.from({ length: CANONICAL_PORT_ATTEMPTS }, (_, offset) => preferredPort + offset);
+    let address: { host: string; port: number } | null = null;
+    for (const [attempt, port] of candidatePorts.entries()) {
+      // A host caches its first start, failed or not, so each port gets a new one.
+      host = createCanonicalServerHost(hostOptions(port));
+      try {
+        address = await host.start();
+        break;
+      } catch (error) {
+        host = null;
+        const inUse = (error as NodeJS.ErrnoException | null)?.code === 'EADDRINUSE';
+        if (!inUse || attempt === candidatePorts.length - 1) throw error;
+        console.warn(`[unified desktop] Port ${port} is in use; trying ${port + 1}.`);
+      }
+    }
+    if (!address) throw new Error('The canonical server did not start.');
     origin = `https://127.0.0.1:${address.port}`;
     configureDesktopSetupChannel(desktopSetupToken);
     configureCanonicalWindow(origin);

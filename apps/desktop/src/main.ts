@@ -18,8 +18,11 @@ import {
 } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
+import type { LibraryIndexPayload, LibraryIndexUnchanged } from './shared/desktopProtocol';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
 
@@ -38,7 +41,7 @@ import {
   destroyLanDiscovery,
   discoverLanPeers,
 } from './main/lanDiscovery';
-import { findFFmpeg, getTranscodeCapabilities } from './main/mediaBinaries';
+import { findFFmpeg, findFFprobe, getTranscodeCapabilities } from './main/mediaBinaries';
 import {
   assertLocalMediaPath,
   probeMedia,
@@ -63,6 +66,20 @@ import { MEDIA_PROTOCOL_SCHEMES, mediaSchemePrivileges } from './main/loomtvProt
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
+import { clearOversizedHttpCacheOnce, httpDiskCacheSwitch } from './main/httpCacheBudget.ts';
+import { pruneObsoleteData } from './main/dataRetention.ts';
+import {
+  CLEANUP_REASON_LABELS,
+  CLEANUP_RETENTION_MS,
+  createCleanupStore,
+  findLeftovers,
+  findRedundantSubtitles,
+  withoutRemovedSubtitles,
+  type CleanupCandidate,
+  type EmbeddedTrack,
+  type SubtitleTools,
+} from './main/libraryCleanup.ts';
+import { libraryIndexIfChanged } from './main/libraryIndexFingerprint.ts';
 import {
   registerResource,
   setResourceRegistryCatalogGeneration,
@@ -84,6 +101,15 @@ import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
 import { parseIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
+import { createOriginalNameStore } from './main/fileRename/originalNames.ts';
+import {
+  confirmationIsFresh,
+  createMatchConfirmationStore,
+  evaluateConfirmation,
+  gatherConfirmation,
+  searchTermsFor,
+  type ConfirmationSources,
+} from './main/fileRename/matchConfirmation.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
 import { loadShowSchedules } from './main/showSchedule.ts';
@@ -214,6 +240,9 @@ import {
   resetAutomaticAnalysisData,
   loadMetadataOfflineModeFromDatabase,
   migrateLegacyCredentialStorage,
+  isProfilesMigrationComplete,
+  readCommittedCanonicalMigrationId,
+  takeUnreadableSecureSettingsWarning,
   checkpointDatabaseForQuit,
 } from './main/database';
 import {
@@ -266,7 +295,7 @@ import type {
 } from './main/metadata/types';
 import { fetchOMDbMetadata, fetchOMDbMetadataById, fetchOMDbSeasonEpisodes } from './main/metadata/omdb';
 import { fetchTVMetadata, fetchTVMetadataCandidates, fetchTVMetadataById } from './main/metadata/tvmaze';
-import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates } from './main/metadata/tvdb';
+import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates, searchTVDBIdentity } from './main/metadata/tvdb';
 import {
   fetchTMDBMovieMetadata,
   fetchTMDBMovieMetadataById,
@@ -290,7 +319,7 @@ import {
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
 import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinator';
-import { isPlaybackActivityActive, setPlaybackActivityLease } from './main/ffmpegGovernor';
+import { acquireFfmpegToolSlot, isPlaybackActivityActive, setPlaybackActivityLease } from './main/ffmpegGovernor';
 import {
   createLibraryScanFilesAsync,
 } from './main/libraryScanFiles';
@@ -361,6 +390,8 @@ const disableZeroCopy = ['1', 'true', 'yes'].includes(
   String(process.env.LOOMTV_DISABLE_ZERO_COPY || '').trim().toLowerCase(),
 );
 if (disableZeroCopy) app.commandLine.appendSwitch('disable-zero-copy');
+
+app.commandLine.appendSwitch(...httpDiskCacheSwitch());
 
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
@@ -1194,6 +1225,11 @@ function compactLibraryIndexForRenderer(revision = libraryMutationVersion) {
   return projectLibraryIndexForRenderer(scoped, revision);
 }
 
+function compactLibraryIndexIfChanged(knownFingerprint?: string): LibraryIndexPayload | LibraryIndexUnchanged {
+  const state = getDesktopActiveProfileState();
+  return libraryIndexIfChanged(compactLibraryIndexForRenderer(), `${state.profileId ?? 'profile:none'}:${state.selectionRevision}`, knownFingerprint);
+}
+
 function compactLibraryItemForRenderer(mediaId: string, revision = libraryMutationVersion) {
   const profileId = getDesktopActiveProfileId();
   if (!profileId) return null;
@@ -1466,6 +1502,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   reconcileSkipAnalysisAfterScan(previous, data);
   firstSeenDates(true);
   scheduleAutomaticOrganize();
+  scheduleLibraryCleanup();
   if (scanCommits.get(data)?.backgroundMetadataRefresh) {
     void refreshIncompleteMetadataQueue(loadLibrary()).then(() => refreshDisplayMetadataQueue(loadLibrary()))
       .catch((error) => console.warn('[metadata] Background refresh after scan failed:', error));
@@ -1788,8 +1825,68 @@ const iptvService = createIptvService({ getDatabase: getIptvDatabase, findFFmpeg
 // Renaming files to their matched names. The executor moves every path-,
 // ID-, and revision-keyed record with the files and refuses to run while a
 // scan could be writing the same library.
+const originalNames = createOriginalNameStore(getMediaRenameDatabase);
+const matchConfirmations = createMatchConfirmationStore(getMediaRenameDatabase);
+
+function confirmationSources(): ConfirmationSources {
+  const settings = loadSettings();
+  const tmdb = getMetadataApiKey(settings, 'tmdb');
+  const omdb = getMetadataApiKey(settings, 'omdb');
+  const tvdb = getMetadataApiKey(settings, 'tvdb');
+  const online = <T>(request: () => Promise<T | null>) => async (): Promise<T | null> => (
+    (loadMetadataOfflineModeFromDatabase() ?? Boolean(settings.metadataOfflineMode)) ? null : request()
+  );
+  return {
+    tmdbMovie: (title, year) => online(() => fetchTMDBMovieMetadata(title, year, tmdb))(),
+    tmdbShow: (title, year) => online(() => fetchTMDBTVMetadata(title, year, tmdb))(),
+    omdb: (title, year, type) => online(() => fetchOMDbMetadata(title, year, omdb, type))(),
+    tvdb: (title, year, type) => online(() => searchTVDBIdentity(title, year, tvdb, type))(),
+    tvmaze: (title, year) => online(() => fetchTVMetadata(title, year))(),
+    anilist: (title) => online(() => fetchAniListAnimeMetadata(undefined, title))(),
+    mal: (title) => online(() => fetchJikanMetadata(title))(),
+  };
+}
+
+let matchConfirmationRefresh: Promise<void> | null = null;
+
+/**
+ * Ask the metadata sources about every item the organizer would change and
+ * has not checked recently. Sources are asked one item at a time to stay
+ * within their rate limits; a confirmed item is never asked again unless
+ * its match changes.
+ */
+function refreshMatchConfirmations(): Promise<void> {
+  matchConfirmationRefresh ||= (async () => {
+    const data = loadLibrary();
+    const groups = normalizeLibraryFolderGroups(data);
+    const roots = flattenLibraryFolders(groups);
+    const animeRoots = (groups.anime || []).map((root) => path.resolve(root));
+    const plan = mediaRenameExecutor.plan();
+    const wanted = new Set([
+      ...plan.entries.map((entry) => entry.mediaId),
+      // A title check failure may only need the sources' other titles.
+      ...plan.skipped.filter((skip) => skip.reason.includes('which does not match')).map((skip) => skip.mediaId),
+    ]);
+    const now = Date.now();
+    const sources = confirmationSources();
+    for (const item of [...data.movies, ...data.tvShows, ...data.animeShows]) {
+      if (!wanted.has(item.id)) continue;
+      const stored = matchConfirmations.get(item.id);
+      if (stored && confirmationIsFresh(stored, item, now)) continue;
+      const likelyAnime = item.type === 'anime' || animeRoots.some((root) => path.resolve(item.filePath).startsWith(root + path.sep));
+      matchConfirmations.set(item.id, await gatherConfirmation(item, searchTermsFor(item, roots), sources, { likelyAnime }));
+    }
+  })().finally(() => { matchConfirmationRefresh = null; });
+  return matchConfirmationRefresh;
+}
+
 const mediaRenameExecutor = createRenameExecutor({
   getDatabase: getMediaRenameDatabase,
+  verifyMatch: (item) => {
+    const stored = matchConfirmations.get(item.id);
+    return stored ? evaluateConfirmation(item, stored) : null;
+  },
+  recordOriginalNames: (moves) => originalNames.recordMoves(moves),
   loadLibrary,
   saveLibraryMutation,
   remapMediaIds: remapLibraryMediaReferences,
@@ -1813,7 +1910,10 @@ function mediaRenameBatchForRenderer(batch: RenameBatchRecord) {
 }
 
 const mediaRenameHandlers = {
-  previewMediaRenames: () => {
+  previewMediaRenames: async () => {
+    await refreshMatchConfirmations().catch((error) => {
+      console.warn('[rename] Could not check matches with the metadata sources:', describeErrorForLog(error));
+    });
     const plan = mediaRenameExecutor.plan();
     return {
       entries: plan.entries.map((entry) => ({
@@ -1829,12 +1929,31 @@ const mediaRenameHandlers = {
           ? { moveToFolder: path.basename(path.dirname(entry.to)), createsFolder: Boolean(entry.createFolder) }
           : {}),
         sidecars: entry.sidecars.map((sidecar) => ({ fromName: path.basename(sidecar.from), toName: path.basename(sidecar.to) })),
+        ...(entry.verification ? { verification: entry.verification } : {}),
       })),
       skipped: plan.skipped.map((skip) => ({ mediaTitle: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason })),
     };
   },
   applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
   listMediaRenames: (offset = 0) => mediaRenameExecutor.history(20, offset).map(mediaRenameBatchForRenderer),
+  originalFileName: (filePath: string) => originalNames.originalPath(filePath),
+  libraryCleanupHistory: () => libraryCleanup.history().map((batch) => ({
+    id: batch.id,
+    createdAt: batch.createdAt,
+    restoredAt: batch.restoredAt,
+    expiresAt: batch.createdAt + CLEANUP_RETENTION_MS,
+    items: batch.items.map((item) => ({ name: path.basename(item.from), folder: path.dirname(item.from), reason: CLEANUP_REASON_LABELS[item.reason] })),
+  })),
+  restoreLibraryCleanup: (batchId: string) => {
+    const result = libraryCleanup.restore(batchId);
+    // Restored subtitles return to the player's lists with a quick scan.
+    void (async () => {
+      const scanVersion = libraryMutationVersion;
+      const scanned = await scanLibrary(loadLibrary(), { mode: 'quick', backgroundMetadataRefresh: false });
+      saveLibraryFromScan(scanned, scanVersion);
+    })().catch((error) => console.warn('[cleanup] Rescan after restore failed:', describeErrorForLog(error)));
+    return { restored: result.restored, skipped: result.skipped.length };
+  },
   getMediaRenameRecord: (batchId: string) => {
     const batch = mediaRenameExecutor.record(batchId);
     if (!batch) return null;
@@ -1928,14 +2047,108 @@ const AUTO_ORGANIZE_RETRY_MS = 60_000;
 let autoOrganizeTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAutomaticError = '';
 
+const libraryCleanup = createCleanupStore(getMediaRenameDatabase, path.join(USER_DATA_DIR, 'library-cleanup'));
+let libraryCleanupTimer: NodeJS.Timeout | null = null;
+let libraryCleanupRunning = false;
+const LIBRARY_CLEANUP_DELAY_MS = 15_000;
+const LIBRARY_CLEANUP_RETRY_MS = 60_000;
+const execFileAsync = promisify(execFile);
+
+/** Wait while anything plays or scans: subtitle checks read whole videos. */
+const cleanupShouldWait = () => isPlaybackActivityActive() || activeScans.size > 0;
+
+function subtitleTools(): SubtitleTools | null {
+  const ffmpeg = findFFmpeg();
+  const ffprobe = findFFprobe();
+  if (!ffmpeg || !ffprobe) return null;
+  const withSlot = async <T>(work: () => Promise<T>): Promise<T> => {
+    const release = await acquireFfmpegToolSlot('subtitle check');
+    try { return await work(); } finally { release(); }
+  };
+  const toSrt = (args: string[]) => withSlot(async () => (await execFileAsync(ffmpeg, ['-nostdin', '-v', 'error', ...args, '-f', 'srt', '-'], { maxBuffer: 64 * 1024 * 1024, timeout: 120_000 })).stdout);
+  return {
+    probe: (video) => withSlot(async () => {
+      try {
+        const { stdout } = await execFileAsync(ffprobe, ['-v', 'error', '-select_streams', 's', '-show_entries', 'stream=index,codec_name:stream_tags=language,title:stream_disposition=forced', '-of', 'json', video], { timeout: 30_000 });
+        const streams = (JSON.parse(stdout) as { streams?: Array<{ index: number; codec_name?: string; tags?: { language?: string; title?: string }; disposition?: { forced?: number } }> }).streams || [];
+        return streams.map((stream): EmbeddedTrack => ({
+          index: stream.index,
+          codec: stream.codec_name || '',
+          language: stream.tags?.language || '',
+          title: stream.tags?.title || '',
+          forced: Boolean(stream.disposition?.forced),
+        }));
+      } catch {
+        return null;
+      }
+    }),
+    extract: (video, trackIndex) => toSrt(['-i', video, '-map', `0:${trackIndex}`]),
+    convert: (sidecar) => toSrt(['-i', sidecar]),
+    shouldStop: cleanupShouldWait,
+  };
+}
+
+function scheduleLibraryCleanup(delayMs = LIBRARY_CLEANUP_DELAY_MS): void {
+  if (loadSettings().cleanUpLibraryFiles === 'off') return;
+  if (libraryCleanupTimer) clearTimeout(libraryCleanupTimer);
+  libraryCleanupTimer = setTimeout(() => { void runLibraryCleanup(); }, delayMs);
+  libraryCleanupTimer.unref?.();
+}
+
+/**
+ * Move leftover download files and redundant subtitles out of the library
+ * folders, on launch and after each sync. Everything moved can be restored
+ * from Settings for 30 days.
+ */
+async function runLibraryCleanup(): Promise<void> {
+  libraryCleanupTimer = null;
+  if (libraryCleanupRunning || loadSettings().cleanUpLibraryFiles === 'off') return;
+  if (cleanupShouldWait()) {
+    scheduleLibraryCleanup(LIBRARY_CLEANUP_RETRY_MS);
+    return;
+  }
+  libraryCleanupRunning = true;
+  try {
+    libraryCleanup.purgeExpired();
+    const roots = flattenLibraryFolders(normalizeLibraryFolderGroups(loadLibrary()));
+    const leftovers = findLeftovers(roots);
+    const tools = subtitleTools();
+    const subtitles = tools ? await findRedundantSubtitles(roots, tools, libraryCleanup.subtitleCache) : [];
+    // Playback or a scan started during the subtitle checks: finish later.
+    if (cleanupShouldWait()) {
+      scheduleLibraryCleanup(LIBRARY_CLEANUP_RETRY_MS);
+      return;
+    }
+    const keep = libraryCleanup.restoredPaths();
+    const batch = libraryCleanup.hold(([...leftovers, ...subtitles] as CleanupCandidate[])
+      .filter((candidate) => !keep.has(path.resolve(candidate.path))));
+    if (!batch) return;
+    const removed = new Set(batch.items.map((item) => path.resolve(item.from)));
+    const data = loadLibrary();
+    const movies = withoutRemovedSubtitles(data.movies, removed);
+    const tvShows = withoutRemovedSubtitles(data.tvShows, removed);
+    const animeShows = withoutRemovedSubtitles(data.animeShows, removed);
+    if (movies.changed || tvShows.changed || animeShows.changed) {
+      saveLibraryMutation({ ...data, movies: movies.items, tvShows: tvShows.items, animeShows: animeShows.items });
+    }
+    console.info(`[cleanup] Moved ${batch.items.length} leftover file(s) out of the library folders.`);
+    const window = getMainWindow();
+    if (window && !window.isDestroyed()) window.webContents.send('library:cleaned', { removed: batch.items.length });
+  } catch (error) {
+    console.warn('[cleanup] Library cleanup failed:', describeErrorForLog(error));
+  } finally {
+    libraryCleanupRunning = false;
+  }
+}
+
 function scheduleAutomaticOrganize(delayMs = AUTO_ORGANIZE_DELAY_MS): void {
   if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
   if (autoOrganizeTimer) clearTimeout(autoOrganizeTimer);
-  autoOrganizeTimer = setTimeout(runAutomaticOrganize, delayMs);
+  autoOrganizeTimer = setTimeout(() => { void runAutomaticOrganize(); }, delayMs);
   autoOrganizeTimer.unref?.();
 }
 
-function runAutomaticOrganize(): void {
+async function runAutomaticOrganize(): Promise<void> {
   autoOrganizeTimer = null;
   if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
   if (isPlaybackActivityActive() || activeScans.size > 0) {
@@ -1943,6 +2156,12 @@ function runAutomaticOrganize(): void {
     return;
   }
   try {
+    await refreshMatchConfirmations();
+    // A scan or playback may have started while the sources were asked.
+    if (isPlaybackActivityActive() || activeScans.size > 0) {
+      scheduleAutomaticOrganize(AUTO_ORGANIZE_RETRY_MS);
+      return;
+    }
     const result = mediaRenameExecutor.applyAutomatic();
     lastAutomaticError = '';
     if (!result) return;
@@ -1965,6 +2184,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   loadLibrary,
   libraryForRenderer,
   libraryIndexForRenderer: compactLibraryIndexForRenderer,
+  libraryIndexIfChanged: compactLibraryIndexIfChanged,
   // Detail reads must return the persisted library snapshot. Provider refreshes
   // belong to explicit metadata-refresh actions, not opening a local title.
   libraryItemForRenderer: compactLibraryItemForRenderer,
@@ -2491,7 +2711,47 @@ export const mediaServerDeps = {
  * the window is already on screen while the library warms, the stale transcode
  * cache is swept, and the LAN advertisement goes out.
  */
+function warnAboutUnreadableCredentials(): void {
+  try { loadSettings(); } catch { /* the startup path reports its own errors */ }
+  if (!takeUnreadableSecureSettingsWarning()) return;
+  const window = getMainWindow();
+  const options = {
+    type: 'warning' as const,
+    message: 'Loom could not read its saved credentials',
+    detail: 'Metadata API keys and the OpenSubtitles sign-in need to be entered again in Settings, '
+      + 'and paired phones and TVs may need to pair again. This usually means the file '
+      + 'loomtv-local-secrets.key was lost or replaced. The unreadable copy is kept, so restoring '
+      + 'that file recovers it.',
+  };
+  void (window && !window.isDestroyed() ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options));
+}
+
+function scheduleObsoleteDataCleanup(): void {
+  // Well after startup: removing a few hundred MB must not compete with the
+  // first window paint or a library scan.
+  const timer = setTimeout(() => {
+    try {
+      const removed = pruneObsoleteData({
+        userDataDir: USER_DATA_DIR,
+        now: Date.now(),
+        committedMigrationId: readCommittedCanonicalMigrationId(),
+        profilesMigrationComplete: isProfilesMigrationComplete(),
+      });
+      for (const entry of removed) {
+        console.info(`[retention] Removed ${path.basename(entry.path)} (${Math.round(entry.bytes / 1048576)} MB, ${entry.reason}).`);
+      }
+    } catch (error) {
+      console.warn('[retention] Obsolete data cleanup failed:', describeErrorForLog(error));
+    }
+  }, 2 * 60 * 1000);
+  timer.unref();
+}
+
 async function startBackgroundServices(): Promise<void> {
+  scheduleObsoleteDataCleanup();
+  void clearOversizedHttpCacheOnce(USER_DATA_DIR, () => session.defaultSession.clearCache())
+    .then((cleared) => { if (cleared) console.info('[cache] Cleared the pre-cap Chromium HTTP cache.'); })
+    .catch((error) => console.warn('[cache] Could not clear the Chromium HTTP cache:', describeErrorForLog(error)));
   let configuredAdminUrl: string | null = null;
   if (process.env.LOOMTV_ADMIN_URL?.trim()) {
     try {
@@ -2613,6 +2873,16 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('Interrupted rename recovery will retry on the next launch:', describeErrorForLog(error));
   }
+  // Renames made before original names were recorded per file.
+  try {
+    if (originalNames.isEmpty()) {
+      const history = mediaRenameExecutor.history(Number.MAX_SAFE_INTEGER).reverse();
+      const recorded = history.length ? originalNames.backfillFromHistory(history) : 0;
+      if (recorded) console.info(`[rename] Recorded original names for ${recorded} file(s) from rename history.`);
+    }
+  } catch (error) {
+    console.warn('Original file names will be recorded on the next launch:', describeErrorForLog(error));
+  }
 
   // ── loomtv:// media protocol handlers ───────────────────────────────────────
   // Translates loomtv://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>
@@ -2630,7 +2900,9 @@ app.whenReady().then(async () => {
       }
       parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
       const targetUrl = `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
-      return net.fetch(targetUrl, { headers, redirect: 'error' });
+      // The token makes every launch's URL new, so a cached copy is never
+      // reused; the media is already on local disk.
+      return net.fetch(targetUrl, { headers, redirect: 'error', cache: 'no-store' });
     } catch (err) {
       // The forwarded URL carries the local access token as a query parameter,
       // and fetch failures embed that URL in their message.
@@ -2654,8 +2926,11 @@ app.whenReady().then(async () => {
   }
   presentPrimaryWindow();
   recordPlaybackDiagnostic('desktop.window.requested');
+  warnAboutUnreadableCredentials();
   // Resume eligible renames if Loom closed during the file-settling delay.
   scheduleAutomaticOrganize();
+  // Clear leftovers on every launch as well as after each sync.
+  scheduleLibraryCleanup();
 
   if (!(loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode))) {
     void stremioPluginService.installDefaultCinemeta().catch((error) => {
@@ -2668,6 +2943,11 @@ app.whenReady().then(async () => {
   });
 }).catch((error) => {
   console.error('Failed to start Loom Media Server:', error);
+  // Without this the app bounces in the Dock and disappears with no reason.
+  dialog.showErrorBox(
+    'Loom could not start',
+    `${describeErrorForLog(error)}\n\nDetails are in the log. Quit any other copy of Loom and try again.`,
+  );
   // A failed startup must not remain as a headless process holding the single
   // instance lock. This is especially important when a native dependency
   // (such as better-sqlite3) has not been rebuilt for the current Electron ABI.

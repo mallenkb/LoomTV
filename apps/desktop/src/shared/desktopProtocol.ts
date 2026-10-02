@@ -269,6 +269,14 @@ export interface LibraryIndexPayload extends LanLibraryIndexPayload<LibraryCard>
   libraryFolders?: string[];
   libraryFolderGroups?: LibraryFolderGroups;
   libraryFolderStatuses?: LibraryFolderStatus[];
+  /** Identifies this exact index for library:get-index-if-changed. */
+  fingerprint?: string;
+}
+/** The renderer already holds the index with this fingerprint. */
+export interface LibraryIndexUnchanged {
+  catalogVersion: 1;
+  unchanged: true;
+  fingerprint: string;
 }
 export type LibraryItemDetailsPayload = LanLibraryItemDetailsPayload<WireMediaItem>;
 
@@ -301,6 +309,8 @@ export interface SettingsPayload {
    * does neither. Defaults to "ask".
    */
   organizeFilesAfterSync?: 'ask' | 'auto' | 'off';
+  /** Clear leftover download files and redundant subtitles on sync and launch. */
+  cleanUpLibraryFiles?: 'auto' | 'off';
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
   /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
@@ -926,6 +936,8 @@ export interface MediaRenamePreviewEntry {
   createsFolder?: boolean;
   /** Subtitles, .nfo, and thumbnails that are renamed along with a video. */
   sidecars: { fromName: string; toName: string }[];
+  /** Whether the metadata sources confirmed the match; only confirmed entries run automatically. */
+  verification?: { status: 'confirmed' | 'waiting' | 'conflict' | 'unchecked'; note: string };
 }
 
 interface MediaRenameSkip {
@@ -937,6 +949,17 @@ interface MediaRenameSkip {
 export interface MediaRenamePreview {
   entries: MediaRenamePreviewEntry[];
   skipped: MediaRenameSkip[];
+}
+
+/** One automatic cleanup of library folders, newest first. */
+export interface LibraryCleanupBatch {
+  id: string;
+  createdAt: number;
+  /** Non-zero once restored. */
+  restoredAt: number;
+  /** When the held files are removed for good, unless restored. */
+  expiresAt: number;
+  items: { name: string; folder: string; reason: string }[];
 }
 
 /** A past rename batch, newest first, for the undo list. */

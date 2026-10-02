@@ -331,6 +331,7 @@ export interface IpcHandlerDependencies<
   loadLibrary: () => TLibraryData;
   libraryForRenderer: (library?: TLibraryData) => IpcResult<'library:get'>;
   libraryIndexForRenderer: () => IpcResult<'library:get-index'>;
+  libraryIndexIfChanged: (knownFingerprint?: string) => IpcResult<'library:get-index-if-changed'>;
   libraryItemForRenderer: (mediaId: string) => IpcResult<'library:get-item'> | Promise<IpcResult<'library:get-item'>>;
   scanLibrary: (
     library: TLibraryData,
@@ -364,10 +365,13 @@ export interface IpcHandlerDependencies<
   explainIptvChannel: (reference: string) => Promise<IpcResult<'iptv:explain-channel'>>;
   iptvGuide: (references: string[], fromMs: number, toMs: number) => IpcResult<'iptv:guide'>;
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => IpcResult<'iptv:set-favorite'>;
-  previewMediaRenames: () => IpcResult<'library:rename-preview'>;
+  previewMediaRenames: () => IpcResult<'library:rename-preview'> | Promise<IpcResult<'library:rename-preview'>>;
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
   listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
   getMediaRenameRecord: (batchId: string) => IpcResult<'library:rename-record'>;
+  originalFileName: (filePath: string) => IpcResult<'library:original-file-name'>;
+  libraryCleanupHistory: () => IpcResult<'library:cleanup-history'>;
+  restoreLibraryCleanup: (batchId: string) => IpcResult<'library:cleanup-restore'>;
   undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
   mediaRenameStatus: () => IpcResult<'library:rename-status'>;
   libraryEpisodeUpdates: () => Promise<IpcResult<'library:episode-updates'>>;
@@ -653,6 +657,8 @@ export function registerIpcHandlers<
 
   handleNoArgs('library:get', () => deps.libraryForRenderer());
   handleNoArgs('library:get-index', () => deps.libraryIndexForRenderer());
+  handle('library:get-index-if-changed', (_event, knownFingerprint?: string) => deps.libraryIndexIfChanged(knownFingerprint),
+    z.tuple([z.string().regex(/^[0-9a-f]{32}$/).optional()]));
   handle('library:get-item', (_event, mediaId) => deps.libraryItemForRenderer(mediaId), z.tuple([nonEmptyString]));
 
   handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {
@@ -862,6 +868,19 @@ export function registerIpcHandlers<
   handle('library:rename-record', (_event, batchId) => {
     deps.authorizeSettingsWrite();
     return deps.getMediaRenameRecord(batchId);
+  }, z.tuple([z.string().uuid()]));
+  handle('library:original-file-name', (_event, filePath) => {
+    // Only library media; the answer reveals a name the file once had.
+    deps.authorizeMediaPath(filePath);
+    return deps.originalFileName(filePath);
+  }, z.tuple([nonEmptyString.max(4096)]));
+  handleNoArgs('library:cleanup-history', () => {
+    deps.authorizeSettingsWrite();
+    return deps.libraryCleanupHistory();
+  });
+  handle('library:cleanup-restore', (_event, batchId) => {
+    deps.authorizeSettingsWrite();
+    return deps.restoreLibraryCleanup(batchId);
   }, z.tuple([z.string().uuid()]));
   handleNoArgs('library:episode-updates', () => deps.libraryEpisodeUpdates());
   handleNoArgs('library:health', () => {

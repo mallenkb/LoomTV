@@ -515,10 +515,21 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return true;
   }, [activeProfileId, clearDetailStateIfScopeChanged, isCurrentLibraryMutation]);
 
+  const lastAppliedIndexRef = useRef<{ index: LibraryIndexPayload; compact: ReturnType<typeof libraryDataFromIndex> } | null>(null);
   const applyCompactIndex = useCallback((index: LibraryIndexPayload, mutationToken?: LibraryMutationToken) => {
     if (activeProfileIdRef.current !== activeProfileId) return null;
+    // The transport hands back the same object when the host reports the
+    // catalog unchanged; skip re-mapping and reconciling every card.
+    const last = lastAppliedIndexRef.current;
+    if (!mutationToken && last?.index === index
+      && libraryProfileIdRef.current === activeProfileId
+      && stateRef.current.catalogRevision === index.revision) {
+      return last.compact;
+    }
     const compact = libraryDataFromIndex(index);
-    return applyLibraryData(compact, mutationToken) ? compact : null;
+    if (!applyLibraryData(compact, mutationToken)) return null;
+    lastAppliedIndexRef.current = { index, compact };
+    return compact;
   }, [activeProfileId, applyLibraryData]);
 
   const loadPrimaryCatalog = useCallback(async (mutationToken?: LibraryMutationToken) => {

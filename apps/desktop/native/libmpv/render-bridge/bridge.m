@@ -307,7 +307,8 @@ static id nodeValue(const mpv_node *node, unsigned depth, unsigned *budget) {
             if (size > 65536) return NSNull.null;
             return [[NSString alloc] initWithBytes:node->u.string length:size encoding:NSUTF8StringEncoding] ?: NSNull.null;
         }
-        case MPV_FORMAT_FLAG: return @(node->u.flag != 0);
+        // @YES/@NO serialize as JSON true/false; @(flag != 0) is an int and became 1/0.
+        case MPV_FORMAT_FLAG: return node->u.flag ? @YES : @NO;
         case MPV_FORMAT_INT64: return @(node->u.int64);
         case MPV_FORMAT_DOUBLE: return isfinite(node->u.double_) ? @(node->u.double_) : NSNull.null;
         case MPV_FORMAT_NODE_ARRAY:

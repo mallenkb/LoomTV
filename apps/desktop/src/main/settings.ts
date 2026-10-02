@@ -37,6 +37,7 @@ const settingsInputSchema = z.looseObject({
   appThemeMode: z.unknown().optional(),
   autoSyncIntervalHours: z.unknown().optional(),
   organizeFilesAfterSync: z.unknown().optional(),
+  cleanUpLibraryFiles: z.unknown().optional(),
   otherFolderIcon: z.unknown().optional(),
   localNetworkDeviceId: z.unknown().optional(),
   localNetworkDeviceName: z.unknown().optional(),
@@ -218,6 +219,9 @@ function normalizeSettings(input: unknown): AppSettings {
     organizeFilesAfterSync: raw.organizeFilesAfterSync === 'ask' || raw.organizeFilesAfterSync === 'off'
       ? raw.organizeFilesAfterSync
       : 'auto',
+    // Leftover download files and redundant subtitles are cleared on each
+    // sync and launch unless the viewer turned it off.
+    cleanUpLibraryFiles: raw.cleanUpLibraryFiles === 'off' ? 'off' : 'auto',
     otherFolderIcon: typeof raw.otherFolderIcon === 'string' ? raw.otherFolderIcon : 'folder',
     playbackSkipBackSeconds: Number.isFinite(Number(raw.playbackSkipBackSeconds)) && Number(raw.playbackSkipBackSeconds) > 0
       ? Number(raw.playbackSkipBackSeconds)
@@ -281,6 +285,7 @@ export function loadSettings(): AppSettings {
     },
     normalize: normalizeSettings,
     save: (settings) => saveSettingsToDatabase({ ...settings }),
+    generatedFields: ['localNetworkHmacSecret', 'localNetworkShareToken', 'localNetworkDeviceId'],
   });
 }
 

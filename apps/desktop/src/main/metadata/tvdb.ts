@@ -89,7 +89,8 @@ function typedArtworkUrls(series: JsonRecord, matcher: (type: string) => boolean
 function remoteIdValue(record: JsonRecord): { source: string; id: string } | null {
   const id = text(record.id || record.value || record.remoteId);
   if (!id) return null;
-  return { source: `${text(record.sourceName)} ${text(record.source)} ${text(record.type)}`.toLowerCase(), id };
+  // TVDB names sources "TheMovieDB.com" and "TV Maze"; compare without spaces.
+  return { source: `${text(record.sourceName)} ${text(record.source)} ${text(record.type)}`.toLowerCase().replace(/\s+/g, ''), id };
 }
 
 function providerIds(series: JsonRecord, id: string): MediaItem['providerIds'] {
@@ -100,7 +101,7 @@ function providerIds(series: JsonRecord, id: string): MediaItem['providerIds'] {
     const entry = remoteIdValue(remote);
     if (!entry) continue;
     if (entry.source.includes('imdb') && !result.imdbId) result.imdbId = entry.id.startsWith('tt') ? entry.id : `tt${entry.id}`;
-    if (entry.source.includes('tmdb') && !result.tmdbId) result.tmdbId = entry.id;
+    if ((entry.source.includes('tmdb') || entry.source.includes('themoviedb')) && !result.tmdbId) result.tmdbId = entry.id;
     if (entry.source.includes('tvmaze') && !result.tvmazeId) result.tvmazeId = entry.id;
   }
   return result;
@@ -289,8 +290,8 @@ function responseData(payload: unknown): unknown {
   return record?.data ?? payload;
 }
 
-async function searchTVDB(title: string, localYear: number | undefined, apiKey: string): Promise<JsonRecord[]> {
-  const query = new URLSearchParams({ query: title, type: 'series' });
+async function searchTVDB(title: string, localYear: number | undefined, apiKey: string, type: 'series' | 'movie' = 'series'): Promise<JsonRecord[]> {
+  const query = new URLSearchParams({ query: title, type });
   if (localYear) query.set('year', String(localYear));
   const payload = await fetchTVDBJson(`/search?${query.toString()}`, apiKey);
   return asArray(responseData(payload)).map(asRecord).filter((result): result is JsonRecord => Boolean(result));
@@ -349,6 +350,50 @@ export async function fetchTVDBMetadata(title: string, localYear?: number, apiKe
       : tvdbSeriesToMetadata(selected, searchResultTitle(selected) || title, localYear, artworkTypes);
   } catch (error) {
     console.error('[TVDB]', error);
+    return null;
+  }
+}
+
+export type TVDBSearchIdentity = {
+  title: string;
+  /** The name plus aliases and translations, for matching titles in other languages. */
+  titles: string[];
+  year?: number;
+  providerIds: MediaItem['providerIds'];
+};
+
+/**
+ * The series or movie a TVDB search finds for a title and year, or null when
+ * no result's name (or alias) and year agree. Unlike fetchTVDBMetadata this
+ * never falls back to the first result, so it can serve as an independent
+ * confirmation of a match.
+ */
+export async function searchTVDBIdentity(
+  title: string,
+  localYear: number | undefined,
+  apiKey: string | undefined,
+  type: 'series' | 'movie',
+): Promise<TVDBSearchIdentity | null> {
+  const key = text(apiKey);
+  if (!key || !title.trim()) return null;
+  try {
+    const results = await searchTVDB(title, localYear, key, type);
+    const localTitles = uniqueLocalTitles([title]);
+    for (const result of results) {
+      const name = searchResultTitle(result);
+      const aliases = asArray(result.aliases).map(text).filter(Boolean);
+      const translations = Object.values(asRecord(result.translations) || {}).map(text).filter(Boolean);
+      const titles = [...new Set([name, ...aliases, ...translations].filter(Boolean))];
+      const year = searchResultYear(result) || undefined;
+      if (localYear && year && Math.abs(localYear - year) > 1) continue;
+      if (!titles.some((candidate) => remoteMatchesAnyLocalTitle(localTitles, candidate))) continue;
+      const id = text(result.tvdb_id || result.tvdbId || String(result.id || '').replace(/^\D+-/, ''));
+      const ids = providerIds(result, type === 'series' ? id : '');
+      return { title: name, titles, year, providerIds: ids };
+    }
+    return null;
+  } catch (error) {
+    console.error('[TVDB identity]', error);
     return null;
   }
 }
