@@ -64,6 +64,7 @@ import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
 import { clearOversizedHttpCacheOnce, httpDiskCacheSwitch } from './main/httpCacheBudget.ts';
+import { pruneObsoleteData } from './main/dataRetention.ts';
 import {
   registerResource,
   setResourceRegistryCatalogGeneration,
@@ -215,6 +216,8 @@ import {
   resetAutomaticAnalysisData,
   loadMetadataOfflineModeFromDatabase,
   migrateLegacyCredentialStorage,
+  isProfilesMigrationComplete,
+  readCommittedCanonicalMigrationId,
   takeUnreadableSecureSettingsWarning,
   checkpointDatabaseForQuit,
 } from './main/database';
@@ -2510,7 +2513,29 @@ function warnAboutUnreadableCredentials(): void {
   void (window && !window.isDestroyed() ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options));
 }
 
+function scheduleObsoleteDataCleanup(): void {
+  // Well after startup: removing a few hundred MB must not compete with the
+  // first window paint or a library scan.
+  const timer = setTimeout(() => {
+    try {
+      const removed = pruneObsoleteData({
+        userDataDir: USER_DATA_DIR,
+        now: Date.now(),
+        committedMigrationId: readCommittedCanonicalMigrationId(),
+        profilesMigrationComplete: isProfilesMigrationComplete(),
+      });
+      for (const entry of removed) {
+        console.info(`[retention] Removed ${path.basename(entry.path)} (${Math.round(entry.bytes / 1048576)} MB, ${entry.reason}).`);
+      }
+    } catch (error) {
+      console.warn('[retention] Obsolete data cleanup failed:', describeErrorForLog(error));
+    }
+  }, 2 * 60 * 1000);
+  timer.unref();
+}
+
 async function startBackgroundServices(): Promise<void> {
+  scheduleObsoleteDataCleanup();
   void clearOversizedHttpCacheOnce(USER_DATA_DIR, () => session.defaultSession.clearCache())
     .then((cleared) => { if (cleared) console.info('[cache] Cleared the pre-cap Chromium HTTP cache.'); })
     .catch((error) => console.warn('[cache] Could not clear the Chromium HTTP cache:', describeErrorForLog(error)));

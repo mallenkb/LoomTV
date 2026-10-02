@@ -245,6 +245,26 @@ function backupBeforeProfilesMigration(database: BetterSqlite3.Database): void {
   }
 }
 
+export function isProfilesMigrationComplete(): boolean {
+  return !profilesMigrationPending(getDb());
+}
+
+/** The committed canonical migration id, or null when there is none or it cannot be read. */
+export function readCommittedCanonicalMigrationId(): string | null {
+  const canonicalPath = path.join(app.getPath('userData'), 'loomtv-canonical.sqlite');
+  if (!fs.existsSync(canonicalPath)) return null;
+  let canonical: BetterSqlite3.Database | null = null;
+  try {
+    canonical = new BetterSqlite3(canonicalPath, { readonly: true, fileMustExist: true });
+    const row = canonical.prepare("SELECT id FROM migration_markers WHERE state = 'committed'").get() as { id?: unknown } | undefined;
+    return typeof row?.id === 'string' && row.id ? row.id : null;
+  } catch {
+    return null;
+  } finally {
+    canonical?.close();
+  }
+}
+
 function getSegmentRepository(): ReturnType<typeof createDatabaseSegmentsRepository> {
   segmentRepository ||= createDatabaseSegmentsRepository(getDb());
   return segmentRepository;
