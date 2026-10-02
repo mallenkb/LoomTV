@@ -3,13 +3,13 @@ import test from 'node:test';
 import { libraryIndexIfChanged } from '../src/main/libraryIndexFingerprint.ts';
 import type { LibraryIndexPayload } from '../src/shared/desktopProtocol';
 
-const index = (lastPlayed?: number): LibraryIndexPayload => ({
+const index = (lastPlayed?: number, checkedAt = 1, status = 'online'): LibraryIndexPayload => ({
   catalogVersion: 1,
   revision: 7,
   movies: [{ id: 'm1', title: 'Movie', type: 'movie', lastPlayed } as LibraryIndexPayload['movies'][number]],
   tvShows: [],
   animeShows: [],
-  libraryFolderStatuses: [{ path: '/media', status: 'online' } as never],
+  libraryFolderStatuses: [{ path: '/media', status, checkedAt } as never],
 });
 
 test('an unchanged index is answered with its fingerprint only', () => {
@@ -25,4 +25,10 @@ test('changes outside the revision number still send the full index', () => {
   assert.ok(!('unchanged' in played), 'lastPlayed changed with the same revision');
   const otherProfile = libraryIndexIfChanged(index(), 'p2:0', first.fingerprint);
   assert.ok(!('unchanged' in otherProfile), 'a different profile scope never matches');
+});
+
+test('the folder check time alone does not count as a change', () => {
+  const first = libraryIndexIfChanged(index(undefined, 1), 'p1:0');
+  assert.ok('unchanged' in libraryIndexIfChanged(index(undefined, 2), 'p1:0', first.fingerprint));
+  assert.ok(!('unchanged' in libraryIndexIfChanged(index(undefined, 2, 'offline'), 'p1:0', first.fingerprint)));
 });

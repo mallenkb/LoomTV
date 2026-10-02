@@ -13,9 +13,15 @@ export function libraryIndexIfChanged(
   scope: string,
   knownFingerprint?: string,
 ): LibraryIndexPayload | LibraryIndexUnchanged {
+  // checkedAt records when each folder was last looked at, so it differs on
+  // every build; the status itself is what the renderer shows.
+  const comparable = {
+    ...index,
+    libraryFolderStatuses: index.libraryFolderStatuses?.map(({ checkedAt: _checkedAt, ...status }) => status),
+  };
   const fingerprint = createHash('sha256')
     .update(`${scope}\n`)
-    .update(JSON.stringify(index))
+    .update(JSON.stringify(comparable))
     .digest('hex')
     .slice(0, 32);
   if (knownFingerprint === fingerprint) return { catalogVersion: 1, unchanged: true, fingerprint };
