@@ -215,6 +215,7 @@ import {
   resetAutomaticAnalysisData,
   loadMetadataOfflineModeFromDatabase,
   migrateLegacyCredentialStorage,
+  takeUnreadableSecureSettingsWarning,
   checkpointDatabaseForQuit,
 } from './main/database';
 import {
@@ -2494,6 +2495,21 @@ export const mediaServerDeps = {
  * the window is already on screen while the library warms, the stale transcode
  * cache is swept, and the LAN advertisement goes out.
  */
+function warnAboutUnreadableCredentials(): void {
+  try { loadSettings(); } catch { /* the startup path reports its own errors */ }
+  if (!takeUnreadableSecureSettingsWarning()) return;
+  const window = getMainWindow();
+  const options = {
+    type: 'warning' as const,
+    message: 'Loom could not read its saved credentials',
+    detail: 'Metadata API keys and the OpenSubtitles sign-in need to be entered again in Settings, '
+      + 'and paired phones and TVs may need to pair again. This usually means the file '
+      + 'loomtv-local-secrets.key was lost or replaced. The unreadable copy is kept, so restoring '
+      + 'that file recovers it.',
+  };
+  void (window && !window.isDestroyed() ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options));
+}
+
 async function startBackgroundServices(): Promise<void> {
   void clearOversizedHttpCacheOnce(USER_DATA_DIR, () => session.defaultSession.clearCache())
     .then((cleared) => { if (cleared) console.info('[cache] Cleared the pre-cap Chromium HTTP cache.'); })
@@ -2662,6 +2678,7 @@ app.whenReady().then(async () => {
   }
   presentPrimaryWindow();
   recordPlaybackDiagnostic('desktop.window.requested');
+  warnAboutUnreadableCredentials();
   // Resume eligible renames if Loom closed during the file-settling delay.
   scheduleAutomaticOrganize();
 
@@ -2676,6 +2693,11 @@ app.whenReady().then(async () => {
   });
 }).catch((error) => {
   console.error('Failed to start Loom Media Server:', error);
+  // Without this the app bounces in the Dock and disappears with no reason.
+  dialog.showErrorBox(
+    'Loom could not start',
+    `${describeErrorForLog(error)}\n\nDetails are in the log. Quit any other copy of Loom and try again.`,
+  );
   // A failed startup must not remain as a headless process holding the single
   // instance lock. This is especially important when a native dependency
   // (such as better-sqlite3) has not been rebuilt for the current Electron ABI.

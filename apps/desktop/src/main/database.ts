@@ -473,13 +473,27 @@ export function getMediaRenameDatabase(): BetterSqlite3.Database {
   return getDb();
 }
 
+let unreadableSecureSettingsPending = false;
+
 function secureSettingsPersistence() {
   const database = getDb();
   return createSecureSettingsPersistence({
     load: () => loadSettingsRecord(database),
     save: (settings) => saveSettingsRecord(database, settings),
     transaction: (action) => database.transaction(action)(),
-  }, secureSettingsCodec);
+  }, secureSettingsCodec, {
+    onUnreadable: (error) => {
+      if (!unreadableSecureSettingsPending) console.warn('[settings] Saved credentials could not be decrypted; continuing without them:', error.message);
+      unreadableSecureSettingsPending = true;
+    },
+  });
+}
+
+/** True once per launch in which saved credentials could not be decrypted. */
+export function takeUnreadableSecureSettingsWarning(): boolean {
+  const pending = unreadableSecureSettingsPending;
+  unreadableSecureSettingsPending = false;
+  return pending;
 }
 
 export function loadSettingsFromDatabase(): SettingsData | null {

@@ -281,6 +281,7 @@ export function loadSettings(): AppSettings {
     },
     normalize: normalizeSettings,
     save: (settings) => saveSettingsToDatabase({ ...settings }),
+    generatedFields: ['localNetworkHmacSecret', 'localNetworkShareToken', 'localNetworkDeviceId'],
   });
 }
 
