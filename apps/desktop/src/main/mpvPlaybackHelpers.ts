@@ -7,6 +7,11 @@ export function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** mpv flags as the bridge reports them: booleans, or 1/0 from older bridges. */
+export function mpvFlag(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
 export function normalizeMpvTracks(
   value: unknown,
   subtitleSources: ReadonlyMap<string, SubtitleSource>,
@@ -30,10 +35,10 @@ export function normalizeMpvTracks(
       language: typeof track.lang === 'string' ? track.lang : undefined,
       title: typeof track.title === 'string' ? track.title : undefined,
       channels: finiteNumber(track['demux-channel-count']),
-      default: track.default === true,
-      forced: track.forced === true,
-      selected: track.selected === true,
-      external: track.external === true,
+      default: mpvFlag(track.default),
+      forced: mpvFlag(track.forced),
+      selected: mpvFlag(track.selected),
+      external: mpvFlag(track.external),
       source: externalPath ? subtitleSources.get(externalPath) || 'sidecar' : 'embedded',
     }];
   });

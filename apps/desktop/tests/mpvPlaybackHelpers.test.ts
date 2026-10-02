@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { meetsMinimumMacOS, mpvColor, normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
+import { meetsMinimumMacOS, mpvColor, mpvFlag, normalizeMpvTracks } from '../src/main/mpvPlaybackHelpers.ts';
 
 test('mpv tracks normalize embedded and authorized external subtitles', () => {
   const externalPath = path.resolve('/tmp/loomtv-example.en.srt');
@@ -75,4 +75,20 @@ test('libmpv loads only on macOS versions its bundle supports', () => {
   assert.equal(meetsMinimumMacOS('15.7.3', '26.0'), false);
   assert.equal(meetsMinimumMacOS('12.0', '26.0'), false);
   assert.equal(meetsMinimumMacOS('15.7', null), true);
+});
+
+test('mpv flags reported as 1/0 by the bridge still mark the selected track', () => {
+  // Bridges built before the @YES/@NO fix serialize flags as numbers.
+  const tracks = normalizeMpvTracks([
+    { id: 1, type: 'video', selected: 1, default: 1, forced: 0, external: 0 },
+    { id: 2, type: 'audio', selected: 0, default: 0 },
+  ], new Map());
+  assert.equal(tracks[0].selected, true);
+  assert.equal(tracks[0].default, true);
+  assert.equal(tracks[0].forced, false);
+  assert.equal(tracks[1].selected, false);
+  assert.equal(mpvFlag(true), true);
+  assert.equal(mpvFlag(1), true);
+  assert.equal(mpvFlag(0), false);
+  assert.equal(mpvFlag('yes'), false);
 });

@@ -11,7 +11,7 @@ import type {
 } from '../shared/desktopProtocol.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
-import { finiteNumber, meetsMinimumMacOS, mpvColor, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
+import { finiteNumber, meetsMinimumMacOS, mpvColor, mpvFlag, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
 import {
   createNativeViewHost,
   loadKoffi,
@@ -237,6 +237,10 @@ class LibMpvSession {
   // private audio unit.
   private desiredMuted = false;
   private softMuted = false;
+  private lastOcclusionCheckAt = 0;
+  private occludedSince = 0;
+  private selectedVideoTrackId: number | null = null;
+  private suspendedVideoTrackId: number | null = null;
 
   constructor(
     private readonly runtime: Runtime,
@@ -298,6 +302,7 @@ class LibMpvSession {
     if (this.stopped || !this.engine || !this.eventBuffer) return;
     const output = this.eventBuffer;
     try {
+      if (this.state.status === 'ready') this.syncOffscreenVideo(Date.now());
       const length = Number(this.runtime.api.pollInto(this.engine, output, output.length));
       if (length === 0) return;
       if (length < 0 || length > output.length - 1) throw new Error('libmpv returned an oversized event batch.');
@@ -337,7 +342,7 @@ class LibMpvSession {
     if (message.event !== 'property-change' || !message.name) return;
     if (message.name === 'time-pos') this.emit({ position: finiteNumber(message.data) });
     else if (message.name === 'duration') this.emit({ duration: finiteNumber(message.data) });
-    else if (message.name === 'pause') this.emit({ paused: message.data === true });
+    else if (message.name === 'pause') this.emit({ paused: mpvFlag(message.data) });
     else if (message.name === 'volume') this.emit({ volume: finiteNumber(message.data) === undefined ? undefined : Number(message.data) / 100 });
     // The soft mute no longer carries the viewer's choice; report that choice.
     else if (message.name === 'mute') this.emit({ muted: this.desiredMuted });
@@ -351,7 +356,18 @@ class LibMpvSession {
       }
     }
     else if (message.name === 'speed') this.emit({ speed: finiteNumber(message.data) });
-    else if (message.name === 'track-list') this.emit({ tracks: normalizeMpvTracks(message.data, this.subtitleSources) });
+    else if (message.name === 'track-list') {
+      const tracks = normalizeMpvTracks(message.data, this.subtitleSources);
+      const selectedVideo = tracks.find((track) => track.type === 'video' && track.selected);
+      if (selectedVideo) this.selectedVideoTrackId = selectedVideo.id;
+      // Turning video off offscreen is not the viewer's choice; keep the
+      // track shown as selected.
+      this.emit({
+        tracks: this.suspendedVideoTrackId === null ? tracks : tracks.map((track) => (
+          track.type === 'video' ? { ...track, selected: track.id === this.suspendedVideoTrackId } : track
+        )),
+      });
+    }
     else if (message.name === 'video-params' && message.data && typeof message.data === 'object') {
       const params = message.data as Record<string, unknown>;
       const width = finiteNumber(params.w);
@@ -379,7 +395,7 @@ class LibMpvSession {
     else if (message.name === 'frame-drop-count') this.updateDiagnostics({ frameDrops: finiteNumber(message.data) });
     else if (message.name === 'decoder-frame-drop-count') this.updateDiagnostics({ decoderFrameDrops: finiteNumber(message.data) });
     else if (message.name === 'demuxer-cache-duration') this.updateDiagnostics({ bufferSeconds: finiteNumber(message.data) });
-    else if (message.name === 'paused-for-cache') this.updateDiagnostics({ buffering: message.data === true });
+    else if (message.name === 'paused-for-cache') this.updateDiagnostics({ buffering: mpvFlag(message.data) });
     else if (message.name === 'video-codec') this.updateDiagnostics({ videoCodec: typeof message.data === 'string' ? message.data : undefined });
     else if (message.name === 'estimated-vf-fps') this.updateDiagnostics({ estimatedFps: finiteNumber(message.data) });
   }
@@ -441,8 +457,41 @@ class LibMpvSession {
     }
   }
 
+  /**
+   * Turn video off while the window is fully hidden. mpv keeps about 200 MB
+   * of OpenGL render targets in the main process for as long as a video
+   * output exists, which is wasted while nothing is on screen; audio keeps
+   * playing. See LibVlcPlaybackSession.syncOffscreenVideo for the LibVLC case.
+   */
+  private syncOffscreenVideo(now: number): void {
+    if (now - this.lastOcclusionCheckAt < 500) return;
+    this.lastOcclusionCheckAt = now;
+    if (!this.host?.isOccluded?.()) {
+      this.occludedSince = 0;
+      this.resumeOffscreenVideo();
+      return;
+    }
+    if (this.occludedSince === 0) this.occludedSince = now;
+    if (this.suspendedVideoTrackId !== null || this.selectedVideoTrackId === null) return;
+    if (now - this.occludedSince < 3_000) return;
+    if (!this.trySend(['set_property', 'vid', 'no'])) return;
+    this.suspendedVideoTrackId = this.selectedVideoTrackId;
+    recordPlaybackDiagnostic('mpv.offscreen', 'video-suspended');
+  }
+
+  private resumeOffscreenVideo(): void {
+    const trackId = this.suspendedVideoTrackId;
+    if (trackId === null) return;
+    this.suspendedVideoTrackId = null;
+    // The relative zero seek decodes the current frame, which a paused
+    // player would otherwise not show until playback resumes.
+    if (this.trySend(['set_property', 'vid', trackId])) this.trySend(['seek', 0, 'relative+exact']);
+    recordPlaybackDiagnostic('mpv.offscreen', 'video-restored');
+  }
+
   command(command: MpvCommand): boolean {
     if (command.type === 'set-muted') return this.applyMute(command.muted);
+    if (command.type === 'set-video-track') this.suspendedVideoTrackId = null;
     try { return commandList(command).every((entry) => this.send(entry)); }
     catch (error) {
       const message = error instanceof Error ? error.message : 'libmpv rejected a playback command.';
