@@ -47,6 +47,7 @@ export const ORGANIZE_CONFIDENCE_MIGRATION_VERSION = 25;
 export const PHOTO_LIBRARY_MIGRATION_VERSION = 26;
 export const MEDIA_LIBRARY_MIGRATION_VERSION = 27;
 export const MEDIA_LIBRARY_DISCS_MIGRATION_VERSION = 28;
+export const LIBRARY_IMPORT_INVENTORY_MIGRATION_VERSION = 29;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -400,6 +401,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateShowScheduleCache(database);
   migrateLibraryFirstSeen(database);
   migrateOrganizeConfidence(database);
+  migrateImportInventories(database);
   migratePhotoLibrary(database);
   migrateMediaLibraries(database);
   migrateMediaLibraryDiscs(database);
@@ -1555,5 +1557,22 @@ function migrateOrganizeConfidence(database: BetterSqlite3.Database): void {
     `);
     database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
       .run(ORGANIZE_CONFIDENCE_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+
+function migrateImportInventories(database: BetterSqlite3.Database): void {
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS library_imports (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        removed_at INTEGER NOT NULL DEFAULT 0,
+        record_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_library_imports_created ON library_imports(created_at);
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)')
+      .run(LIBRARY_IMPORT_INVENTORY_MIGRATION_VERSION, Date.now());
   })();
 }

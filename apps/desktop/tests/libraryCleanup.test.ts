@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import BetterSqlite3 from 'better-sqlite3';
-import { migrateDatabase } from '../src/main/databaseMigrations.ts';
+import { organizationFixture } from './helpers/organizationFixture.ts';
+import { fileStamp } from '../src/main/fileRename/recoverableFileMove.ts';
 import {
   CLEANUP_RETENTION_MS,
   createCleanupStore,
@@ -32,7 +32,7 @@ function library(t: test.TestContext) {
 const rel = (root: string, candidates: Array<{ path: string; reason: string }>) =>
   candidates.map((candidate) => `${candidate.reason} ${path.relative(root, candidate.path)}`).sort();
 
-test('download notes, site logos and folders of only those are leftovers', (t) => {
+test('recognized download notes and site logos are individual leftovers', (t) => {
   const { root, file } = library(t);
   file('Movies/Sound of Freedom (2023)/Sound of Freedom (2023).mkv');
   file('Movies/Sound of Freedom (2023)/[TGx]Downloaded from torrentgalaxy.to .txt');
@@ -52,15 +52,16 @@ test('download notes, site logos and folders of only those are leftovers', (t) =
   assert.deepEqual(rel(root, findLeftovers([path.join(root, 'Movies'), path.join(root, 'TV')])), [
     'download-note Movies/Sound of Freedom (2023)/[TGx]Downloaded from torrentgalaxy.to .txt',
     'download-note Movies/Thumbs.db',
+    'download-note TV/Lioness (2023)/Season 01/Torrent Downloaded From/Torrent Downloaded From 1337x.to.txt',
+    'download-note TV/Lioness (2023)/Season 01/Torrent Downloaded From/Torrent Downloaded From Glodls.to.txt',
     'not-artwork Movies/Tai Chi Master (1993)/www.YTS.MX.jpg',
-    'only-junk TV/Lioness (2023)/Season 01/Torrent Downloaded From',
   ]);
 });
 
-test('a library folder itself is never a leftover, even when it only holds notes', (t) => {
+test('unknown notes are preserved and the library folder is never a leftover', (t) => {
   const { root, file } = library(t);
   file('Empty Library/readme.txt');
-  assert.deepEqual(rel(root, findLeftovers([path.join(root, 'Empty Library')])), ['download-note Empty Library/readme.txt']);
+  assert.deepEqual(rel(root, findLeftovers([path.join(root, 'Empty Library')])), []);
 });
 
 const srt = (lines: Array<[string, string]>) => lines.map(([time, text], index) => `${index + 1}\n${time} --> 00:00:59,000\n${text}\n`).join('\n');
@@ -75,7 +76,7 @@ test('subtitles count as the same only with the same lines at the same times', (
   assert.equal(sameSubtitles(other, base), false, 'a different translation is kept');
 });
 
-test('exact copies of a built-in track and one file copied onto episodes are redundant', async (t) => {
+test('full embedded dialogue covers ordinary sidecars even with a different translation', async (t) => {
   const { root, file } = library(t);
   const lines = srt([['00:00:01,000', 'On that day mankind received a grim reminder.'], ['00:00:04,000', 'Everyone get ready to fight!']]);
   file('Anime/Show/Season 01/S01E01.mkv'); file('Anime/Show/Season 01/S01E01.en.srt', lines);
@@ -94,9 +95,10 @@ test('exact copies of a built-in track and one file copied onto episodes are red
     convert: async (sidecar) => fs.readFileSync(sidecar, 'utf8'),
   };
   assert.deepEqual(rel(root, await findRedundantSubtitles([path.join(root, 'Anime'), path.join(root, 'Movies')], tools)), [
-    'embedded-copy Movies/Film/Film.en.srt',
-    'episode-copy Anime/Show/Season 01/S01E01.en.srt',
-    'episode-copy Anime/Show/Season 01/S01E02.en.srt',
+    'embedded-coverage Anime/Show/Season 01/S01E01.en.srt',
+    'embedded-coverage Anime/Show/Season 01/S01E02.en.srt',
+    'embedded-coverage Anime/Show/Season 01/S01E03.en.srt',
+    'embedded-coverage Movies/Film/Film.en.srt',
   ]);
 });
 
@@ -111,32 +113,33 @@ test('without a built-in track in that language, copies are kept', async (t) => 
 
 test('held files can be put back, are remembered, and expire after 30 days', (t) => {
   const { root, file } = library(t);
-  const database = new BetterSqlite3(':memory:');
-  migrateDatabase(database);
-  t.after(() => database.close());
+  const { database } = organizationFixture(t);
   const holding = path.join(root, '.holding');
   const store = createCleanupStore(() => database, holding);
   const note = file('Movies/Film/notes.txt', 'ad');
-  const folder = path.dirname(file('Movies/Film/Downloaded From/a.txt'));
-  const batch = store.hold([{ path: note, reason: 'download-note' }, { path: folder, reason: 'only-junk' }], 1_000);
+  const extra = file('Movies/Film/Downloaded From/a.txt');
+  const batch = store.hold([{ path: note, reason: 'download-note', stamp: fileStamp(note) }, { path: extra, reason: 'download-note', stamp: fileStamp(extra) }], 1_000);
   assert.ok(batch);
   assert.equal(fs.existsSync(note), false);
-  assert.equal(fs.existsSync(folder), false);
+  assert.equal(fs.existsSync(extra), false);
   assert.equal(store.history()[0].items.length, 2);
 
   fs.writeFileSync(note, 'new file in the same place');
   const result = store.restore(batch.id, 2_000);
   assert.deepEqual(result, { restored: 1, skipped: [note] }, 'something now in its place is never overwritten');
   assert.equal(fs.readFileSync(note, 'utf8'), 'new file in the same place');
-  assert.ok(fs.existsSync(path.join(folder, 'a.txt')));
-  assert.ok(store.restoredPaths().has(path.resolve(folder)));
-  assert.throws(() => store.restore(batch.id), /already restored/);
+  assert.ok(fs.existsSync(extra));
+  assert.ok(store.restoredPaths().has(path.resolve(extra)));
+  assert.equal(store.history()[0].restoredAt, 0);
+  assert.equal(fs.readFileSync(batch.items[0].held, 'utf8'), 'ad');
+  fs.unlinkSync(note);
+  assert.equal(store.restore(batch.id).restored, 1);
 
-  const later = store.hold([{ path: folder, reason: 'only-junk' }], 3_000);
+  const later = store.hold([{ path: extra, reason: 'download-note', stamp: fileStamp(extra) }], 3_000);
   assert.ok(later);
   assert.equal(store.purgeExpired(3_000 + CLEANUP_RETENTION_MS - 1), 0);
   assert.equal(store.purgeExpired(3_000 + CLEANUP_RETENTION_MS + 1), 1);
-  assert.equal(fs.existsSync(path.join(holding, later.id)), false);
+  assert.equal(fs.existsSync(later.items[0].held), false);
 });
 
 test('removed subtitles leave the catalog', () => {

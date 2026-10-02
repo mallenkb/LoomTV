@@ -1,36 +1,25 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type BetterSqlite3 from 'better-sqlite3';
 import { isImageFileName, isSubtitleFileName, isVideoFileName, normalizedArtworkBaseName, subtitleMatchesVideo } from './fileClassification.ts';
 import { subtitleLanguageFromFileName } from './subtitleLanguage.ts';
+import { fileStamp, planFileTransfer, resumeFileTransfer, type FileTransfer } from './fileRename/recoverableFileMove.ts';
+import { assertLibraryPath, inventoryIdentity, type ImportRecord } from './fileRename/importInventory.ts';
 
-/**
- * Keeps library folders to the videos and what helps play them.
- *
- * Removed: text and link files left by downloads, images that are not
- * artwork (site logos), folders holding nothing else, subtitle files that
- * are exact copies of a track built into the video, and the same subtitle
- * file copied onto several episodes when each episode has its own built-in
- * track in that language. Kept: videos, every other subtitle, artwork,
- * .nfo files, unfinished downloads, files whose type is unknown, and
- * anything hidden.
- *
- * Nothing is deleted outright. Files move to a holding folder in LoomTV's
- * data, each cleanup is listed in Settings where it can be restored, and
- * held files are removed for good after 30 days.
- */
+/** Recognized clutter and covered subtitles are held for 30 days, with a durable journal. */
 
 export const CLEANUP_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-const JUNK_EXTENSIONS = new Set(['.txt', '.url', '.webloc', '.lnk', '.website', '.html', '.htm', '.exe', '.bat', '.cmd', '.scr', '.torrent', '.sfv', '.md5', '.nzb']);
+const JUNK_EXTENSIONS = new Set(['.url', '.webloc', '.website', '.torrent', '.sfv', '.md5', '.nzb']);
 const JUNK_NAMES = new Set(['thumbs.db', 'desktop.ini']);
 const PARTIAL_SUFFIX = /\.(?:part|partial|crdownload|download|fdmdownload|opdownload)$/i;
 const ARTWORK_WORDS = ['poster', 'folder', 'cover', 'thumbnail', 'thumb', 'default', 'movie', 'backdrop', 'fanart', 'background', 'landscape', 'banner', 'logo', 'clearlogo', 'clearart', 'disc', 'season', 'specials'];
 
-export type CleanupReason = 'download-note' | 'not-artwork' | 'only-junk' | 'embedded-copy' | 'episode-copy';
+export type CleanupReason = 'download-note' | 'not-artwork' | 'only-junk' | 'embedded-copy' | 'episode-copy' | 'embedded-coverage';
 
 export const CLEANUP_REASON_LABELS: Record<CleanupReason, string> = {
+  'embedded-coverage': 'Embedded subtitles cover this language and purpose',
   'download-note': 'Text or link file left by a download',
   'not-artwork': 'Image that is not artwork',
   'only-junk': 'Folder holding only such files',
@@ -38,9 +27,9 @@ export const CLEANUP_REASON_LABELS: Record<CleanupReason, string> = {
   'episode-copy': 'The same subtitle file copied onto other episodes',
 };
 
-export type CleanupCandidate = { path: string; reason: CleanupReason };
+export type CleanupCandidate = { path: string; reason: CleanupReason; stamp?: string; video?: string; videoStamp?: string };
 
-type Entry = { name: string; isDirectory: boolean };
+type Entry = { name: string; isDirectory: boolean; isSymbolicLink?: boolean };
 export type CleanupFileSystem = {
   list: (directory: string) => Entry[] | null;
 };
@@ -48,7 +37,7 @@ export type CleanupFileSystem = {
 const defaultFileSystem: CleanupFileSystem = {
   list: (directory) => {
     try {
-      return fs.readdirSync(directory, { withFileTypes: true }).map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }));
+      return fs.readdirSync(directory, { withFileTypes: true }).map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory(), isSymbolicLink: entry.isSymbolicLink() }));
     } catch {
       return null;
     }
@@ -58,55 +47,36 @@ const defaultFileSystem: CleanupFileSystem = {
 function junkReason(name: string, directory: string, videoStems: readonly string[]): CleanupReason | null {
   const lower = name.toLowerCase();
   if (name.startsWith('.') || isVideoFileName(name) || isSubtitleFileName(name) || PARTIAL_SUFFIX.test(name)) return null;
-  if (JUNK_NAMES.has(lower) || JUNK_EXTENSIONS.has(path.extname(lower))) return 'download-note';
+  if (JUNK_NAMES.has(lower) || JUNK_EXTENSIONS.has(path.extname(lower)) || (/\.(?:txt|html?|lnk)$/i.test(lower) && /downloaded[ ._-]?from|visit[ ._-]?(?:us|our)|website|torrent|advert|sample[ ._-]?url/.test(lower))) return 'download-note';
   if (isImageFileName(name)) {
     const base = normalizedArtworkBaseName(name);
     const folder = normalizedArtworkBaseName(path.basename(directory));
     const isArtwork = ARTWORK_WORDS.some((word) => base === word || base.startsWith(`${word} `) || base.endsWith(` ${word}`) || base.includes(`${word} `))
       || videoStems.some((stem) => base === stem || base.startsWith(`${stem} `))
       || (folder && base === folder);
-    return isArtwork ? null : 'not-artwork';
+    return !isArtwork && /website|advert|downloaded[ ._-]?from|torrent|visit[ ._-]?us|www\.[a-z0-9-]+\.(?:com|org|net|to|mx)/i.test(name) ? 'not-artwork' : null;
   }
   return null;
 }
 
-/**
- * Leftover files and folders under the library folders. A folder whose every
- * file is a leftover is reported once, as a folder. Library folders
- * themselves are never candidates.
- */
+/** Individual files only. A stale directory candidate must never sweep new content. */
 export function findLeftovers(roots: readonly string[], fileSystem: CleanupFileSystem = defaultFileSystem): CleanupCandidate[] {
   const candidates: CleanupCandidate[] = [];
-  // Returns true when everything inside is a leftover (and there is something).
-  const visit = (directory: string, isRoot: boolean): boolean => {
+  const visit = (directory: string) => {
     const entries = fileSystem.list(directory);
-    if (!entries) return false;
-    const visible = entries.filter((entry) => !entry.name.startsWith('.'));
-    const videoStems = visible.filter((entry) => !entry.isDirectory && isVideoFileName(entry.name))
-      .map((entry) => normalizedArtworkBaseName(entry.name));
-    const found: CleanupCandidate[] = [];
-    let allJunk = visible.length > 0;
-    for (const entry of visible) {
+    if (!entries) return;
+    const videoStems = entries.filter((entry) => !entry.isDirectory && isVideoFileName(entry.name)).map((entry) => normalizedArtworkBaseName(entry.name));
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.isSymbolicLink) continue;
       const target = path.join(directory, entry.name);
-      if (entry.isDirectory) {
-        const before = candidates.length;
-        if (visit(target, false)) {
-          candidates.splice(before);
-          found.push({ path: target, reason: 'only-junk' });
-        } else {
-          allJunk = false;
-        }
-        continue;
-      }
+      if (entry.isDirectory) { visit(target); continue; }
       const reason = junkReason(entry.name, directory, videoStems);
-      if (reason) found.push({ path: target, reason });
-      else allJunk = false;
+      if (reason) {
+        try { candidates.push({ path: target, reason, stamp: fileStamp(target) }); } catch { /* Inaccessible files stay. */ }
+      }
     }
-    if (allJunk && !isRoot) return true;
-    candidates.push(...found);
-    return false;
   };
-  for (const root of roots) visit(path.resolve(root), true);
+  for (const root of roots) visit(path.resolve(root));
   return candidates;
 }
 
@@ -134,7 +104,8 @@ export function sameLanguage(left: string, right: string): boolean {
 }
 
 function isFullTrack(track: EmbeddedTrack): boolean {
-  return !track.forced && !/sign|song|forced|commentary/i.test(track.title);
+  return !track.forced && !/sign|song|forced|commentary/i.test(track.title)
+    && /\b(?:full|dialogue|dialog|complete)\b/i.test(track.title);
 }
 
 type Cue = { start: number; text: string };
@@ -187,176 +158,231 @@ export type SubtitleCache = {
   set: (sidecar: string, signature: string, verdict: CleanupReason | 'keep') => void;
 };
 
-function signatureOf(...files: string[]): string {
-  return files.map((file) => {
-    try {
-      const stat = fs.statSync(file);
-      return `${stat.size}:${Math.round(stat.mtimeMs)}`;
-    } catch {
-      return 'missing';
-    }
-  }).join('|');
-}
-
-/**
- * Sidecar subtitles that add nothing: exact copies of a built-in track, and
- * one file copied onto several episodes when each has a built-in track in
- * that language. LoomTV's own cleaned variants, forced and signs tracks,
- * hearing-impaired versions, and anything that differs are kept.
- */
+/** Prefer a full embedded track of the same language and purpose; unknown coverage stays. */
 export async function findRedundantSubtitles(
-  roots: readonly string[],
-  tools: SubtitleTools,
-  cache?: SubtitleCache,
+  roots: readonly string[], tools: SubtitleTools, cache?: SubtitleCache,
   fileSystem: CleanupFileSystem = defaultFileSystem,
 ): Promise<CleanupCandidate[]> {
-  type Pair = { video: string; sidecar: string; language: string; hash: string };
-  const pairs: Pair[] = [];
+  const pairs: Array<{ video: string; sidecar: string; language: string; purpose: string }> = [];
+  const purposeOf = (value: string) => /\b(?:sdh|cc|hearing impaired)\b/i.test(value) ? 'accessibility'
+    : /\bcommentary\b/i.test(value) ? 'commentary'
+      : /\b(?:signs|songs)\b/i.test(value) ? 'signs' : /\bforced\b/i.test(value) ? 'forced' : 'dialogue';
   const walk = (directory: string) => {
-    const entries = fileSystem.list(directory) || [];
+    const entries = (fileSystem.list(directory) || []).filter((entry) => !entry.isSymbolicLink);
     const files = entries.filter((entry) => !entry.isDirectory && !entry.name.startsWith('.')).map((entry) => entry.name);
-    const videos = files.filter(isVideoFileName);
     for (const name of files.filter(isSubtitleFileName)) {
-      if (/\.loomtv-clean-/i.test(name) || /\.(?:forced|signs|songs|sdh|cc|hi)\./i.test(name)) continue;
-      const video = videos.find((candidate) => subtitleMatchesVideo(name, candidate));
-      if (!video) continue;
-      const sidecar = path.join(directory, name);
-      let hash: string;
-      try {
-        hash = createHash('sha1').update(fs.readFileSync(sidecar)).digest('hex');
-      } catch {
-        continue;
-      }
-      pairs.push({ video: path.join(directory, video), sidecar, language: subtitleLanguageFromFileName(name), hash });
+      if (/\.loomtv-clean-/i.test(name)) continue;
+      const language = subtitleLanguageFromFileName(name, '');
+      if (!language) continue;
+      const videos = files.filter((candidate) => isVideoFileName(candidate) && subtitleMatchesVideo(name, candidate));
+      if (videos.length !== 1) continue;
+      pairs.push({ video: path.join(directory, videos[0]), sidecar: path.join(directory, name), language, purpose: !sameLanguage(language, 'hi') && /\.hi\./i.test(name) ? 'accessibility' : purposeOf(name.replace(/[._-]/g, ' ')) });
     }
     for (const entry of entries) if (entry.isDirectory && !entry.name.startsWith('.')) walk(path.join(directory, entry.name));
   };
   for (const root of roots) walk(path.resolve(root));
-
-  // One file's content on several different videos is right for one at most.
-  const videosByHash = new Map<string, Set<string>>();
-  for (const pair of pairs) videosByHash.set(pair.hash, (videosByHash.get(pair.hash) || new Set()).add(pair.video));
-
   const results: CleanupCandidate[] = [];
   const probes = new Map<string, EmbeddedTrack[] | null>();
   for (const pair of pairs) {
     if (tools.shouldStop?.()) break;
-    const signature = signatureOf(pair.sidecar, pair.video) + `|${videosByHash.get(pair.hash)?.size || 1}`;
+    let stamp: string;
+    let videoStamp: string;
+    try { stamp = fileStamp(pair.sidecar); videoStamp = fileStamp(pair.video); } catch { continue; }
+    const signature = `coverage-v2|${stamp}|${videoStamp}|${pair.purpose}`;
     const cached = cache?.get(pair.sidecar, signature);
-    if (cached) {
-      if (cached !== 'keep') results.push({ path: pair.sidecar, reason: cached });
-      continue;
-    }
-    if (!probes.has(pair.video)) probes.set(pair.video, await tools.probe(pair.video));
-    const tracks = (probes.get(pair.video) || []).filter((track) => isFullTrack(track) && sameLanguage(track.language, pair.language));
-    const textTracks = tracks.filter((track) => TEXT_CODECS.has(track.codec));
-    let verdict: CleanupReason | 'keep' = 'keep';
-    if (tracks.length > 0 && (videosByHash.get(pair.hash)?.size || 0) > 1) {
-      verdict = 'episode-copy';
-    } else if (textTracks.length > 0) {
-      try {
-        const sidecarCues = parseSrtCues(await tools.convert(pair.sidecar));
-        for (const track of textTracks) {
+    let verdict: CleanupReason | 'keep' = cached || 'keep';
+    if (!cached) {
+      if (!probes.has(pair.video)) probes.set(pair.video, await tools.probe(pair.video));
+      const tracks = (probes.get(pair.video) || []).filter((track) => sameLanguage(track.language, pair.language));
+      const covered = tracks.some((track) => {
+        const labelled = purposeOf(track.title);
+        const purpose = labelled === 'dialogue' && track.forced ? 'forced' : labelled;
+        return purpose === pair.purpose && (purpose === 'dialogue' || purpose === 'accessibility' ? isFullTrack(track) : true);
+      });
+      if (covered) verdict = 'embedded-coverage';
+      else {
+        // An exact text match is also sufficient, without guessing full coverage.
+        for (const track of tracks.filter((value) => TEXT_CODECS.has(value.codec) && !value.forced && purposeOf(value.title) === pair.purpose)) {
           if (tools.shouldStop?.()) break;
-          if (sameSubtitles(sidecarCues, parseSrtCues(await tools.extract(pair.video, track.index)))) {
-            verdict = 'embedded-copy';
-            break;
-          }
+          try {
+            if (sameSubtitles(parseSrtCues(await tools.convert(pair.sidecar)), parseSrtCues(await tools.extract(pair.video, track.index)) )) { verdict = 'embedded-copy'; break; }
+          } catch { /* Probe/conversion failure keeps the sidecar. */ }
         }
-      } catch {
-        verdict = 'keep';
       }
+      // Retry transient failed probes on a later scan.
+      if (probes.get(pair.video) !== null) cache?.set(pair.sidecar, signature, verdict);
     }
     if (tools.shouldStop?.()) break;
-    cache?.set(pair.sidecar, signature, verdict);
-    if (verdict !== 'keep') results.push({ path: pair.sidecar, reason: verdict });
+    if (verdict !== 'keep') results.push({ path: pair.sidecar, reason: verdict, stamp, video: pair.video, videoStamp });
   }
   return results;
 }
 
 // ── Holding, history and restore ──────────────────────────────────────────
 
-export type CleanupItem = { from: string; held: string; reason: CleanupReason };
+export type CleanupItem = {
+  from: string; held: string; reason: CleanupReason;
+  state?: 'holding' | 'held' | 'restoring' | 'restored' | 'expired' | 'blocked';
+  transfer?: FileTransfer;
+  restoredTo?: string;
+  error?: string;
+};
 export type CleanupBatch = { id: string; createdAt: number; restoredAt: number; items: CleanupItem[] };
+type CleanupHooks = {
+  beforeHold?: (paths: string[]) => void;
+  moved?: (from: string, to: string, held: boolean) => void;
+  validatePath?: (file: string) => void;
+};
 
-function moveAcrossDrives(from: string, to: string): void {
-  fs.mkdirSync(path.dirname(to), { recursive: true });
-  try {
-    fs.renameSync(from, to);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
-    fs.cpSync(from, to, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
-    fs.rmSync(from, { recursive: true, force: true });
-  }
-}
-
-export function createCleanupStore(getDatabase: () => BetterSqlite3.Database, holdingRoot: string) {
+export function createCleanupStore(getDatabase: () => BetterSqlite3.Database, holdingRoot: string, hooks: CleanupHooks = {}) {
   function readBatch(row: { id: string; created_at: number; restored_at: number; items_json: string }): CleanupBatch {
     return { id: row.id, createdAt: row.created_at, restoredAt: row.restored_at, items: JSON.parse(row.items_json) as CleanupItem[] };
   }
-
-  /** Move candidates to the holding folder and record them as one batch. */
-  function hold(candidates: readonly CleanupCandidate[], now = Date.now()): CleanupBatch | null {
-    if (candidates.length === 0) return null;
-    const id = randomUUID();
-    const items: CleanupItem[] = [];
-    candidates.forEach((candidate, index) => {
-      const held = path.join(holdingRoot, id, `${index}-${path.basename(candidate.path)}`);
-      try {
-        moveAcrossDrives(candidate.path, held);
-        items.push({ from: candidate.path, held, reason: candidate.reason });
-      } catch (error) {
-        console.warn(`[cleanup] Left ${path.basename(candidate.path)} in place:`, error instanceof Error ? error.message : error);
-      }
-    });
-    if (items.length === 0) return null;
-    getDatabase()
-      .prepare('INSERT INTO library_cleanup_batches (id, created_at, restored_at, items_json) VALUES (?, ?, 0, ?)')
-      .run(id, now, JSON.stringify(items));
-    return { id, createdAt: now, restoredAt: 0, items };
+  function save(batch: CleanupBatch): void {
+    getDatabase().prepare('INSERT INTO library_cleanup_batches (id, created_at, restored_at, items_json) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET restored_at = excluded.restored_at, items_json = excluded.items_json')
+      .run(batch.id, batch.createdAt, batch.restoredAt, JSON.stringify(batch.items));
   }
-
+  function complete(batch: CleanupBatch, item: CleanupItem): void {
+    const transfer = item.transfer;
+    if (!transfer) throw new Error('The file has no transfer journal.');
+    resumeFileTransfer(transfer, () => save(batch));
+    const previousState = item.state;
+    try {
+      getDatabase().transaction(() => {
+        hooks.moved?.(transfer.from, transfer.to, previousState === 'holding');
+        item.state = previousState === 'holding' ? 'held' : 'restored';
+        item.error = undefined;
+        save(batch);
+      })();
+    } catch (error) {
+      item.state = previousState;
+      throw error;
+    }
+  }
   function history(limit = 20): CleanupBatch[] {
-    return (getDatabase().prepare('SELECT * FROM library_cleanup_batches ORDER BY created_at DESC LIMIT ?').all(limit) as Array<{ id: string; created_at: number; restored_at: number; items_json: string }>)
-      .map(readBatch);
+    return (getDatabase().prepare('SELECT * FROM library_cleanup_batches ORDER BY created_at DESC LIMIT ?').all(limit) as Array<{ id: string; created_at: number; restored_at: number; items_json: string }>).map(readBatch);
   }
-
-  /** Put a batch back. Anything now occupying an original path is never overwritten. */
+  function recoverInterrupted(): void {
+    for (const batch of history(Number.MAX_SAFE_INTEGER)) {
+      if (!batch.restoredAt) {
+        expandLegacyDirectories(batch);
+        for (const item of batch.items) {
+          if (item.state || !fs.existsSync(item.held) || !fs.lstatSync(item.held).isFile()) continue;
+          item.state = 'held';
+          if (isVideoFileName(path.basename(item.from))) item.error = 'A video was found in older cleanup storage. It is kept for recovery and will not expire.';
+          item.transfer = { from: item.from, to: item.held, sourceIdentity: '', sourceStamp: '', staging: `${item.held}.legacy-staging`, publishedIdentity: inventoryIdentity(item.held) || '', phase: 'moved' };
+          save(batch);
+        }
+      }
+      for (const item of batch.items) {
+        if (!item.transfer || (item.state !== 'holding' && item.state !== 'restoring')) continue;
+        try {
+          hooks.validatePath?.(item.state === 'holding' ? item.from : item.transfer.to);
+          complete(batch, item);
+        } catch (error) {
+          item.error = error instanceof Error ? error.message : String(error);
+          save(batch);
+        }
+      }
+      if (batch.items.every((item) => item.state === 'restored')) { batch.restoredAt ||= Date.now(); save(batch); }
+    }
+  }
+  function hold(candidates: readonly CleanupCandidate[], now = Date.now()): CleanupBatch | null {
+    if (!candidates.length) return null;
+    hooks.beforeHold?.(candidates.map((candidate) => candidate.path));
+    const batch: CleanupBatch = { id: randomUUID(), createdAt: now, restoredAt: 0, items: [] };
+    for (const candidate of candidates) {
+      try {
+        hooks.validatePath?.(candidate.path);
+        if (isVideoFileName(path.basename(candidate.path))) continue;
+        if (!candidate.stamp || fileStamp(candidate.path) !== candidate.stamp) continue;
+        if (candidate.video && fileStamp(candidate.video) !== candidate.videoStamp) continue;
+        const held = path.join(holdingRoot, batch.id, `${batch.items.length}-${path.basename(candidate.path)}`);
+        const item: CleanupItem = { from: candidate.path, held, reason: candidate.reason, state: 'holding', transfer: planFileTransfer(candidate.path, held) };
+        batch.items.push(item);
+        save(batch); // Persist before the first filesystem mutation.
+        try { complete(batch, item); } catch (error) { item.error = error instanceof Error ? error.message : String(error); save(batch); }
+      } catch (error) { console.warn('[cleanup] Kept a changed or unavailable file:', error instanceof Error ? error.message : error); }
+    }
+    return batch.items.length ? batch : null;
+  }
+  function restoreItem(batch: CleanupBatch, item: CleanupItem, target: string): boolean {
+    try {
+      hooks.validatePath?.(target);
+      if (item.state === 'expired') return false;
+      if (item.state === 'restored') return true;
+      if (item.state === 'holding') complete(batch, item);
+      if (item.state !== 'restoring') {
+        if (fs.existsSync(target)) throw new Error('The original destination is occupied.');
+        item.transfer = planFileTransfer(item.held, target);
+        item.restoredTo = target;
+        item.state = 'restoring';
+        save(batch);
+      }
+      complete(batch, item);
+      return true;
+    } catch (error) { item.error = error instanceof Error ? error.message : String(error); save(batch); return false; }
+  }
+  function expandLegacyDirectories(batch: CleanupBatch): void {
+    const expanded: CleanupItem[] = [];
+    let changed = false;
+    const visit = (item: CleanupItem) => {
+      if (item.state || !fs.existsSync(item.held) || !fs.lstatSync(item.held).isDirectory()) { expanded.push(item); return; }
+      changed = true;
+      for (const name of fs.readdirSync(item.held)) {
+        visit({ from: path.join(item.from, name), held: path.join(item.held, name), reason: item.reason });
+      }
+    };
+    for (const item of batch.items) visit(item);
+    if (changed && expanded.length) { batch.items = expanded; save(batch); }
+  }
   function restore(batchId: string, now = Date.now()): { restored: number; skipped: string[] } {
-    const row = getDatabase().prepare('SELECT * FROM library_cleanup_batches WHERE id = ?').get(batchId) as { id: string; created_at: number; restored_at: number; items_json: string } | undefined;
-    if (!row) throw new Error('That cleanup could not be found.');
-    const batch = readBatch(row);
-    if (batch.restoredAt) throw new Error('That cleanup was already restored.');
+    const batch = history(Number.MAX_SAFE_INTEGER).find((value) => value.id === batchId);
+    if (!batch) throw new Error('That cleanup could not be found.');
+    expandLegacyDirectories(batch);
     let restored = 0;
     const skipped: string[] = [];
     for (const item of batch.items) {
-      if (fs.existsSync(item.from) || !fs.existsSync(item.held)) {
-        skipped.push(item.from);
-        continue;
-      }
-      try {
-        moveAcrossDrives(item.held, item.from);
-        restored += 1;
-      } catch {
-        skipped.push(item.from);
-      }
+      if (item.state === 'restored' || batch.restoredAt) continue;
+      if (restoreItem(batch, item, item.from)) restored += 1;
+      else skipped.push(item.from);
     }
-    getDatabase().prepare('UPDATE library_cleanup_batches SET restored_at = ? WHERE id = ?').run(now, batchId);
-    fs.rmSync(path.join(holdingRoot, batchId), { recursive: true, force: true });
+    if (!skipped.length && batch.items.every((item) => item.state === 'restored')) batch.restoredAt = now;
+    save(batch);
+    // Never remove the holding directory of a partial restore.
     return { restored, skipped };
   }
-
-  /** Remove held files for good once their batch is older than the retention period. */
-  function purgeExpired(now = Date.now()): number {
-    const expired = (getDatabase().prepare('SELECT id FROM library_cleanup_batches WHERE restored_at = 0 AND created_at < ?').all(now - CLEANUP_RETENTION_MS) as Array<{ id: string }>);
-    for (const { id } of expired) fs.rmSync(path.join(holdingRoot, id), { recursive: true, force: true });
-    return expired.length;
+  function restoreImport(record: ImportRecord): void {
+    for (const batch of history(Number.MAX_SAFE_INTEGER)) {
+      expandLegacyDirectories(batch);
+      for (const entry of record.entries.filter((value) => value.held)) {
+        const item = batch.items.find((value) => value.held === entry.current && value.state !== 'restored');
+        if (!item) continue;
+        assertLibraryPath(entry.original, record.root);
+        if (inventoryIdentity(entry.current) !== entry.identity) continue;
+        restoreItem(batch, item, entry.original);
+      }
+      if (batch.items.every((item) => item.state === 'restored')) { batch.restoredAt ||= Date.now(); save(batch); }
+    }
   }
-
-  /** Files the viewer put back; cleanup leaves them alone from then on. */
+  function purgeExpired(now = Date.now()): number {
+    let purged = 0;
+    for (const batch of history(Number.MAX_SAFE_INTEGER)) {
+      if (batch.restoredAt || batch.createdAt >= now - CLEANUP_RETENTION_MS) continue;
+      for (const item of batch.items) {
+        // Pending or failed restores stay recoverable until resolved.
+        if (item.state !== 'held' || item.error || !item.transfer || isVideoFileName(path.basename(item.from))) continue;
+        if (inventoryIdentity(item.held) !== item.transfer.publishedIdentity) continue;
+        fs.unlinkSync(item.held);
+        item.state = 'expired';
+        save(batch);
+        purged += 1;
+      }
+    }
+    return purged;
+  }
   function restoredPaths(): Set<string> {
-    const rows = getDatabase().prepare('SELECT items_json FROM library_cleanup_batches WHERE restored_at > 0').all() as Array<{ items_json: string }>;
-    return new Set(rows.flatMap((row) => (JSON.parse(row.items_json) as CleanupItem[]).map((item) => path.resolve(item.from))));
+    return new Set(history(Number.MAX_SAFE_INTEGER).flatMap((batch) => batch.items.filter((item) => item.state === 'restored' || batch.restoredAt).map((item) => path.resolve(item.restoredTo || item.from))));
   }
 
   const subtitleCache: SubtitleCache = {
@@ -376,7 +402,8 @@ export function createCleanupStore(getDatabase: () => BetterSqlite3.Database, ho
     },
   };
 
-  return { hold, history, restore, purgeExpired, restoredPaths, subtitleCache };
+  const hasPending = () => history(Number.MAX_SAFE_INTEGER).some((batch) => batch.items.some((item) => item.state === 'holding' || item.state === 'restoring'));
+  return { hold, history, restore, restoreImport, recoverInterrupted, hasPending, purgeExpired, restoredPaths, subtitleCache };
 }
 
 /** The subtitle file a stored subtitle URL points at, if any. */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, FilePen, Undo2 } from 'lucide-react';
+import { ArrowRight, FilePen } from 'lucide-react';
 import { CaretDown } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/ConfirmProvider';
@@ -175,7 +175,7 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
     const moves = chosen.filter((entry) => entry.moveToFolder).length;
     const confirmed = await confirm({
       title: `Rename ${files.toLocaleString()} ${files === 1 ? 'file' : 'files'}${folders ? ` and ${folders.toLocaleString()} ${folders === 1 ? 'folder' : 'folders'}` : ''}?`,
-      description: `The files are renamed on disk together with their subtitles${moves ? `, and ${moves.toLocaleString()} ${moves === 1 ? 'moves' : 'move'} into the right folder` : ''}. Watch progress, lists, and skip segments move with them, and you can undo the whole batch afterwards.`,
+      description: `The files are renamed on disk together with their subtitles${moves ? `, and ${moves.toLocaleString()} ${moves === 1 ? 'moves' : 'move'} into the right folder` : ''}. Watch progress, lists, and skip segments move with them, and you can restore the original import afterwards.`,
       confirmLabel: 'Rename',
     });
     if (!confirmed) return;
@@ -193,29 +193,6 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
       setBusy(null);
     }
   }, [confirm, preview, refreshLibrary, reload, selected]);
-
-  const undo = useCallback(async (batch: MediaRenameBatch) => {
-    const confirmed = await confirm({
-      title: 'Undo this rename?',
-      description: `Put ${batch.videoCount.toLocaleString()} ${batch.videoCount === 1 ? 'file' : 'files'} back under their old names. They will not be renamed this way again unless their match changes.`,
-      confirmLabel: 'Undo rename',
-    });
-    if (!confirmed) return;
-    setBusy('undo');
-    setError('');
-    setStatus('');
-    try {
-      await desktopApi.undoMediaRename(batch.id);
-      setRecord((current) => current?.id === batch.id ? { ...current, undoneAt: Date.now() } : current);
-      setStatus('The rename was undone. Its original names are still in rename history.');
-      await reload();
-      await refreshLibrary();
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(null);
-    }
-  }, [confirm, refreshLibrary, reload]);
 
   const selectedCount = preview ? preview.entries.filter((entry) => selected.has(entry.id)).length : 0;
 
@@ -245,7 +222,7 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
             <div>
               <p className="text-sm font-semibold text-white">Organize files after sync</p>
               <p className="mt-0.5 text-xs text-[var(--loom-muted)]">
-                Rename and move matched files to the names LoomTV shows. Original names and locations are saved in rename history, including after undo.
+                Rename and move matched files to the names LoomTV shows. The original inventory is saved before changes. Use Original imports to restore the first recorded state.
               </p>
             </div>
           </div>
@@ -269,14 +246,8 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--loom-muted)]">
             <span className="min-w-0 truncate">Last rename: {batchSummary(lastBatch)}{lastBatch.undoneAt ? ' · undone' : ''}</span>
             <span className="flex shrink-0 items-center gap-2">
-              {!lastBatch.undoneAt ? (
-                <Button type="button" variant="outline" size="sm" onClick={() => void undo(lastBatch)} disabled={disabled || busy !== null} className="gap-1.5">
-                  <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Undo
-                </Button>
-              ) : null}
               <Button type="button" variant="outline" size="sm" onClick={() => void viewNames(lastBatch)} disabled={busy !== null}>
-                View original names
+                View rename record
               </Button>
               {history.length > 1 || hasOlder ? (
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowHistory((value) => !value)}>
@@ -288,7 +259,7 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
         ) : null}
         {showHistory ? (
           <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
-            <p className="text-xs text-[var(--loom-muted)]">Records stay available after undo. Undo newer batches first to restore the earliest recorded names.</p>
+            <p className="text-xs text-[var(--loom-muted)]">Rename records show each batch. Use Original imports to restore the first recorded state.</p>
             {history.slice(1).map((batch) => (
               <div key={batch.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-bg)] p-2.5 text-xs">
                 <div className="min-w-0">
@@ -297,16 +268,9 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
                 </div>
                 <span className="flex shrink-0 items-center gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => void viewNames(batch)} disabled={busy !== null}>
-                    View original names
+                    View rename record
                   </Button>
-                  {batch.undoneAt ? (
-                    <span className="text-[var(--loom-muted)]">Undone</span>
-                  ) : (
-                    <Button type="button" variant="outline" size="sm" onClick={() => void undo(batch)} disabled={disabled || busy !== null} className="gap-1.5">
-                      <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Undo
-                    </Button>
-                  )}
+
                 </span>
               </div>
             ))}
@@ -327,7 +291,6 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
           disabled={disabled || busy !== null}
           error={error}
           onClose={() => { if (busy === null) setRecord(null); }}
-          onUndo={() => void undo(record)}
         />
       ) : null}
 

@@ -509,7 +509,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const moving = targetDirectory !== directory;
     if (!(list(directory) || []).includes(name)) return skip('The file is no longer where the library expects it.');
     if (input.isRecentlyModified?.(filePath)) {
-      return skip('The file is still being copied or downloaded. It is organized as soon as it finishes.');
+      return skip('The file is still being copied or downloaded, or is waiting for a stable observation window.');
     }
     // Keep organized names except provisional episode codes awaiting a title
     // or a season prefix confirmed wrong by the folder and episode metadata.
@@ -518,7 +518,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const base = keepName ? name.slice(0, name.length - path.extname(name).length) : withinLimit(newBase);
     const target = keepName ? name : `${base}${path.extname(name).toLowerCase()}`;
     if (target === name && !moving) return 'unchanged';
-    if (input.isLocked(filePath, target)) return skip('You undid this rename, so it is not renamed again unless its match changes.');
+    if (input.isLocked(filePath, target)) return skip('You restored this content. Automatic organization leaves it in place.');
     if (moving && !input.sameDrive(directory, createFolder ? path.dirname(createFolder) : targetDirectory)) {
       return skip('The destination folder is on a different drive, so the file is not moved.');
     }
@@ -560,7 +560,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
   const planFolder = (item: MediaItem, label: string, folder: string, targetName: string): void => {
     if (isProtectedFolder(folder)) return;
     const name = path.basename(folder);
-    if (name === targetName) return;
+    if (name === targetName || input.isLocked(folder, targetName)) return;
     const reason = folderWaitReason(folder);
     if (reason) {
       skipped.push({ mediaId: item.id, mediaTitle: item.title, filePath: folder, reason });
@@ -965,8 +965,8 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
         targetDirectory = existing[0] || path.join(showFolder, seasonName(first.season));
         if (!existing[0]) createFolder = targetDirectory;
       }
-      if (looseEpisode && [targetDirectory, showFolder].some((folder) => (list(folder) || []).some((video) => {
-        if (!isVideoFileName(video)) return false;
+      if (misplaced && targetDirectory !== directory && [targetDirectory, showFolder].some((folder) => (list(folder) || []).some((video) => {
+        if (!isVideoFileName(video) || path.resolve(folder, video) === path.resolve(filePath)) return false;
         const episode = parseEpisodeFileName(video, first.season);
         return episode && (folder !== showFolder || episode.season === first.season)
           && sorted.some((candidate) => candidate.episode === episode.episode);

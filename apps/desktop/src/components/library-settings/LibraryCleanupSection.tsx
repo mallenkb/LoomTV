@@ -63,7 +63,7 @@ export default function LibraryCleanupSection({ disabled }: { disabled: boolean 
     try {
       const result = await desktopApi.restoreLibraryCleanup(batch.id);
       setStatus(result.skipped
-        ? `Put back ${result.restored.toLocaleString()} ${result.restored === 1 ? 'file' : 'files'}. ${result.skipped.toLocaleString()} could not be put back because something else is in their place.`
+        ? `Put back ${result.restored.toLocaleString()} ${result.restored === 1 ? 'file' : 'files'}. ${result.skipped.toLocaleString()} remain unresolved. Missing files, occupied destinations, or unavailable drives are listed in the cleanup record.`
         : `Put back ${result.restored.toLocaleString()} ${result.restored === 1 ? 'file' : 'files'}. Cleanup will leave them alone from now on.`);
       await load();
     } catch (cause) {
@@ -83,7 +83,7 @@ export default function LibraryCleanupSection({ disabled }: { disabled: boolean 
           <div>
             <p className="text-sm font-semibold text-white">Clean up library folders</p>
             <p className="mt-0.5 text-xs text-[var(--loom-muted)]">
-              On each sync and launch, removes text and link files left by downloads, images that are not artwork, and subtitle files that copy a track already built into the video. Videos, other subtitles and artwork are never touched. Removed files can be put back for 30 days, and anything put back is left alone after that.
+              Recognized download clutter and external subtitles covered by embedded tracks move to holding storage for 30 days. Unknown files, useful artwork, and subtitles with uncertain coverage stay. Failed restores keep their remaining files for retry.
             </p>
           </div>
         </div>
@@ -106,7 +106,7 @@ export default function LibraryCleanupSection({ disabled }: { disabled: boolean 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-[var(--loom-text)]">
                   {dateLabel(batch.createdAt)} · {batch.items.length.toLocaleString()} {batch.items.length === 1 ? 'file' : 'files'}
-                  <span className="text-[var(--loom-muted)]">{batch.restoredAt ? ' · put back' : ` · kept until ${dateLabel(batch.expiresAt)}`}</span>
+                  <span className="text-[var(--loom-muted)]">{batch.restoredAt ? ' · put back' : batch.items.some((item) => item.error) ? ' · needs attention' : batch.expiresAt <= Date.now() ? ' · retention ended' : ` · kept until ${dateLabel(batch.expiresAt)}`} </span>
                 </p>
                 <span className="flex shrink-0 items-center gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => setOpen(open === batch.id ? null : batch.id)}>
@@ -125,7 +125,7 @@ export default function LibraryCleanupSection({ disabled }: { disabled: boolean 
                   {batch.items.map((item) => (
                     <li key={`${item.folder}/${item.name}`} className="min-w-0">
                       <span className="block break-all text-[var(--loom-text)]">{item.name}</span>
-                      <span className="block break-all text-[var(--loom-faint)]">{item.reason} · {item.folder}</span>
+                      <span className="block break-all text-[var(--loom-faint)]">{item.reason} · {item.folder}{item.state ? ` · ${item.state}` : ''}{item.error ? ` · ${item.error}` : ''}</span>
                     </li>
                   ))}
                 </ul>

@@ -37,6 +37,9 @@ import type {
   MediaRenameBatch,
   MediaRenameRecord,
   LibraryCleanupBatch,
+  LibraryImportSummary,
+  LibraryOriginalPreview,
+  LibraryOriginalResult,
   MediaRenamePreview,
   MediaRenameStatus,
   LibraryEpisodeUpdates,
@@ -135,6 +138,9 @@ export interface IpcContract {
   'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };
   'library:update-folder': { args: [folderPath: string, nextFolderPath: string, kind: LibraryFolderKind]; result: LibraryIndexPayload };
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
+  'library:imports': { args: [offset?: number]; result: LibraryImportSummary[] };
+  'library:original-preview': { args: [importId: string]; result: LibraryOriginalPreview };
+  'library:original-restore': { args: [importId: string]; result: LibraryOriginalResult };
   'library:rename-preview': { args: []; result: MediaRenamePreview };
   'library:rename-apply': { args: [entryIds: string[]]; result: MediaRenameApplyResult };
   'library:rename-history': { args: [offset?: number]; result: MediaRenameBatch[] };

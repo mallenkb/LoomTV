@@ -23,6 +23,9 @@ import type {
   LibraryIndexPayload,
   LibraryIndexUnchanged,
   LibraryCleanupBatch,
+  LibraryImportSummary,
+  LibraryOriginalPreview,
+  LibraryOriginalResult,
   LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
@@ -272,6 +275,9 @@ export type DesktopBridgeApi = {
       removeIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
       refreshIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
       setIptvPageActive?: (active: boolean) => Promise<void>;
+      listLibraryImports?: (offset?: number) => Promise<LibraryImportSummary[]>;
+      previewLibraryOriginal?: (importId: string) => Promise<LibraryOriginalPreview>;
+      restoreLibraryOriginal?: (importId: string) => Promise<LibraryOriginalResult>;
       previewMediaRenames?: () => Promise<MediaRenamePreview>;
       applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
       listMediaRenames?: (offset?: number) => Promise<MediaRenameBatch[]>;
@@ -1417,6 +1423,20 @@ const desktopTransport = {
   },
 
   // Renaming files needs the desktop app itself; there is no LAN route for it.
+  async listLibraryImports(offset = 0): Promise<LibraryImportSummary[]> {
+    return window.desktopApi?.listLibraryImports?.(offset) ?? [];
+  },
+
+  async previewLibraryOriginal(importId: string): Promise<LibraryOriginalPreview> {
+    if (!window.desktopApi?.previewLibraryOriginal) throw new Error('Original records are only available in the desktop app.');
+    return window.desktopApi.previewLibraryOriginal(importId);
+  },
+
+  async restoreLibraryOriginal(importId: string): Promise<LibraryOriginalResult> {
+    if (!window.desktopApi?.restoreLibraryOriginal) throw new Error('Restoring originals is only available in the desktop app.');
+    return window.desktopApi.restoreLibraryOriginal(importId);
+  },
+
   async previewMediaRenames(): Promise<MediaRenamePreview> {
     if (!window.desktopApi?.previewMediaRenames) throw new Error('Renaming files is only available in the desktop app.');
     return window.desktopApi.previewMediaRenames();

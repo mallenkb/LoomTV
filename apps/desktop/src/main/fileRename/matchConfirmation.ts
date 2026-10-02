@@ -66,7 +66,7 @@ function anchorIds(item: Identity): Ids {
 
 export function confirmationAnchor(item: Identity): string {
   const ids = anchorIds(item);
-  return `${item.type}|${ID_KEYS.map((key) => ids[key] || '').join('|')}`;
+  return `v2|${item.type}|${item.title}|${item.year || ''}|${ID_KEYS.map((key) => ids[key] || '').join('|')}`;
 }
 
 function sourceList(sources: readonly SourceName[]): string {
@@ -84,7 +84,9 @@ export function evaluateConfirmation(item: Identity, confirmation: MatchConfirma
     const same = comparable.filter((key) => String(record.ids[key]) === String(anchor[key]));
     const yearAgrees = !record.year || !item.year || Math.abs(record.year - item.year) <= 1;
     let confirms = false;
-    if (same.length > 0) {
+    if (comparable.some((key) => String(record.ids[key]) !== String(anchor[key]))) {
+      conflicts.push(record);
+    } else if (same.length > 0) {
       if (yearAgrees) confirms = true;
       else conflicts.push(record);
     } else if (comparable.length > 0) {

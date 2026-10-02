@@ -30,6 +30,7 @@ import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIc
 import { otherFolderGroupForFolder, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import AddLibraryWizard, { type WizardFolder } from './AddLibraryWizard';
 import OrganizeFilesSection from './OrganizeFilesSection';
+import OriginalImportsSection from './OriginalImportsSection';
 import LibraryCleanupSection from './LibraryCleanupSection';
 import LibraryHealthCard from './LibraryHealthCard';
 import {
@@ -802,6 +803,7 @@ export default function LibrarySettingsPanel({
             <Button type="button" onClick={() => void runAction('movies', async () => { fullRescanLibrary(); await refreshLibrary(); })} disabled={anyScanning} variant="outline">Full rescan</Button>
           </div>
           <OrganizeFilesSection disabled={anyScanning} />
+          <OriginalImportsSection disabled={anyScanning} />
           <LibraryCleanupSection disabled={anyScanning} />
         </CardContent>
       </Card>

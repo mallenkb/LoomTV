@@ -1,26 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** No writes for this long: the file is finished, organize it now. */
-export const QUIET_MS = 60_000;
-/** Otherwise two looks this far apart with the same size and time. */
-export const STABLE_CHECK_MS = 5_000;
+/** Minimum quiet window. Stability is evidence, never proof of download completion. */
+export const QUIET_MS = 5 * 60_000;
+/** Require two observations spanning the quiet window, including after launch. */
+export const STABLE_CHECK_MS = QUIET_MS;
 
 /** Names download managers and browsers write to until a download completes. */
 const PARTIAL_SUFFIX = /\.(?:part|partial|crdownload|download|fdmdownload|opdownload)$/i;
 
-type Observation = { size: number; mtimeMs: number; at: number };
+type Observation = { size: number; mtimeMs: number; ctimeMs: number; at: number };
 
-/**
- * Decides whether a file is still being written, so it is organized the
- * moment it is finished instead of after a fixed wait.
- *
- * A file nothing has written to for a minute is finished. A newer one must
- * look the same (size and modified time) on two looks a few seconds apart.
- * A download manager's partial file for the same name keeps it waiting.
- * The returned number is how long to wait before looking again; 0 means
- * finished.
- */
+/** Wait for stable observations and known download markers to disappear. */
 export function createFileSettling(options: {
   stat?: (filePath: string) => { size: number; mtimeMs: number; ctimeMs: number } | null;
   listDirectory?: (directory: string) => string[] | null;
@@ -46,24 +37,19 @@ export function createFileSettling(options: {
     const current = stat(filePath);
     if (!current) return STABLE_CHECK_MS;
     const name = path.basename(filePath);
-    const partial = (listDirectory(path.dirname(filePath)) || [])
-      .some((entry) => PARTIAL_SUFFIX.test(entry) && entry.replace(PARTIAL_SUFFIX, '') === name);
-    if (partial) return STABLE_CHECK_MS;
-    // ctime also moves when a copy finishes setting the file's dates.
-    if (now - Math.max(current.mtimeMs, current.ctimeMs) >= QUIET_MS) {
+    const entries = listDirectory(path.dirname(filePath));
+    if (!entries || current.size <= 0 || PARTIAL_SUFFIX.test(name)
+      || entries.some((entry) => (PARTIAL_SUFFIX.test(entry) && entry.replace(PARTIAL_SUFFIX, '') === name)
+        || entry === `${name}.aria2` || entry === `${name}.!qB` || entry === `${name}.!ut`)) {
       observations.delete(filePath);
-      return 0;
+      return STABLE_CHECK_MS;
     }
     const previous = observations.get(filePath);
-    if (previous && previous.size === current.size && previous.mtimeMs === current.mtimeMs) {
+    if (previous && previous.size === current.size && previous.mtimeMs === current.mtimeMs && previous.ctimeMs === current.ctimeMs) {
       const elapsed = now - previous.at;
-      if (elapsed >= STABLE_CHECK_MS) {
-        observations.delete(filePath);
-        return 0;
-      }
-      return STABLE_CHECK_MS - elapsed;
+      return Math.max(0, STABLE_CHECK_MS - elapsed, QUIET_MS - (now - Math.max(current.mtimeMs, current.ctimeMs)));
     }
-    observations.set(filePath, { size: current.size, mtimeMs: current.mtimeMs, at: now });
+    observations.set(filePath, { size: current.size, mtimeMs: current.mtimeMs, ctimeMs: current.ctimeMs, at: now });
     return STABLE_CHECK_MS;
   }
 

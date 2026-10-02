@@ -17,7 +17,7 @@ import { planRenames } from '../src/main/fileRename/renamePlanner.ts';
 import type { MediaItem } from '../src/main/metadata/types.ts';
 
 const movie = { type: 'movie', title: 'One Night Only', year: 2026, providerIds: { tmdbId: '1433367', imdbId: 'tt37853455' } } as const;
-const confirmation = (records: SourceRecord[], item = movie): MatchConfirmation => ({
+const confirmation = (records: SourceRecord[], item: Pick<MediaItem, 'type' | 'title' | 'year' | 'providerIds'> = movie): MatchConfirmation => ({
   checkedAt: 0, anchor: confirmationAnchor(item), searchedTitle: item.title, asked: ['tmdb', 'omdb', 'tvdb'], records,
 });
 const tmdb: SourceRecord = { source: 'tmdb', ids: { tmdbId: '1433367', imdbId: 'tt37853455' }, title: 'One Night Only', year: 2026 };
@@ -89,7 +89,7 @@ test('planned entries carry the verdict, and unchecked ones are marked', (t) => 
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const file = (name: string) => { const target = path.join(root, name); mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, 'v'); return target; };
   const item = (id: string, title: string, name: string) => ({
-    id, type: 'movie', title, year: 2026, poster: '', backdrop: '', summary: '', rating: 0, genres: [], filePath: file(name), providerIds: { tmdbId: id },
+    id, type: 'movie', title, year: 2026, poster: '', backdrop: '', summary: '', rating: 0, genres: [], cast: [], filePath: file(name), providerIds: { tmdbId: id },
   } as MediaItem);
   const items = [item('1', 'Runner', 'Runner.2026.1080p.mkv'), item('2', 'The Uprising', 'The.Uprising.2026.1080p.mkv')];
   const plan = planRenames({
@@ -100,4 +100,16 @@ test('planned entries carry the verdict, and unchecked ones are marked', (t) => 
   const byTitle = new Map(plan.entries.map((entry) => [entry.mediaTitle, entry.verification?.status]));
   assert.equal(byTitle.get('Runner'), 'confirmed');
   assert.equal(byTitle.get('The Uprising'), 'unchecked');
+});
+
+
+test('one matching ID cannot excuse a contradictory provider ID', () => {
+  const contradictory: SourceRecord = { ...tmdb, ids: { ...tmdb.ids, imdbId: 'tt9999999' } };
+  assert.equal(evaluateConfirmation(movie, confirmation([contradictory, omdb])).status, 'conflict');
+});
+
+test('changed title or year invalidates a cached confirmation', () => {
+  const stored = confirmation([tmdb, omdb]);
+  assert.equal(confirmationIsFresh(stored, { ...movie, year: 2025 }, 1), false);
+  assert.equal(confirmationIsFresh(stored, { ...movie, title: 'Another title' }, 1), false);
 });

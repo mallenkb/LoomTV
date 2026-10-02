@@ -5,6 +5,8 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { createMediaItemId } from '../libraryItemHelpers.ts';
 import { mediaFileRevision } from '../skipSegments/fileIdentity.ts';
 import { createFileSettling } from './fileSettling.ts';
+import { inventoryIdentity, type createImportInventory } from './importInventory.ts';
+import { fileStamp } from './recoverableFileMove.ts';
 import type { LibraryData } from '../appContracts.ts';
 import type { MediaItem } from '../metadata/types.ts';
 import {
@@ -35,6 +37,8 @@ export type LoggedOperation = RenameOperation & {
   role: 'video' | 'sidecar' | 'folder' | 'mkdir' | 'rmdir';
   /** Recreating a removed folder: one that is already there is fine. */
   restore?: boolean;
+  expectedIdentity?: string;
+  expectedStamp?: string;
   /** Catalog path change when an episode file gains its own show folder. */
   mediaFrom?: string;
   mediaTo?: string;
@@ -86,6 +90,9 @@ function stepIsOnDisk(operation: LoggedOperation): boolean {
   }
   if (sourceExists === targetExists) {
     throw new RenameError(`Cannot safely recover "${operation.from}": ${sourceExists ? 'both paths exist' : 'neither path is available'}. The recovery record has been kept.`);
+  }
+  if (operation.expectedIdentity && inventoryIdentity(targetExists ? operation.to : operation.from) !== operation.expectedIdentity) {
+    throw new RenameError('Recovery found a replaced file. The journal has been kept for review.');
   }
   return targetExists;
 }
@@ -155,6 +162,7 @@ export type RenameExecutorDeps = {
   verifyMatch?: (item: MediaItem) => { status: 'confirmed' | 'waiting' | 'conflict'; note: string; knownTitles: string[] } | null;
   /** Keeps each file's first name; called after every batch that moved files. */
   recordOriginalNames?: (moves: ReadonlyArray<{ from: string; to: string }>) => void;
+  inventory?: ReturnType<typeof createImportInventory>;
 };
 
 /** Every video and sidecar move in a batch, from its old path to where it ended up. */
@@ -394,10 +402,13 @@ function sameFile(left: string, right: string): boolean {
 }
 
 /** Execute forward steps; the caller owns durable rollback. */
-function performOnDisk(operations: readonly LoggedOperation[], onStep: (completed: number) => void): void {
+function performOnDisk(operations: readonly LoggedOperation[], onStep: (completed: number) => void, validate?: (operation: LoggedOperation) => void): void {
   let completed = 0;
   const stepDone = () => onStep(++completed);
   for (const operation of operations) {
+    validate?.(operation);
+    if (operation.expectedIdentity && inventoryIdentity(operation.from) !== operation.expectedIdentity) throw new RenameError('A source was replaced after the plan was saved.');
+    if (operation.expectedStamp && fileStamp(operation.from) !== operation.expectedStamp) throw new RenameError('A source changed after the plan was saved.');
     if (operation.role === 'mkdir') {
       if (fs.existsSync(operation.to)) throw new RenameError(`"${operation.to}" already exists.`);
       try {
@@ -446,6 +457,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
   function plan(options: { automatic?: boolean } = {}): RenamePlan & { waitingFiles: number; retryAfterMs?: number } {
     const data = deps.loadLibrary();
     const locks = lockedTargets();
+    const isRestored = deps.inventory?.protection();
     const now = Date.now();
     const deferred = new Map<string, number>();
     const result = planRenames({
@@ -472,7 +484,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
           return null;
         }
       },
-      isLocked: (filePath, targetName) => locks.get(filePath) === targetName.toLowerCase(),
+      isLocked: (filePath, targetName) => Boolean(isRestored?.(filePath)) || locks.get(filePath) === targetName.toLowerCase(),
     });
     const delays = [...deferred.values()];
     return { ...result, waitingFiles: deferred.size, ...(delays.length ? { retryAfterMs: Math.max(1000, Math.min(...delays) + 1000) } : {}) };
@@ -493,9 +505,14 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     // Persist the rollback boundary before touching disk. Removing each restored
     // step makes recovery restartable even if a second crash interrupts rollback.
     save.run(JSON.stringify(remaining), remaining.length, id);
+    const validate = deps.inventory?.operationValidator(inverted(remaining));
     while (remaining.length > 0) {
       const operation = remaining[remaining.length - 1];
-      if (stepIsOnDisk(operation)) performStep(invert(operation));
+      if (stepIsOnDisk(operation)) {
+        const reversal = invert(operation);
+        validate?.(reversal);
+        performStep(reversal);
+      }
       remaining.pop();
       save.run(JSON.stringify(remaining), remaining.length, id);
     }
@@ -534,6 +551,16 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     const diskOperations = operations.filter((operation) => !(
       operation.role === 'mkdir' && operation.restore && pathExists(operation.to)
     ));
+    if (direction === 'apply' && deps.inventory) {
+      const roots = deps.libraryRoots(data);
+      deps.inventory.captureLibrary(allItems(data), roots);
+      deps.inventory.capturePaths(diskOperations.filter((op) => op.from && pathExists(op.from)).map((op) => op.from), roots);
+    }
+    for (const operation of diskOperations) {
+      if (!operation.from || !pathExists(operation.from) || operation.role === 'rmdir') continue;
+      operation.expectedIdentity ||= inventoryIdentity(operation.from) || undefined;
+      if (operation.role === 'video' || operation.role === 'sidecar') operation.expectedStamp ||= fileStamp(operation.from);
+    }
     const journalId = openJournal(batchId, direction, diskOperations);
     const recordStep = database.prepare('UPDATE media_rename_journal SET completed = ? WHERE id = ?');
     let completedOnDisk = 0;
@@ -542,7 +569,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
         completedOnDisk = completed;
         recordStep.run(completed, journalId);
         deps.onStepCompleted?.(completed);
-      });
+      }, deps.inventory?.operationValidator(diskOperations));
     } catch (error) {
       reverseJournal(journalId, diskOperations, completedOnDisk);
       throw error;
@@ -551,6 +578,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       database.transaction(() => {
         remapStoredState(database, mapPath, aliases, revisions);
         deps.remapMediaIds(aliases);
+        deps.inventory?.moved(diskOperations, false, direction === 'apply');
         finalize(database);
         database.prepare('DELETE FROM media_rename_journal WHERE id = ?').run(journalId);
         deps.saveLibraryMutation(next);
@@ -645,12 +673,12 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       // Only matches two sources agree on are applied without review.
       const entries = planned.entries.filter((entry) => !entry.verification || entry.verification.status === 'confirmed');
       if (entries.length === 0) return retryAfterMs === undefined ? null : { batchId: '', renamed: 0, retryAfterMs };
-      return { ...this.apply(entries.map((entry) => entry.id)), retryAfterMs };
+      return { ...this.apply(entries.map((entry) => entry.id), true), retryAfterMs };
     },
 
-    apply(entryIds: readonly string[]): { batchId: string; renamed: number } {
+    apply(entryIds: readonly string[], automatic = false): { batchId: string; renamed: number } {
       const wanted = new Set(entryIds);
-      const entries = plan().entries.filter((entry) => wanted.has(entry.id));
+      const entries = plan({ automatic }).entries.filter((entry) => wanted.has(entry.id));
       // An entry's ID covers its exact source and destination. Any approved
       // entry missing from the fresh plan changed since the preview, so
       // nothing runs until the new plan has been reviewed.
@@ -692,6 +720,8 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
           } : {}),
         })),
       ];
+      const finalPath = createPathMapper(pathMoves(operations));
+      const affectedVideos = new Set(libraryItems.flatMap((item) => item.type === 'movie' ? [item.filePath] : (item.episodeFiles || []).map((file) => file.filePath)).filter((file) => finalPath(file) !== file));
       const batchId = randomUUID();
       execute(operations, batchId, 'apply', (database) => {
         database
@@ -700,7 +730,30 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       });
       removeEmptiedFolders(entries, createPathMapper(pathMoves(operations)), batchId, operations);
       recordOriginals(operations);
-      return { batchId, renamed: videos.size };
+      return { batchId, renamed: affectedVideos.size };
+    },
+
+    restoreOriginal(id: string): { restored: number; issues: Array<{ path: string; reason: string }> } {
+      if (!deps.inventory) throw new RenameError('Original inventories are unavailable.');
+      deps.inventory.requestRestore(id);
+      const planned = deps.inventory.preview(id);
+      const record = deps.inventory.get(id);
+      const firstMove = planned.operations.find((operation) => operation.role === 'video');
+      if (record && firstMove) {
+        for (const item of allItems(deps.loadLibrary()).filter((value) => value.type !== 'movie')) {
+          const files = item.episodeFiles || [];
+          if (!files.length || !files.every((file) => record.entries.some((entry) => entry.video && entry.current === file.filePath))) continue;
+          const folder = record.entries.find((entry) => entry.kind === 'directory' && entry.current === item.filePath);
+          if (folder) { firstMove.mediaFrom = item.filePath; firstMove.mediaTo = folder.original; }
+        }
+      }
+      if (planned.operations.length) {
+        // File paths, progress, artwork and track preferences use the same
+        // transaction and recovery journal as ordinary organization.
+        execute(planned.operations, randomUUID(), 'undo', () => undefined);
+      }
+      deps.inventory.finishRestore(id);
+      return { restored: planned.operations.filter((operation) => operation.role === 'video' || operation.role === 'sidecar').length, issues: planned.issues };
     },
 
     /**

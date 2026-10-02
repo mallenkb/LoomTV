@@ -36,7 +36,7 @@ function asLanguage(token: string): string | null {
 }
 
 /** Language of a sidecar subtitle file; English when the name carries none. */
-export function subtitleLanguageFromFileName(fileName: string): string {
+export function subtitleLanguageFromFileName(fileName: string, fallback = 'en'): string {
   const name = path.basename(fileName);
   const openSubtitles = name.match(/\.opensubtitles\.([a-z]{2,3})\./i);
   if (openSubtitles) return openSubtitles[1].toLowerCase();
@@ -63,5 +63,5 @@ export function subtitleLanguageFromFileName(fileName: string): string {
     const language = asLanguage(match[1]);
     if (language) return language;
   }
-  return 'en';
+  return fallback;
 }

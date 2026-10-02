@@ -1,3 +1,4 @@
+import { restoreOffscreenTrack } from './offscreenVideoRestore.ts';
 import { BrowserWindow, type WebContents } from 'electron';
 import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
@@ -1380,16 +1381,20 @@ class LibVlcPlaybackSession {
   private resumeOffscreenVideo(): void {
     const trackId = this.suspendedVideoTrackId;
     if (trackId === null) return;
-    this.suspendedVideoTrackId = null;
     const api = this.runtime.api;
     try {
-      api.videoSetTrack?.(this.player, trackId);
-      // A new decoder shows nothing until the next keyframe, and nothing at
-      // all while paused. Seeking to the current time decodes a frame now.
-      const positionMs = Number(api.playerGetTime(this.player));
-      if (positionMs >= 0) api.playerSetTime(this.player, Math.round(positionMs));
+      this.suspendedVideoTrackId = restoreOffscreenTrack(trackId,
+        (id) => Boolean(this.player && api.videoSetTrack && Number(api.videoSetTrack(this.player, id)) >= 0),
+        () => {
+          const positionMs = Number(api.playerGetTime(this.player));
+          if (positionMs < 0 || !Number.isFinite(positionMs)) return false;
+          api.playerSetTime(this.player, Math.round(positionMs));
+          return true;
+        });
+      if (this.suspendedVideoTrackId !== null) return;
     } catch (error) {
       console.warn('[libvlc] could not restore video after the window returned:', error instanceof Error ? error.message : error);
+      return;
     }
     recordPlaybackDiagnostic('vlc.offscreen', 'video-restored');
   }

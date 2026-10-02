@@ -6,12 +6,11 @@ import type { MediaRenameRecord } from '@/shared/desktopProtocol';
 const PAGE_SIZE = 50;
 const KIND_LABELS = { video: 'Video', sidecar: 'Subtitle or artwork', folder: 'Folder' };
 
-export default function RenameRecordDialog({ record, disabled, error, onClose, onUndo }: {
+export default function RenameRecordDialog({ record, disabled, error, onClose }: {
   record: MediaRenameRecord;
   disabled: boolean;
   error: string;
   onClose: () => void;
-  onUndo: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE_SIZE);
@@ -26,9 +25,9 @@ export default function RenameRecordDialog({ record, disabled, error, onClose, o
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} contentClassName="max-w-3xl border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)]">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Original names</DialogTitle>
+          <DialogTitle>Rename record</DialogTitle>
           <DialogDescription className="text-[var(--loom-muted)]">
-            Names and locations before and after the rename on {new Date(record.createdAt).toLocaleString()}. This record is kept after undo. For repeated renames, undo newer batches first.
+            Names and locations for the rename on {new Date(record.createdAt).toLocaleString()}. Use Original imports to restore the first saved state.
           </DialogDescription>
         </DialogHeader>
         <label className="mt-4 block text-sm">
@@ -49,7 +48,7 @@ export default function RenameRecordDialog({ record, disabled, error, onClose, o
               <p className="mb-2 font-semibold">{KIND_LABELS[change.kind]}</p>
               <dl className="space-y-2">
                 <div>
-                  <dt className="text-[var(--loom-muted)]">Original name and location</dt>
+                  <dt className="text-[var(--loom-muted)]">Name before this batch</dt>
                   <dd className="mt-0.5 select-text break-all">{change.fromPath}</dd>
                 </div>
                 <div>
@@ -66,7 +65,6 @@ export default function RenameRecordDialog({ record, disabled, error, onClose, o
         </div>
         {error ? <p role="alert" className="mt-3 text-xs text-red-200">{error}</p> : null}
         <div className="mt-4 flex justify-end gap-2">
-          {!record.undoneAt ? <Button type="button" variant="outline" onClick={onUndo} disabled={disabled}>Undo this rename</Button> : null}
           <Button type="button" variant="outline" onClick={onClose} disabled={disabled}>Close</Button>
         </div>
       </DialogContent>

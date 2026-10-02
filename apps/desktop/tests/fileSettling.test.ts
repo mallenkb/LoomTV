@@ -14,12 +14,13 @@ function settling(files: Record<string, { size: number; mtimeMs: number; ctimeMs
   });
 }
 
-test('a file nothing wrote to for a minute is organized at once', () => {
+test('an old timestamp still needs a full stable observation window', () => {
   const check = settling({ '/m/Runner.mkv': { size: 10, mtimeMs: NOW - QUIET_MS } });
-  assert.equal(check.waitMs('/m/Runner.mkv', NOW), 0);
+  assert.equal(check.waitMs('/m/Runner.mkv', NOW), STABLE_CHECK_MS);
+  assert.equal(check.waitMs('/m/Runner.mkv', NOW + STABLE_CHECK_MS), 0);
 });
 
-test('a just-finished download is organized after two equal looks seconds apart', () => {
+test('a just-finished download is organized after two equal looks spanning the quiet window', () => {
   const files = { '/m/One Night Only.mkv': { size: 1_618_359_708, mtimeMs: NOW - 2_000 } };
   const check = settling(files);
   assert.equal(check.waitMs('/m/One Night Only.mkv', NOW), STABLE_CHECK_MS);
@@ -39,11 +40,22 @@ test("a download manager's partial file for the same name keeps it waiting", () 
   const check = settling({ '/m/Movie.mkv': { size: 1, mtimeMs: NOW - 10 * QUIET_MS } }, ['Movie.mkv.crdownload']);
   assert.ok(check.waitMs('/m/Movie.mkv', NOW) > 0);
   const other = settling({ '/m/Movie.mkv': { size: 1, mtimeMs: NOW - 10 * QUIET_MS } }, ['Other.mkv.fdmdownload']);
-  assert.equal(other.waitMs('/m/Movie.mkv', NOW), 0, "another file's download does not hold this one");
+  other.waitMs('/m/Movie.mkv', NOW);
+  assert.equal(other.waitMs('/m/Movie.mkv', NOW + STABLE_CHECK_MS), 0, "another file's download does not hold this one");
 });
 
 test('a recent copy whose dates were set back is still checked', () => {
   // Finder keeps the original modified date but the status change is new.
   const check = settling({ '/m/Copied.mkv': { size: 5, mtimeMs: NOW - 365 * 86_400_000, ctimeMs: NOW - 1_000 } });
   assert.ok(check.waitMs('/m/Copied.mkv', NOW) > 0);
+});
+
+
+test('a five-second pause and unreadable directory do not establish readiness', () => {
+  const check = settling({ '/m/Movie.mkv': { size: 10, mtimeMs: NOW } });
+  check.waitMs('/m/Movie.mkv', NOW);
+  assert.ok(check.waitMs('/m/Movie.mkv', NOW + 5_000) > 0);
+  const unreadable = createFileSettling({ stat: () => ({ size: 10, mtimeMs: 0, ctimeMs: 0 }), listDirectory: () => null });
+  assert.ok(unreadable.waitMs('/m/Movie.mkv', NOW) > 0);
+  assert.ok(unreadable.waitMs('/m/Movie.mkv', NOW + STABLE_CHECK_MS) > 0);
 });

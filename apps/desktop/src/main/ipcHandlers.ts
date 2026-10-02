@@ -368,6 +368,9 @@ export interface IpcHandlerDependencies<
   explainIptvChannel: (reference: string) => Promise<IpcResult<'iptv:explain-channel'>>;
   iptvGuide: (references: string[], fromMs: number, toMs: number) => IpcResult<'iptv:guide'>;
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => IpcResult<'iptv:set-favorite'>;
+  listLibraryImports: (offset?: number) => IpcResult<'library:imports'>;
+  previewLibraryOriginal: (id: string) => IpcResult<'library:original-preview'>;
+  restoreLibraryOriginal: (id: string) => Promise<IpcResult<'library:original-restore'>>;
   previewMediaRenames: () => IpcResult<'library:rename-preview'> | Promise<IpcResult<'library:rename-preview'>>;
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
   listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
@@ -885,6 +888,18 @@ export function registerIpcHandlers<
   handle('iptv:set-page-active', (_event, active) => deps.setIptvPageActive(active), z.tuple([z.boolean()]));
 
   // Renaming touches files on disk, so every step is an owner-only settings write.
+  handle('library:imports', (_event, offset) => {
+    deps.authorizeSettingsWrite();
+    return deps.listLibraryImports(offset);
+  }, z.tuple([z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()]));
+  handle('library:original-preview', (_event, id) => {
+    deps.authorizeSettingsWrite();
+    return deps.previewLibraryOriginal(id);
+  }, z.tuple([z.string().uuid()]));
+  handle('library:original-restore', (_event, id) => {
+    deps.authorizeSettingsWrite();
+    return deps.restoreLibraryOriginal(id);
+  }, z.tuple([z.string().uuid()]));
   handleNoArgs('library:rename-preview', () => {
     deps.authorizeSettingsWrite();
     return deps.previewMediaRenames();

@@ -1,3 +1,4 @@
+import { restoreOffscreenTrack } from './offscreenVideoRestore.ts';
 import { BrowserWindow, type WebContents } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -483,10 +484,10 @@ class LibMpvSession {
   private resumeOffscreenVideo(): void {
     const trackId = this.suspendedVideoTrackId;
     if (trackId === null) return;
-    this.suspendedVideoTrackId = null;
-    // The relative zero seek decodes the current frame, which a paused
-    // player would otherwise not show until playback resumes.
-    if (this.trySend(['set_property', 'vid', trackId])) this.trySend(['seek', 0, 'relative+exact']);
+    this.suspendedVideoTrackId = restoreOffscreenTrack(trackId,
+      (id) => this.trySend(['set_property', 'vid', id]),
+      () => this.trySend(['seek', 0, 'relative+exact']));
+    if (this.suspendedVideoTrackId !== null) return;
     recordPlaybackDiagnostic('mpv.offscreen', 'video-restored');
   }
 

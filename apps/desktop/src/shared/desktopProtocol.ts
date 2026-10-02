@@ -951,6 +951,33 @@ export interface MediaRenamePreview {
   skipped: MediaRenameSkip[];
 }
 
+export interface LibraryImportSummary {
+  id: string;
+  title: string;
+  category: 'movie' | 'tv' | 'anime';
+  createdAt: number;
+  removedAt: number;
+  restoredAt: number;
+  restoreRequestedAt: number;
+  originalQuality: 'captured' | 'historical-partial';
+  entryCount: number;
+}
+
+export interface LibraryOriginalPreview {
+  importId: string;
+  title: string;
+  removedAt: number;
+  originalQuality: 'captured' | 'historical-partial';
+  entries: Array<{ original: string; current: string; kind: string; status: string }>;
+  issues: Array<{ path: string; reason: string }>;
+}
+
+export interface LibraryOriginalResult {
+  restored: number;
+  complete: boolean;
+  issues: Array<{ path: string; reason: string }>;
+}
+
 /** One automatic cleanup of library folders, newest first. */
 export interface LibraryCleanupBatch {
   id: string;
@@ -959,7 +986,7 @@ export interface LibraryCleanupBatch {
   restoredAt: number;
   /** When the held files are removed for good, unless restored. */
   expiresAt: number;
-  items: { name: string; folder: string; reason: string }[];
+  items: { name: string; folder: string; reason: string; state?: string; error?: string }[];
 }
 
 /** A past rename batch, newest first, for the undo list. */

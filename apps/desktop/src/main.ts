@@ -103,7 +103,9 @@ import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
 import { parseIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
+import { createFileSettling } from './main/fileRename/fileSettling.ts';
 import { createOriginalNameStore } from './main/fileRename/originalNames.ts';
+import { assertLibraryPath, createImportInventory, inventoryIdentity, within } from './main/fileRename/importInventory.ts';
 import {
   confirmationIsFresh,
   createMatchConfirmationStore,
@@ -1540,6 +1542,10 @@ function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): bool
   try {
     const rowsChanged = saveLibraryScanDeltaToDatabase(delta.changed, delta.removed, cache, commit.aliases, delta.removedFilePaths);
     cachedLibrary = delta.published;
+    try {
+      importInventory.reconcile(commit.roots);
+      importInventory.captureLibrary(libraryItemsFor(delta.published), commit.roots);
+    } catch (error) { console.warn('[library] Original inventory will retry before organization:', describeErrorForLog(error)); }
     console.info('[scanner] persistence', JSON.stringify({ durationMs: performance.now() - persistenceStarted, rowsChanged, changedItems: delta.changed.length, removedItems: delta.removed.length, cacheWrites: Object.keys(cache).length }));
     return true;
   } catch (error) {
@@ -1828,6 +1834,7 @@ const iptvService = createIptvService({ getDatabase: getIptvDatabase, findFFmpeg
 // ID-, and revision-keyed record with the files and refuses to run while a
 // scan could be writing the same library.
 const originalNames = createOriginalNameStore(getMediaRenameDatabase);
+const importInventory = createImportInventory(getMediaRenameDatabase);
 const matchConfirmations = createMatchConfirmationStore(getMediaRenameDatabase);
 
 function confirmationSources(): ConfirmationSources {
@@ -1886,13 +1893,14 @@ const mediaRenameExecutor = createRenameExecutor({
   getDatabase: getMediaRenameDatabase,
   verifyMatch: (item) => {
     const stored = matchConfirmations.get(item.id);
-    return stored ? evaluateConfirmation(item, stored) : null;
+    return stored && confirmationIsFresh(stored, item, Date.now()) ? evaluateConfirmation(item, stored) : null;
   },
   recordOriginalNames: (moves) => originalNames.recordMoves(moves),
+  inventory: importInventory,
   loadLibrary,
   saveLibraryMutation,
   remapMediaIds: remapLibraryMediaReferences,
-  isScanRunning: () => activeScans.size > 0,
+  isScanRunning: () => activeScans.size > 0 || isPlaybackActivityActive() || libraryCleanupRunning || libraryCleanup.hasPending(),
   libraryRoots: (data) => flattenLibraryFolders(normalizeLibraryFolderGroups(data)),
 });
 
@@ -1912,6 +1920,48 @@ function mediaRenameBatchForRenderer(batch: RenameBatchRecord) {
 }
 
 const mediaRenameHandlers = {
+  listLibraryImports: (offset = 0) => importInventory.all().reverse().slice(offset, offset + 20).map(({ entries, createdDirectories: _createdDirectories, root: _root, ...record }) => ({ ...record, entryCount: entries.length })),
+  previewLibraryOriginal: (id: string) => {
+    const record = importInventory.get(id);
+    if (!record) throw new Error('That import could not be found.');
+    const plan = importInventory.preview(id);
+    return {
+      importId: id, title: record.title, removedAt: record.removedAt, originalQuality: record.originalQuality,
+      entries: record.entries.map((entry) => {
+        let available = false;
+        try { available = inventoryIdentity(entry.current) === entry.identity; } catch { /* Unavailable. */ }
+        return { original: entry.original, current: entry.current, kind: entry.kind,
+          status: !available ? 'Missing or unavailable' : entry.held ? 'In cleanup storage' : entry.current === entry.original ? 'Original location' : 'Ready to restore' };
+      }),
+      issues: plan.issues,
+    };
+  },
+  restoreLibraryOriginal: async (id: string) => {
+    if (cleanupShouldWait() || libraryCleanupRunning) throw new Error('Wait for playback, scanning, and cleanup to finish before restoring.');
+    libraryCleanup.recoverInterrupted();
+    if (libraryCleanup.hasPending()) throw new Error('A cleanup transfer needs recovery. Review cleanup history before restoring this import.');
+    const record = importInventory.get(id);
+    if (!record || record.removedAt) throw new Error('This import is no longer available. History cannot restore a deleted video.');
+    const roots = flattenLibraryFolders(normalizeLibraryFolderGroups(loadLibrary()));
+    if (!roots.some((root) => path.resolve(root) === record.root)) throw new Error("Reconnect this import's library before restoring it.");
+    importInventory.requestRestore(id);
+    libraryCleanup.restoreImport(record);
+    const result = mediaRenameExecutor.restoreOriginal(id);
+    for (const entry of importInventory.get(id)?.entries || []) {
+      if (entry.held) result.issues.push({ path: entry.original, reason: 'The held file could not be restored. Check cleanup history for its recovery status.' });
+    }
+    const restored = importInventory.get(id);
+    if (!restored) throw new Error('The restoration record could not be read.');
+    // A rescan also restores sidecar choices and regroups episodes moved out of a show.
+    try {
+      const scanVersion = libraryMutationVersion;
+      const scanned = await scanLibrary(loadLibrary(), { mode: 'quick', backgroundMetadataRefresh: false });
+      saveLibraryFromScan(scanned, scanVersion);
+    } catch (error) {
+      result.issues.push({ path: record.root, reason: `Files were restored, but library refresh needs retrying: ${describeErrorForLog(error)}` });
+    }
+    return { ...result, complete: Boolean(restored.restoredAt) && result.issues.length === 0 };
+  },
   previewMediaRenames: async () => {
     await refreshMatchConfirmations().catch((error) => {
       console.warn('[rename] Could not check matches with the metadata sources:', describeErrorForLog(error));
@@ -1938,15 +1988,16 @@ const mediaRenameHandlers = {
   },
   applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
   listMediaRenames: (offset = 0) => mediaRenameExecutor.history(20, offset).map(mediaRenameBatchForRenderer),
-  originalFileName: (filePath: string) => originalNames.originalPath(filePath),
+  originalFileName: (filePath: string) => importInventory.originalPath(filePath) || originalNames.originalPath(filePath),
   libraryCleanupHistory: () => libraryCleanup.history().map((batch) => ({
     id: batch.id,
     createdAt: batch.createdAt,
     restoredAt: batch.restoredAt,
     expiresAt: batch.createdAt + CLEANUP_RETENTION_MS,
-    items: batch.items.map((item) => ({ name: path.basename(item.from), folder: path.dirname(item.from), reason: CLEANUP_REASON_LABELS[item.reason] })),
+    items: batch.items.map((item) => ({ name: path.basename(item.from), folder: path.dirname(item.from), reason: CLEANUP_REASON_LABELS[item.reason], state: item.state, error: item.error })),
   })),
   restoreLibraryCleanup: (batchId: string) => {
+    if (cleanupShouldWait() || libraryCleanupRunning) throw new Error('Wait for playback, scanning, and cleanup before restoring.');
     const result = libraryCleanup.restore(batchId);
     // Restored subtitles return to the player's lists with a quick scan.
     void (async () => {
@@ -2049,7 +2100,22 @@ const AUTO_ORGANIZE_RETRY_MS = 60_000;
 let autoOrganizeTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAutomaticError = '';
 
-const libraryCleanup = createCleanupStore(getMediaRenameDatabase, path.join(USER_DATA_DIR, 'library-cleanup'));
+const libraryCleanup = createCleanupStore(getMediaRenameDatabase, path.join(USER_DATA_DIR, 'library-cleanup'), {
+  beforeHold: (paths) => {
+    const data = loadLibrary();
+    const roots = flattenLibraryFolders(normalizeLibraryFolderGroups(data));
+    importInventory.captureLibrary(libraryItemsFor(data), roots);
+    importInventory.capturePaths(paths, roots);
+  },
+  moved: (from, to, held) => importInventory.moved([{ from, to, role: 'sidecar' }], held),
+  validatePath: (file) => {
+    const roots = flattenLibraryFolders(normalizeLibraryFolderGroups(loadLibrary()));
+    const root = roots.find((value) => within(file, value));
+    if (!root) throw new Error('The cleanup path is outside the configured libraries.');
+    assertLibraryPath(file, root);
+  },
+});
+const cleanupSettling = createFileSettling();
 let libraryCleanupTimer: NodeJS.Timeout | null = null;
 let libraryCleanupRunning = false;
 const LIBRARY_CLEANUP_DELAY_MS = 15_000;
@@ -2071,13 +2137,13 @@ function subtitleTools(): SubtitleTools | null {
   return {
     probe: (video) => withSlot(async () => {
       try {
-        const { stdout } = await execFileAsync(ffprobe, ['-v', 'error', '-select_streams', 's', '-show_entries', 'stream=index,codec_name:stream_tags=language,title:stream_disposition=forced', '-of', 'json', video], { timeout: 30_000 });
-        const streams = (JSON.parse(stdout) as { streams?: Array<{ index: number; codec_name?: string; tags?: { language?: string; title?: string }; disposition?: { forced?: number } }> }).streams || [];
+        const { stdout } = await execFileAsync(ffprobe, ['-v', 'error', '-select_streams', 's', '-show_entries', 'stream=index,codec_name:stream_tags=language,title:stream_disposition=forced,hearing_impaired', '-of', 'json', video], { timeout: 30_000 });
+        const streams = (JSON.parse(stdout) as { streams?: Array<{ index: number; codec_name?: string; tags?: { language?: string; title?: string }; disposition?: { forced?: number; hearing_impaired?: number } }> }).streams || [];
         return streams.map((stream): EmbeddedTrack => ({
           index: stream.index,
           codec: stream.codec_name || '',
           language: stream.tags?.language || '',
-          title: stream.tags?.title || '',
+          title: `${stream.tags?.title || ''}${stream.disposition?.hearing_impaired ? ' SDH' : ''}`,
           forced: Boolean(stream.disposition?.forced),
         }));
       } catch {
@@ -2111,6 +2177,8 @@ async function runLibraryCleanup(): Promise<void> {
   }
   libraryCleanupRunning = true;
   try {
+    libraryCleanup.recoverInterrupted();
+    if (libraryCleanup.hasPending()) return;
     libraryCleanup.purgeExpired();
     const roots = flattenLibraryFolders(normalizeLibraryFolderGroups(loadLibrary()));
     const leftovers = findLeftovers(roots);
@@ -2122,10 +2190,14 @@ async function runLibraryCleanup(): Promise<void> {
       return;
     }
     const keep = libraryCleanup.restoredPaths();
-    const batch = libraryCleanup.hold(([...leftovers, ...subtitles] as CleanupCandidate[])
-      .filter((candidate) => !keep.has(path.resolve(candidate.path))));
+    const isRestored = importInventory.protection();
+    const candidates = ([...leftovers, ...subtitles] as CleanupCandidate[])
+      .filter((candidate) => !keep.has(path.resolve(candidate.path)) && !isRestored(candidate.path));
+    const ready = candidates.filter((candidate) => cleanupSettling.waitMs(candidate.path) === 0 && (!candidate.video || cleanupSettling.waitMs(candidate.video) === 0));
+    if (ready.length < candidates.length) scheduleLibraryCleanup(LIBRARY_CLEANUP_RETRY_MS);
+    const batch = libraryCleanup.hold(ready);
     if (!batch) return;
-    const removed = new Set(batch.items.map((item) => path.resolve(item.from)));
+    const removed = new Set(batch.items.filter((item) => item.state === 'held').map((item) => path.resolve(item.from)));
     const data = loadLibrary();
     const movies = withoutRemovedSubtitles(data.movies, removed);
     const tvShows = withoutRemovedSubtitles(data.tvShows, removed);
@@ -2895,7 +2967,7 @@ app.whenReady().then(async () => {
   }
   // Renames made before original names were recorded per file.
   try {
-    if (originalNames.isEmpty()) {
+    {
       const history = mediaRenameExecutor.history(Number.MAX_SAFE_INTEGER).reverse();
       const recorded = history.length ? originalNames.backfillFromHistory(history) : 0;
       if (recorded) console.info(`[rename] Recorded original names for ${recorded} file(s) from rename history.`);
@@ -2903,6 +2975,8 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('Original file names will be recorded on the next launch:', describeErrorForLog(error));
   }
+
+  try { libraryCleanup.recoverInterrupted(); } catch (error) { console.warn('[cleanup] Recovery remains pending:', describeErrorForLog(error)); }
 
   // ── loomtv:// media protocol handlers ───────────────────────────────────────
   // Translates loomtv://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>
