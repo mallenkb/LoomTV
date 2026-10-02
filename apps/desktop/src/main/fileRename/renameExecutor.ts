@@ -8,6 +8,7 @@ import type { LibraryData } from '../appContracts.ts';
 import type { MediaItem } from '../metadata/types.ts';
 import {
   createPathMapper,
+  ORGANIZE_SETTLE_MINUTES,
   orderOperations,
   planRenames,
   type RenameOperation,
@@ -423,7 +424,7 @@ function performOnDisk(operations: readonly LoggedOperation[], onStep: (complete
 }
 
 /** A file changed more recently than this is left for a later automatic run. */
-const RECENT_CHANGE_MS = 10 * 60 * 1000;
+const RECENT_CHANGE_MS = ORGANIZE_SETTLE_MINUTES * 60 * 1000;
 
 export function createRenameExecutor(deps: RenameExecutorDeps) {
   const lockedTargets = (): Map<string, string> => new Map(

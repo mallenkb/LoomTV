@@ -41,7 +41,7 @@ test('unfinished episodes block parent folder changes', (t) => {
 });
 test('recently copied children block parent renames', (t) => {
  const f = fixture(t); const source = f.file('Runner/Runner.2026.mkv'); const plan = f.plan([f.item({ filePath: source })], () => true);
- assert.equal(plan.entries.length, 0); assert.ok(plan.skipped.some((skip) => /10 minutes/.test(skip.reason)));
+ assert.equal(plan.entries.length, 0); assert.ok(plan.skipped.some((skip) => /5 minutes/.test(skip.reason)));
 });
 function metadataDeps(): MetadataItemBuilderDependencies {
  const none = async () => null;
