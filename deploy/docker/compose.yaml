@@ -27,12 +27,17 @@ services:
       CACHE_DIR: /cache
       MEDIA_DIR: /media
       FFMPEG_PATH: /usr/bin/ffmpeg
+      # Optional direct TLS. The default remains the trusted reverse proxy above.
+      # TLS_CERT_FILE: /tls/fullchain.pem
+      # TLS_KEY_FILE: /tls/privkey.pem
       # Set this only when the container has /dev/dri mounted.
       LOOMTV_VAAPI_DEVICE: ${LOOMTV_VAAPI_DEVICE:-}
       TZ: ${TZ:-UTC}
     volumes:
       - "${LOOMTV_CONFIG_DIR:-./data/config}:/config"
       - "${LOOMTV_CACHE_DIR:-./data/cache}:/cache"
+      # Mount only when direct TLS is configured.
+      # - "${LOOMTV_TLS_DIR:-./tls}:/tls:ro"
       # Keep media read-only.  Mount the host's SMB/NFS path here; LoomTV
       # should not receive NAS credentials or manage the network share.
       - "${LOOMTV_MEDIA_DIR:-./data/media}:/media:ro"

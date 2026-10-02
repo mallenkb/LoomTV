@@ -46,8 +46,7 @@ const AUTO_SYNC_OPTIONS = [
   { value: 168, label: 'Every 1 week' },
 ];
 
-const LEGACY_LIBRARY_KINDS = ['movies', 'tvShows', 'anime', 'others'] as const;
-type LegacyLibraryKind = (typeof LEGACY_LIBRARY_KINDS)[number];
+type LegacyLibraryKind = 'movies' | 'tvShows' | 'anime' | 'others';
 const LIBRARY_SIDEBAR_IDS: Partial<Record<LibraryKind, SidebarNavItemId>> = {
   movies: 'movies',
   tvShows: 'tv',
@@ -183,7 +182,7 @@ function useMediaLibraryRoots() {
     setRoots(Object.fromEntries(entries) as MediaRoots);
     setError('');
     setLoading(false);
-  }, [canRead, activeProfile?.id]);
+  }, [canRead]);
 
   useEffect(() => {
     let active = true;
@@ -296,7 +295,7 @@ export default function LibrarySettingsPanel({
     return LIBRARY_TYPE_DEFINITIONS.map((definition) => {
       const legacySection = folderSections.find((section) => section.key === definition.kind);
       let folders: UnifiedFolder[] = [];
-      let itemCount: number | null = 0;
+      let itemCount: number | null;
 
       if (definition.kind === 'photos') {
         folders = photoLibrary.roots.map((root: PhotoRoot) => ({
@@ -378,40 +377,42 @@ export default function LibrarySettingsPanel({
     return hideEmpty ? libraries.filter((library) => library.status !== 'empty') : libraries;
   }, [hideEmpty, libraries]);
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = async () => {
     await Promise.all([
       mediaLibraries.refresh(),
       photoLibrary.refresh(),
       refreshLibrary(),
     ]);
-  }, [mediaLibraries.refresh, photoLibrary.refresh, refreshLibrary]);
+  };
 
-  const scanLibraryKind = useCallback(async (kind: LibraryKind) => {
+  const scanLibraryKind = async (kind: LibraryKind) => {
     if (kind === 'photos') {
-      if (!photoLibrary.api) throw new Error('Photo libraries are available from the Loom desktop host.');
-      const roots = await photoLibrary.api.roots();
+      const api = photoLibrary.api;
+      if (!api) throw new Error('Photo libraries are available from the Loom desktop host.');
+      const roots = await api.roots();
       for (const root of roots) {
-        await photoLibrary.api.scan(root.id);
-        await waitForScanCompletion(() => photoLibrary.api!.roots(), root.id);
+        await api.scan(root.id);
+        await waitForScanCompletion(() => api.roots(), root.id);
       }
       await photoLibrary.refresh();
       return;
     }
     if (isMediaLibraryKind(kind)) {
-      if (!mediaLibraries.api) throw new Error('Media libraries are available from the Loom desktop host.');
-      const roots = await mediaLibraries.api.roots(kind);
+      const api = mediaLibraries.api;
+      if (!api) throw new Error('Media libraries are available from the Loom desktop host.');
+      const roots = await api.roots(kind);
       for (const root of roots) {
-        await mediaLibraries.api.scan(kind, root.id);
-        await waitForScanCompletion(() => mediaLibraries.api!.roots(kind), root.id);
+        await api.scan(kind, root.id);
+        await waitForScanCompletion(() => api.roots(kind), root.id);
       }
       await mediaLibraries.refresh();
       return;
     }
     scanLibrary();
     await refreshLibrary();
-  }, [mediaLibraries.api, mediaLibraries.refresh, photoLibrary.api, photoLibrary.refresh, refreshLibrary, scanLibrary]);
+  };
 
-  const addFolderForKind = useCallback(async (kind: LibraryKind, folderPath?: string): Promise<WizardFolder | null> => {
+  const addFolderForKind = async (kind: LibraryKind, folderPath?: string): Promise<WizardFolder | null> => {
     if (kind === 'photos') {
       if (!photoLibrary.api) throw new Error('Photo libraries are available from the Loom desktop host.');
       const root = await photoLibrary.api.add(folderPath);
@@ -446,7 +447,7 @@ export default function LibrarySettingsPanel({
     await refreshLibrary();
     notifyLibraryRootsChanged();
     return { id: `legacy-${Date.now()}`, path: 'Folder selected', name: 'Folder selected' };
-  }, [addLibraryFolder, addLibraryFolderPath, mediaLibraries.api, mediaLibraries.refresh, photoLibrary.api, photoLibrary.refresh, refreshLibrary]);
+  };
 
   const canAddFolder = useCallback((kind: LibraryKind) => {
     if (kind === 'photos') return Boolean(photoLibrary.api);
@@ -454,7 +455,7 @@ export default function LibrarySettingsPanel({
     return !desktopApi.isRemoteLibraryMode();
   }, [mediaLibraries.api, photoLibrary.api]);
 
-  const removeFolder = useCallback(async (kind: LibraryKind, folder: UnifiedFolder | WizardFolder) => {
+  const removeFolder = async (kind: LibraryKind, folder: UnifiedFolder | WizardFolder) => {
     const confirmed = await confirm({
       title: 'Remove this library folder?',
       description: `Remove "${folder.name || folder.path}" from the library. Files on disk will be kept.`,
@@ -479,7 +480,7 @@ export default function LibrarySettingsPanel({
     if (folder.path === 'Folder selected') return;
     await removeLibraryFolder(folder.path);
     notifyLibraryRootsChanged();
-  }, [confirm, mediaLibraries.api, mediaLibraries.refresh, photoLibrary.api, photoLibrary.refresh, removeLibraryFolder]);
+  };
 
   const runAction = async (kind: LibraryKind, action: () => Promise<void | boolean>, refreshAfter = true) => {
     setBusyKind(kind);

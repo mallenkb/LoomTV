@@ -325,19 +325,22 @@ function AudioPlayer({ kind, api, playback, onClose, onNext, onQueueRemove, onQu
   const [speed, setSpeed] = useState(1);
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const currentId = playback.current.id;
+  const initialPosition = playback.current.position;
+  const playbackUrl = playback.url;
 
   useEffect(() => {
-    setPosition(playback.current.position);
-    savedPositionRef.current = playback.current.position;
+    setPosition(initialPosition);
+    savedPositionRef.current = initialPosition;
     setAudioError(null);
-  }, [playback.current.id, playback.current.position, playback.url]);
+  }, [currentId, initialPosition, playbackUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return undefined;
     audio.playbackRate = speed;
     return undefined;
-  }, [speed, playback.current.id]);
+  }, [speed, currentId]);
 
   useEffect(() => {
     if (!sleepMinutes) return undefined;
@@ -351,8 +354,8 @@ function AudioPlayer({ kind, api, playback, onClose, onNext, onQueueRemove, onQu
   const savePosition = useCallback((nextPosition: number, completed = false) => {
     if (!Number.isFinite(nextPosition) || (Math.abs(nextPosition - savedPositionRef.current) < 5 && !completed)) return;
     savedPositionRef.current = nextPosition;
-    void api.progress(kind, playback.current.id, Math.max(0, nextPosition), completed).catch(() => undefined);
-  }, [api, kind, playback.current.id]);
+    void api.progress(kind, currentId, Math.max(0, nextPosition), completed).catch(() => undefined);
+  }, [api, kind, currentId]);
 
   const seekToChapter = (start: number) => {
     if (!audioRef.current) return;
@@ -707,7 +710,7 @@ export default function MediaLibrary({ kind }: { kind: MediaLibraryKind }) {
   }, [selectedRootId, view]);
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
-  const visibleItems = page?.items || [];
+  const visibleItems = useMemo(() => page?.items || [], [page]);
   const groups = useMemo(() => groupItems(kind, view, visibleItems), [kind, view, visibleItems]);
 
   const addRoot = async () => {

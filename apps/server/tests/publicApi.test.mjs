@@ -202,6 +202,12 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
         assert.ok(operation.responses, `every operation documents responses (${method})`);
       }
     }
+
+    const health = await anonymous('GET', '/healthz');
+    const adminBootstrap = await anonymous('GET', '/api/admin/bootstrap');
+    for (const payload of [discovery.payload, onboarding.payload, health.payload, adminBootstrap.payload]) {
+      assert.equal(JSON.stringify(payload).includes(BOOTSTRAP_SECRET), false, 'public status must not disclose the bootstrap secret');
+    }
   });
 
   await t.test('authenticated routes reject anonymous requests with the versioned error envelope', async () => {
@@ -219,6 +225,9 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     assert.equal(missingSecret.status, 401);
     assert.equal(missingSecret.payload.error.code, 'bootstrap_secret_invalid');
 
+    const missingAdminSecret = await anonymous('POST', '/api/admin/onboarding/owner', { name: 'Owner', password: OWNER_PASSWORD });
+    assert.equal(missingAdminSecret.status, 401);
+    assert.equal(missingAdminSecret.payload.error, 'bootstrap_secret_invalid');
     const rejected = await anonymous('POST', '/api/v1/auth/owner', {
       name: 'Owner',
       password: 'short',

@@ -772,7 +772,7 @@
         </div>
       </article>
       <article class="kanban-lane partial-lane">
-        <div class="kanban-lane-header"><h3>🟡 Partial</h3><span class="count">17 capabilities · 26.2%</span></div>
+        <div class="kanban-lane-header"><h3>🟡 Partial</h3><span class="count">18 capabilities · 27.7%</span></div>
         <div class="kanban-cards">
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Hosted web client</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
@@ -785,6 +785,10 @@
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Public API &amp; integrations</h4><span class="status partial">Partial</span><span class="status completion">80%</span></div>
           <p><code>/api/v1</code> provides discovery, OpenAPI metadata, bearer scopes, profile/progress, library, series grouping, media, diagnostics, and backup, with automated contract tests. SDK examples, webhooks, and a written compatibility policy remain.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Plugin system</h4><span class="status partial">Partial</span><span class="status completion">15%</span></div>
+          <p>The declaration-only v1 manifest schema, safe capability allowlist, install/load boundary validator, developer documentation, and example manifest are present. Secure provider transport/sandbox, installer packaging/signatures, lifecycle, and request/response contracts remain.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Architecture</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
@@ -845,7 +849,7 @@
         </div>
       </article>
       <article class="kanban-lane no-lane">
-        <div class="kanban-lane-header"><h3>🔴 Not started</h3><span class="count">15 capabilities · 23.1%</span></div>
+        <div class="kanban-lane-header"><h3>🔴 Not started</h3><span class="count">14 capabilities · 21.5%</span></div>
         <div class="kanban-cards">
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Music libraries</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
@@ -898,10 +902,6 @@
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Internet remote streaming</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
           <p>Documentation explicitly limits the current target to same-LAN use and warns against public exposure.</p>
-        </article>
-        <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Plugin system</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
-          <p>Providers and features are compiled into the product; no plugin catalog or third-party extension API was found.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Notifications &amp; webhooks</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
@@ -1316,7 +1316,7 @@
             </tr>
             <tr>
               <td class="feature-name">Plugin system</td>
-              <td data-label="LoomTV"><span class="status no">No</span><br>Providers and features are compiled into the product; no plugin catalog or third-party extension API was found.</td>
+              <td data-label="LoomTV"><span class="status partial">Protocol foundation</span><br>The v1 declaration schema, safe capability allowlist, install/load validation boundary, developer documentation, and example manifest are present; no provider runtime, plugin catalog, or sandboxed third-party execution is shipped.</td>
               <td data-label="Jellyfin"><span class="status yes">Large ecosystem</span><br>Plugins extend authentication, metadata, Live TV, subtitles, notifications, analytics, integrations, and more.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Probably its strongest long-term platform advantage.</td>
             </tr>

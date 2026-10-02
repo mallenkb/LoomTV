@@ -9,7 +9,7 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 const HELP = `Usage: loomtv-server [options]
 
-Starts the Loom Media Server headless HTTP service. The service exposes the runtime
+Starts the Loom Media Server headless HTTP(S) service. The service exposes the runtime
 health contract, authenticated administration, catalog scanning, direct media
 delivery, and on-demand HLS transcoding without Electron.
 
@@ -21,6 +21,10 @@ Options:
   --media-dir <path>     Optional media root (may be offline at startup)
   --ffmpeg-path <path>   FFmpeg executable used for transcoding probes
   --ffprobe-path <path>  FFprobe executable used for media inspection
+  --bootstrap-secret-file <path>  Read the one-time owner bootstrap secret from a file
+  --tls-cert-file <path> TLS certificate chain for direct HTTPS
+  --tls-key-file <path>  TLS private key for direct HTTPS
+  --development-allow-insecure-non-loopback  Allow cleartext LAN binding for isolated development
   --require-secure-transport  Reject admin and credential requests over HTTP
   --require-bootstrap-secret  Require a generated claim secret for first owner setup
   --trusted-proxies <list>  Comma-separated trusted proxy IPs/CIDRs
@@ -31,14 +35,18 @@ Environment aliases:
   DATA_DIR / LOOMTV_DATA_DIR, CACHE_DIR / LOOMTV_CACHE_DIR,
   MEDIA_DIR / LOOMTV_MEDIA_DIR, FFMPEG_PATH / LOOMTV_FFMPEG_PATH,
   FFPROBE_PATH / LOOMTV_FFPROBE_PATH,
+  BOOTSTRAP_SECRET / LOOMTV_BOOTSTRAP_SECRET,
+  BOOTSTRAP_SECRET_FILE / LOOMTV_BOOTSTRAP_SECRET_FILE,
+  TLS_CERT_FILE / LOOMTV_TLS_CERT_FILE, TLS_KEY_FILE / LOOMTV_TLS_KEY_FILE,
+  LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK,
   REQUIRE_SECURE_TRANSPORT / LOOMTV_REQUIRE_SECURE_TRANSPORT,
   REQUIRE_BOOTSTRAP_SECRET / LOOMTV_REQUIRE_BOOTSTRAP_SECRET,
   TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES
 `;
 
 /**
- * @typedef {'host' | 'port' | 'datadir' | 'cachedir' | 'mediadir' | 'ffmpegpath' | 'ffprobepath' | 'trustedproxies'} StringOption
- * @typedef {Partial<Record<StringOption, string>> & { help?: boolean, requiresecuretransport?: boolean, requirebootstrapsecret?: boolean }} CliValues
+ * @typedef {'host' | 'port' | 'datadir' | 'cachedir' | 'mediadir' | 'ffmpegpath' | 'ffprobepath' | 'trustedproxies' | 'bootstrapsecretfile' | 'tlscertfile' | 'tlskeyfile'} StringOption
+ * @typedef {Partial<Record<StringOption, string>> & { help?: boolean, requiresecuretransport?: boolean, requirebootstrapsecret?: boolean, developmentallowinsecurenonloopback?: boolean }} CliValues
  */
 
 /** @param {string} message */
@@ -83,18 +91,19 @@ function parseBoolean(value, source) {
 function parseArgs(args) {
   /** @type {CliValues} */
   const values = {};
-  const booleanOptions = new Set(['--require-secure-transport', '--require-bootstrap-secret']);
+  const booleanOptions = new Set(['--require-secure-transport', '--require-bootstrap-secret', '--development-allow-insecure-non-loopback']);
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') return { help: true };
     const equalsIndex = argument.indexOf('=');
     const name = equalsIndex >= 0 ? argument.slice(0, equalsIndex) : argument;
     const inlineValue = equalsIndex >= 0 ? argument.slice(equalsIndex + 1) : undefined;
-    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', '--ffprobe-path', '--trusted-proxies', ...booleanOptions ].includes(name)) {
+    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', '--ffprobe-path', '--trusted-proxies', '--bootstrap-secret-file', '--tls-cert-file', '--tls-key-file', ...booleanOptions ].includes(name)) {
       throw usageError(`Unknown option: ${argument}`);
     }
     if (booleanOptions.has(name)) {
-      values[name === '--require-secure-transport' ? 'requiresecuretransport' : 'requirebootstrapsecret'] = parseBoolean(inlineValue, name);
+      const key = /** @type {'requiresecuretransport' | 'requirebootstrapsecret' | 'developmentallowinsecurenonloopback'} */ (name.slice(2).replaceAll('-', ''));
+      values[key] = parseBoolean(inlineValue, name);
       continue;
     }
     const value = inlineValue ?? readOptionValue(args, index++, name);
@@ -142,7 +151,23 @@ function buildConfig(cliValues) {
   const trustedProxies = cliValues.trustedproxies
     || readEnvironmentValue('TRUSTED_PROXIES', 'LOOMTV_TRUSTED_PROXIES')
     || '';
-  return { host, port, paths, ffmpegPath, ffprobePath, requireSecureTransport, requireBootstrapSecret, trustedProxies };
+  return {
+    host, port, paths, ffmpegPath, ffprobePath, requireSecureTransport, requireBootstrapSecret, trustedProxies,
+    developmentAllowInsecureNonLoopback: cliValues.developmentallowinsecurenonloopback
+      ?? parseBoolean(process.env.LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK || 'false', 'LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK'),
+    bootstrapSecret: readEnvironmentValue('BOOTSTRAP_SECRET', 'LOOMTV_BOOTSTRAP_SECRET'),
+    bootstrapSecretFile: cliValues.bootstrapsecretfile || readEnvironmentValue('BOOTSTRAP_SECRET_FILE', 'LOOMTV_BOOTSTRAP_SECRET_FILE'),
+    tlsCertFile: cliValues.tlscertfile || readEnvironmentValue('TLS_CERT_FILE', 'LOOMTV_TLS_CERT_FILE'),
+    tlsKeyFile: cliValues.tlskeyfile || readEnvironmentValue('TLS_KEY_FILE', 'LOOMTV_TLS_KEY_FILE'),
+  };
+}
+
+/** @param {ReturnType<typeof buildConfig>} config */
+async function loadTls(config) {
+  if (!config.tlsCertFile && !config.tlsKeyFile) return undefined;
+  if (!config.tlsCertFile || !config.tlsKeyFile) throw usageError('Direct TLS requires both --tls-cert-file and --tls-key-file.');
+  const [cert, key] = await Promise.all([fs.readFile(config.tlsCertFile, 'utf8'), fs.readFile(config.tlsKeyFile, 'utf8')]);
+  return { cert, key };
 }
 
 async function run() {
@@ -153,9 +178,11 @@ async function run() {
   }
   const config = buildConfig(cliValues);
   await ensureRuntimeDirectories(config.paths);
+  const tls = await loadTls(config);
   const version = await readServerVersion(PACKAGE_ROOT);
   const service = createCanonicalVideoServer({
     ...config,
+    tls,
     version,
     deploymentMode: 'standalone',
     requireBootstrapSecret: config.requireBootstrapSecret,
@@ -180,7 +207,7 @@ async function run() {
 
   await service.start();
   const address = service.address();
-  process.stdout.write(`[loomtv-server] listening on http://${address.host}:${address.port}\n`);
+  process.stdout.write(`[loomtv-server] listening on ${tls ? 'https' : 'http'}://${address.host}:${address.port}\n`);
   process.stdout.write(`[loomtv-server] data=${config.paths.dataDir} cache=${config.paths.cacheDir}`
     + `${config.paths.mediaDir ? ` media=${config.paths.mediaDir}` : ''}\n`);
 }

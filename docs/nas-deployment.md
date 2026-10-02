@@ -19,6 +19,19 @@ playback, and graceful shutdown without an Electron session.
 
 ## Storage model
 
+## Direct HTTPS
+
+The server also accepts `--tls-cert-file` and `--tls-key-file`, or the
+`TLS_CERT_FILE` and `TLS_KEY_FILE` environment variables. Supply both PEM files
+and make them readable by the server account. The server validates the certificate
+and key before starting. Docker users must mount these files read-only.
+
+The supplied deployment defaults still use a trusted TLS reverse proxy. Direct
+TLS does not make an arbitrary forwarded-header chain trustworthy. Keep the
+proxy allowlist limited to actual proxy peers, or leave it empty without a proxy.
+
+## Storage model
+
 Keep LoomTV's application state on local storage and mount media separately:
 
 | Path | Contents | Backup | Container mode |
