@@ -30,6 +30,20 @@ test('season two stays season two when season one is absent', (t) => {
  assert.ok(plan.entries.some((entry) => entry.to.endsWith('/Season 02/S02E01 - Slave.mkv')));
  assert.ok(plan.entries.every((entry) => !entry.to.includes('Season 01')));
 });
+test('a movie matched to a differently titled film is not renamed', (t) => {
+ const f = fixture(t); const source = f.file('One.Night.Only.2026.1080p.WEB-DL.mkv');
+ const plan = f.plan([f.item({ title: 'Totally Different Film', filePath: source })]);
+ assert.equal(plan.entries.length, 0);
+ assert.match(plan.skipped[0]?.reason || '', /does not match "Totally Different Film"/);
+});
+test('a source title can confirm a file named in another language', (t) => {
+ const f = fixture(t); const source = f.file('Sen.to.Chihiro.no.Kamikakushi.2001.1080p.mkv');
+ const item = f.item({ title: 'Spirited Away', year: 2001, filePath: source });
+ assert.equal(f.plan([item]).entries.length, 0);
+ const confirmed = planRenames({ items: [item], libraryRoots: [f.root], movieFolders: true, isLocked: () => false, sameDrive: () => true,
+  listDirectory: (dir) => { try { return readdirSync(dir); } catch { return null; } }, knownTitles: () => ['Sen to Chihiro no Kamikakushi'] });
+ assert.equal(confirmed.entries[0]?.to, path.join(f.root, 'Spirited Away (2001)/Spirited Away (2001).mkv'));
+});
 test('existing movie folder prevents duplicate creation or overwrite', (t) => {
  const f = fixture(t); const source = f.file('Runner.2026.1080p.mkv'); f.file('Runner (2026)/Runner (2026).mkv');
  assert.equal(f.plan([f.item({ filePath: source })]).entries.length, 0);

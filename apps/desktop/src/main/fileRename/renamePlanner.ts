@@ -62,6 +62,8 @@ export type RenamePlannerInput = {
   sameDrive: (left: string, right: string) => boolean;
   /** Give a movie that shares a folder with others a folder of its own. */
   movieFolders?: boolean;
+  /** Other titles the matched sources know this item by (original or translated). */
+  knownTitles?: (item: MediaItem) => readonly string[];
   /**
    * Automatic runs only: true for a file changed moments ago, which may still
    * be downloading or seeding. Such a file waits for a later sync.
@@ -206,6 +208,33 @@ function withoutReleaseTags(name: string): string {
 
 function words(value: string): string[] {
   return value.toLowerCase().replace(/['’]/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+const ROMAN_NUMERALS: Record<string, string> = { ii: '2', iii: '3', iv: '4', v: '5', vi: '6', vii: '7', viii: '8', ix: '9', x: '10' };
+
+/** Words that carry a title's meaning: no articles, Roman numerals as digits. */
+function titleWords(value: string): string[] {
+  return words(value.replace(/&/g, ' and '))
+    .map((word) => ROMAN_NUMERALS[word] || word)
+    .filter((word) => !STOPWORDS.has(word));
+}
+
+/**
+ * Whether the title in a file's name and a matched title name the same thing.
+ * Most of the shorter one's words must appear in the longer one, so extra
+ * words ("Lee Cronin's The Mummy" for "The Mummy", a franchise prefix) pass
+ * but a different film with the same year and runtime does not. A file name
+ * without any title words cannot disagree.
+ */
+export function titleAgrees(fileTitle: string, matchTitles: readonly string[]): boolean {
+  const fileWords = titleWords(fileTitle);
+  if (fileWords.length === 0) return true;
+  return matchTitles.some((title) => {
+    const known = titleWords(title);
+    if (known.length === 0) return false;
+    const shared = known.filter((word) => fileWords.some((other) => sameWord(word, other))).length;
+    return shared / Math.min(known.length, fileWords.length) >= 0.6;
+  });
 }
 
 /** "stone" and "stones", "emerge" and "emerges" count as the same word. */
@@ -565,6 +594,10 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const { titleTokens, tagText } = splitAtYear(stem, item.year);
     if (titleLostWords(item.title, titleTokens)) {
       return { reason: `The library title "${item.title}" is missing words from the file's own title.` };
+    }
+    const fileTitle = cleanMediaTitle(titleTokens.join(' ')).title;
+    if (!titleAgrees(fileTitle, [item.title, ...(input.knownTitles?.(item) || [])])) {
+      return { reason: `The file is called "${fileTitle}", which does not match "${item.title}".` };
     }
     // Editions and split parts only count in the release-tag part after the
     // year; before it they are the title ("The Godfather Part 2").
