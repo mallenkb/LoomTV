@@ -11,6 +11,7 @@ import type {
 } from '../shared/desktopProtocol.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { isScreenLocked } from './screenLock.ts';
 import { finiteNumber, meetsMinimumMacOS, mpvColor, mpvFlag, normalizeMpvTracks } from './mpvPlaybackHelpers.ts';
 import {
   createNativeViewHost,
@@ -466,7 +467,7 @@ class LibMpvSession {
   private syncOffscreenVideo(now: number): void {
     if (now - this.lastOcclusionCheckAt < 500) return;
     this.lastOcclusionCheckAt = now;
-    if (!this.host?.isOccluded?.()) {
+    if (!this.host?.isOccluded?.() && !isScreenLocked()) {
       this.occludedSince = 0;
       this.resumeOffscreenVideo();
       return;

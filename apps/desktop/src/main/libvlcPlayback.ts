@@ -16,6 +16,7 @@ import {
 import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { playbackDiagnostics, recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { isScreenLocked } from './screenLock.ts';
 import {
   captureLibVlcTrackSelection,
   restoreLibVlcTrackSelection,
@@ -1346,11 +1347,12 @@ class LibVlcPlaybackSession {
    * Turn video decoding off while the window is fully hidden.
    *
    * The vout draws through a Core Animation OpenGL layer. While the window is
-   * occluded (another app in front, another Space, minimized) the window
-   * server stops consuming its buffers, and the layer's pool grows from 2 to
-   * 16 window-sized IOSurfaces: about 650 MB at 4112x2580, held until the
-   * window is visible again, including while paused. Hiding the NSView does
-   * not stop it. Deselecting the video track destroys the vout and frees the
+   * occluded (another app in front, another Space, minimized) or the screen
+   * is locked, the window server stops consuming its buffers, and the layer's
+   * pool grows from 2 to 16 window-sized IOSurfaces: about 650 MB at
+   * 4112x2580, held until the window is visible again, including while
+   * paused. Hiding the NSView does not stop it. A locked screen still reports
+   * the window as visible, so it is checked separately. Deselecting the video track destroys the vout and frees the
    * pool; audio keeps playing.
    */
   private syncOffscreenVideo(now: number): void {
@@ -1358,7 +1360,7 @@ class LibVlcPlaybackSession {
     this.lastOcclusionCheckAt = now;
     const api = this.runtime.api;
     if (!api.videoGetTrack || !api.videoSetTrack || !this.player) return;
-    const occluded = this.nativeViewHost?.isOccluded?.() ?? false;
+    const occluded = (this.nativeViewHost?.isOccluded?.() ?? false) || isScreenLocked();
     if (!occluded) {
       this.occludedSince = 0;
       this.resumeOffscreenVideo();
