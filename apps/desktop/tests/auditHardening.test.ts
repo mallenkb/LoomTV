@@ -145,8 +145,9 @@ function mpvFixture() {
   const api = loadModule('libmpvPlayback', {
     electron: { BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false }) } },
     'node:fs': { existsSync: () => true },
-    './mpvPlaybackHelpers.ts': { finiteNumber: Number, normalizeMpvTracks: () => [] },
+    './mpvPlaybackHelpers.ts': { finiteNumber: Number, normalizeMpvTracks: () => [], mpvFlag: (value: unknown) => value === true || value === 1 },
     './playbackDiagnostics.ts': { recordPlaybackDiagnostic: () => undefined },
+    './screenLock.ts': { isScreenLocked: () => false },
     './libvlcPlayback.ts': {
       loadKoffi: () => koffi,
       createNativeViewHost: () => {
