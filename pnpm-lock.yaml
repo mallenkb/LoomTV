@@ -197,6 +197,7 @@ overrides:
 patchedDependencies:
   '@electron-forge/plugin-vite@7.11.1': 2147d1f08250871dbcefded7d6ba182b28e7b07355c5f5f2fa3c7271a8fb8c14
   image-size@1.2.1: 82a93c2a3e8763c6ff5d5ff6413f51621e10aa0390f2ce904b7032d27d9fa2d3
+  node-forge@1.4.0: 375710e9c28f91be78dee3a610888703517540376f3ba861df19c9bd33efefdf
   react-native-zeroconf@0.14.0: 1fda3c41ebb5a91ed1c3542bda4ddb16c056b7fa5831b258443e0f660706b011
 
 importers:
@@ -7751,7 +7752,7 @@ snapshots:
       glob: 13.0.6
       lan-network: 0.2.1
       minimatch: 9.0.9
-      node-forge: 1.4.0
+      node-forge: 1.4.0(patch_hash=375710e9c28f91be78dee3a610888703517540376f3ba861df19c9bd33efefdf)
       npm-package-arg: 11.0.3
       ora: 3.4.0
       picomatch: 4.0.4
@@ -7787,7 +7788,7 @@ snapshots:
 
   '@expo/code-signing-certificates@0.0.6':
     dependencies:
-      node-forge: 1.4.0
+      node-forge: 1.4.0(patch_hash=375710e9c28f91be78dee3a610888703517540376f3ba861df19c9bd33efefdf)
 
   '@expo/config-plugins@54.0.4(supports-color@8.1.1)':
     dependencies:
@@ -12137,7 +12138,7 @@ snapshots:
     optionalDependencies:
       encoding: 0.1.13
 
-  node-forge@1.4.0: {}
+  node-forge@1.4.0(patch_hash=375710e9c28f91be78dee3a610888703517540376f3ba861df19c9bd33efefdf): {}
 
   node-gyp@12.3.0:
     dependencies:

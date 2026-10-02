@@ -6,7 +6,7 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ### [2.0.8](docs/releases/v2.0.8.md)
 
-Improves online subtitle matching when IMDb IDs are missing and fixes series metadata years and media organization safeguards.
+Improves online subtitle matching when IMDb IDs are missing, fixes series metadata years and media organization safeguards, and patches a node-forge signature verification issue.
 
 ### [2.0.7](docs/releases/v2.0.7.md)
 

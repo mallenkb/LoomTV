@@ -50,6 +50,12 @@ graphs of the mobile and TV apps. Remove each waiver when Expo or Metro moves to
 - `GHSA-w3rx-r6r6-pgpr`: ICNS parser infinite-loop denial of service.
 - `GHSA-5p2g-fcmc-qvqq`: JXL and HEIF parser infinite-loop denial of service.
 
+The `GHSA-86w9-cpqp-85rv` node-forge signature-verification finding is mitigated with a local
+patch applying the nested `DigestAlgorithm` element-count fix from upstream PR
+[#1152](https://github.com/digitalbazaar/forge/pull/1152). Since upstream has not published a
+fixed release, the waiver is limited to Expo tooling paths in the mobile and TV workspaces and
+expires on 2026-10-16. Remove the patch and waiver after adopting the upstream fix.
+
 `pnpm sbom` creates a deterministic CycloneDX 1.6 inventory from `pnpm-lock.yaml`. It omits a
 generation timestamp, sorts components, includes available integrity hashes, and records the
 source lockfile SHA-256 so repeated generation from the same lockfile is byte-for-byte stable.

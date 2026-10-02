@@ -27,6 +27,20 @@
       "requiredPathMarkers": [
         ">metro>image-size"
       ]
+    },
+    "GHSA-86w9-cpqp-85rv": {
+      "module": "node-forge",
+      "reviewedOn": "2026-10-02",
+      "expires": "2026-10-16",
+      "owner": "@mallenkb",
+      "reason": "A local pnpm patch applies the nested DigestAlgorithm element-count fix from upstream PR digitalbazaar/forge#1152. The upstream node-forge release is still affected and has no published patched version. The waiver is limited to Expo tooling dependency paths in the mobile and TV workspaces; remove it as soon as a fixed upstream release is available and adopted.",
+      "allowedPathPrefixes": [
+        "apps__mobile>",
+        "apps__tv>"
+      ],
+      "requiredPathMarkers": [
+        ">node-forge"
+      ]
     }
   }
 }
