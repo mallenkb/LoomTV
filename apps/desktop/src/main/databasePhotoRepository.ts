@@ -14,7 +14,9 @@ export function createPhotoRepository(db: BetterSqlite3.Database) {
     root: (id: string) => roots().find((root) => root.id === id),
     add(id: string, folder: string, name: string) {
       db.prepare('INSERT OR IGNORE INTO photo_roots(id,path,name) VALUES(?,?,?)').run(id, folder, name);
-      return roots().find((root) => root.path === folder)!;
+      const root = roots().find((entry) => entry.path === folder);
+      if (!root) throw new Error('The photo folder could not be saved.');
+      return root;
     },
     remove(id: string) { db.prepare('DELETE FROM photo_roots WHERE id=?').run(id); },
     markUnavailable(id: string, message: string) {

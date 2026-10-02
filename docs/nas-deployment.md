@@ -17,8 +17,6 @@ browser client. The deployment shape is stable now, so NAS operators can
 exercise process startup, storage paths, health checks, permissions, browser
 playback, and graceful shutdown without an Electron session.
 
-## Storage model
-
 ## Direct HTTPS
 
 The server also accepts `--tls-cert-file` and `--tls-key-file`, or the
