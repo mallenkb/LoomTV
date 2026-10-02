@@ -21,6 +21,7 @@ import type {
   LibraryFolderKind,
   LibraryIndexPayload,
   LibraryIndexUnchanged,
+  LibraryCleanupBatch,
   LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
@@ -273,6 +274,8 @@ export type DesktopBridgeApi = {
       listMediaRenames?: (offset?: number) => Promise<MediaRenameBatch[]>;
       getMediaRenameRecord?: (batchId: string) => Promise<MediaRenameRecord | null>;
       getOriginalFileName?: (filePath: string) => Promise<string | null>;
+      libraryCleanupHistory?: () => Promise<LibraryCleanupBatch[]>;
+      restoreLibraryCleanup?: (batchId: string) => Promise<{ restored: number; skipped: number }>;
       undoMediaRename?: (batchId: string) => Promise<MediaRenameBatch[]>;
       mediaRenameStatus?: () => Promise<MediaRenameStatus>;
       libraryEpisodeUpdates?: () => Promise<LibraryEpisodeUpdates>;
@@ -1414,6 +1417,16 @@ const desktopTransport = {
   async listMediaRenames(offset = 0): Promise<MediaRenameBatch[]> {
     if (!window.desktopApi?.listMediaRenames) return [];
     return window.desktopApi.listMediaRenames(offset);
+  },
+
+  async libraryCleanupHistory(): Promise<LibraryCleanupBatch[]> {
+    if (!window.desktopApi?.libraryCleanupHistory) return [];
+    return window.desktopApi.libraryCleanupHistory();
+  },
+
+  async restoreLibraryCleanup(batchId: string): Promise<{ restored: number; skipped: number }> {
+    if (!window.desktopApi?.restoreLibraryCleanup) throw new Error('Restoring cleaned files is only available in the desktop app.');
+    return window.desktopApi.restoreLibraryCleanup(batchId);
   },
 
   /** The file's name before LoomTV first renamed it, or null. */

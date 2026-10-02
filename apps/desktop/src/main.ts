@@ -21,6 +21,8 @@ import path from 'node:path';
 import type { LibraryIndexPayload, LibraryIndexUnchanged } from './shared/desktopProtocol';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
 
@@ -39,7 +41,7 @@ import {
   destroyLanDiscovery,
   discoverLanPeers,
 } from './main/lanDiscovery';
-import { findFFmpeg, getTranscodeCapabilities } from './main/mediaBinaries';
+import { findFFmpeg, findFFprobe, getTranscodeCapabilities } from './main/mediaBinaries';
 import {
   assertLocalMediaPath,
   probeMedia,
@@ -66,6 +68,17 @@ import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } fr
 import { createArtworkUrls } from './main/artworkUrls';
 import { clearOversizedHttpCacheOnce, httpDiskCacheSwitch } from './main/httpCacheBudget.ts';
 import { pruneObsoleteData } from './main/dataRetention.ts';
+import {
+  CLEANUP_REASON_LABELS,
+  CLEANUP_RETENTION_MS,
+  createCleanupStore,
+  findLeftovers,
+  findRedundantSubtitles,
+  withoutRemovedSubtitles,
+  type CleanupCandidate,
+  type EmbeddedTrack,
+  type SubtitleTools,
+} from './main/libraryCleanup.ts';
 import { libraryIndexIfChanged } from './main/libraryIndexFingerprint.ts';
 import {
   registerResource,
@@ -306,7 +319,7 @@ import {
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
 import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinator';
-import { isPlaybackActivityActive, setPlaybackActivityLease } from './main/ffmpegGovernor';
+import { acquireFfmpegToolSlot, isPlaybackActivityActive, setPlaybackActivityLease } from './main/ffmpegGovernor';
 import {
   createLibraryScanFilesAsync,
 } from './main/libraryScanFiles';
@@ -1489,6 +1502,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   reconcileSkipAnalysisAfterScan(previous, data);
   firstSeenDates(true);
   scheduleAutomaticOrganize();
+  scheduleLibraryCleanup();
   if (scanCommits.get(data)?.backgroundMetadataRefresh) {
     void refreshIncompleteMetadataQueue(loadLibrary()).then(() => refreshDisplayMetadataQueue(loadLibrary()))
       .catch((error) => console.warn('[metadata] Background refresh after scan failed:', error));
@@ -1923,6 +1937,23 @@ const mediaRenameHandlers = {
   applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
   listMediaRenames: (offset = 0) => mediaRenameExecutor.history(20, offset).map(mediaRenameBatchForRenderer),
   originalFileName: (filePath: string) => originalNames.originalPath(filePath),
+  libraryCleanupHistory: () => libraryCleanup.history().map((batch) => ({
+    id: batch.id,
+    createdAt: batch.createdAt,
+    restoredAt: batch.restoredAt,
+    expiresAt: batch.createdAt + CLEANUP_RETENTION_MS,
+    items: batch.items.map((item) => ({ name: path.basename(item.from), folder: path.dirname(item.from), reason: CLEANUP_REASON_LABELS[item.reason] })),
+  })),
+  restoreLibraryCleanup: (batchId: string) => {
+    const result = libraryCleanup.restore(batchId);
+    // Restored subtitles return to the player's lists with a quick scan.
+    void (async () => {
+      const scanVersion = libraryMutationVersion;
+      const scanned = await scanLibrary(loadLibrary(), { mode: 'quick', backgroundMetadataRefresh: false });
+      saveLibraryFromScan(scanned, scanVersion);
+    })().catch((error) => console.warn('[cleanup] Rescan after restore failed:', describeErrorForLog(error)));
+    return { restored: result.restored, skipped: result.skipped.length };
+  },
   getMediaRenameRecord: (batchId: string) => {
     const batch = mediaRenameExecutor.record(batchId);
     if (!batch) return null;
@@ -2015,6 +2046,100 @@ const AUTO_ORGANIZE_DELAY_MS = 5000;
 const AUTO_ORGANIZE_RETRY_MS = 60_000;
 let autoOrganizeTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAutomaticError = '';
+
+const libraryCleanup = createCleanupStore(getMediaRenameDatabase, path.join(USER_DATA_DIR, 'library-cleanup'));
+let libraryCleanupTimer: NodeJS.Timeout | null = null;
+let libraryCleanupRunning = false;
+const LIBRARY_CLEANUP_DELAY_MS = 15_000;
+const LIBRARY_CLEANUP_RETRY_MS = 60_000;
+const execFileAsync = promisify(execFile);
+
+/** Wait while anything plays or scans: subtitle checks read whole videos. */
+const cleanupShouldWait = () => isPlaybackActivityActive() || activeScans.size > 0;
+
+function subtitleTools(): SubtitleTools | null {
+  const ffmpeg = findFFmpeg();
+  const ffprobe = findFFprobe();
+  if (!ffmpeg || !ffprobe) return null;
+  const withSlot = async <T>(work: () => Promise<T>): Promise<T> => {
+    const release = await acquireFfmpegToolSlot('subtitle check');
+    try { return await work(); } finally { release(); }
+  };
+  const toSrt = (args: string[]) => withSlot(async () => (await execFileAsync(ffmpeg, ['-nostdin', '-v', 'error', ...args, '-f', 'srt', '-'], { maxBuffer: 64 * 1024 * 1024, timeout: 120_000 })).stdout);
+  return {
+    probe: (video) => withSlot(async () => {
+      try {
+        const { stdout } = await execFileAsync(ffprobe, ['-v', 'error', '-select_streams', 's', '-show_entries', 'stream=index,codec_name:stream_tags=language,title:stream_disposition=forced', '-of', 'json', video], { timeout: 30_000 });
+        const streams = (JSON.parse(stdout) as { streams?: Array<{ index: number; codec_name?: string; tags?: { language?: string; title?: string }; disposition?: { forced?: number } }> }).streams || [];
+        return streams.map((stream): EmbeddedTrack => ({
+          index: stream.index,
+          codec: stream.codec_name || '',
+          language: stream.tags?.language || '',
+          title: stream.tags?.title || '',
+          forced: Boolean(stream.disposition?.forced),
+        }));
+      } catch {
+        return null;
+      }
+    }),
+    extract: (video, trackIndex) => toSrt(['-i', video, '-map', `0:${trackIndex}`]),
+    convert: (sidecar) => toSrt(['-i', sidecar]),
+    shouldStop: cleanupShouldWait,
+  };
+}
+
+function scheduleLibraryCleanup(delayMs = LIBRARY_CLEANUP_DELAY_MS): void {
+  if (loadSettings().cleanUpLibraryFiles === 'off') return;
+  if (libraryCleanupTimer) clearTimeout(libraryCleanupTimer);
+  libraryCleanupTimer = setTimeout(() => { void runLibraryCleanup(); }, delayMs);
+  libraryCleanupTimer.unref?.();
+}
+
+/**
+ * Move leftover download files and redundant subtitles out of the library
+ * folders, on launch and after each sync. Everything moved can be restored
+ * from Settings for 30 days.
+ */
+async function runLibraryCleanup(): Promise<void> {
+  libraryCleanupTimer = null;
+  if (libraryCleanupRunning || loadSettings().cleanUpLibraryFiles === 'off') return;
+  if (cleanupShouldWait()) {
+    scheduleLibraryCleanup(LIBRARY_CLEANUP_RETRY_MS);
+    return;
+  }
+  libraryCleanupRunning = true;
+  try {
+    libraryCleanup.purgeExpired();
+    const roots = flattenLibraryFolders(normalizeLibraryFolderGroups(loadLibrary()));
+    const leftovers = findLeftovers(roots);
+    const tools = subtitleTools();
+    const subtitles = tools ? await findRedundantSubtitles(roots, tools, libraryCleanup.subtitleCache) : [];
+    // Playback or a scan started during the subtitle checks: finish later.
+    if (cleanupShouldWait()) {
+      scheduleLibraryCleanup(LIBRARY_CLEANUP_RETRY_MS);
+      return;
+    }
+    const keep = libraryCleanup.restoredPaths();
+    const batch = libraryCleanup.hold(([...leftovers, ...subtitles] as CleanupCandidate[])
+      .filter((candidate) => !keep.has(path.resolve(candidate.path))));
+    if (!batch) return;
+    const removed = new Set(batch.items.map((item) => path.resolve(item.from)));
+    const data = loadLibrary();
+    const movies = withoutRemovedSubtitles(data.movies, removed);
+    const tvShows = withoutRemovedSubtitles(data.tvShows, removed);
+    const animeShows = withoutRemovedSubtitles(data.animeShows, removed);
+    if (movies.changed || tvShows.changed || animeShows.changed) {
+      saveLibraryMutation({ ...data, movies: movies.items, tvShows: tvShows.items, animeShows: animeShows.items });
+    }
+    console.info(`[cleanup] Moved ${batch.items.length} leftover file(s) out of the library folders.`);
+    const window = getMainWindow();
+    if (window && !window.isDestroyed()) window.webContents.send('library:cleaned', { removed: batch.items.length });
+  } catch (error) {
+    console.warn('[cleanup] Library cleanup failed:', describeErrorForLog(error));
+  } finally {
+    libraryCleanupRunning = false;
+  }
+}
 
 function scheduleAutomaticOrganize(delayMs = AUTO_ORGANIZE_DELAY_MS): void {
   if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
@@ -2804,6 +2929,8 @@ app.whenReady().then(async () => {
   warnAboutUnreadableCredentials();
   // Resume eligible renames if Loom closed during the file-settling delay.
   scheduleAutomaticOrganize();
+  // Clear leftovers on every launch as well as after each sync.
+  scheduleLibraryCleanup();
 
   if (!(loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode))) {
     void stremioPluginService.installDefaultCinemeta().catch((error) => {

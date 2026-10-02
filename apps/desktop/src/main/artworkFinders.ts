@@ -37,6 +37,9 @@ export function createArtworkFinders(deps: ArtworkFindersDeps) {
               : 1000;
         return { name: entry.name, score };
       })
+      // An image named like none of these (a site logo left by a download)
+      // is not artwork, so it never becomes a poster or backdrop.
+      .filter((candidate) => candidate.score < 1000)
       .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
 
     return candidates[0] ? path.join(folderPath, candidates[0].name) : '';
@@ -44,7 +47,7 @@ export function createArtworkFinders(deps: ArtworkFindersDeps) {
 
   function getLocalFolderArtworkUrl(folderPath: string, kind: 'poster' | 'backdrop'): string {
     const preferred = kind === 'poster'
-      ? ['poster', 'folder', 'cover', 'thumbnail', 'thumb', 'default', 'movie']
+      ? ['poster', 'folder', 'cover', 'thumbnail', 'thumb', 'default', 'movie', path.basename(folderPath)]
       : ['backdrop', 'fanart', 'background', 'landscape', 'banner'];
     const imagePath = findLocalArtworkFile(folderPath, preferred);
     return imagePath ? getLocalImageUrl(imagePath) : '';

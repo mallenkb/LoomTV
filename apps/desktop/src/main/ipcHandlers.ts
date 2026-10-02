@@ -370,6 +370,8 @@ export interface IpcHandlerDependencies<
   listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
   getMediaRenameRecord: (batchId: string) => IpcResult<'library:rename-record'>;
   originalFileName: (filePath: string) => IpcResult<'library:original-file-name'>;
+  libraryCleanupHistory: () => IpcResult<'library:cleanup-history'>;
+  restoreLibraryCleanup: (batchId: string) => IpcResult<'library:cleanup-restore'>;
   undoMediaRename: (batchId: string) => IpcResult<'library:rename-undo'>;
   mediaRenameStatus: () => IpcResult<'library:rename-status'>;
   libraryEpisodeUpdates: () => Promise<IpcResult<'library:episode-updates'>>;
@@ -872,6 +874,14 @@ export function registerIpcHandlers<
     deps.authorizeMediaPath(filePath);
     return deps.originalFileName(filePath);
   }, z.tuple([nonEmptyString.max(4096)]));
+  handleNoArgs('library:cleanup-history', () => {
+    deps.authorizeSettingsWrite();
+    return deps.libraryCleanupHistory();
+  });
+  handle('library:cleanup-restore', (_event, batchId) => {
+    deps.authorizeSettingsWrite();
+    return deps.restoreLibraryCleanup(batchId);
+  }, z.tuple([z.string().uuid()]));
   handleNoArgs('library:episode-updates', () => deps.libraryEpisodeUpdates());
   handleNoArgs('library:health', () => {
     deps.authorizeSettingsWrite();

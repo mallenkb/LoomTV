@@ -309,6 +309,8 @@ export interface SettingsPayload {
    * does neither. Defaults to "ask".
    */
   organizeFilesAfterSync?: 'ask' | 'auto' | 'off';
+  /** Clear leftover download files and redundant subtitles on sync and launch. */
+  cleanUpLibraryFiles?: 'auto' | 'off';
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
   /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
@@ -947,6 +949,17 @@ interface MediaRenameSkip {
 export interface MediaRenamePreview {
   entries: MediaRenamePreviewEntry[];
   skipped: MediaRenameSkip[];
+}
+
+/** One automatic cleanup of library folders, newest first. */
+export interface LibraryCleanupBatch {
+  id: string;
+  createdAt: number;
+  /** Non-zero once restored. */
+  restoredAt: number;
+  /** When the held files are removed for good, unless restored. */
+  expiresAt: number;
+  items: { name: string; folder: string; reason: string }[];
 }
 
 /** A past rename batch, newest first, for the undo list. */
