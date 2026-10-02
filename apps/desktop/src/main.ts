@@ -63,6 +63,7 @@ import { MEDIA_PROTOCOL_SCHEMES, mediaSchemePrivileges } from './main/loomtvProt
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
+import { clearOversizedHttpCacheOnce, httpDiskCacheSwitch } from './main/httpCacheBudget.ts';
 import {
   registerResource,
   setResourceRegistryCatalogGeneration,
@@ -361,6 +362,8 @@ const disableZeroCopy = ['1', 'true', 'yes'].includes(
   String(process.env.LOOMTV_DISABLE_ZERO_COPY || '').trim().toLowerCase(),
 );
 if (disableZeroCopy) app.commandLine.appendSwitch('disable-zero-copy');
+
+app.commandLine.appendSwitch(...httpDiskCacheSwitch());
 
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
@@ -2492,6 +2495,9 @@ export const mediaServerDeps = {
  * cache is swept, and the LAN advertisement goes out.
  */
 async function startBackgroundServices(): Promise<void> {
+  void clearOversizedHttpCacheOnce(USER_DATA_DIR, () => session.defaultSession.clearCache())
+    .then((cleared) => { if (cleared) console.info('[cache] Cleared the pre-cap Chromium HTTP cache.'); })
+    .catch((error) => console.warn('[cache] Could not clear the Chromium HTTP cache:', describeErrorForLog(error)));
   let configuredAdminUrl: string | null = null;
   if (process.env.LOOMTV_ADMIN_URL?.trim()) {
     try {
@@ -2630,7 +2636,9 @@ app.whenReady().then(async () => {
       }
       parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
       const targetUrl = `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
-      return net.fetch(targetUrl, { headers, redirect: 'error' });
+      // The token makes every launch's URL new, so a cached copy is never
+      // reused; the media is already on local disk.
+      return net.fetch(targetUrl, { headers, redirect: 'error', cache: 'no-store' });
     } catch (err) {
       // The forwarded URL carries the local access token as a query parameter,
       // and fetch failures embed that URL in their message.
