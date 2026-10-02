@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.8](docs/releases/v2.0.8.md)
+
+Improves online subtitle matching when IMDb IDs are missing and fixes series metadata years and media organization safeguards.
+
 ### [2.0.7](docs/releases/v2.0.7.md)
 
 Corrects season-aware episode naming and loose-file organization, prioritizes new badges across library categories, and puts completed titles last.
