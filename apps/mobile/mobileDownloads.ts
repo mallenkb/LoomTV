@@ -131,6 +131,21 @@ type SaveDownloadInput = {
   signal?: AbortSignal;
 };
 
+export function mobileDownloadFileName(headers: Record<string, string> | undefined, url: string): string {
+  const disposition = Object.entries(headers || {}).find(([key]) => key.toLowerCase() === 'content-disposition')?.[1] || '';
+  const encoded = /filename\*\s*=\s*(?:UTF-8'[^']*')?([^;]+)/i.exec(disposition)?.[1];
+  const quoted = /filename\s*=\s*"([^"]*)"/i.exec(disposition)?.[1] ?? /filename\s*=\s*([^;]+)/i.exec(disposition)?.[1];
+  let name: string;
+  try { name = encoded ? decodeURIComponent(encoded.trim()) : (quoted || '').trim(); } catch { name = (quoted || '').trim(); }
+  if (!name) {
+    try { name = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || ''); } catch { name = ''; }
+  }
+  const printable = Array.from(name.split(/[\\/]/).pop() || '')
+    .filter((character) => character.charCodeAt(0) >= 0x20 && character.charCodeAt(0) !== 0x7f).join('');
+  const safe = printable.replace(/^\.+/, '').slice(-180);
+  return safe || 'media';
+}
+
 export function saveMobileDownload(input: SaveDownloadInput): Promise<MobileDownload> {
   const generation = hostGenerations.get(input.hostDeviceId) || 0;
   const controller = new AbortController();
@@ -211,6 +226,8 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
     if (input.capability.sizeBytes > 0 && file.size !== input.capability.sizeBytes) {
       throw new Error('The downloaded file is incomplete. Please retry.');
     }
+    const destination = new File(directory, mobileDownloadFileName(result.headers, input.contentUrl));
+    if (destination.uri !== file.uri) file.move(destination);
     assertCurrent();
     const createdAt = Date.now();
     const sizeBytes = Number(file.size || input.capability.sizeBytes || 0);

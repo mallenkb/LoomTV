@@ -26,23 +26,43 @@ function downloadHarness({ task, previous = null, runAsync = async () => {} } = 
     exists = true;
     size = 1;
     constructor(path, name) { this.uri = name ? `${path.uri}/${name}` : path; }
+    move(destination) { this.uri = destination.uri; }
     delete() { deletedFiles.push(this.uri); }
   }
   const context = vm.createContext({
-    AbortController, Directory, File, Paths: { document: 'file:///documents' },
+    AbortController, Directory, File, URL, Paths: { document: 'file:///documents' },
     createDownloadResumable: (url, fileUri, options) => {
       requests.push({ url, fileUri, options });
       return task ?? { downloadAsync: async () => ({ uri: fileUri, status: 200 }), cancelAsync: async () => {} };
     },
     SQLite: { openDatabaseAsync: async () => db },
   });
-  vm.runInContext(`${stripTypeScriptTypes(source).replace(/^import[^\n]*\n/gm, '').replace(/^export /gm, '')}\nglobalThis.api = { saveMobileDownload, clearMobileDownloads };`, context);
+  vm.runInContext(`${stripTypeScriptTypes(source).replace(/^import[^\n]*\n/gm, '').replace(/^export /gm, '')}\nglobalThis.api = { saveMobileDownload, clearMobileDownloads, mobileDownloadFileName };`, context);
   return { api: context.api, requests, writes, deletedDirectories, deletedFiles };
 }
 
 const input = (signal) => ({
   hostDeviceId: 'host', profileId: 'profile', title: 'Movie', contentUrl: 'https://server/download', signal,
   capability: { id: 'lease', mediaId: 'movie', sizeBytes: 1, credential: { scheme: 'LoomDownload', id: 'id', secret: 'secret' } },
+});
+
+test('finished downloads retain the server-provided filename and extension', async () => {
+  const harness = downloadHarness({ task: {
+    downloadAsync: async () => ({ status: 200, headers: { 'Content-Disposition': 'attachment; filename="The Film (2020).mkv"' } }),
+    cancelAsync: async () => {},
+  } });
+  const saved = await harness.api.saveMobileDownload(input());
+  assert.match(saved.uri, /The Film \(2020\)\.mkv$/);
+  assert.equal(harness.writes.find(({ sql }) => sql.includes('INSERT INTO')).args[4], saved.uri);
+});
+
+test('download filenames keep their extension without leaving the download directory', () => {
+  const name = downloadHarness().api.mobileDownloadFileName;
+  assert.equal(name({ 'content-disposition': 'attachment; filename="Movie.mp4"' }, 'https://server/x'), 'Movie.mp4');
+  assert.equal(name({ 'Content-Disposition': "attachment; filename*=UTF-8''Caf%C3%A9.mkv" }, 'https://server/x'), 'Café.mkv');
+  assert.equal(name({ 'Content-Disposition': 'attachment; filename="../../etc/passwd"' }, 'https://server/x'), 'passwd');
+  assert.equal(name({}, 'https://server/api/v1/downloads/abc/content'), 'content');
+  assert.equal(name({ 'Content-Disposition': 'attachment; filename=".."' }, 'https://server/'), 'media');
 });
 
 test('host cleanup cancels native work without waiting for the original transfer to finish', async () => {
