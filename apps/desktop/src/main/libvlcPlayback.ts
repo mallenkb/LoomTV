@@ -540,6 +540,8 @@ export type NativeViewHost = {
   /** Hand frame sizing to AppKit so the view tracks an animated window resize. */
   setAutoresize: (enabled: boolean) => void;
   syncHierarchy: (forceRebind?: boolean) => boolean;
+  /** True when no part of the owner window is on screen (macOS only). */
+  isOccluded?: () => boolean;
   destroy: () => void;
 };
 
@@ -574,6 +576,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
   const msgSendVoid1Bool = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'bool']);
   const msgSendVoid1Pointer = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'void *']);
   const msgSendVoid1UnsignedLong = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'ulong']);
+  const msgSendUnsignedLong0 = objc.func('objc_msgSend', 'ulong', ['void *', 'void *']);
   const msgSendVoid3PointerIntPointer = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'void *', 'int', 'void *']);
   const nsPoint = koffi.struct({ x: 'double', y: 'double' });
   const nsSize = koffi.struct({ width: 'double', height: 'double' });
@@ -815,6 +818,11 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       syncBounds,
       setAutoresize,
       syncHierarchy: attachToContentView,
+      isOccluded: () => {
+        if (destroyed || !ownerWindowObject) return false;
+        // NSWindowOcclusionStateVisible is bit 1.
+        try { return (Number(msgSendUnsignedLong0(ownerWindowObject, selector('occlusionState'))) & 2) === 0; } catch { return false; }
+      },
       destroy: () => {
         if (destroyed || !nativeView) return;
         destroyed = true;
@@ -1061,6 +1069,9 @@ class LibVlcPlaybackSession {
   private nativeRearmUntil = 0;
   private nativeTracksSignature = '';
   private lastNativeTrackRefreshAt = 0;
+  private lastOcclusionCheckAt = 0;
+  private occludedSince = 0;
+  private suspendedVideoTrackId: number | null = null;
   private state: LibVlcPlaybackState;
   private readonly windowListeners: Array<() => void> = [];
 
@@ -1202,6 +1213,8 @@ class LibVlcPlaybackSession {
     const syncHierarchy = () => this.scheduleNativeViewSync(false, 32);
     const syncVisibility = () => this.syncNativeViewVisibility();
     const restoreNativeSurface = () => {
+      // Recheck occlusion on the next poll so suspended video returns promptly.
+      this.lastOcclusionCheckAt = 0;
       this.syncNativeViewVisibility();
       // A long idle, display sleep, minimize, or app switch can retire the
       // backing surface without changing the NSView pointers. Refresh the
@@ -1329,7 +1342,58 @@ class LibVlcPlaybackSession {
     }
   }
 
+  /**
+   * Turn video decoding off while the window is fully hidden.
+   *
+   * The vout draws through a Core Animation OpenGL layer. While the window is
+   * occluded (another app in front, another Space, minimized) the window
+   * server stops consuming its buffers, and the layer's pool grows from 2 to
+   * 16 window-sized IOSurfaces: about 650 MB at 4112x2580, held until the
+   * window is visible again, including while paused. Hiding the NSView does
+   * not stop it. Deselecting the video track destroys the vout and frees the
+   * pool; audio keeps playing.
+   */
+  private syncOffscreenVideo(now: number): void {
+    if (now - this.lastOcclusionCheckAt < 500) return;
+    this.lastOcclusionCheckAt = now;
+    const api = this.runtime.api;
+    if (!api.videoGetTrack || !api.videoSetTrack || !this.player) return;
+    const occluded = this.nativeViewHost?.isOccluded?.() ?? false;
+    if (!occluded) {
+      this.occludedSince = 0;
+      this.resumeOffscreenVideo();
+      return;
+    }
+    if (this.occludedSince === 0) this.occludedSince = now;
+    const currentTrackId = Number(api.videoGetTrack(this.player));
+    // A replay opens a new input, which selects video again on its own.
+    if (this.suspendedVideoTrackId !== null && currentTrackId >= 0) this.suspendedVideoTrackId = null;
+    if (this.suspendedVideoTrackId !== null || now - this.occludedSince < 3_000) return;
+    if (this.nativeFullscreenTransition || this.awaitingFullscreenViewport || !(currentTrackId >= 0)) return;
+    if (Number(api.videoSetTrack(this.player, -1)) < 0) return;
+    this.suspendedVideoTrackId = currentTrackId;
+    recordPlaybackDiagnostic('vlc.offscreen', 'video-suspended');
+  }
+
+  private resumeOffscreenVideo(): void {
+    const trackId = this.suspendedVideoTrackId;
+    if (trackId === null) return;
+    this.suspendedVideoTrackId = null;
+    const api = this.runtime.api;
+    try {
+      api.videoSetTrack?.(this.player, trackId);
+      // A new decoder shows nothing until the next keyframe, and nothing at
+      // all while paused. Seeking to the current time decodes a frame now.
+      const positionMs = Number(api.playerGetTime(this.player));
+      if (positionMs >= 0) api.playerSetTime(this.player, Math.round(positionMs));
+    } catch (error) {
+      console.warn('[libvlc] could not restore video after the window returned:', error instanceof Error ? error.message : error);
+    }
+    recordPlaybackDiagnostic('vlc.offscreen', 'video-restored');
+  }
+
   private rearmNativeVideoOutput(): void {
+    this.resumeOffscreenVideo();
     const api = this.runtime.api;
     const positionMs = Number(api.playerGetTime(this.player));
     const previousPlayer = this.player;
@@ -1630,7 +1694,11 @@ class LibVlcPlaybackSession {
     if (!getDescriptions || !release || !this.player) return [];
     const head = nativeHandle(getDescriptions(this.player));
     if (!head) return [];
-    const selectedId = getSelected ? Number(getSelected(this.player)) : Number.NaN;
+    // Report the suspended video track as still selected; turning it off
+    // offscreen is not a user choice.
+    const selectedId = type === 'video' && this.suspendedVideoTrackId !== null
+      ? this.suspendedVideoTrackId
+      : getSelected ? Number(getSelected(this.player)) : Number.NaN;
     const tracks: PlaybackTrack[] = [];
     let cursor: NativeHandle = head;
     try {
@@ -1726,6 +1794,7 @@ class LibVlcPlaybackSession {
       if (status === 'ready') {
         this.applyPendingRearmTrackSelection();
         this.applyInitialAudioSelection();
+        this.syncOffscreenVideo(Date.now());
         this.refreshNativeTracks();
       }
       if (status === 'ready' && this.startSeconds > 0 && !this.startApplied) {
@@ -1802,6 +1871,7 @@ class LibVlcPlaybackSession {
           return applied;
         }
         case 'set-video-track': {
+          this.suspendedVideoTrackId = null;
           const applied = api.videoSetTrack ? Number(api.videoSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
           if (applied) this.refreshNativeTracks(true);
           return applied;
