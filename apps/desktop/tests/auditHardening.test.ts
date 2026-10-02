@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { restoreOffscreenTrack } from '../src/main/offscreenVideoRestore.ts';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -148,6 +149,7 @@ function mpvFixture() {
     './mpvPlaybackHelpers.ts': { finiteNumber: Number, normalizeMpvTracks: () => [], mpvFlag: (value: unknown) => value === true || value === 1 },
     './playbackDiagnostics.ts': { recordPlaybackDiagnostic: () => undefined },
     './screenLock.ts': { isScreenLocked: () => false },
+    './offscreenVideoRestore.ts': { restoreOffscreenTrack },
     './libvlcPlayback.ts': {
       loadKoffi: () => koffi,
       createNativeViewHost: () => {
