@@ -144,7 +144,10 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
     try {
       const next = await desktopApi.previewMediaRenames();
       setPreview(next);
-      setSelected(new Set(next.entries.map((entry) => entry.id)));
+      // Matches the metadata sources have not confirmed wait for a deliberate choice.
+      setSelected(new Set(next.entries
+        .filter((entry) => !entry.verification || entry.verification.status === 'confirmed')
+        .map((entry) => entry.id)));
       setShowSkipped(false);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -384,6 +387,14 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
                                 {entry.sidecars.length ? (
                                   <span className="block text-[var(--loom-faint)]">
                                     + {entry.sidecars.map((sidecar) => sidecar.toName).join(', ')}
+                                  </span>
+                                ) : null}
+                                {entry.verification ? (
+                                  <span className={`block ${entry.verification.status === 'confirmed'
+                                    ? 'text-[var(--loom-faint)]'
+                                    : entry.verification.status === 'conflict' ? 'text-red-300' : 'text-amber-200'}`}
+                                  >
+                                    {entry.verification.note}
                                   </span>
                                 ) : null}
                               </span>

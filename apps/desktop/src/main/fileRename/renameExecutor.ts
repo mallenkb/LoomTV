@@ -151,6 +151,8 @@ export type RenameExecutorDeps = {
   libraryRoots: (data: LibraryData) => string[];
   /** Called after each disk step is journaled; lets a test stop the process mid-batch. */
   onStepCompleted?: (completed: number) => void;
+  /** The metadata sources' verdict on an item's match, or null while unchecked. */
+  verifyMatch?: (item: MediaItem) => { status: 'confirmed' | 'waiting' | 'conflict'; note: string; knownTitles: string[] } | null;
   /** Keeps each file's first name; called after every batch that moved files. */
   recordOriginalNames?: (moves: ReadonlyArray<{ from: string; to: string }>) => void;
 };
@@ -454,6 +456,10 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
           return remaining > 0;
         },
       } : {}),
+      ...(deps.verifyMatch ? {
+        verify: deps.verifyMatch,
+        knownTitles: (item: MediaItem) => deps.verifyMatch?.(item)?.knownTitles ?? [],
+      } : {}),
       // A movie that shares a folder with others gets a folder of its own.
       movieFolders: true,
       sameDrive: onSameDrive,
@@ -634,7 +640,10 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
      * changed in the last few minutes wait. Null when there is nothing to do.
      */
     applyAutomatic(): { batchId: string; renamed: number; retryAfterMs?: number } | null {
-      const { entries, retryAfterMs } = plan({ automatic: true });
+      const planned = plan({ automatic: true });
+      const retryAfterMs = planned.retryAfterMs;
+      // Only matches two sources agree on are applied without review.
+      const entries = planned.entries.filter((entry) => !entry.verification || entry.verification.status === 'confirmed');
       if (entries.length === 0) return retryAfterMs === undefined ? null : { batchId: '', renamed: 0, retryAfterMs };
       return { ...this.apply(entries.map((entry) => entry.id)), retryAfterMs };
     },

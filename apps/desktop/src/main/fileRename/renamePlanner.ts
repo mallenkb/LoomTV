@@ -36,6 +36,11 @@ export type RenamePlanEntry = {
   createFolder?: string;
   /** A loose episode becomes a show whose catalog path is this new folder. */
   showFolder?: string;
+  /**
+   * What the metadata sources said about the match. Only confirmed entries
+   * are applied automatically; the rest wait for review in the preview.
+   */
+  verification?: { status: 'confirmed' | 'waiting' | 'conflict' | 'unchecked'; note: string };
 };
 
 type RenameSkip = {
@@ -64,6 +69,11 @@ export type RenamePlannerInput = {
   movieFolders?: boolean;
   /** Other titles the matched sources know this item by (original or translated). */
   knownTitles?: (item: MediaItem) => readonly string[];
+  /**
+   * The sources' verdict on an item's match, or null while it has not been
+   * checked. Without this function every planned entry counts as confirmed.
+   */
+  verify?: (item: MediaItem) => { status: 'confirmed' | 'waiting' | 'conflict'; note: string } | null;
   /**
    * Automatic runs only: true for a file that is still being copied or
    * downloaded. It is looked at again shortly and organized once finished.
@@ -1062,6 +1072,16 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     planFolder(item, 'Show folder', showFolder, titleWithYear(item.title, item.year));
   }
 
+  if (input.verify) {
+    const byId = new Map(input.items.map((item) => [item.id, item]));
+    for (const entry of entries) {
+      const item = byId.get(entry.mediaId);
+      const verdict = item ? input.verify(item) : null;
+      entry.verification = verdict
+        ? { status: verdict.status, note: verdict.note }
+        : { status: 'unchecked', note: 'The match has not been checked with the metadata sources yet.' };
+    }
+  }
   return { entries, skipped };
 }
 

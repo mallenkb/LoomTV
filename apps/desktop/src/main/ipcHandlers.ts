@@ -365,7 +365,7 @@ export interface IpcHandlerDependencies<
   explainIptvChannel: (reference: string) => Promise<IpcResult<'iptv:explain-channel'>>;
   iptvGuide: (references: string[], fromMs: number, toMs: number) => IpcResult<'iptv:guide'>;
   setIptvFavorite: (sourceId: string, channelId: string, favorite: boolean) => IpcResult<'iptv:set-favorite'>;
-  previewMediaRenames: () => IpcResult<'library:rename-preview'>;
+  previewMediaRenames: () => IpcResult<'library:rename-preview'> | Promise<IpcResult<'library:rename-preview'>>;
   applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
   listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
   getMediaRenameRecord: (batchId: string) => IpcResult<'library:rename-record'>;

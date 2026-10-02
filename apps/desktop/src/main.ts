@@ -89,6 +89,14 @@ import { createIptvService } from './main/iptv/iptvService.ts';
 import { parseIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { createRenameExecutor, type RenameBatchRecord } from './main/fileRename/renameExecutor.ts';
 import { createOriginalNameStore } from './main/fileRename/originalNames.ts';
+import {
+  confirmationIsFresh,
+  createMatchConfirmationStore,
+  evaluateConfirmation,
+  gatherConfirmation,
+  searchTermsFor,
+  type ConfirmationSources,
+} from './main/fileRename/matchConfirmation.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
 import { loadShowSchedules } from './main/showSchedule.ts';
@@ -274,7 +282,7 @@ import type {
 } from './main/metadata/types';
 import { fetchOMDbMetadata, fetchOMDbMetadataById, fetchOMDbSeasonEpisodes } from './main/metadata/omdb';
 import { fetchTVMetadata, fetchTVMetadataCandidates, fetchTVMetadataById } from './main/metadata/tvmaze';
-import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates } from './main/metadata/tvdb';
+import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates, searchTVDBIdentity } from './main/metadata/tvdb';
 import {
   fetchTMDBMovieMetadata,
   fetchTMDBMovieMetadataById,
@@ -1804,8 +1812,66 @@ const iptvService = createIptvService({ getDatabase: getIptvDatabase, findFFmpeg
 // ID-, and revision-keyed record with the files and refuses to run while a
 // scan could be writing the same library.
 const originalNames = createOriginalNameStore(getMediaRenameDatabase);
+const matchConfirmations = createMatchConfirmationStore(getMediaRenameDatabase);
+
+function confirmationSources(): ConfirmationSources {
+  const settings = loadSettings();
+  const tmdb = getMetadataApiKey(settings, 'tmdb');
+  const omdb = getMetadataApiKey(settings, 'omdb');
+  const tvdb = getMetadataApiKey(settings, 'tvdb');
+  const online = <T>(request: () => Promise<T | null>) => async (): Promise<T | null> => (
+    (loadMetadataOfflineModeFromDatabase() ?? Boolean(settings.metadataOfflineMode)) ? null : request()
+  );
+  return {
+    tmdbMovie: (title, year) => online(() => fetchTMDBMovieMetadata(title, year, tmdb))(),
+    tmdbShow: (title, year) => online(() => fetchTMDBTVMetadata(title, year, tmdb))(),
+    omdb: (title, year, type) => online(() => fetchOMDbMetadata(title, year, omdb, type))(),
+    tvdb: (title, year, type) => online(() => searchTVDBIdentity(title, year, tvdb, type))(),
+    tvmaze: (title, year) => online(() => fetchTVMetadata(title, year))(),
+    anilist: (title) => online(() => fetchAniListAnimeMetadata(undefined, title))(),
+    mal: (title) => online(() => fetchJikanMetadata(title))(),
+  };
+}
+
+let matchConfirmationRefresh: Promise<void> | null = null;
+
+/**
+ * Ask the metadata sources about every item the organizer would change and
+ * has not checked recently. Sources are asked one item at a time to stay
+ * within their rate limits; a confirmed item is never asked again unless
+ * its match changes.
+ */
+function refreshMatchConfirmations(): Promise<void> {
+  matchConfirmationRefresh ||= (async () => {
+    const data = loadLibrary();
+    const groups = normalizeLibraryFolderGroups(data);
+    const roots = flattenLibraryFolders(groups);
+    const animeRoots = (groups.anime || []).map((root) => path.resolve(root));
+    const plan = mediaRenameExecutor.plan();
+    const wanted = new Set([
+      ...plan.entries.map((entry) => entry.mediaId),
+      // A title check failure may only need the sources' other titles.
+      ...plan.skipped.filter((skip) => skip.reason.includes('which does not match')).map((skip) => skip.mediaId),
+    ]);
+    const now = Date.now();
+    const sources = confirmationSources();
+    for (const item of [...data.movies, ...data.tvShows, ...data.animeShows]) {
+      if (!wanted.has(item.id)) continue;
+      const stored = matchConfirmations.get(item.id);
+      if (stored && confirmationIsFresh(stored, item, now)) continue;
+      const likelyAnime = item.type === 'anime' || animeRoots.some((root) => path.resolve(item.filePath).startsWith(root + path.sep));
+      matchConfirmations.set(item.id, await gatherConfirmation(item, searchTermsFor(item, roots), sources, { likelyAnime }));
+    }
+  })().finally(() => { matchConfirmationRefresh = null; });
+  return matchConfirmationRefresh;
+}
+
 const mediaRenameExecutor = createRenameExecutor({
   getDatabase: getMediaRenameDatabase,
+  verifyMatch: (item) => {
+    const stored = matchConfirmations.get(item.id);
+    return stored ? evaluateConfirmation(item, stored) : null;
+  },
   recordOriginalNames: (moves) => originalNames.recordMoves(moves),
   loadLibrary,
   saveLibraryMutation,
@@ -1830,7 +1896,10 @@ function mediaRenameBatchForRenderer(batch: RenameBatchRecord) {
 }
 
 const mediaRenameHandlers = {
-  previewMediaRenames: () => {
+  previewMediaRenames: async () => {
+    await refreshMatchConfirmations().catch((error) => {
+      console.warn('[rename] Could not check matches with the metadata sources:', describeErrorForLog(error));
+    });
     const plan = mediaRenameExecutor.plan();
     return {
       entries: plan.entries.map((entry) => ({
@@ -1846,6 +1915,7 @@ const mediaRenameHandlers = {
           ? { moveToFolder: path.basename(path.dirname(entry.to)), createsFolder: Boolean(entry.createFolder) }
           : {}),
         sidecars: entry.sidecars.map((sidecar) => ({ fromName: path.basename(sidecar.from), toName: path.basename(sidecar.to) })),
+        ...(entry.verification ? { verification: entry.verification } : {}),
       })),
       skipped: plan.skipped.map((skip) => ({ mediaTitle: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason })),
     };
@@ -1949,11 +2019,11 @@ let lastAutomaticError = '';
 function scheduleAutomaticOrganize(delayMs = AUTO_ORGANIZE_DELAY_MS): void {
   if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
   if (autoOrganizeTimer) clearTimeout(autoOrganizeTimer);
-  autoOrganizeTimer = setTimeout(runAutomaticOrganize, delayMs);
+  autoOrganizeTimer = setTimeout(() => { void runAutomaticOrganize(); }, delayMs);
   autoOrganizeTimer.unref?.();
 }
 
-function runAutomaticOrganize(): void {
+async function runAutomaticOrganize(): Promise<void> {
   autoOrganizeTimer = null;
   if ((loadSettings().organizeFilesAfterSync || 'auto') !== 'auto') return;
   if (isPlaybackActivityActive() || activeScans.size > 0) {
@@ -1961,6 +2031,12 @@ function runAutomaticOrganize(): void {
     return;
   }
   try {
+    await refreshMatchConfirmations();
+    // A scan or playback may have started while the sources were asked.
+    if (isPlaybackActivityActive() || activeScans.size > 0) {
+      scheduleAutomaticOrganize(AUTO_ORGANIZE_RETRY_MS);
+      return;
+    }
     const result = mediaRenameExecutor.applyAutomatic();
     lastAutomaticError = '';
     if (!result) return;

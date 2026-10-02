@@ -934,6 +934,8 @@ export interface MediaRenamePreviewEntry {
   createsFolder?: boolean;
   /** Subtitles, .nfo, and thumbnails that are renamed along with a video. */
   sidecars: { fromName: string; toName: string }[];
+  /** Whether the metadata sources confirmed the match; only confirmed entries run automatically. */
+  verification?: { status: 'confirmed' | 'waiting' | 'conflict' | 'unchecked'; note: string };
 }
 
 interface MediaRenameSkip {
