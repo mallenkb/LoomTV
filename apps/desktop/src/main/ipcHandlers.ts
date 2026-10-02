@@ -1,3 +1,4 @@
+import type { PhotoLibraryApi } from '../shared/photoLibrary.ts';
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue, WebContents } from 'electron';
 import fs from 'node:fs';
@@ -325,6 +326,8 @@ export interface IpcHandlerDependencies<
   TLibraryData,
   TSettings extends NetworkSettings & IpcResult<'settings:get'>,
 > {
+  photos?: PhotoLibraryApi;
+  mediaLibraries?: import('../shared/mediaLibraries.ts').MediaLibrariesApi;
   getMediaServerPort: () => number;
   localAccessToken: string;
   showOpenFolderDialog: (options: OpenDialogOptions) => Promise<OpenDialogReturnValue>;
@@ -654,6 +657,35 @@ export function registerIpcHandlers<
     libraryScanQueue = queued.then(() => undefined, () => undefined);
     return queued;
   };
+
+  if (deps.mediaLibraries) {
+    const media = deps.mediaLibraries;
+    const kind = z.enum(['music','audiobooks','books','comics']);
+    const id = z.string().min(1).max(128);
+    handle('media-libraries:roots', (_event,k) => { deps.authorizeSettingsWrite(); return media.roots(k); },z.tuple([kind]));
+    handle('media-libraries:add', (_event,k,folderPath) => { deps.authorizeSettingsWrite(); return media.add(k,folderPath); },z.tuple([kind,z.string().min(1).max(8192).optional()]));
+    handle('media-libraries:remove', (_event,k,r) => { deps.authorizeSettingsWrite(); return media.remove(k,r); },z.tuple([kind,z.string().uuid()]));
+    handle('media-libraries:scan', (_event,k,r) => { deps.authorizeSettingsWrite(); return media.scan(k,r); },z.tuple([kind,z.string().uuid()]));
+    handle('media-libraries:cancel', (_event,k,r) => { deps.authorizeSettingsWrite(); return media.cancel(k,r); },z.tuple([kind,z.string().uuid()]));
+    handle('media-libraries:browse', (_event,k,r) => { deps.authorizeSettingsWrite(); return media.browse(k,r); },z.tuple([kind,z.object({ query:z.string().max(500).optional(),offset:z.number().int().min(0).max(1_000_000).optional(),rootId:z.string().uuid().optional(),inProgress:z.boolean().optional() }).strict()]));
+    handle('media-libraries:open', (_event,k,i) => { deps.authorizeSettingsWrite(); return media.open(k,i); },z.tuple([kind,id]));
+    handle('media-libraries:publication', (_event,k,i) => { deps.authorizeSettingsWrite(); return media.publication(k,i); },z.tuple([kind,id]));
+    handle('media-libraries:progress', (_event,k,i,p,c) => { deps.authorizeSettingsWrite(); return media.progress(k,i,p,c); },z.tuple([kind,id,z.number().finite().min(0).max(1_000_000_000),z.boolean()]));
+  }
+  if (deps.photos) {
+    const photos = deps.photos;
+    handleNoArgs('photos:roots', () => { deps.authorizeSettingsWrite(); return photos.roots(); });
+    handle('photos:add', (_event, folderPath) => { deps.authorizeSettingsWrite(); return photos.add(folderPath); }, z.tuple([z.string().min(1).max(8192).optional()]));
+    handle('photos:remove', (_event, id) => { deps.authorizeSettingsWrite(); return photos.remove(id); }, z.tuple([z.string().uuid()]));
+    handle('photos:scan', (_event, id) => { deps.authorizeSettingsWrite(); return photos.scan(id); }, z.tuple([z.string().uuid()]));
+    handle('photos:cancel', (_event, id) => { deps.authorizeSettingsWrite(); return photos.cancel(id); }, z.tuple([z.string().uuid()]));
+    handle('photos:browse', (_event, request) => { deps.authorizeSettingsWrite(); return photos.browse(request); }, z.tuple([z.object({
+      rootId: z.string().uuid().optional(),
+      folder: z.string().max(8192).nullable(),
+      offset: z.number().int().min(0).max(1_000_000).optional(),
+    }).strict()]));
+    handle('photos:read', (_event, id) => { deps.authorizeSettingsWrite(); return photos.read(id); }, z.tuple([z.string().max(128).trim().min(1)]));
+  }
 
   handleNoArgs('library:get', () => deps.libraryForRenderer());
   handleNoArgs('library:get-index', () => deps.libraryIndexForRenderer());

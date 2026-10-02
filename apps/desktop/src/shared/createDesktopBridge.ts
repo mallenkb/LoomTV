@@ -80,6 +80,26 @@ const ipcRenderer = {
 // ─── desktopApi — existing library/media/settings surface ────────────────────
 
 const desktopApi = {
+  mediaLibraries: {
+    roots: (kind: import('./mediaLibraries').MediaLibraryKind) => ipcRenderer.invoke('media-libraries:roots', kind),
+    add: (kind: import('./mediaLibraries').MediaLibraryKind, folderPath?: string) => ipcRenderer.invoke('media-libraries:add', kind, folderPath),
+    remove: (kind: import('./mediaLibraries').MediaLibraryKind, id: string) => ipcRenderer.invoke('media-libraries:remove', kind, id),
+    scan: (kind: import('./mediaLibraries').MediaLibraryKind, id: string) => ipcRenderer.invoke('media-libraries:scan', kind, id),
+    cancel: (kind: import('./mediaLibraries').MediaLibraryKind, id: string) => ipcRenderer.invoke('media-libraries:cancel', kind, id),
+    browse: (kind: import('./mediaLibraries').MediaLibraryKind, request: { query?: string; offset?: number; rootId?: string; inProgress?: boolean }) => ipcRenderer.invoke('media-libraries:browse', kind, request),
+    open: (kind: import('./mediaLibraries').MediaLibraryKind, id: string) => ipcRenderer.invoke('media-libraries:open', kind, id),
+    publication: (kind: import('./mediaLibraries').MediaLibraryKind, id: string) => ipcRenderer.invoke('media-libraries:publication', kind, id),
+    progress: (kind: import('./mediaLibraries').MediaLibraryKind, id: string, position: number, completed: boolean) => ipcRenderer.invoke('media-libraries:progress', kind, id, position, completed),
+  },
+  photos: {
+    roots: () => ipcRenderer.invoke('photos:roots'),
+    add: (folderPath?: string) => ipcRenderer.invoke('photos:add', folderPath),
+    remove: (id: string) => ipcRenderer.invoke('photos:remove', id),
+    scan: (id: string) => ipcRenderer.invoke('photos:scan', id),
+    cancel: (id: string) => ipcRenderer.invoke('photos:cancel', id),
+    browse: (request: import('./photoLibrary').PhotoBrowseRequest) => ipcRenderer.invoke('photos:browse', request),
+    read: (id: string) => ipcRenderer.invoke('photos:read', id),
+  },
   onMemoryTrim: (callback: () => void) => {
     const handler = () => callback();
     ipcRenderer.on('app:trim-memory', handler);

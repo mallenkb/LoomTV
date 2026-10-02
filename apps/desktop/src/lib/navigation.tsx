@@ -29,7 +29,7 @@ function destination(to: string) {
   if (live) return { ...location, to: '/live/$sourceId' as const, params: { sourceId: decodeURIComponent(live[1]) } };
   const addon = /^\/addons\/stremio\/([^/]+)$/.exec(url.pathname);
   if (addon) return { ...location, to: '/addons/stremio/$addonId' as const, params: { addonId: decodeURIComponent(addon[1]) } };
-  const paths = ['/', '/movies', '/tv', '/anime', '/others', '/discover', '/my-list', '/settings'] as const;
+  const paths = ['/', '/movies', '/photos', '/music', '/audiobooks', '/books', '/comics', '/tv', '/anime', '/others', '/discover', '/my-list', '/settings'] as const;
   const path = paths.find(path => path === url.pathname) || '/';
   return { ...location, to: path, params: {} };
 }

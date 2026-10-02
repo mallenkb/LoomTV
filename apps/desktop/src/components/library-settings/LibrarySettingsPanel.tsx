@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { CaretDown, DotsSixVertical } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -18,7 +18,12 @@ import { useConfirm } from '@/components/ConfirmProvider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLibrary } from '@/contexts/LibraryContext';
+import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi } from '@/lib/desktopApi';
+import { usePhotoLibrary } from '@/lib/photoLibrary';
+import type { MediaLibraryKind, MediaLibraryRoot } from '@/shared/mediaLibraries';
+import { MEDIA_LIBRARY_KINDS } from '@/shared/mediaLibraries';
+import type { PhotoRoot } from '@/shared/photoLibrary';
 import type { SidebarNavItemId, SidebarOrderItem } from '@/pages/Settings.helpers';
 import type { LibraryFolderSection, LibraryFolderStatus } from '@/pages/Settings.types';
 import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
@@ -41,11 +46,17 @@ const AUTO_SYNC_OPTIONS = [
   { value: 168, label: 'Every 1 week' },
 ];
 
-type LegacyLibraryKind = 'movies' | 'tvShows' | 'anime' | 'others';
+const LEGACY_LIBRARY_KINDS = ['movies', 'tvShows', 'anime', 'others'] as const;
+type LegacyLibraryKind = (typeof LEGACY_LIBRARY_KINDS)[number];
 const LIBRARY_SIDEBAR_IDS: Partial<Record<LibraryKind, SidebarNavItemId>> = {
   movies: 'movies',
   tvShows: 'tv',
   anime: 'anime',
+  photos: 'photos',
+  music: 'music',
+  audiobooks: 'audiobooks',
+  books: 'books',
+  comics: 'comics',
 };
 
 type LibrarySettingsSectionProps = {
@@ -85,6 +96,7 @@ type LibrarySettingsSectionProps = {
   onClearAppData: () => void;
 };
 
+type MediaRoots = Record<MediaLibraryKind, MediaLibraryRoot[]>;
 
 type UnifiedFolder = {
   id: string;
@@ -94,7 +106,7 @@ type UnifiedFolder = {
   scanning: boolean;
   state: 'available' | 'degraded' | 'unavailable';
   message: string | null;
-  source: 'legacy';
+  source: 'legacy' | 'media' | 'photo';
   isNetworkLike?: boolean;
 };
 
@@ -117,6 +129,14 @@ type EditingFolder = {
   groupId: string;
 };
 
+function emptyMediaRoots(): MediaRoots {
+  return Object.fromEntries(MEDIA_LIBRARY_KINDS.map((kind) => [kind, []])) as unknown as MediaRoots;
+}
+
+function isMediaLibraryKind(kind: LibraryKind): kind is MediaLibraryKind {
+  return (MEDIA_LIBRARY_KINDS as readonly string[]).includes(kind);
+}
+
 function folderBaseName(folderPath: string): string {
   return folderPath.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || folderPath;
 }
@@ -127,6 +147,66 @@ function errorMessage(cause: unknown, fallback: string): string {
 
 function notifyLibraryRootsChanged(): void {
   window.dispatchEvent(new Event('loomtv:library-roots-changed'));
+}
+
+async function waitForScanCompletion(
+  readRoots: () => Promise<Array<{ id: string; scanning: boolean; message?: string | null }>>,
+  rootId: string,
+): Promise<void> {
+  while (true) {
+    const root = (await readRoots()).find((entry) => entry.id === rootId);
+    if (!root) return;
+    if (!root.scanning) {
+      if (root.message) throw new Error(root.message);
+      return;
+    }
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 750));
+  }
+}
+
+function useMediaLibraryRoots() {
+  const api = typeof window !== 'undefined' ? window.desktopApi?.mediaLibraries : undefined;
+  const { activeProfile } = useProfiles();
+  const canRead = activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode();
+  const [roots, setRoots] = useState<MediaRoots>(() => emptyMediaRoots());
+  const [loading, setLoading] = useState(Boolean(api));
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async (background = false) => {
+    if (!canRead) {
+      setRoots(emptyMediaRoots());
+      setLoading(false);
+      return;
+    }
+    if (!background) setLoading(true);
+    const entries = await Promise.all(MEDIA_LIBRARY_KINDS.map(async (kind) => [kind, await desktopApi.getMediaRoots(kind)] as const));
+    setRoots(Object.fromEntries(entries) as MediaRoots);
+    setError('');
+    setLoading(false);
+  }, [canRead, activeProfile?.id]);
+
+  useEffect(() => {
+    let active = true;
+    void refresh().catch((cause) => {
+      if (!active) return;
+      setError(errorMessage(cause, 'Media libraries could not be loaded.'));
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [refresh]);
+
+  const scanning = MEDIA_LIBRARY_KINDS.some((kind) => roots[kind].some((root) => root.scanning));
+  useEffect(() => {
+    if (!canRead) return undefined;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void refresh(true).catch(() => setLoading(false));
+    }, scanning ? 1200 : 3000);
+    return () => window.clearInterval(timer);
+  }, [canRead, refresh, scanning]);
+
+  return { api, roots, loading, error, refresh, scanning };
 }
 
 function libraryStatusLabel(library: UnifiedLibrary): string {
@@ -197,6 +277,8 @@ export default function LibrarySettingsPanel({
 }: LibrarySettingsSectionProps) {
   const { addLibraryFolderPath, refreshLibrary } = useLibrary();
   const confirm = useConfirm();
+  const photoLibrary = usePhotoLibrary();
+  const mediaLibraries = useMediaLibraryRoots();
   const [hideEmpty, setHideEmpty] = useState(false);
   const [expandedKind, setExpandedKind] = useState<LibraryKind | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -214,9 +296,33 @@ export default function LibrarySettingsPanel({
     return LIBRARY_TYPE_DEFINITIONS.map((definition) => {
       const legacySection = folderSections.find((section) => section.key === definition.kind);
       let folders: UnifiedFolder[] = [];
-      let itemCount: number | null;
+      let itemCount: number | null = 0;
 
-      if (legacySection) {
+      if (definition.kind === 'photos') {
+        folders = photoLibrary.roots.map((root: PhotoRoot) => ({
+          id: root.id,
+          path: root.path,
+          name: root.name,
+          count: root.count,
+          scanning: root.scanning,
+          state: root.state,
+          message: root.message,
+          source: 'photo' as const,
+        }));
+        itemCount = folders.reduce((total, folder) => total + folder.count, 0);
+      } else if (isMediaLibraryKind(definition.kind)) {
+        folders = mediaLibraries.roots[definition.kind].map((root) => ({
+          id: root.id,
+          path: root.path,
+          name: root.name,
+          count: root.count,
+          scanning: root.scanning,
+          state: root.message ? 'degraded' : 'available',
+          message: root.message,
+          source: 'media' as const,
+        }));
+        itemCount = folders.reduce((total, folder) => total + folder.count, 0);
+      } else if (legacySection) {
         folders = legacySection.folders.map((folder) => {
           const status = statusByPath.get(folder);
           return {
@@ -266,20 +372,63 @@ export default function LibrarySettingsPanel({
       const rightPosition = rightId ? sidebarPositions.get(rightId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
       return leftPosition - rightPosition;
     });
-  }, [animeCount, customFolderNames, folderSections, movieCount, sidebarOrderItems, statusByPath, tvShowCount]);
+  }, [animeCount, customFolderNames, folderSections, mediaLibraries.roots, movieCount, photoLibrary.roots, sidebarOrderItems, statusByPath, tvShowCount]);
 
   const filteredLibraries = useMemo(() => {
     return hideEmpty ? libraries.filter((library) => library.status !== 'empty') : libraries;
   }, [hideEmpty, libraries]);
 
-  const refreshAll = refreshLibrary;
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      mediaLibraries.refresh(),
+      photoLibrary.refresh(),
+      refreshLibrary(),
+    ]);
+  }, [mediaLibraries.refresh, photoLibrary.refresh, refreshLibrary]);
 
-  const scanLibraryKind = useCallback(async (_kind: LibraryKind) => {
+  const scanLibraryKind = useCallback(async (kind: LibraryKind) => {
+    if (kind === 'photos') {
+      if (!photoLibrary.api) throw new Error('Photo libraries are available from the Loom desktop host.');
+      const roots = await photoLibrary.api.roots();
+      for (const root of roots) {
+        await photoLibrary.api.scan(root.id);
+        await waitForScanCompletion(() => photoLibrary.api!.roots(), root.id);
+      }
+      await photoLibrary.refresh();
+      return;
+    }
+    if (isMediaLibraryKind(kind)) {
+      if (!mediaLibraries.api) throw new Error('Media libraries are available from the Loom desktop host.');
+      const roots = await mediaLibraries.api.roots(kind);
+      for (const root of roots) {
+        await mediaLibraries.api.scan(kind, root.id);
+        await waitForScanCompletion(() => mediaLibraries.api!.roots(kind), root.id);
+      }
+      await mediaLibraries.refresh();
+      return;
+    }
     scanLibrary();
     await refreshLibrary();
-  }, [refreshLibrary, scanLibrary]);
+  }, [mediaLibraries.api, mediaLibraries.refresh, photoLibrary.api, photoLibrary.refresh, refreshLibrary, scanLibrary]);
 
   const addFolderForKind = useCallback(async (kind: LibraryKind, folderPath?: string): Promise<WizardFolder | null> => {
+    if (kind === 'photos') {
+      if (!photoLibrary.api) throw new Error('Photo libraries are available from the Loom desktop host.');
+      const root = await photoLibrary.api.add(folderPath);
+      if (!root) return null;
+      await photoLibrary.refresh();
+      notifyLibraryRootsChanged();
+      return { id: root.id, path: root.path, name: root.name, count: root.count, message: root.message };
+    }
+    if (isMediaLibraryKind(kind)) {
+      if (!mediaLibraries.api) throw new Error('Media libraries are available from the Loom desktop host.');
+      const root = await mediaLibraries.api.add(kind, folderPath);
+      if (!root) return null;
+      await mediaLibraries.refresh();
+      notifyLibraryRootsChanged();
+      return { id: root.id, path: root.path, name: root.name, count: root.count, message: root.message };
+    }
+
     const legacyKind = kind as LegacyLibraryKind;
     if (typeof window !== 'undefined' && window.desktopApi?.pickLibraryFolder && window.desktopApi?.addLibraryFolderPath) {
       const folder = folderPath || await desktopApi.pickLibraryFolder();
@@ -297,11 +446,15 @@ export default function LibrarySettingsPanel({
     await refreshLibrary();
     notifyLibraryRootsChanged();
     return { id: `legacy-${Date.now()}`, path: 'Folder selected', name: 'Folder selected' };
-  }, [addLibraryFolder, addLibraryFolderPath, refreshLibrary]);
+  }, [addLibraryFolder, addLibraryFolderPath, mediaLibraries.api, mediaLibraries.refresh, photoLibrary.api, photoLibrary.refresh, refreshLibrary]);
 
-  const canAddFolder = (_kind: LibraryKind) => !desktopApi.isRemoteLibraryMode();
+  const canAddFolder = useCallback((kind: LibraryKind) => {
+    if (kind === 'photos') return Boolean(photoLibrary.api);
+    if (isMediaLibraryKind(kind)) return Boolean(mediaLibraries.api);
+    return !desktopApi.isRemoteLibraryMode();
+  }, [mediaLibraries.api, photoLibrary.api]);
 
-  const removeFolder = useCallback(async (_kind: LibraryKind, folder: UnifiedFolder | WizardFolder) => {
+  const removeFolder = useCallback(async (kind: LibraryKind, folder: UnifiedFolder | WizardFolder) => {
     const confirmed = await confirm({
       title: 'Remove this library folder?',
       description: `Remove "${folder.name || folder.path}" from the library. Files on disk will be kept.`,
@@ -309,10 +462,24 @@ export default function LibrarySettingsPanel({
       destructive: true,
     });
     if (!confirmed) return false;
+    if (kind === 'photos') {
+      if (!photoLibrary.api) throw new Error('Photo libraries are available from the Loom desktop host.');
+      await photoLibrary.api.remove(folder.id);
+      await photoLibrary.refresh();
+      notifyLibraryRootsChanged();
+      return;
+    }
+    if (isMediaLibraryKind(kind)) {
+      if (!mediaLibraries.api) throw new Error('Media libraries are available from the Loom desktop host.');
+      await mediaLibraries.api.remove(kind, folder.id);
+      await mediaLibraries.refresh();
+      notifyLibraryRootsChanged();
+      return;
+    }
     if (folder.path === 'Folder selected') return;
     await removeLibraryFolder(folder.path);
     notifyLibraryRootsChanged();
-  }, [confirm, removeLibraryFolder]);
+  }, [confirm, mediaLibraries.api, mediaLibraries.refresh, photoLibrary.api, photoLibrary.refresh, removeLibraryFolder]);
 
   const runAction = async (kind: LibraryKind, action: () => Promise<void | boolean>, refreshAfter = true) => {
     setBusyKind(kind);
@@ -330,7 +497,8 @@ export default function LibrarySettingsPanel({
 
   const addFromTable = async (kind: LibraryKind) => {
     await runAction(kind, async () => {
-      await addFolderForKind(kind);
+      const folder = await addFolderForKind(kind);
+      if (folder && (kind === 'photos' || isMediaLibraryKind(kind))) await scanLibraryKind(kind);
     });
   };
 
@@ -376,7 +544,7 @@ export default function LibrarySettingsPanel({
     }
   };
 
-  const anyScanning = isScanning;
+  const anyScanning = isScanning || mediaLibraries.scanning || photoLibrary.roots.some((root) => root.scanning);
   const configuredCount = libraries.filter((library) => library.folders.length > 0).length;
   const totalItemCount = libraries.reduce((total, library) => total + (library.itemCount || 0), 0);
 
@@ -402,15 +570,16 @@ export default function LibrarySettingsPanel({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {(libraryActionError || actionError) ? (
+          {(libraryActionError || actionError || mediaLibraries.error || (photoLibrary.error ? errorMessage(photoLibrary.error, '') : '')) ? (
             <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-3 text-sm text-red-100">
-              <span>{libraryActionError || actionError}</span>
+              <span>{libraryActionError || actionError || mediaLibraries.error || errorMessage(photoLibrary.error, 'Photo libraries could not be loaded.')}</span>
               {libraryActionError && onRetryLibraryAction ? (
                 <Button type="button" variant="outline" onClick={onRetryLibraryAction} className="shrink-0 border-red-300/40 text-red-50 hover:bg-red-500/15">Try again</Button>
               ) : null}
             </div>
           ) : null}
 
+          {mediaLibraries.loading || photoLibrary.loading ? <p role="status" className="text-sm text-[var(--loom-muted)]">Loading library folders…</p> : null}
 
           <div className="space-y-2">
             {filteredLibraries.map((library) => {
@@ -637,7 +806,6 @@ export default function LibrarySettingsPanel({
       </Card>
 
       <LibraryHealthCard disabled={anyScanning} />
-
       <Card className="settings-panel">
         <CardHeader className="gap-1"><CardTitle className="text-base text-white">Data management</CardTitle><CardDescription className="text-[var(--loom-muted)]">Back up the database or clear this device's local Loom data.</CardDescription></CardHeader>
         <CardContent className="grid gap-3">
@@ -652,6 +820,7 @@ export default function LibrarySettingsPanel({
         canAddFolder={canAddFolder}
         onAddFolder={addFolderForKind}
         onRemoveFolder={removeFolder}
+        onScan={async (kind) => { await scanLibraryKind(kind); await refreshAll(); }}
       />
 
       <Dialog open={Boolean(editingFolder)} onOpenChange={(open) => { if (!open && !isSavingEdit) setEditingFolder(null); }} contentClassName="max-w-md border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)]">

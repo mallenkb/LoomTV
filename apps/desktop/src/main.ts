@@ -6,6 +6,8 @@ import { canCheckUnchangedRoot } from './main/scanning/quickScanCache';
 import { scanInventory, type DiscoveryInventory } from './main/scanning/inventory.ts';
 import { isCurrentScanCommit, planScanDelta, scanCommits } from './main/scanning/scanPersistence.ts';
 import { hasScannerProcesses, stopScannerProcesses } from './main/scanning/rustScannerClient.ts';
+import { createPhotoLibraryService } from './main/photoLibraryService.ts';
+import { createMediaLibrariesService } from './main/mediaLibrariesService.ts';
 import {
   app,
   dialog,
@@ -1733,7 +1735,7 @@ function configureRendererSecurityPolicy(): void {
     "font-src 'self' file: data:",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
+    "frame-src 'self' loomtv://media-libraries https://www.youtube-nocookie.com https://www.youtube.com",
     "frame-ancestors 'none'",
     "form-action 'none'",
   ].join('; ');
@@ -2176,8 +2178,24 @@ async function runAutomaticOrganize(): Promise<void> {
   }
 }
 
+const photoLibraryService = createPhotoLibraryService(async () => {
+  const result = await showOpenFolderDialog({
+    properties: ['openDirectory'],
+    buttonLabel: 'Add Photos Folder',
+    message: 'Choose a folder containing photos for Loom.',
+  });
+  return result.canceled ? null : result.filePaths[0] || null;
+});
+
+const mediaLibrariesService = createMediaLibrariesService(async () => {
+  const result = await showOpenFolderDialog({ properties: ['openDirectory'], buttonLabel: 'Add library folder' });
+  return result.canceled ? null : result.filePaths[0] || null;
+});
+
 registerIpcHandlers<LibraryData, AppSettings>({
   ...mediaRenameHandlers,
+  mediaLibraries: mediaLibrariesService,
+  photos: photoLibraryService,
   getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
   showOpenFolderDialog,
@@ -2674,6 +2692,8 @@ export const mediaServerDeps = {
   getRendererCatalogIdentity,
   libraryForLocalNetwork,
   libraryForRenderer,
+  photoRootsForRenderer: () => photoLibraryService.roots(),
+  mediaRootsForRenderer: (kind: import('./shared/mediaLibraries').MediaLibraryKind) => mediaLibrariesService.roots(kind),
   loadLibrary,
   resourceRegistryEpoch: RESOURCE_REGISTRY_BOOT_ID,
   loadSettings,
@@ -2891,6 +2911,14 @@ app.whenReady().then(async () => {
   const handleMediaProtocol = async (request: Request) => {
     try {
       const parsed = new URL(request.url);
+      if (parsed.hostname === 'photos') return photoLibraryService.imageResponse(request);
+      if (parsed.hostname === 'media-libraries') {
+        const response = await mediaLibrariesService.response(request);
+        const origin = request.headers.get('Origin');
+        const rendererOrigin = MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : 'null';
+        if (origin === rendererOrigin) response.headers.set('Access-Control-Allow-Origin', origin);
+        return response;
+      }
       // Forward Range header so video seeking works correctly
       const headers: Record<string, string> = {};
       const range = request.headers.get('Range');

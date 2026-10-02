@@ -1,5 +1,6 @@
 import { cachedDesktopRead, invalidateDesktopData, queryClient } from './queryClient';
 import packageJson from '../../package.json';
+import { mediaRootsSchema, photoRootsSchema } from '@/shared/libraryRoots';
 import type {
   MediaSessionCommand,
   MediaSessionDiagnostics,
@@ -239,6 +240,8 @@ export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION_
 
 export type DesktopBridgeApi = {
       onMemoryTrim?: (callback: () => void) => () => void;
+      mediaLibraries?: import('../shared/mediaLibraries.ts').MediaLibrariesApi;
+      photos?: import('../shared/photoLibrary.ts').PhotoLibraryApi;
       getLibrary: () => Promise<LibraryPayload>;
       getLibraryIndex?: () => Promise<LibraryIndexPayload>;
       getLibraryIndexIfChanged?: (knownFingerprint?: string) => Promise<LibraryIndexPayload | LibraryIndexUnchanged>;
@@ -962,6 +965,16 @@ const desktopTransport = {
     }
     if (window.desktopApi) return window.desktopApi.getLibrary();
     return fetchJson('/api/renderer/library', desktopLibrarySchema);
+  },
+
+  async getPhotoRoots() {
+    if (window.desktopApi?.photos) return window.desktopApi.photos.roots();
+    return fetchJson('/api/renderer/library/roots?kind=photos', photoRootsSchema);
+  },
+
+  async getMediaRoots(kind: import('../shared/mediaLibraries').MediaLibraryKind) {
+    if (window.desktopApi?.mediaLibraries) return window.desktopApi.mediaLibraries.roots(kind);
+    return fetchJson(`/api/renderer/library/roots?kind=${encodeURIComponent(kind)}`, mediaRootsSchema);
   },
 
   async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {

@@ -11,6 +11,8 @@ import ProfileGate from './components/profiles/ProfileGate';
 import Home from './pages/Home';
 const MyList = lazyRouteComponent(() => import('./pages/MyList'));
 const Movies = lazyRouteComponent(() => import('./pages/Movies'));
+const Photos = lazyRouteComponent(() => import('./pages/Photos'));
+const MediaLibrary = lazyRouteComponent(() => import('./pages/MediaLibrary'));
 const Others = lazyRouteComponent(() => import('./pages/Others'));
 const TVShows = lazyRouteComponent(() => import('./pages/TVShows'));
 const MovieDetail = lazyRouteComponent(() => import('./pages/MovieDetail'));
@@ -697,6 +699,11 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: Home }),
   createRoute({ getParentRoute: () => rootRoute, path: '/my-list', component: MyList }),
   createRoute({ getParentRoute: () => rootRoute, path: '/movies', component: Movies }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/photos', component: Photos }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/music', component: () => <MediaLibrary key="music" kind="music" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/audiobooks', component: () => <MediaLibrary key="audiobooks" kind="audiobooks" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/books', component: () => <MediaLibrary key="books" kind="books" /> }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/comics', component: () => <MediaLibrary key="comics" kind="comics" /> }),
   createRoute({ getParentRoute: () => rootRoute, path: '/others', beforeLoad: () => Others.preload?.(), component: OthersRoute }),
   createRoute({ getParentRoute: () => rootRoute, path: '/tv', beforeLoad: () => TVShows.preload?.(), component: () => <TVShows kind="series" /> }),
   createRoute({ getParentRoute: () => rootRoute, path: '/anime', beforeLoad: () => TVShows.preload?.(), component: () => <TVShows kind="anime" /> }),

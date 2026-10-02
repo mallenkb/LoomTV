@@ -5,11 +5,14 @@ export type SidebarOrderItem = {
   label: string;
 };
 
+export const MEDIA_SIDEBAR_NAV_ITEM_IDS = ['photos', 'music', 'audiobooks', 'books', 'comics'] as const;
 
 export const DEFAULT_SIDEBAR_NAV_ORDER: SidebarNavItemId[] = [
   'anime',
   'tv',
   'movies',
+  'divider-photos',
+  ...MEDIA_SIDEBAR_NAV_ITEM_IDS,
   'discover',
   'my-list',
   'divider',
@@ -19,6 +22,12 @@ export const SIDEBAR_NAV_LABELS: Record<string, string> = {
   anime: 'Anime',
   tv: 'TV Shows',
   movies: 'Movies',
+  'divider-photos': 'Photos divider',
+  photos: 'Photos',
+  music: 'Music',
+  audiobooks: 'Audiobooks',
+  books: 'Books',
+  comics: 'Comics and manga',
   discover: 'Discover',
   'my-list': 'My List',
   divider: 'Library divider',

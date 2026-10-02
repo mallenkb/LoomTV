@@ -6,12 +6,13 @@ import {
 import { ArrowLeft, ArrowRight, Loader2, Plus, X } from 'lucide-react';
 import { useLibrary, type LibraryFolderKind } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
+import type { MediaLibraryKind } from '@/shared/mediaLibraries';
 import { Button } from '@/components/ui/button';
 import { useModalLayer } from '@/components/ui/dialog';
 import { LibraryTypeIcon } from '@/components/library-settings/librarySettingsModel';
 
 type SetupStep = 'types' | 'folders' | 'review';
-type SetupKind = LibraryFolderKind;
+type SetupKind = LibraryFolderKind | 'photos' | MediaLibraryKind;
 
 type LibraryOption = {
   id: SetupKind;
@@ -24,8 +25,36 @@ const LIBRARY_OPTIONS: LibraryOption[] = [
   { id: 'movies', label: 'Movies', description: 'Feature films and personal videos', formats: 'MP4, MKV, AVI and more' },
   { id: 'tvShows', label: 'TV Shows', description: 'Series organized by season', formats: 'Episodes and season folders' },
   { id: 'anime', label: 'Anime', description: 'Anime series and films', formats: 'Series and movie folders' },
+  { id: 'photos', label: 'Photos', description: 'Photos kept in their folder structure', formats: 'JPEG, PNG and WebP' },
+  { id: 'music', label: 'Music', description: 'Artists, albums and tracks', formats: 'MP3, FLAC, M4A and more' },
+  { id: 'audiobooks', label: 'Audiobooks', description: 'Books with chapters and progress', formats: 'M4B, MP3 and more' },
+  { id: 'books', label: 'Books', description: 'Ebooks and documents', formats: 'EPUB and PDF' },
+  { id: 'comics', label: 'Comics and manga', description: 'Issues, volumes and manga', formats: 'CBZ and PDF' },
   { id: 'others', label: 'Other videos', description: 'Mixed video folders and custom collections', formats: 'Detected by Loom' },
 ];
+
+const VIDEO_KINDS = new Set<SetupKind>(['movies', 'tvShows', 'anime', 'others']);
+
+function isMediaLibraryKind(kind: SetupKind): kind is MediaLibraryKind {
+  return kind === 'music' || kind === 'audiobooks' || kind === 'books' || kind === 'comics';
+}
+
+type ScanRoot = { id: string; scanning: boolean; message: string | null };
+
+async function waitForScanCompletion(
+  readRoots: () => Promise<ScanRoot[]>,
+  rootId: string,
+): Promise<void> {
+  while (true) {
+    const root = (await readRoots()).find((entry) => entry.id === rootId);
+    if (!root) throw new Error('A library folder was removed while it was being scanned.');
+    if (!root.scanning) {
+      if (root.message) throw new Error(root.message);
+      return;
+    }
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 750));
+  }
+}
 
 export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplete: () => void; onSkip: () => void }) {
   const { addLibraryFolderPath, removeLibraryFolder } = useLibrary();
@@ -35,6 +64,7 @@ export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplet
   const [busyKind, setBusyKind] = useState<SetupKind | null>(null);
   const [isFinishing, setIsFinishing] = useState(false);
   const [message, setMessage] = useState('');
+  const [scanAfterAdding, setScanAfterAdding] = useState(true);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -87,13 +117,32 @@ export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplet
     setBusyKind(kind);
     setMessage('');
     try {
-      const path = await desktopApi.pickLibraryFolder();
-      if (!path) {
+      if (VIDEO_KINDS.has(kind)) {
+        const path = await desktopApi.pickLibraryFolder?.();
+        if (!path) {
+          setMessage('No folder was selected. Your choices are still here.');
+          return;
+        }
+        await addLibraryFolderPath(kind as LibraryFolderKind, path);
+        recordFolder(kind, path);
+        return;
+      }
+      if (kind === 'photos') {
+        const root = await window.desktopApi?.photos?.add();
+        if (!root) {
+          setMessage('No folder was selected. Your choices are still here.');
+          return;
+        }
+        recordFolder(kind, root.path);
+        return;
+      }
+      if (!isMediaLibraryKind(kind)) throw new Error('This library type is not available.');
+      const root = await window.desktopApi?.mediaLibraries?.add(kind);
+      if (!root) {
         setMessage('No folder was selected. Your choices are still here.');
         return;
       }
-      await addLibraryFolderPath(kind, path);
-      recordFolder(kind, path);
+      recordFolder(kind, root.path);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Loom could not add that folder.');
     } finally {
@@ -106,7 +155,17 @@ export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplet
     setBusyKind(kind);
     setMessage('');
     try {
-      await removeLibraryFolder(path);
+      if (VIDEO_KINDS.has(kind)) {
+        await removeLibraryFolder(path);
+      } else if (kind === 'photos') {
+        const roots = await window.desktopApi?.photos?.roots();
+        const root = roots?.find((entry) => entry.path === path);
+        if (root) await window.desktopApi?.photos?.remove(root.id);
+      } else {
+        const roots = await window.desktopApi?.mediaLibraries?.roots(kind as MediaLibraryKind);
+        const root = roots?.find((entry) => entry.path === path);
+        if (root) await window.desktopApi?.mediaLibraries?.remove(kind as MediaLibraryKind, root.id);
+      }
       setFolders((current) => ({
         ...current,
         [kind]: (current[kind] || []).filter((entry) => entry !== path),
@@ -129,6 +188,29 @@ export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplet
     setIsFinishing(true);
     setMessage('');
     try {
+      if (scanAfterAdding) {
+        for (const kind of selected) {
+          if (kind === 'photos') {
+            const api = window.desktopApi?.photos;
+            if (!api) throw new Error('Photo libraries are available from the Loom desktop host.');
+            for (const path of folders.photos || []) {
+              const root = (await api.roots()).find((entry) => entry.path === path);
+              if (!root) throw new Error('A photo folder could not be found. Add it again from Settings.');
+              await api.scan(root.id);
+              await waitForScanCompletion(() => api.roots(), root.id);
+            }
+          } else if (isMediaLibraryKind(kind)) {
+            const api = window.desktopApi?.mediaLibraries;
+            if (!api) throw new Error('Media libraries are available from the Loom desktop host.');
+            for (const path of folders[kind] || []) {
+              const root = (await api.roots(kind)).find((entry) => entry.path === path);
+              if (!root) throw new Error('A media folder could not be found. Add it again from Settings.');
+              await api.scan(kind, root.id);
+              await waitForScanCompletion(() => api.roots(kind), root.id);
+            }
+          }
+        }
+      }
       onComplete();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Loom could not finish scanning your libraries.');
@@ -170,6 +252,7 @@ export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplet
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[var(--loom-muted)]">Quick picks</span>
               <Button type="button" variant="outline" size="sm" onClick={() => applyStarter(['movies', 'tvShows', 'anime'])}>Video</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => applyStarter(['music', 'audiobooks', 'books', 'comics'])}>Listen and read</Button>
               <Button type="button" variant="outline" size="sm" onClick={() => applyStarter(LIBRARY_OPTIONS.map((option) => option.id))}>Everything</Button>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" role="group" aria-label="Library types">
@@ -248,7 +331,12 @@ export default function FirstRunLibrarySetup({ onComplete, onSkip }: { onComplet
                 </div>
               ))}
             </div>
-
+            {selected.some((kind) => kind === 'photos' || isMediaLibraryKind(kind)) && (
+              <label className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface)] px-4 py-3 text-sm">
+                <span><span className="block font-semibold">Scan during setup</span><span className="mt-0.5 block text-xs text-[var(--loom-muted)]">Video folders scan when added. Loom scans the other folders before setup finishes.</span></span>
+                <input type="checkbox" checked={scanAfterAdding} onChange={(event) => setScanAfterAdding(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />
+              </label>
+            )}
           </main>
         )}
 

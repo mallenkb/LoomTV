@@ -526,6 +526,15 @@ export function getMediaRenameDatabase(): BetterSqlite3.Database {
 }
 
 let unreadableSecureSettingsPending = false;
+/** Photos share the Electron database and its whole-database backup. */
+export function getPhotoDatabase(): BetterSqlite3.Database {
+  return getDb();
+}
+
+/** Non-video repositories own separate table groups in the shared database. */
+export function getMediaLibraryDatabase(): BetterSqlite3.Database {
+  return getDb();
+}
 
 function secureSettingsPersistence() {
   const database = getDb();
@@ -1414,6 +1423,13 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
 export function clearDatabase(): ProfileRecord {
   const database = getDb();
   database.transaction(() => database.exec(`
+    DELETE FROM music_roots;
+    DELETE FROM audiobooks_roots;
+    DELETE FROM books_roots;
+    DELETE FROM comics_roots;
+    DELETE FROM photo_items;
+    DELETE FROM photo_directories;
+    DELETE FROM photo_roots;
     DELETE FROM segment_manual_history;
     DELETE FROM media_segments;
     DELETE FROM media_segment_candidates;

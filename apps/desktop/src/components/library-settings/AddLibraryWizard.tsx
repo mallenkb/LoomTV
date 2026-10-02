@@ -23,8 +23,10 @@ export type AddLibraryWizardProps = {
   canAddFolder: (kind: LibraryKind) => boolean;
   onAddFolder: (kind: LibraryKind, folderPath?: string) => Promise<WizardFolder | null>;
   onRemoveFolder: (kind: LibraryKind, folder: WizardFolder) => Promise<void | boolean>;
+  onScan: (kind: LibraryKind) => Promise<void>;
 };
 
+const VIDEO_LIBRARY_KINDS = new Set<LibraryKind>(['movies', 'tvShows', 'anime', 'others']);
 
 export default function AddLibraryWizard({
   open,
@@ -32,9 +34,11 @@ export default function AddLibraryWizard({
   canAddFolder,
   onAddFolder,
   onRemoveFolder,
+  onScan,
 }: AddLibraryWizardProps) {
   const [kind, setKind] = useState<LibraryKind>('movies');
   const [folders, setFolders] = useState<WizardFolder[]>([]);
+  const [scanAfterAdding, setScanAfterAdding] = useState(true);
   const [busy, setBusy] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -45,6 +49,7 @@ export default function AddLibraryWizard({
     if (!open) return;
     setKind('movies');
     setFolders([]);
+    setScanAfterAdding(true);
     setBusy(false);
     setRemovingId(null);
     setError('');
@@ -54,6 +59,7 @@ export default function AddLibraryWizard({
 
   const selectedDefinition = LIBRARY_TYPE_DEFINITIONS.find((definition) => definition.kind === kind)
     || LIBRARY_TYPE_DEFINITIONS[0];
+  const videoLibrary = VIDEO_LIBRARY_KINDS.has(kind);
   const folderActionsAvailable = canAddFolder(kind);
 
   const selectKind = (nextKind: LibraryKind) => {
@@ -63,6 +69,7 @@ export default function AddLibraryWizard({
       return;
     }
     setKind(nextKind);
+    setScanAfterAdding(true);
     setError('');
   };
 
@@ -119,6 +126,7 @@ export default function AddLibraryWizard({
     setBusy(true);
     setError('');
     try {
+      if (scanAfterAdding && !videoLibrary) await onScan(kind);
       setComplete(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The library could not be scanned.');
@@ -131,6 +139,7 @@ export default function AddLibraryWizard({
     setComplete(false);
     setKind('movies');
     setFolders([]);
+    setScanAfterAdding(true);
     setError('');
     setFolderPathInput('');
   };
@@ -158,7 +167,11 @@ export default function AddLibraryWizard({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--loom-text)]">{selectedDefinition.label}</p>
                 <p className="mt-1 text-sm text-[var(--loom-muted)]">
-                  The folders were added and scanned.
+                  {videoLibrary
+                    ? 'The folders were added and scanned.'
+                    : scanAfterAdding
+                      ? 'The folders were added and scanned.'
+                      : 'The folders were added.'}
                 </p>
               </div>
             </div>
@@ -248,7 +261,17 @@ export default function AddLibraryWizard({
               {!folderActionsAvailable ? <p role="alert" className="text-xs text-amber-200">Folder picking is available in the Loom desktop app.</p> : null}
             </section>
 
-
+            {!videoLibrary ? (
+              <label className="flex items-center gap-2 text-sm text-[var(--loom-text)]">
+                <input
+                  type="checkbox"
+                  checked={scanAfterAdding}
+                  onChange={(event) => setScanAfterAdding(event.target.checked)}
+                  className="h-4 w-4 accent-[var(--loom-accent)]"
+                />
+                Scan after adding
+              </label>
+            ) : null}
 
             {error ? <p role="alert" className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p> : null}
 

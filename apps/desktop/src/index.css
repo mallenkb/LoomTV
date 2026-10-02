@@ -464,6 +464,10 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   filter: none;
 }
 
+body.platform-darwin .loom-photo-viewer-header {
+  padding-top: 2rem;
+}
+
 .loom-modern-home {
   color-scheme: inherit;
 }
