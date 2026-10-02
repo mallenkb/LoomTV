@@ -48,6 +48,8 @@ export function createThumbnailCache(options: {
   database?: BetterSqlite3.Database;
   /** Starts the legacy-table migration; tests drive it with migrateLegacyBatch. */
   scheduleMigration?: boolean;
+  /** Called once the legacy table is empty, so its pages can be returned. */
+  onLegacyDrained?: () => void;
 }) {
   const { directory, database } = options;
   let savesSinceSweep = 0;
@@ -193,6 +195,7 @@ export function createThumbnailCache(options: {
     if (rows.length === 0) {
       legacyRowsRemain = false;
       enforceQuota();
+      options.onLegacyDrained?.();
       return 0;
     }
     const remove = database.prepare('DELETE FROM thumbnail_cache WHERE cache_key = ?');

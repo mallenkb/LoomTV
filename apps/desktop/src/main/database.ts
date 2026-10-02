@@ -190,16 +190,38 @@ export function checkpointDatabaseForQuit(): void {
   }
 }
 
+let freePageTrimTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Return free pages a bounded step at a time until none are left. One step
+ * per launch took many launches to give back a large deletion, such as the
+ * thumbnail BLOBs moving out of the database.
+ */
+function scheduleFreePageTrim(database: BetterSqlite3.Database, delayMs = 1_000): void {
+  if (freePageTrimTimer) return;
+  freePageTrimTimer = setTimeout(() => {
+    freePageTrimTimer = null;
+    if (db !== database) return;
+    try {
+      if (trimFreePages(database) > 0) scheduleFreePageTrim(database);
+      else database.pragma('wal_checkpoint(PASSIVE)');
+    } catch (error) {
+      console.warn('[database] Free page trim failed:', error);
+    }
+  }, delayMs);
+  freePageTrimTimer.unref();
+}
+
 function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
   const timer = setTimeout(() => {
     if (db !== database) return;
     try {
       database.pragma('optimize');
-      trimFreePages(database);
       database.pragma('wal_checkpoint(PASSIVE)');
     } catch (error) {
       console.warn('[database] Idle maintenance failed:', error);
     }
+    scheduleFreePageTrim(database, 0);
   }, 30_000);
   timer.unref();
 }
@@ -417,10 +439,12 @@ function thumbnailCacheDirectory(): string {
 }
 
 function getThumbnailRepository(): ReturnType<typeof createThumbnailCache> {
+  const database = getDb();
   thumbnailRepository ||= createThumbnailCache({
     directory: thumbnailCacheDirectory(),
-    database: getDb(),
+    database,
     scheduleMigration: true,
+    onLegacyDrained: () => scheduleFreePageTrim(database),
   });
   return thumbnailRepository;
 }

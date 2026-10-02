@@ -61,10 +61,13 @@ test('the quota removes the least recently used files first', (t) => {
 test('legacy SQLite thumbnails move to files in batches and keep their age', (t) => {
   const dir = tempDir(t);
   const database = legacyDatabase(t, 5);
-  const cache = createThumbnailCache({ directory: dir, database });
+  let drained = 0;
+  const cache = createThumbnailCache({ directory: dir, database, onLegacyDrained: () => { drained += 1; } });
   assert.equal(cache.migrateLegacyBatch(2), 2);
   assert.equal(cache.migrateLegacyBatch(10), 3);
+  assert.equal(drained, 0);
   assert.equal(cache.migrateLegacyBatch(10), 0);
+  assert.equal(drained, 1, 'the drained hook lets the database return the freed pages');
   assert.equal((database.prepare('SELECT COUNT(*) AS n FROM thumbnail_cache').get() as { n: number }).n, 0);
   // Check the carried-over age before a read refreshes it.
   const stem = key(1);
