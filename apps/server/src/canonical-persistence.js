@@ -68,7 +68,9 @@ export function createCanonicalPersistence(options) {
   async function stopServices() {
     const failures = [];
     for (const close of [
-      () => accountsAndCatalog.stop?.(),
+      // A rejected transport configuration never opens the state store. The
+      // scanner's stop method reads that store, so only stop it after startup.
+      () => started ? accountsAndCatalog.stop?.() : undefined,
       () => profiles.close?.(),
       () => store.stop(),
     ]) {

@@ -75,7 +75,7 @@ test('non-loopback transport policy rejects cleartext and requires secure proxy 
   );
   assert.throws(
     () => assertTransportConfiguration({ host: '0.0.0.0', proxyPolicy }),
-    (error) => error.code === 'INSECURE_TRANSPORT_CONFIGURATION' && /requires --require-secure-transport/.test(error.message),
+    (error) => error.code === 'INSECURE_TRANSPORT_CONFIGURATION' && /require --require-secure-transport/.test(error.message),
   );
   assert.doesNotThrow(() => assertTransportConfiguration({
     host: '0.0.0.0',

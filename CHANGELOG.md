@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.9](docs/releases/v2.0.9.md)
+
+Adds recoverable library organization and cleanup, reduces desktop playback memory use, and integrates the first local photo, audio, and reading-library implementations.
+
 ### [2.0.8](docs/releases/v2.0.8.md)
 
 Improves online subtitle matching when IMDb IDs are missing, fixes series metadata years and media organization safeguards, and patches a node-forge signature verification issue.
