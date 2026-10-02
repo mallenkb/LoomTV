@@ -21,7 +21,7 @@ import {
   type CachedArtwork,
   type FetchedArtworkBytes,
 } from './databaseArtworkRepository.ts';
-import { createDatabaseThumbnailRepository, type CachedThumbnail } from './databaseThumbnailRepository.ts';
+import { createThumbnailCache, type CachedThumbnail } from './thumbnailCache.ts';
 import { compactDatabaseIfWasteful, trimFreePages } from './databaseCompaction.ts';
 import {
   loadLibrary as loadLibraryRecord,
@@ -134,7 +134,7 @@ export type { PersistedStremioAddonSnapshot } from './databasePluginRepository.t
 
 let db: BetterSqlite3.Database | null = null;
 let artworkRepository: ReturnType<typeof createDatabaseArtworkRepository> | null = null;
-let thumbnailRepository: ReturnType<typeof createDatabaseThumbnailRepository> | null = null;
+let thumbnailRepository: ReturnType<typeof createThumbnailCache> | null = null;
 let segmentRepository: ReturnType<typeof createDatabaseSegmentsRepository> | null = null;
 let pluginSecretStore: PluginSecretStore | null = null;
 
@@ -392,8 +392,16 @@ function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkReposito
   return artworkRepository;
 }
 
-function getThumbnailRepository(): ReturnType<typeof createDatabaseThumbnailRepository> {
-  thumbnailRepository ||= createDatabaseThumbnailRepository(getDb());
+function thumbnailCacheDirectory(): string {
+  return path.join(app.getPath('userData'), 'thumbnail-cache');
+}
+
+function getThumbnailRepository(): ReturnType<typeof createThumbnailCache> {
+  thumbnailRepository ||= createThumbnailCache({
+    directory: thumbnailCacheDirectory(),
+    database: getDb(),
+    scheduleMigration: true,
+  });
   return thumbnailRepository;
 }
 
@@ -1402,7 +1410,8 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM app_settings;
   `))();
 
-  for (const cacheDirectory of [artworkCacheDirectory(), pluginArtworkCacheDirectory()]) {
+  thumbnailRepository?.clear();
+  for (const cacheDirectory of [artworkCacheDirectory(), pluginArtworkCacheDirectory(), thumbnailCacheDirectory()]) {
     try {
       fs.rmSync(cacheDirectory, { recursive: true, force: true });
     } catch (error) {
