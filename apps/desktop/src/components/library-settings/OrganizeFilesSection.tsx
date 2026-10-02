@@ -228,7 +228,7 @@ export default function OrganizeFilesSection({ disabled }: { disabled: boolean }
         : pending > 0
           ? `${pending.toLocaleString()} ${pending === 1 ? 'file can' : 'files can'} be renamed to match ${pending === 1 ? 'its title' : 'their titles'}.`
           : organize.waitingFiles
-            ? 'Waiting for files to remain unchanged for 5 minutes before organizing.'
+            ? 'Waiting for files that are still being copied or downloaded.'
             : organize.skippedFiles
               ? 'Some files are waiting or need review. Open the preview for details.'
               : 'Everything is organized.';

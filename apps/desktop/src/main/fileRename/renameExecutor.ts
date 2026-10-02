@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
 import { createMediaItemId } from '../libraryItemHelpers.ts';
 import { mediaFileRevision } from '../skipSegments/fileIdentity.ts';
+import { createFileSettling } from './fileSettling.ts';
 import type { LibraryData } from '../appContracts.ts';
 import type { MediaItem } from '../metadata/types.ts';
 import {
   createPathMapper,
-  ORGANIZE_SETTLE_MINUTES,
   orderOperations,
   planRenames,
   type RenameOperation,
@@ -433,10 +433,9 @@ function performOnDisk(operations: readonly LoggedOperation[], onStep: (complete
   }
 }
 
-/** A file changed more recently than this is left for a later automatic run. */
-const RECENT_CHANGE_MS = ORGANIZE_SETTLE_MINUTES * 60 * 1000;
-
 export function createRenameExecutor(deps: RenameExecutorDeps) {
+  // Kept across runs: a file still being written is looked at again shortly.
+  const settling = createFileSettling();
   const lockedTargets = (): Map<string, string> => new Map(
     (deps.getDatabase().prepare('SELECT file_path, rejected_name FROM media_rename_locks').all() as Array<{ file_path: string; rejected_name: string }>)
       .map((row) => [row.file_path, row.rejected_name.toLowerCase()]),
@@ -450,13 +449,9 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     const result = planRenames({
       ...(options.automatic ? {
         isRecentlyModified: (filePath: string) => {
-          try {
-            const remaining = RECENT_CHANGE_MS - (now - fs.statSync(filePath).mtimeMs);
-            if (remaining > 0) deferred.set(filePath, remaining);
-            return remaining > 0;
-          } catch {
-            return true;
-          }
+          const remaining = settling.waitMs(filePath, now);
+          if (remaining > 0) deferred.set(filePath, remaining);
+          return remaining > 0;
         },
       } : {}),
       // A movie that shares a folder with others gets a folder of its own.

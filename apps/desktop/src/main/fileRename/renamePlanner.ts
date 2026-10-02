@@ -65,8 +65,8 @@ export type RenamePlannerInput = {
   /** Other titles the matched sources know this item by (original or translated). */
   knownTitles?: (item: MediaItem) => readonly string[];
   /**
-   * Automatic runs only: true for a file changed moments ago, which may still
-   * be downloading or seeding. Such a file waits for a later sync.
+   * Automatic runs only: true for a file that is still being copied or
+   * downloaded. It is looked at again shortly and organized once finished.
    */
   isRecentlyModified?: (filePath: string) => boolean;
 };
@@ -77,8 +77,6 @@ const SUBTITLE_TAG = /^(?:[a-z]{2,3}(?:-[a-z]{2,4})?|forced|sdh|cc|hi|default|fu
 const PLACEHOLDER_TITLE = /^(?:tba|tbd|to be announced|untitled|episode\s*#?\d+|ep\.?\s*\d+)$/i;
 const SAMPLE_NAME = /(?:^|[\s._-])sample(?:[\s._-]|$)/i;
 const MAX_BASE_LENGTH = 200;
-/** Automatic runs leave a file alone until it has been unchanged this long. */
-export const ORGANIZE_SETTLE_MINUTES = 5;
 /** Tokens that start the release-tag part of a name: quality, source, codec, language, group markers. */
 const RELEASE_TAG = /^(?:\d{3,4}p|4k|uhd|hdr\d*\+?|dv|dovi|sdr|web|web-?dl|webrip|nfrip|amzn|nf|hmax|dsnp|atvp|hulu|pcok|bluray|blu-ray|brrip|bdrip|dvdrip|hdtv|hdrip|remux|x26[45]|h\.?26[45]|hevc|avc|av1|xvid|aac\d?(?:\.\d)?|ac3|dd\+?\d?(?:\.\d)?|ddp\d?(?:\.\d)?|eac3|dts(?:-hd)?|truehd|atmos|flac|opus|mp3|10bit|8bit|ita|eng|esub|multi|dual|subs?|proper|repack|internal|complete|limited)$/i;
 const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'and', 'in', 'on', 'to', 'is', 'at', 'for', 'with']);
@@ -403,7 +401,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
           return `"${name}" is still downloading. Folder changes wait until the download finishes.`;
         }
         if (isVideoFileName(name)) {
-          if (input.isRecentlyModified?.(child)) return `"${name}" changed in the last ${ORGANIZE_SETTLE_MINUTES} minutes. Folder changes wait until copying finishes.`;
+          if (input.isRecentlyModified?.(child)) return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
         } else if (!SIDECAR_EXTENSIONS.has(path.extname(name).toLowerCase()) && list(child) !== null) {
           pending.push({ directory: child, depth: depth + 1 });
         }
@@ -501,7 +499,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
     const moving = targetDirectory !== directory;
     if (!(list(directory) || []).includes(name)) return skip('The file is no longer where the library expects it.');
     if (input.isRecentlyModified?.(filePath)) {
-      return skip(`The file changed in the last ${ORGANIZE_SETTLE_MINUTES} minutes and may still be downloading. It is organized once it has been unchanged that long.`);
+      return skip('The file is still being copied or downloaded. It is organized as soon as it finishes.');
     }
     // Keep organized names except provisional episode codes awaiting a title
     // or a season prefix confirmed wrong by the folder and episode metadata.
