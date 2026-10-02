@@ -331,6 +331,7 @@ export interface IpcHandlerDependencies<
   loadLibrary: () => TLibraryData;
   libraryForRenderer: (library?: TLibraryData) => IpcResult<'library:get'>;
   libraryIndexForRenderer: () => IpcResult<'library:get-index'>;
+  libraryIndexIfChanged: (knownFingerprint?: string) => IpcResult<'library:get-index-if-changed'>;
   libraryItemForRenderer: (mediaId: string) => IpcResult<'library:get-item'> | Promise<IpcResult<'library:get-item'>>;
   scanLibrary: (
     library: TLibraryData,
@@ -653,6 +654,8 @@ export function registerIpcHandlers<
 
   handleNoArgs('library:get', () => deps.libraryForRenderer());
   handleNoArgs('library:get-index', () => deps.libraryIndexForRenderer());
+  handle('library:get-index-if-changed', (_event, knownFingerprint?: string) => deps.libraryIndexIfChanged(knownFingerprint),
+    z.tuple([z.string().regex(/^[0-9a-f]{32}$/).optional()]));
   handle('library:get-item', (_event, mediaId) => deps.libraryItemForRenderer(mediaId), z.tuple([nonEmptyString]));
 
   handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {

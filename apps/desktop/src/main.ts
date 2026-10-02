@@ -18,6 +18,7 @@ import {
 } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
+import type { LibraryIndexPayload, LibraryIndexUnchanged } from './shared/desktopProtocol';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
@@ -65,6 +66,7 @@ import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } fr
 import { createArtworkUrls } from './main/artworkUrls';
 import { clearOversizedHttpCacheOnce, httpDiskCacheSwitch } from './main/httpCacheBudget.ts';
 import { pruneObsoleteData } from './main/dataRetention.ts';
+import { libraryIndexIfChanged } from './main/libraryIndexFingerprint.ts';
 import {
   registerResource,
   setResourceRegistryCatalogGeneration,
@@ -1201,6 +1203,11 @@ function compactLibraryIndexForRenderer(revision = libraryMutationVersion) {
   return projectLibraryIndexForRenderer(scoped, revision);
 }
 
+function compactLibraryIndexIfChanged(knownFingerprint?: string): LibraryIndexPayload | LibraryIndexUnchanged {
+  const state = getDesktopActiveProfileState();
+  return libraryIndexIfChanged(compactLibraryIndexForRenderer(), `${state.profileId ?? 'profile:none'}:${state.selectionRevision}`, knownFingerprint);
+}
+
 function compactLibraryItemForRenderer(mediaId: string, revision = libraryMutationVersion) {
   const profileId = getDesktopActiveProfileId();
   if (!profileId) return null;
@@ -1972,6 +1979,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   loadLibrary,
   libraryForRenderer,
   libraryIndexForRenderer: compactLibraryIndexForRenderer,
+  libraryIndexIfChanged: compactLibraryIndexIfChanged,
   // Detail reads must return the persisted library snapshot. Provider refreshes
   // belong to explicit metadata-refresh actions, not opening a local title.
   libraryItemForRenderer: compactLibraryItemForRenderer,

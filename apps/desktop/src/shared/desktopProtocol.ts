@@ -269,6 +269,14 @@ export interface LibraryIndexPayload extends LanLibraryIndexPayload<LibraryCard>
   libraryFolders?: string[];
   libraryFolderGroups?: LibraryFolderGroups;
   libraryFolderStatuses?: LibraryFolderStatus[];
+  /** Identifies this exact index for library:get-index-if-changed. */
+  fingerprint?: string;
+}
+/** The renderer already holds the index with this fingerprint. */
+export interface LibraryIndexUnchanged {
+  catalogVersion: 1;
+  unchanged: true;
+  fingerprint: string;
 }
 export type LibraryItemDetailsPayload = LanLibraryItemDetailsPayload<WireMediaItem>;
 

@@ -10,6 +10,7 @@ import type {
 } from './mediaControlProtocol';
 import type {
   LibraryIndexPayload,
+  LibraryIndexUnchanged,
   LibraryItemDetailsPayload,
   LibraryScanMode,
   LibraryScanProgress,
@@ -46,6 +47,7 @@ import type { IpcContract, IpcEventContract } from './ipcContract';
 
 type CompactLibraryBridgeApi = {
   getLibraryIndex: () => Promise<LibraryIndexPayload>;
+  getLibraryIndexIfChanged: (knownFingerprint?: string) => Promise<LibraryIndexPayload | LibraryIndexUnchanged>;
   getLibraryItem: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
 };
 
@@ -85,6 +87,7 @@ const desktopApi = {
   },
   getLibrary: () => ipcRenderer.invoke('library:get'),
   getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
+  getLibraryIndexIfChanged: (knownFingerprint?: string) => ipcRenderer.invoke('library:get-index-if-changed', knownFingerprint),
   getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),
   scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
   onLibraryScanProgress: (callback: (progress: LibraryScanProgress) => void) => {

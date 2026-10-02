@@ -9,6 +9,7 @@ import type {
   ApiResult,
   LibraryFolderKind,
   LibraryIndexPayload,
+  LibraryIndexUnchanged,
   LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
@@ -110,6 +111,7 @@ export interface IpcContract {
   'library:add-folder-path': { args: [kind: LibraryFolderKind, folderPath: string]; result: LibraryIndexPayload };
   'library:get': { args: []; result: LibraryPayload };
   'library:get-index': { args: []; result: LibraryIndexPayload };
+  'library:get-index-if-changed': { args: [knownFingerprint?: string]; result: LibraryIndexPayload | LibraryIndexUnchanged };
   'library:get-item': { args: [mediaId: string]; result: LibraryItemDetailsPayload | null };
   'library:pick-folder': { args: [currentPath?: string]; result: string | null };
   'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };

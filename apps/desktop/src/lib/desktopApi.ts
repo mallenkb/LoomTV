@@ -20,6 +20,7 @@ import type {
   FFmpegStatus,
   LibraryFolderKind,
   LibraryIndexPayload,
+  LibraryIndexUnchanged,
   LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
@@ -239,6 +240,7 @@ export type DesktopBridgeApi = {
       onMemoryTrim?: (callback: () => void) => () => void;
       getLibrary: () => Promise<LibraryPayload>;
       getLibraryIndex?: () => Promise<LibraryIndexPayload>;
+      getLibraryIndexIfChanged?: (knownFingerprint?: string) => Promise<LibraryIndexPayload | LibraryIndexUnchanged>;
       getLibraryItem?: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
       scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryIndexPayload>;
       onLibraryScanProgress?: (callback: (progress: LibraryScanProgress) => void) => () => void;
@@ -436,6 +438,9 @@ const BROWSER_LOCAL_SESSION_KEY = 'loomtv:browser-local-session-token.v1';
 let resolvedServerBase: string | null = null;
 let resolvedLocalAccessToken: string | null = null;
 let remoteCatalogCache: { identity: string; etag: string; index: LibraryIndexPayload } | null = null;
+// The last local index, returned again when the host reports it unchanged so
+// the renderer can recognize the same object and skip re-applying it.
+let lastLocalIndex: LibraryIndexPayload | null = null;
 let remoteCatalogGeneration = 0;
 
 function clearRemoteCatalogCache(): void {
@@ -902,6 +907,20 @@ const desktopTransport = {
         libraryEtag: etag,
       });
       return index;
+    }
+    if (window.desktopApi?.getLibraryIndexIfChanged) {
+      const known = lastLocalIndex?.fingerprint;
+      const response = await window.desktopApi.getLibraryIndexIfChanged(known);
+      if ('unchanged' in response) {
+        if (lastLocalIndex && response.fingerprint === known) return lastLocalIndex;
+        lastLocalIndex = null;
+        const fresh = await window.desktopApi.getLibraryIndexIfChanged();
+        if ('unchanged' in fresh) throw new Error('The host reported an unchanged catalog without one to compare.');
+        lastLocalIndex = fresh;
+        return fresh;
+      }
+      lastLocalIndex = response;
+      return response;
     }
     if (window.desktopApi?.getLibraryIndex) return window.desktopApi.getLibraryIndex();
     const response = await fetchLocalResponse('/api/renderer/library/index');
