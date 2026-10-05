@@ -17,7 +17,7 @@ export interface IpcSenderIdentity {
   mainWindowDestroyed: boolean;
 }
 
-const TRUSTED_APPLICATION_PROTOCOLS = new Set(['file:', 'http:', 'https:']);
+const TRUSTED_APPLICATION_PROTOCOLS = new Set(['file:', 'http:', 'https:', 'loomtv:']);
 
 /**
  * Compare a navigation or sender URL with the immutable application identity
@@ -36,6 +36,12 @@ export function isExpectedAppUrl(candidateUrl: string | null, expectedAppUrl: st
       || candidate.protocol !== expected.protocol) return false;
     if (expected.protocol === 'file:') {
       return candidate.hostname === expected.hostname && candidate.pathname === expected.pathname;
+    }
+    if (expected.protocol === 'loomtv:') {
+      return expected.hostname === 'app' && candidate.hostname === 'app'
+        && expected.pathname === '/index.html' && candidate.pathname === expected.pathname
+        && !candidate.port && !expected.port && !candidate.username && !expected.username
+        && !candidate.password && !expected.password;
     }
     return candidate.origin === expected.origin;
   } catch {

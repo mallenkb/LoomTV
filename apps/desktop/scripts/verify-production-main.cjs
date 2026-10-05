@@ -27,4 +27,4 @@ if (embeddedDevRenderer.test(mainBundle)) {
   process.exit(1);
 }
 
-console.log('Production renderer binding verified: bundled file only.');
+console.log('Production renderer binding verified: bundled assets only.');

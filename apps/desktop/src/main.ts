@@ -20,6 +20,7 @@ import {
 } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { LibraryIndexPayload, LibraryIndexUnchanged } from './shared/desktopProtocol';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -66,6 +67,8 @@ import { isIpcOnlyHttpRoute } from './main/lanRoutePolicy';
 import { isTrustedRendererHttpOrigin } from './main/rendererHttpAccess';
 import { rendererConnectSources } from './main/rendererSecurityPolicy.ts';
 import { MEDIA_PROTOCOL_SCHEMES, mediaSchemePrivileges } from './main/loomtvProtocol.ts';
+import { PACKAGED_RENDERER_ORIGIN, isPackagedRendererUrl, packagedRendererAssetPath } from './main/rendererProtocol.ts';
+import { migrateRendererStorage } from './main/rendererStorageMigration.ts';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { hasNativePlaybackSession, refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
@@ -126,6 +129,7 @@ import {
   getRendererDevServerUrl,
   getTrayIconPath,
   getWindowIconPath,
+  packagedRendererRoot,
 } from './main/windowManager';
 import { libMpvRuntimeSummary as mpvRuntimeSummary, stopAllLibMpvPlayback as stopAllMpvPlayback } from './main/libmpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
@@ -402,7 +406,7 @@ app.commandLine.appendSwitch(...httpDiskCacheSwitch());
 
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
-  ...MEDIA_PROTOCOL_SCHEMES.map((scheme) => ({ scheme, privileges: mediaSchemePrivileges })),
+  ...MEDIA_PROTOCOL_SCHEMES.map((scheme) => ({ scheme, privileges: { ...mediaSchemePrivileges, codeCache: scheme === 'loomtv' } })),
 ]);
 
 const USER_DATA_DIR = app.getPath('userData');
@@ -499,6 +503,7 @@ function getLanRendererUrl(): string | null {
 const LAN_RENDERER_URL = getLanRendererUrl();
 const ALLOWED_CORS_ORIGINS = new Set<string>(
   [
+    PACKAGED_RENDERER_ORIGIN,
     MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : '',
     LAN_RENDERER_URL ? new URL(LAN_RENDERER_URL).origin : '',
   ].filter(Boolean),
@@ -1767,6 +1772,7 @@ function configureRendererSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const isRendererDocument = details.resourceType === 'mainFrame'
       && (details.url.startsWith('file://')
+        || isPackagedRendererUrl(details.url)
         || Boolean(MAIN_WINDOW_DEV_SERVER_URL && details.url.startsWith(MAIN_WINDOW_DEV_SERVER_URL)));
     if (!isRendererDocument) {
       callback({ responseHeaders: details.responseHeaders || {} });
@@ -2989,11 +2995,18 @@ app.whenReady().then(async () => {
   const handleMediaProtocol = async (request: Request) => {
     try {
       const parsed = new URL(request.url);
+      if (parsed.protocol === 'loomtv:' && parsed.hostname === 'app') {
+        const assetPath = packagedRendererAssetPath(request.url, packagedRendererRoot());
+        if (!assetPath || !['GET', 'HEAD'].includes(request.method)) return new Response('Forbidden', { status: 403 });
+        try {
+          return await net.fetch(pathToFileURL(assetPath).toString(), { method: request.method });
+        } catch { return new Response('Not Found', { status: 404 }); }
+      }
       if (parsed.hostname === 'photos') return photoLibraryService.imageResponse(request);
       if (parsed.hostname === 'media-libraries') {
         const response = await mediaLibrariesService.response(request);
         const origin = request.headers.get('Origin');
-        const rendererOrigin = MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : 'null';
+        const rendererOrigin = MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : PACKAGED_RENDERER_ORIGIN;
         if (origin === rendererOrigin) response.headers.set('Access-Control-Allow-Origin', origin);
         return response;
       }
@@ -3027,6 +3040,9 @@ app.whenReady().then(async () => {
   await startMediaServer(mediaServerDeps);
   recordPlaybackDiagnostic('desktop.media-server.ready');
   recordStartupMark('mediaServerReady');
+  if (!MAIN_WINDOW_DEV_SERVER_URL) {
+    await migrateRendererStorage(path.join(packagedRendererRoot(), 'index.html'), USER_DATA_DIR);
+  }
   // Unified onboarding needs the setup response to choose the setup window.
   // Restored administration can start after the native renderer opens.
   const waitForSetup = await requiresUnifiedDesktopSetup();
