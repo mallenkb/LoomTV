@@ -106,6 +106,17 @@ queryClient.getQueryCache().subscribe(event => {
 });
 
 let activeReads = 0;
+export const DETAIL_CACHE_TTL_MS = 15_000;
+const detailPrefetches = new Map<string, Promise<void>>();
+export function prefetchLibraryDetails(id: string, read: () => Promise<unknown>): void {
+  const key = JSON.stringify([...queryScope(), id]);
+  if (detailPrefetches.has(key) || detailPrefetches.size >= 3) return;
+  const request = Promise.resolve().then(read)
+    .then(() => undefined, () => undefined)
+    .finally(() => { detailPrefetches.delete(key); });
+  detailPrefetches.set(key, request);
+}
+
 const pendingReads: (() => void)[] = [];
 async function scheduledRead<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T> {
   await new Promise<void>((resolve, reject) => {
@@ -137,7 +148,8 @@ export async function cachedDesktopRead<T>(family: string, args: readonly unknow
   const options = {
     queryKey: [family, ...scope, ...args],
     queryFn: ({ signal }: { signal: AbortSignal }) => expensive ? scheduledRead(read, signal) : read(),
-    staleTime,
+    staleTime: family === 'detail' ? Math.min(staleTime, DETAIL_CACHE_TTL_MS) : staleTime,
+    ...(family === 'detail' ? { gcTime: DETAIL_CACHE_TTL_MS } : {}),
     // LibraryContext owns the catalog. Retain only its in-flight request here,
     // rather than another complete response for the default three minutes.
     ...(family === 'getLibraryIndex' || family === 'getLibrary' ? { gcTime: 0 } : {}),
