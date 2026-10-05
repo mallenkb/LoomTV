@@ -422,7 +422,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       runtime: matchedTmdbTVMeta?.runtime,
       seasonCount: matchedTmdbTVMeta?.seasonCount || matchedTVDBMeta?.seasonCount,
       episodeCount: matchedTmdbTVMeta?.episodeCount || matchedTVDBMeta?.episodeCount,
-      trailerUrl: matchedTmdbTVMeta?.trailerUrl,
+      trailerUrl: matchedTmdbTVMeta?.trailerUrl || matchedAniListMeta?.trailerUrl || matchedJikanMeta?.trailerUrl,
       providerRatings: completedSeries ? omdbProviderRatings(matchedOmdbData) : undefined,
       contentRatings: mergeContentRatings(
         matchedTmdbTVMeta?.contentRatings,
@@ -697,7 +697,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         : matchedTmdbTVMeta?.runtime,
       seasonCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.seasonCount || matchedTVDBMeta?.seasonCount,
       episodeCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.episodeCount || matchedTVDBMeta?.episodeCount,
-      trailerUrl: finalType === 'movie' ? matchedTmdbData?.trailerUrl : matchedTmdbTVMeta?.trailerUrl,
+      trailerUrl: (finalType === 'movie' ? matchedTmdbData?.trailerUrl : matchedTmdbTVMeta?.trailerUrl)
+        || matchedAniListMeta?.trailerUrl || matchedJikanMeta?.trailerUrl,
       providerRatings: useMovieMetadata || completedSeries
         ? omdbProviderRatings(matchedOmdbData)
         : undefined,

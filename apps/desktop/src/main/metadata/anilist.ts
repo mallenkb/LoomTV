@@ -18,6 +18,7 @@ const ANILIST_DETAIL_QUERY = `
       startDate { year }
       coverImage { extraLarge large medium }
       bannerImage
+      trailer { id site }
       characters(page: 1, perPage: 20, sort: [ROLE, FAVOURITES_DESC]) {
         edges {
           node {
@@ -70,6 +71,7 @@ const aniListMediaSchema = z.object({
   startDate: z.object({ year: z.number().finite().nullable().optional() }).nullable().optional(),
   coverImage: aniListImageSchema.nullable().optional(),
   bannerImage: z.string().nullable().optional(),
+  trailer: z.object({ id: z.string().nullable().optional(), site: z.string().nullable().optional() }).nullable().optional(),
   characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).nullable().optional() }).nullable().optional(),
 });
 
@@ -187,7 +189,16 @@ function mapAniListMedia(media: AniListMedia): AniListAnimeResult {
       : 0,
     genres: media.genres?.filter(Boolean) || [],
     cast: mapAniListCharacterEdges(media.characters?.edges || []),
+    trailerUrl: youtubeTrailerUrl(media.trailer),
   };
+}
+
+/** Loom plays YouTube trailers; AniList also lists Dailymotion ones, which are skipped. */
+function youtubeTrailerUrl(trailer: AniListMedia['trailer']): string | undefined {
+  const id = trailer?.id?.trim();
+  return id && trailer?.site?.toLowerCase() === 'youtube' && /^[\w-]{6,20}$/.test(id)
+    ? `https://www.youtube.com/watch?v=${id}`
+    : undefined;
 }
 
 export async function fetchAniListAnimeMetadata(

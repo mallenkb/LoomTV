@@ -259,15 +259,23 @@ function localSeasonNumbers(item: MediaItem): number[] {
     .sort((left, right) => left - right);
 }
 
-function mergeSelectedEpisodeRatings(
+export function mergeSelectedEpisodeRatings(
   episodes: EpisodeMeta[] | undefined,
   ratingEpisodes: EpisodeMeta[],
+  fallbackSources: ReadonlyArray<readonly EpisodeMeta[] | undefined> = [],
 ): EpisodeMeta[] | undefined {
   if (!episodes?.length) return ratingEpisodes;
 
+  // The selected source wins. An episode it has not rated takes the first
+  // rating another provider has, instead of dropping to none.
   const merged = episodes.map((episode) => {
-    const ratingEpisode = findEpisodeMetadataMatch(episode, ratingEpisodes);
-    return { ...episode, rating: numericRating(ratingEpisode?.rating) };
+    const selected = numericRating(findEpisodeMetadataMatch(episode, ratingEpisodes)?.rating);
+    if (selected > 0) return { ...episode, rating: selected };
+    for (const source of fallbackSources) {
+      const fallback = numericRating(source && findEpisodeMetadataMatch(episode, source as EpisodeMeta[])?.rating);
+      if (fallback > 0) return { ...episode, rating: fallback };
+    }
+    return { ...episode, rating: 0 };
   });
   for (const ratingEpisode of ratingEpisodes) {
     if (!findEpisodeMetadataMatch(ratingEpisode, episodes)) merged.push(ratingEpisode);
@@ -277,6 +285,7 @@ function mergeSelectedEpisodeRatings(
 
 const STREAMING_PROVIDER_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MISSING_TRAILER_RETRY_MS = 7 * DAY_MS;
 const METADATA_REFRESH_INTERVALS: Record<MetadataRefreshCategory, number> = {
   core: 30 * DAY_MS,
   cast: 30 * DAY_MS,
@@ -961,7 +970,20 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       ? tmdbMeta?.episodes
       : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes;
     const selectedRatingEpisodes = completedSeries ? omdbCompletedEpisodes : matchedTV?.episodes || [];
-    const episodes = mergeSelectedEpisodeRatings(providerEpisodes, selectedRatingEpisodes);
+    const fallbackRatingEpisodes = [
+      matchedTV?.episodes, tmdbMeta?.episodes, matchedTVDB?.episodes, likelyAnime ? matchedJikan?.episodes : undefined, providerEpisodes,
+    ];
+    let episodes = mergeSelectedEpisodeRatings(providerEpisodes, selectedRatingEpisodes, fallbackRatingEpisodes);
+    // An airing series reads IMDb episode ratings from OMDb only for seasons
+    // that still have unrated episodes on disk: one request per such season.
+    const unratedSeasons = completedSeries ? [] : [...new Set((item.episodeFiles || [])
+      .filter((file) => file.season > 0 && !(episodes || []).some((episode) => (
+        episode.season === file.season && episode.number === file.episode && numericRating(episode.rating) > 0)))
+      .map((file) => file.season))];
+    if (unratedSeasons.length && (omdbMeta?.imdbID || providerIds.imdbId)) {
+      const omdbEpisodes = await safeMetadataProvider(fetchOMDbSeasonEpisodes(omdbMeta?.imdbID || providerIds.imdbId, unratedSeasons, omdbApiKey), []);
+      if (omdbEpisodes.length) episodes = mergeSelectedEpisodeRatings(episodes, selectedRatingEpisodes, [...fallbackRatingEpisodes, omdbEpisodes]);
+    }
     const episodeSource = completedSeries && omdbCompletedEpisodes.some((episode) => numericRating(episode.rating) > 0)
       ? 'OMDb'
       : hasLocalSpecials && hasTMDBSpecials
@@ -1478,7 +1500,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     const now = Date.now();
     const displayCategories: MetadataRefreshCategory[] = ['core', 'cast', 'artwork', 'ratings', 'episodes'];
-    const initialCategories = displayCategories.filter((category) => metadataCategoryIsDue(mediaId, category, now));
+    // A title still missing its trailer checks again weekly instead of monthly,
+    // since providers often add trailers after a title first appears.
+    const isDue = (item: MediaItem, category: MetadataRefreshCategory, at: number) => (
+      category === 'core' && !hasText(item.trailerUrl)
+        ? metadataCategoryIsDue(mediaId, category, at, MISSING_TRAILER_RETRY_MS)
+        : metadataCategoryIsDue(mediaId, category, at)
+    );
+    const initialCategories = displayCategories.filter((category) => isDue(initialTarget, category, now));
     if (initialCategories.length === 0) return false;
     const previousAttempt = displayMetadataRefreshState.get(mediaId);
     if (previousAttempt?.pending) return previousAttempt.pending;
@@ -1487,7 +1516,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const library = loadLibrary();
       const target = findLibraryMediaItem(library, mediaId);
       if (!target) return false;
-      const categories = displayCategories.filter((category) => metadataCategoryIsDue(mediaId, category, Date.now()));
+      const categories = displayCategories.filter((category) => isDue(target, category, Date.now()));
       if (categories.length === 0) return false;
       const refreshes = (category: MetadataRefreshCategory) => categories.includes(category);
 
