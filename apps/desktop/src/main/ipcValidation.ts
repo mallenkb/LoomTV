@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const startupLibraryRenderArgsSchema = z.tuple([z.number().finite().positive().max(Number.MAX_SAFE_INTEGER)]);
+
 export class IpcArgumentValidationError extends Error {
   constructor(channel: string, options?: ErrorOptions) {
     super(`Invalid arguments for IPC channel "${channel}".`, options);

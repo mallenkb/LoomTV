@@ -4,7 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const packageRoot = path.resolve(__dirname, '..');
-const mainBundlePath = path.join(packageRoot, '.vite', 'build', 'main.js');
+const mainEntryPath = path.join(packageRoot, '.vite', 'build', 'main.js');
+const mainBundlePath = path.join(packageRoot, '.vite', 'build', 'main-bundle.js');
+
+const packageJson = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+if (packageJson.main !== '.vite/build/main.js' || !fs.existsSync(mainEntryPath)
+  || fs.readFileSync(mainEntryPath, 'utf8') !== fs.readFileSync(path.join(packageRoot, 'src', 'mainEntry.cjs'), 'utf8')) {
+  console.error('Missing or incorrect compile-cache entry. Refusing to package an app that bypasses the main bootstrap.');
+  process.exit(1);
+}
 
 if (!fs.existsSync(mainBundlePath)) {
   console.error(`Missing production main bundle: ${mainBundlePath}`);
@@ -19,4 +27,4 @@ if (embeddedDevRenderer.test(mainBundle)) {
   process.exit(1);
 }
 
-console.log('Production renderer binding verified: bundled file only.');
+console.log('Production renderer binding verified: bundled assets only.');

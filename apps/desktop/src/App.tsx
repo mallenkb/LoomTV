@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { queryClient, trimQueryCache } from './lib/queryClient';
+import { queryClient, trimQueryCache, prefetchLibraryDetails } from './lib/queryClient';
 import { useLocation, parseDesktopSearch, stringifyDesktopSearch } from './lib/navigation';
 import { MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
@@ -436,6 +436,17 @@ function AppShell({
     setHomeReady(true);
     markAppReady();
   }, [markAppReady]);
+  const libraryRenderRecordedRef = useRef(false);
+  useEffect(() => {
+    if (!homeReady || appUnderlayHidden || libraryRenderRecordedRef.current || !window.desktopApi?.recordFirstLibraryRender) return;
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        libraryRenderRecordedRef.current = true;
+        void window.desktopApi?.recordFirstLibraryRender?.(performance.timeOrigin + performance.now()).catch(() => undefined);
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [appUnderlayHidden, homeReady]);
 
   const handlePlayMedia = useCallback((
     filePath: string,
@@ -661,12 +672,10 @@ function OthersRoute() { return <Others onPlay={usePlaybackActions().handlePlayM
 function LiveRoute() { return <LiveTv onPlay={usePlaybackActions().handlePlayLiveChannel} />; }
 function AddonRoute() { return <ArchiveOrgAddon onPlay={usePlaybackActions().handlePlayArchiveMovie} />; }
 
-let preloadingDetails = false;
 function warmDetails(id: string, preload: boolean, state: unknown) {
   const routeState = state as { fromDiscover?: boolean; stremioCatalogItem?: unknown; from?: string } | undefined;
-  if (!preload || preloadingDetails || routeState?.fromDiscover || routeState?.stremioCatalogItem || routeState?.from?.startsWith('/discover')) return;
-  preloadingDetails = true;
-  void desktopApi.getLibraryItem(id).catch(() => undefined).finally(() => { preloadingDetails = false; });
+  if (!preload || routeState?.fromDiscover || routeState?.stremioCatalogItem || routeState?.from?.startsWith('/discover')) return;
+  prefetchLibraryDetails(id, () => desktopApi.getLibraryItem(id));
 }
 
 function isRouteModuleError(error: unknown): boolean {

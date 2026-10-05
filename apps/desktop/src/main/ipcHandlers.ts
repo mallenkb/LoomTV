@@ -57,7 +57,8 @@ import {
 import { z } from 'zod';
 import { lanProviderRatingsSchema } from '@loom-media-server/lan-protocol';
 import { playbackStartOptionsSchema, playbackCommandSchema, playbackTimeSchema, externalBrowserUrl, authorizeFolderReveal, boundedIpcRecord } from './ipcPlaybackValidation.ts';
-import { parseIpcArguments } from './ipcValidation.ts';
+import { parseIpcArguments, startupLibraryRenderArgsSchema } from './ipcValidation.ts';
+import { recordFirstLibraryRender } from './startupTiming.ts';
 import { metadataProviderRequestSchema } from './metadataProviderGateway.ts';
 import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
@@ -691,6 +692,7 @@ export function registerIpcHandlers<
   }
 
   handleNoArgs('library:get', () => deps.libraryForRenderer());
+  handle('startup:library-render', (_event, timestamp) => recordFirstLibraryRender(timestamp), startupLibraryRenderArgsSchema);
   handleNoArgs('library:get-index', () => deps.libraryIndexForRenderer());
   handle('library:get-index-if-changed', (_event, knownFingerprint?: string) => deps.libraryIndexIfChanged(knownFingerprint),
     z.tuple([z.string().regex(/^[0-9a-f]{32}$/).optional()]));
