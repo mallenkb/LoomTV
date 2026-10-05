@@ -2114,7 +2114,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         toneMap: reqUrl.searchParams.get('toneMap') === '1' ? true : undefined,
         forceTranscode: reqUrl.searchParams.get('forceTranscode') === '1',
       };
-      const basePlaybackPlan = browserPlaybackPlan(filePath, streamOptions);
+      const basePlaybackPlan = await browserPlaybackPlan(filePath, streamOptions);
       const profileTranscode = Boolean(
         streamOptions.targetVideoCodec && streamOptions.targetVideoCodec !== 'h264'
         || streamOptions.maxWidth

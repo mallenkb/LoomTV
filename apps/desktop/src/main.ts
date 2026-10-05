@@ -56,7 +56,7 @@ import {
   stopTranscodesForScope,
   stopTranscode,
 } from './main/transcodeManager';
-import { probeMediaFile, probeMediaFileAsync } from './main/mediaProbeFile';
+import { cachedProbeMediaFile, probeMediaFileAsync, warmProbeMediaFile } from './main/mediaProbeFile';
 import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/httpResponses';
 import { parseRequiredJson, profileExportSchema } from './main/runtimeValidation.ts';
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
@@ -1279,11 +1279,12 @@ function localMetadataWithTracks(filePath: string, metadata: MediaItem['localMet
   if (!metadata?.audioTracks && !metadata?.subtitleTracks) return metadata;
   if (!fs.existsSync(filePath) || !isVideoFileName(filePath)) return metadata;
 
-  try {
-    return probeMediaFile(filePath).localMetadata || metadata;
-  } catch {
-    return metadata;
-  }
+  // Projections are synchronous. Use a cached probe, and fill the cache in the
+  // background so the next projection has the tracks without FFprobe on main.
+  const cached = cachedProbeMediaFile(filePath);
+  if (cached) return cached.localMetadata || metadata;
+  void warmProbeMediaFile(filePath).catch(() => undefined);
+  return metadata;
 }
 
 function libraryForLocalNetwork(profileId?: string, deviceId?: string): LibraryData {
@@ -1598,7 +1599,7 @@ const {
   loadSettings,
   localTitleFromPath,
   orderedArtworkCandidates,
-  probeMediaFile,
+  probeMediaFile: probeMediaFileAsync,
   recordMetadataRefresh,
   saveLibraryItem: saveLibraryItemMutation,
 });
@@ -1784,8 +1785,8 @@ function configureRendererSecurityPolicy(): void {
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
-const skipSegmentService = createSkipSegmentService({ loadLibrary, loadSettings, probeMediaFile });
-const localSegmentAnalysis = createLocalSegmentAnalysis({ loadLibrary, loadSettings, probeMediaFile });
+const skipSegmentService = createSkipSegmentService({ loadLibrary, loadSettings, probeMediaFile: probeMediaFileAsync });
+const localSegmentAnalysis = createLocalSegmentAnalysis({ loadLibrary, loadSettings, probeMediaFile: probeMediaFileAsync });
 const analysisCoordinator = createAnalysisCoordinator({
   loadLibrary,
   loadSettings,

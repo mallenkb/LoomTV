@@ -1,7 +1,7 @@
 import { scanMetrics } from './scanning/scanMetrics.ts';
 import { scanInventory } from './scanning/inventory.ts';
 import fs from 'node:fs';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { findFFprobe } from './mediaBinaries';
 import { parseYearFromText } from './metadata/helpers';
 import { mergeProviderIds, parseIntegerTag, providerIdsFromTags, scrubTagText, tagValue } from './mediaTags';
@@ -98,24 +98,11 @@ function execFileUtf8(filePath: string, args: string[]): Promise<string> {
 
 function probeMediaFileFromOutput(
   filePath: string,
-  rawOutput?: string,
-  knownIdentity?: MediaProbeCacheIdentity | null,
+  raw: string,
+  identity: MediaProbeCacheIdentity | null,
 ): ProbeMediaFileResult {
-  const identity = knownIdentity === undefined ? mediaProbeCacheIdentity(filePath) : knownIdentity;
   const cacheKey = identity?.key || null;
-  const cached = getCachedProbeResult(cacheKey);
-  if (cached !== undefined) return cached;
-
-  const ffprobePath = findFFprobe();
-  if (!ffprobePath) return {};
-
   try {
-    const raw = rawOutput ?? execFileSync(
-      ffprobePath,
-      ffprobeArguments(filePath),
-      ffprobeOptions,
-    );
-
     const parsed = parseFfprobeOutput(raw);
 
     const embeddedThumbnailStream = parsed.streams?.find((stream) =>
@@ -218,8 +205,24 @@ function probeMediaFileFromOutput(
   }
 }
 
-export function probeMediaFile(filePath: string): ProbeMediaFileResult {
-  return probeMediaFileFromOutput(filePath);
+/**
+ * The cached probe for this exact file revision, without running FFprobe.
+ * Synchronous callers use this and start `probeMediaFileAsync` for a miss,
+ * so FFprobe never blocks the Electron main thread.
+ */
+export function cachedProbeMediaFile(filePath: string): ProbeMediaFileResult | undefined {
+  return getCachedProbeResult(mediaProbeCacheIdentity(filePath)?.key || null);
+}
+
+const warmingProbes = new Map<string, Promise<ProbeMediaFileResult>>();
+
+/** Fill the probe cache in the background; repeated calls share one FFprobe run. */
+export function warmProbeMediaFile(filePath: string): Promise<ProbeMediaFileResult> {
+  const pending = warmingProbes.get(filePath);
+  if (pending) return pending;
+  const probe = probeMediaFileAsync(filePath).finally(() => warmingProbes.delete(filePath));
+  warmingProbes.set(filePath, probe);
+  return probe;
 }
 
 export async function probeMediaFileAsync(filePath: string): Promise<ProbeMediaFileResult> {

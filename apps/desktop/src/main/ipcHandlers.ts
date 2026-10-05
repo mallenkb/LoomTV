@@ -357,8 +357,8 @@ export interface IpcHandlerDependencies<
   authorizeMediaPath: (filePath: string) => void;
   assertSubtitleCanAccessMediaPath?: (mediaFilePath: string, subtitleFilePath: string) => void;
   registerSubtitleResource: (mediaFilePath: string, subtitleFilePath: string) => string;
-  needsBrowserTranscoding: (filePath: string) => boolean;
-  browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
+  needsBrowserTranscoding: (filePath: string) => Promise<boolean>;
+  browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => Promise<BrowserPlaybackPlan>;
   listIptvSources: () => IpcResult<'iptv:list-sources'>;
   addIptvSource: (input: IpcContract['iptv:add-source']['args'][0]) => Promise<IpcResult<'iptv:add-source'>>;
   updateIptvSource: (sourceId: string, patch: IpcContract['iptv:update-source']['args'][1]) => IpcResult<'iptv:update-source'>;
@@ -445,9 +445,9 @@ export interface IpcHandlerDependencies<
     expectedProfileId?: string,
   ) => IpcResult<'playback-track-preferences:save'>;
   getMediaSegments: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
-  saveManualMediaSegment: (input: ManualMediaSegmentInput) => MediaSegmentResponse;
-  deleteManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
-  undoManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
+  saveManualMediaSegment: (input: ManualMediaSegmentInput) => Promise<MediaSegmentResponse>;
+  deleteManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => Promise<MediaSegmentResponse>;
+  undoManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => Promise<MediaSegmentResponse>;
   getManagedMediaSegments: (request?: Partial<MediaSegmentRequest>) => IpcResult<'playback:segments:manage-list'>;
   updateManagedMediaSegment: (candidateId: string, patch: IpcContract['playback:segments:manage-update']['args'][1]) => boolean;
   eraseManagedMediaSegments: (request: MediaSegmentRequest) => IpcResult<'playback:segments:manage-erase'>;
@@ -959,7 +959,7 @@ export function registerIpcHandlers<
     localAccessToken: deps.localAccessToken,
   }));
 
-  handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
+  handle('media:get-stream-url', async (_event, filePath: string, options?: TranscodeOptions) => {
     const iptvReference = parseIptvPlaybackReference(filePath);
     if (iptvReference) {
       const streamUrl = deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId);
@@ -1018,7 +1018,7 @@ export function registerIpcHandlers<
         : {}),
     };
     appendStreamOptionParams(params, options, subtitleResources);
-    const playbackPlan = deps.browserPlaybackPlan(filePath, options || {});
+    const playbackPlan = await deps.browserPlaybackPlan(filePath, options || {});
     const url = `http://127.0.0.1:${deps.getMediaServerPort()}/stream?${params.toString()}`;
     return {
       url,
