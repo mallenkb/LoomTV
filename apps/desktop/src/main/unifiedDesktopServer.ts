@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
 import { canonicalStatePath } from '@loom-media-server/video-migration';
+import { isCanonicalSetupRequired } from 'loom-media-server-headless/runtime';
 import type { UnifiedDesktopServerState } from '../shared/desktopProtocol.ts';
 import { createCanonicalServerHost } from './canonicalServerHost.ts';
 import {
@@ -33,6 +34,7 @@ let adminToken: string | null = null;
 let certificatePinInstalled = false;
 let setupRequired = false;
 let restoredAdminOnly = false;
+let startup: Promise<UnifiedDesktopServerState> | null = null;
 let state: UnifiedDesktopServerState = {
   enabled: false,
   ready: false,
@@ -45,6 +47,15 @@ function enabledByEnvironment(): boolean {
   // Reopen an existing administration installation on ordinary desktop
   // launches. Never silently create a second catalog for a fresh install.
   return fs.existsSync(canonicalStatePath(configuredDataDir() || app.getPath('userData')));
+}
+
+export async function requiresUnifiedDesktopSetup(): Promise<boolean> {
+  const flag = String(process.env[TEST_FLAG] || '').trim().toLowerCase();
+  if (!['1', 'true', 'yes', 'on'].includes(flag)) return false;
+  const dataDir = configuredDataDir();
+  const required = !dataDir || await isCanonicalSetupRequired(dataDir);
+  state = { enabled: true, ready: false, ownerConfigured: !required };
+  return required;
 }
 
 function configuredDataDir(): string | null {
@@ -222,7 +233,12 @@ async function ensureCanonicalProfile(name: string): Promise<void> {
   });
 }
 
-export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupHooks = {}): Promise<UnifiedDesktopServerState> {
+export function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupHooks = {}): Promise<UnifiedDesktopServerState> {
+  startup ??= startServer(setupHooks);
+  return startup;
+}
+
+async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<UnifiedDesktopServerState> {
   if (!enabledByEnvironment()) {
     state = { enabled: false, ready: false, ownerConfigured: false };
     return getUnifiedDesktopServerState();
@@ -240,6 +256,7 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
   }
 
   restoredAdminOnly = !String(process.env[TEST_FLAG] || '').trim();
+  state = { enabled: true, ready: false, ownerConfigured: state.ownerConfigured };
   try {
     fs.mkdirSync(dataDir, { recursive: true });
     identity = loadOrCreateLanTlsIdentity(dataDir, getLocalNetworkAddresses());
@@ -349,6 +366,7 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
 }
 
 export async function configureUnifiedDesktopOwner(input: { name: string; password: string }): Promise<UnifiedDesktopServerState> {
+  await startup;
   if (!state.enabled || restoredAdminOnly) return getUnifiedDesktopServerState();
   if (!state.ready || !identity) throw new Error(state.error || 'The unified LoomTV server is not ready.');
   const name = String(input.name || '').trim();
@@ -377,6 +395,7 @@ function canonicalRootId(folderPath: string): string {
 }
 
 export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others'): Promise<boolean> {
+  await startup;
   if (!state.enabled || restoredAdminOnly) return false;
   if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
   const added = await requestJson<{ root?: { id?: string } }>('/api/v1/library/roots', identity, {
@@ -397,6 +416,7 @@ export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'mo
 }
 
 export async function removeUnifiedDesktopLibraryRoot(folderPath: string): Promise<boolean> {
+  await startup;
   if (!state.enabled || restoredAdminOnly) return false;
   if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
   await requestJson(`/api/v1/library/roots/${canonicalRootId(folderPath)}`, identity, {
@@ -407,6 +427,7 @@ export async function removeUnifiedDesktopLibraryRoot(folderPath: string): Promi
 }
 
 export async function openUnifiedDesktopAdmin(): Promise<boolean> {
+  await startup;
   if (!state.ready || !state.adminUrl) return false;
   await shell.openExternal(state.adminUrl);
   return true;
@@ -425,6 +446,7 @@ export function openUnifiedDesktopSetup(onComplete: () => void): boolean {
 }
 
 export async function stopUnifiedDesktopServer(): Promise<void> {
+  await startup?.catch(() => undefined);
   closeCanonicalSetupWindow();
   const current = host;
   host = null;

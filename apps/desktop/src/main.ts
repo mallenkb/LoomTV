@@ -129,6 +129,7 @@ import {
 import { libMpvRuntimeSummary as mpvRuntimeSummary, stopAllLibMpvPlayback as stopAllMpvPlayback } from './main/libmpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
+import { startDesktopPresentation } from './main/desktopStartup.ts';
 import {
   addUnifiedDesktopLibraryRoot,
   configureUnifiedDesktopOwner,
@@ -137,6 +138,7 @@ import {
   openUnifiedDesktopAdmin,
   openUnifiedDesktopSetup,
   removeUnifiedDesktopLibraryRoot,
+  requiresUnifiedDesktopSetup,
   startUnifiedDesktopServer,
   stopUnifiedDesktopServer,
   type UnifiedDesktopSetupHooks,
@@ -422,6 +424,8 @@ if (!hasSingleInstanceLock) {
 }
 
 let isAppShuttingDown = false;
+let primaryWindowStartupReady = false;
+let unifiedServerStartup: Promise<void> | null = null;
 
 function showOpenFolderDialog(options: OpenDialogOptions) {
   const win = getMainWindow();
@@ -1694,7 +1698,7 @@ const unifiedDesktopSetupHooks: UnifiedDesktopSetupHooks = {
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 function presentPrimaryWindow(): void {
-  if (!app.isReady() || isAppShuttingDown) return;
+  if (!app.isReady() || isAppShuttingDown || !primaryWindowStartupReady) return;
   if (openUnifiedDesktopSetup(() => createWindow())) return;
   createWindow();
 }
@@ -2880,7 +2884,9 @@ async function startBackgroundServices(): Promise<void> {
           console.warn('[tray] Could not open Loom in the default browser:', error);
         });
       },
-      onOpenAdmin: () => {
+      onOpenAdmin: async () => {
+        if (isUpdateInstalling() || isAppShuttingDown) return;
+        await unifiedServerStartup?.catch(() => undefined);
         if (isUpdateInstalling() || isAppShuttingDown) return;
         const adminUrl = getAdminUrl();
         if (!adminUrl) {
@@ -3022,12 +3028,30 @@ app.whenReady().then(async () => {
   // a listen() call, so everything genuinely slow is deferred below instead.
   await startMediaServer(mediaServerDeps);
   recordPlaybackDiagnostic('desktop.media-server.ready');
-  const unifiedServerState = await startUnifiedDesktopServer(unifiedDesktopSetupHooks);
-  if (unifiedServerState.error && !unifiedServerState.ready) {
-    console.error('[unified desktop] Canonical server startup failed:', unifiedServerState.error);
-  }
-  presentPrimaryWindow();
-  recordPlaybackDiagnostic('desktop.window.requested');
+  // Unified onboarding needs the setup response to choose the setup window.
+  // Restored administration can start after the native renderer opens.
+  const waitForSetup = await requiresUnifiedDesktopSetup();
+  unifiedServerStartup = startDesktopPresentation({
+    waitForSetup,
+    presentWindow: () => {
+      primaryWindowStartupReady = true;
+      presentPrimaryWindow();
+      recordPlaybackDiagnostic('desktop.window.requested');
+    },
+    startServer: () => isAppShuttingDown || isUpdateInstalling()
+      ? Promise.resolve(getUnifiedDesktopServerState())
+      : startUnifiedDesktopServer(unifiedDesktopSetupHooks),
+    serverSettled: (state) => {
+      if (state.error && !state.ready) {
+        console.error('[unified desktop] Canonical server startup failed:', state.error);
+      }
+      if (!isAppShuttingDown && !isUpdateInstalling()) syncLanAdvertisement();
+    },
+  });
+  if (waitForSetup) await unifiedServerStartup;
+  else void unifiedServerStartup.catch((error) => {
+    console.error('[unified desktop] Canonical server startup failed:', error);
+  });
   warnAboutUnreadableCredentials();
   // Resume eligible renames if Loom closed during the file-settling delay.
   scheduleAutomaticOrganize();

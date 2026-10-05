@@ -95,3 +95,4 @@ export interface CanonicalVideoServer {
 
 export function createCanonicalVideoServer(options: CanonicalRuntimeOptions): CanonicalVideoServer;
 export function readServerVersion(packageRoot: string): Promise<string>;
+export function isCanonicalSetupRequired(dataDir: string): Promise<boolean>;

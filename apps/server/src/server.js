@@ -22,6 +22,8 @@ import { assertTransportConfiguration } from './transport-security.js';
 import { canonicalPublicError, errorDetails } from './public-error.js';
 import { createWebAppPage } from './web-app.js';
 
+export { isCanonicalSetupRequired } from './setup-service.js';
+
 const SERVICE_NAME = 'loomtv-headless-server';
 const CONTRACT_VERSION = VIDEO_CONTRACT_VERSION;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;

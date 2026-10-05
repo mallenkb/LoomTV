@@ -28,6 +28,12 @@ export function useUnifiedDesktopServer() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!server?.enabled || server.ready || server.error) return;
+    const timer = setTimeout(() => { void refresh(); }, 250);
+    return () => clearTimeout(timer);
+  }, [server, refresh]);
+
   return {
     server: server ?? UNIFIED_SERVER_OFF,
     // Guards first-run saves from racing ahead of the first state read and

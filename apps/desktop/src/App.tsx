@@ -261,7 +261,7 @@ function DesktopBootstrap() {
       }
       try {
         const unified = await desktopApi.getUnifiedDesktopServerState();
-        if (unified.enabled && unified.ready && unified.ownerConfigured) {
+        if (unified.enabled && unified.ownerConfigured) {
           desktopApi.useThisComputerAsHost();
           if (!cancelled) setMode('host');
           return;
