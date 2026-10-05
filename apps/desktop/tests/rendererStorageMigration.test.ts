@@ -62,10 +62,10 @@ afterEach(() => Object.assign(state, { legacy: {}, target: {}, windows: 0, destr
 test('origin migration copies Loom preferences once and keeps newer target preferences', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
   try {
-    state.legacy = { 'loomtv:mode': 'host', 'loom:theme': 'blue', unrelated: 'omit' };
+    state.legacy = { 'loomtv:mode': 'host', 'loom:theme': 'blue', subtitlesDefaultEnabled: 'false', videoProgress: '{}', unrelated: 'omit' };
     state.target = { 'loom:theme': 'red' };
     await migrateRendererStorage('/renderer/index.html', directory);
-    assert.deepEqual(state.target, { 'loomtv:mode': 'host', 'loom:theme': 'red' });
+    assert.deepEqual(state.target, { 'loomtv:mode': 'host', 'loom:theme': 'red', subtitlesDefaultEnabled: 'false', videoProgress: '{}' });
     assert.equal(state.destroyed, 1);
     await migrateRendererStorage('/renderer/index.html', directory);
     assert.equal(state.windows, 1);
@@ -82,10 +82,25 @@ test('empty legacy storage skips the target document and marks migration complet
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test('a full profile with many cached items and artwork data URLs is migrated', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
+  try {
+    const artwork = `data:image/jpeg;base64,${'A'.repeat(3 * 1024 * 1024)}`;
+    state.legacy = {
+      ...Object.fromEntries(Array.from({ length: 2_000 }, (_, index) => [`loomtv:watched-discover-item-v1:${index}`, '{}'])),
+      loomtvCustomMovieArtwork: JSON.stringify({ movie: { poster: artwork } }),
+    };
+    await migrateRendererStorage('/renderer/index.html', directory);
+    assert.equal(Object.keys(state.target).length, 2_001);
+    assert.equal(state.target.loomtvCustomMovieArtwork, state.legacy.loomtvCustomMovieArtwork);
+    await fs.access(path.join(directory, 'renderer-origin-migrated.json'));
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test('oversized legacy preferences leave migration retryable and close the hidden window', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
   try {
-    state.legacy = Object.fromEntries(Array.from({ length: 257 }, (_, index) => [`loom:${index}`, 'value']));
+    state.legacy = Object.fromEntries(Array.from({ length: 50_001 }, (_, index) => [`loom:${index}`, 'value']));
     await migrateRendererStorage('/renderer/index.html', directory);
     assert.equal(state.targetLoads, 0);
     assert.equal(state.destroyed, 1);
