@@ -436,6 +436,15 @@ function AppShell({
     setHomeReady(true);
     markAppReady();
   }, [markAppReady]);
+  useEffect(() => {
+    if (!homeReady || !window.desktopApi?.recordFirstLibraryRender) return;
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        void window.desktopApi?.recordFirstLibraryRender?.(performance.timeOrigin + performance.now()).catch(() => undefined);
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [homeReady]);
 
   const handlePlayMedia = useCallback((
     filePath: string,

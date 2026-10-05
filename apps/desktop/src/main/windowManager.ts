@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { isExpectedAppUrl } from './trustedIpcSender';
 import { installSettingsShortcut } from './openSettings';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { recordStartupMark } from './startupTiming.ts';
 
 const MAIN_WINDOW_DEV_SERVER_URL = (() => {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
@@ -144,6 +145,8 @@ export function createWindow(): void {
 
   mainWindow = new BrowserWindow(windowOptions);
   recordPlaybackDiagnostic('desktop.window.created');
+  recordStartupMark('windowCreated');
+  mainWindow.webContents.once('dom-ready', () => recordStartupMark('domContentLoaded'));
   installSettingsShortcut(mainWindow);
   const expectedAppUrl = expectedRendererAppUrl();
   mainWindowIpcIdentity = Object.freeze({
@@ -162,6 +165,7 @@ export function createWindow(): void {
     if (!revealed) {
       revealed = true;
       recordPlaybackDiagnostic('desktop.window.revealed');
+      mainWindow.once('show', () => recordStartupMark('windowRevealed'));
     }
     presentMainWindow(mainWindow);
   };

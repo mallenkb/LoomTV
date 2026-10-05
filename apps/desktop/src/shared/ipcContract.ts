@@ -134,6 +134,7 @@ export interface IpcContract {
   'library:get-index': { args: []; result: LibraryIndexPayload };
   'library:get-index-if-changed': { args: [knownFingerprint?: string]; result: LibraryIndexPayload | LibraryIndexUnchanged };
   'library:get-item': { args: [mediaId: string]; result: LibraryItemDetailsPayload | null };
+  'startup:library-render': { args: [timestamp: number]; result: boolean };
   'library:pick-folder': { args: [currentPath?: string]; result: string | null };
   'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };
   'library:update-folder': { args: [folderPath: string, nextFolderPath: string, kind: LibraryFolderKind]; result: LibraryIndexPayload };

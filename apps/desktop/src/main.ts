@@ -27,6 +27,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
+import { initializeStartupTimings, recordStartupMark, flushStartupTimings } from './main/startupTiming.ts';
 
 import {
   LOCAL_ACCESS_HEADER,
@@ -424,6 +425,8 @@ if (!hasSingleInstanceLock) {
 }
 
 let isAppShuttingDown = false;
+initializeStartupTimings(USER_DATA_DIR);
+app.on('before-quit', () => { void flushStartupTimings(); });
 let primaryWindowStartupReady = false;
 let unifiedServerStartup: Promise<void> | null = null;
 
@@ -2948,6 +2951,7 @@ async function startBackgroundServices(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  recordStartupMark('appReady');
   startMemoryMetrics();
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');
@@ -3028,6 +3032,7 @@ app.whenReady().then(async () => {
   // a listen() call, so everything genuinely slow is deferred below instead.
   await startMediaServer(mediaServerDeps);
   recordPlaybackDiagnostic('desktop.media-server.ready');
+  recordStartupMark('mediaServerReady');
   // Unified onboarding needs the setup response to choose the setup window.
   // Restored administration can start after the native renderer opens.
   const waitForSetup = await requiresUnifiedDesktopSetup();

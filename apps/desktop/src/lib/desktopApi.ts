@@ -249,6 +249,7 @@ export type DesktopBridgeApi = {
       getLibraryIndex?: () => Promise<LibraryIndexPayload>;
       getLibraryIndexIfChanged?: (knownFingerprint?: string) => Promise<LibraryIndexPayload | LibraryIndexUnchanged>;
       getLibraryItem?: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
+      recordFirstLibraryRender?: (timestamp: number) => Promise<boolean>;
       scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryIndexPayload>;
       onLibraryScanProgress?: (callback: (progress: LibraryScanProgress) => void) => () => void;
       addLibraryFolder: (kind?: LibraryFolderKind) => Promise<LibraryIndexPayload | null>;
