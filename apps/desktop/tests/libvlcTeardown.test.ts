@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
+import { isDeepStrictEqual } from 'node:util';
 import * as ts from 'typescript';
+import type { PlaybackState } from '../src/shared/playbackProtocol.ts';
 import * as platform from '../src/main/libvlcPlatform.ts';
 import * as sessionState from '../src/main/libvlcSessionState.ts';
 import { restoreOffscreenTrack } from '../src/main/offscreenVideoRestore.ts';
@@ -76,10 +78,19 @@ test('every LibVLC async teardown binding has an integer return type for Electro
 function fixture(sharedInstance: number | null = null) {
   const events: string[] = [];
   const pending: Array<{ name: string; handle: number; callback: (error: Error | null) => void }> = [];
-  const players = new Map<number, { state: number; stopping: boolean; releasing: boolean }>();
+  const players = new Map<number, { state: number; positionMs: number; durationMs: number; stopping: boolean; releasing: boolean }>();
   const views = new Map<number, boolean>();
-  const intervals = new Set<() => void>();
+  const intervals = new Map<() => void, number>();
   const timeouts = new Set<() => void>();
+  const sent: PlaybackState[] = [];
+  const powerStates: Array<Pick<PlaybackState, 'status' | 'paused'>> = [];
+  const descriptions = new Map<number, { i_id: number; psz_name: string; p_next: number | null }>();
+  let audioTracks: Array<{ id: number; title: string }> = [];
+  let selectedAudioTrack = 1;
+  let trackReads = 0;
+  let stateReads = 0;
+  let now = 10_000;
+  let pauseImmediately = true;
   let handle = 0;
   let playFails = false;
   const livePlayer = (id: number) => {
@@ -105,24 +116,38 @@ function fixture(sharedInstance: number | null = null) {
     mediaRelease: blocking('media-release'),
     playerNewFromMedia: () => {
       const id = ++handle;
-      players.set(id, { state: 3, stopping: false, releasing: false });
+      players.set(id, { state: 3, positionMs: 12000, durationMs: 60000, stopping: false, releasing: false });
       events.push(`create:${id}`);
       return id;
     },
     playerStop: blocking('stop'),
     playerRelease: blocking('player-release'),
     playerPlay: (id: number) => { livePlayer(id).state = 3; events.push(`play:${id}`); return playFails ? -1 : 0; },
-    playerGetState: (id: number) => livePlayer(id).state,
-    playerGetTime: (id: number) => { livePlayer(id); return 12000; },
-    playerGetLength: (id: number) => { livePlayer(id); return 60000; },
-    playerSetTime: (id: number, value: number) => { livePlayer(id); events.push(`seek:${id}:${value}`); },
-    playerSetPause: (id: number, paused: number) => { livePlayer(id).state = paused ? 4 : 3; },
+    playerGetState: (id: number) => { stateReads++; return livePlayer(id).state; },
+    playerGetTime: (id: number) => livePlayer(id).positionMs,
+    playerGetLength: (id: number) => livePlayer(id).durationMs,
+    playerSetTime: (id: number, value: number) => { livePlayer(id).positionMs = value; events.push(`seek:${id}:${value}`); },
+    playerSetPause: (id: number, paused: number) => { if (pauseImmediately) livePlayer(id).state = paused ? 4 : 3; },
     setDrawable: (id: number) => { livePlayer(id); },
     audioSetVolume: (id: number) => { livePlayer(id); return 0; },
     audioSetMute: (id: number) => { livePlayer(id); },
+    audioGetTrack: (id: number) => { livePlayer(id); return selectedAudioTrack; },
+    audioSetTrack: (id: number, trackId: number) => { livePlayer(id); selectedAudioTrack = trackId; return 0; },
+    audioGetTrackDescription: (id: number) => {
+      livePlayer(id); trackReads++;
+      descriptions.clear();
+      audioTracks.forEach((track, index) => descriptions.set(1000 + index, {
+        i_id: track.id, psz_name: track.title, p_next: index + 1 < audioTracks.length ? 1001 + index : null,
+      }));
+      return audioTracks.length > 0 ? 1000 : null;
+    },
+    trackDescriptionListRelease: () => undefined,
     playerSetRate: (id: number) => { livePlayer(id); return 0; },
   };
-  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, send: () => undefined });
+  const owner = Object.assign(new EventEmitter(), {
+    isDestroyed: () => false,
+    send: (channel: string, state: PlaybackState) => { if (channel === 'libvlc:state') sent.push(state); },
+  });
   const window = Object.assign(new EventEmitter(), {
     isDestroyed: () => false, isMinimized: () => false, isVisible: () => true, isFullScreen: () => false,
   });
@@ -155,8 +180,12 @@ function fixture(sharedInstance: number | null = null) {
     'node:module': { createRequire: () => () => ({}) },
     'node:crypto': { randomUUID: () => `session-${++handle}` },
     'node:fs': fs, 'node:path': path,
+    'node:util': { isDeepStrictEqual },
     './offscreenVideoRestore.ts': { restoreOffscreenTrack },
-    './nativePlaybackPower': { releaseNativePlaybackDisplaySleep: () => undefined, syncNativePlaybackDisplaySleep: () => undefined },
+    './nativePlaybackPower': {
+      releaseNativePlaybackDisplaySleep: () => undefined,
+      syncNativePlaybackDisplaySleep: (_id: string, state: Pick<PlaybackState, 'status' | 'paused'>) => { powerStates.push(state); },
+    },
     './libvlcPlatform.ts': platform,
     './libvlcWarmup.ts': warmup,
     './libvlcTeardown.ts': teardown,
@@ -166,12 +195,16 @@ function fixture(sharedInstance: number | null = null) {
     './libvlcSessionState.ts': sessionState,
   }, {
     process: { platform: 'darwin', arch: 'arm64', env: {} }, fixtureApi: api, fixtureHost: host,
-    setInterval: (fn: () => void) => { intervals.add(fn); return { unref: () => undefined, fn }; },
+    fixtureDecode: (pointer: number) => descriptions.get(pointer),
+    Date: class extends Date { static now() { return now; } },
+    setInterval: (fn: () => void, ms: number) => { intervals.set(fn, ms); return { unref: () => undefined, fn }; },
     clearInterval: (timer: { fn: () => void }) => { intervals.delete(timer.fn); },
     setTimeout: (fn: () => void) => { timeouts.add(fn); return { unref: () => undefined, fn }; },
     clearTimeout: (timer: { fn: () => void }) => { timeouts.delete(timer.fn); },
   }, `
-    cachedRuntime = () => ({ runtime: { api: fixtureApi, libraryPath: '/mock/libvlc' } });
+    cachedRuntime = () => ({ runtime: {
+      api: fixtureApi, libraryPath: '/mock/libvlc', decode: fixtureDecode, trackDescriptionType: {},
+    } });
     createNativeViewHost = fixtureHost;
     loadKoffi = () => ({});
     module.exports.session = () => currentSession;
@@ -208,10 +241,165 @@ function fixture(sharedInstance: number | null = null) {
     assert.ok(result.sessionId);
     return { sessionId: result.sessionId, player: handle, session: playback.session() };
   };
-  return { playback, teardown, warmup, events, pending, players, views, intervals, timeouts, owner, start, complete, drain,
-    failPlay: () => { playFails = true; }, poll: () => { for (const fn of intervals) fn(); },
+  return { playback, teardown, warmup, events, pending, players, views, intervals, timeouts, owner, start, complete, drain, sent, powerStates,
+    failPlay: () => { playFails = true; }, poll: () => { for (const fn of [...intervals.keys()]) fn(); },
+    advance: (ms: number) => { now += ms; }, deferPause: () => { pauseImmediately = false; },
+    stateReads: () => stateReads, trackReads: () => trackReads,
+    setAudioTracks: (tracks: typeof audioTracks) => { audioTracks = tracks; },
   };
 }
+
+test('unchanged paused LibVLC polls send no state and skip display-sleep sync and extra state reads', async () => {
+  const f = fixture();
+  const first = f.start();
+  f.poll();
+  assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, { type: 'set-paused', paused: true }), true);
+  f.poll();
+  assert.deepEqual([...f.intervals.values()], [250]);
+  const sends = f.sent.length;
+  const syncs = f.powerStates.length;
+  const reads = f.stateReads();
+  for (let index = 0; index < 100; index++) { f.advance(250); f.poll(); }
+  assert.equal(f.sent.length - sends, 0);
+  assert.equal(f.powerStates.length - syncs, 0);
+  assert.equal(f.stateReads() - reads, 100);
+  f.playback.stopLibVlcPlayback();
+  await f.drain();
+});
+
+test('LibVLC sends each changed control and progress value once, including cleared values and errors', async () => {
+  const f = fixture();
+  const first = f.start();
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].status, 'loading');
+  f.poll();
+  const commands = [
+    { type: 'set-paused', paused: true },
+    { type: 'set-volume', volume: 0.5 },
+    { type: 'set-muted', muted: true },
+    { type: 'set-speed', speed: 1.5 },
+  ] as const;
+  for (const command of commands) {
+    const before = f.sent.length;
+    assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, command), true);
+    assert.equal(f.sent.length, before + 1, command.type);
+    assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, command), true);
+    f.poll();
+    assert.equal(f.sent.length, before + 1, `Repeated ${command.type}`);
+  }
+  const player = f.players.get(first.player);
+  assert.ok(player);
+  for (const [position, duration] of [[13000, 60000], [13000, 61000], [-1, -1]]) {
+    player.positionMs = position; player.durationMs = duration;
+    const before = f.sent.length;
+    f.poll();
+    assert.equal(f.sent.length, before + 1);
+    f.poll();
+    assert.equal(f.sent.length, before + 1);
+  }
+  assert.equal(f.sent.at(-1)?.position, undefined);
+  assert.equal(f.sent.at(-1)?.duration, undefined);
+  player.state = 7;
+  f.poll();
+  assert.equal(f.sent.at(-1)?.status, 'error');
+  assert.equal(f.sent.at(-1)?.error, 'LibVLC reported a playback error.');
+  await f.drain();
+});
+
+test('native pause acknowledgement updates display sleep even when optimistic renderer state is unchanged', async () => {
+  const f = fixture();
+  const first = f.start();
+  f.poll();
+  f.deferPause();
+  assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, { type: 'set-paused', paused: true }), true);
+  const sends = f.sent.length;
+  const syncs = f.powerStates.length;
+  f.poll();
+  assert.equal(f.sent.length, sends);
+  assert.equal(f.powerStates.length, syncs);
+  assert.equal(f.powerStates.at(-1)?.paused, false);
+  assert.deepEqual([...f.intervals.values()], [16]);
+  const player = f.players.get(first.player);
+  assert.ok(player); player.state = 4;
+  f.poll();
+  assert.equal(f.sent.length, sends);
+  assert.equal(f.powerStates.length, syncs + 1);
+  assert.equal(f.powerStates.at(-1)?.paused, true);
+  assert.deepEqual([...f.intervals.values()], [250]);
+  f.playback.stopLibVlcPlayback();
+  await f.drain();
+});
+
+test('LibVLC resume and paused seek restore 16 ms polling immediately and report the landed seek', async () => {
+  const f = fixture();
+  const first = f.start();
+  f.poll();
+  f.playback.commandLibVlcPlayback(first.sessionId, { type: 'set-paused', paused: true });
+  f.poll();
+  assert.deepEqual([...f.intervals.values()], [250]);
+  const sends = f.sent.length;
+  assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, { type: 'seek', position: 5 }), true);
+  assert.deepEqual([...f.intervals.values()], [16]);
+  f.poll();
+  assert.equal(f.sent.length, sends + 1);
+  assert.equal(f.sent.at(-1)?.position, 5);
+  assert.equal(f.sent.at(-1)?.paused, true);
+  f.advance(749); f.poll();
+  assert.deepEqual([...f.intervals.values()], [16]);
+  f.advance(1); f.poll();
+  assert.deepEqual([...f.intervals.values()], [250]);
+  const samePositionSends = f.sent.length;
+  f.playback.commandLibVlcPlayback(first.sessionId, { type: 'seek', position: 5 });
+  assert.deepEqual([...f.intervals.values()], [16]);
+  f.poll();
+  assert.equal(f.sent.length, samePositionSends + 1);
+  assert.equal(f.sent.at(-1)?.position, 5);
+  f.poll();
+  assert.equal(f.sent.length, samePositionSends + 1);
+  f.advance(750); f.poll();
+  assert.deepEqual([...f.intervals.values()], [250]);
+  assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, { type: 'set-paused', paused: false }), true);
+  assert.deepEqual([...f.intervals.values()], [16]);
+  assert.equal(f.sent.at(-1)?.paused, false);
+  f.poll();
+  assert.deepEqual([...f.intervals.values()], [16]);
+  f.playback.stopLibVlcPlayback();
+  await f.drain();
+});
+
+test('LibVLC track discovery slows after startup and still reports additions, selection and removal within a second', async () => {
+  const f = fixture();
+  f.setAudioTracks([{ id: 1, title: 'English' }]);
+  const first = f.start();
+  f.poll();
+  const initialReads = f.trackReads();
+  f.advance(499); f.poll();
+  assert.equal(f.trackReads(), initialReads);
+  f.advance(1); f.poll();
+  assert.equal(f.trackReads(), initialReads + 1);
+  f.advance(4500); f.poll();
+  const reads = f.trackReads();
+  const sends = f.sent.length;
+  f.setAudioTracks([{ id: 1, title: 'English' }, { id: 2, title: 'French' }]);
+  f.advance(500); f.poll();
+  assert.equal(f.trackReads(), reads);
+  assert.equal(f.sent.length, sends);
+  f.advance(500); f.poll();
+  assert.equal(f.trackReads(), reads + 1);
+  assert.equal(f.sent.length, sends + 1);
+  assert.equal(f.sent.at(-1)?.tracks?.length, 2);
+  assert.equal(f.playback.commandLibVlcPlayback(first.sessionId, { type: 'set-audio-track', trackId: 2 }), true);
+  assert.equal(f.sent.length, sends + 2);
+  assert.equal(f.sent.at(-1)?.tracks?.find((track) => track.id === 2)?.selected, true);
+  f.playback.commandLibVlcPlayback(first.sessionId, { type: 'set-audio-track', trackId: 2 });
+  assert.equal(f.sent.length, sends + 2);
+  f.setAudioTracks([]);
+  f.advance(1000); f.poll();
+  assert.equal(f.sent.length, sends + 3);
+  assert.equal(f.sent.at(-1)?.tracks?.length, 0);
+  f.playback.stopLibVlcPlayback();
+  await f.drain();
+});
 
 test('stop detaches immediately and retains the view until worker stop and releases return', async () => {
   const f = fixture();

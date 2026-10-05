@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackState, PlaybackTrack, PlaybackViewport } from '../shared/playbackProtocol';
 import {
   releaseNativePlaybackDisplaySleep,
@@ -1044,8 +1045,9 @@ class LibVlcPlaybackSession {
   private player: NativeHandle;
   private playerOperation: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
-  private readonly startupPollDeadline = Date.now() + 2500;
-  private startupPolling = true;
+  private pollIntervalMs = 0;
+  private fastPollUntil = 0;
+  private readonly nativeTrackDiscoveryDeadline = Date.now() + 5_000;
   private nativeSyncTimer: NodeJS.Timeout | null = null;
   private nativeSyncRetryCount = 0;
   private nativeSyncForceRebind = false;
@@ -1063,6 +1065,7 @@ class LibVlcPlaybackSession {
   private stopped = false;
   private ended = false;
   private replaySeek: number | null = null;
+  private pendingSeekState = false;
   private startSeconds: number;
   private startApplied = false;
   private requestedPaused = false;
@@ -1084,6 +1087,8 @@ class LibVlcPlaybackSession {
   private occludedSince = 0;
   private suspendedVideoTrackId: number | null = null;
   private state: LibVlcPlaybackState;
+  private lastSentState: LibVlcPlaybackState | null = null;
+  private lastDisplaySleepState: Pick<LibVlcPlaybackState, 'status' | 'paused'> | null = null;
   private readonly windowListeners: Array<() => void> = [];
 
   constructor(
@@ -1177,10 +1182,8 @@ class LibVlcPlaybackSession {
       this.ownerWindow.once('closed', stopForClosedOwner);
       this.windowListeners.push(() => this.ownerWindow.removeListener('closed', stopForClosedOwner));
       this.emit({ status: 'loading' });
-      // Detect initial readiness and apply resume seeks without waiting for the
-      // steady-state progress interval. Bound the faster polling for slow media.
-      this.timer = setInterval(() => this.poll(), 16);
-      this.timer.unref();
+      // Detect initial readiness and apply resume seeks at the playback cadence.
+      this.setPollInterval(16);
     } catch (error) {
       this.finish('error', error instanceof Error ? error.message : 'LibVLC could not start local playback.');
       throw error;
@@ -1438,6 +1441,7 @@ class LibVlcPlaybackSession {
     // A macOS vout can report `closed` briefly while the new decoder and
     // surface are being constructed. Keep the session alive long enough for
     // that legitimate re-arm state instead of tearing the Loom player down.
+    this.resumeFastPolling();
     this.player = null;
     this.beginPlayerOperation(async () => {
       await this.stopAndReleasePlayer(previousPlayer);
@@ -1657,25 +1661,38 @@ class LibVlcPlaybackSession {
     return false;
   }
 
-  private emit(patch: Partial<LibVlcPlaybackState>): void {
+  private emit(patch: Partial<LibVlcPlaybackState>, nativeState?: number, force = false): void {
     if (patch.status && patch.status !== this.state.status) {
       recordPlaybackDiagnostic('vlc.status', patch.status);
       if (patch.status === 'error') console.error('[playback] Recent state transitions', playbackDiagnostics());
     }
-    this.state = { ...this.state, ...patch };
-    syncNativePlaybackDisplaySleep(this.id, {
-      ...this.state,
+    if (Object.entries(patch).some(([key, value]) => !isDeepStrictEqual(this.state[key as keyof LibVlcPlaybackState], value))) {
+      this.state = { ...this.state, ...patch };
+    }
+    const changed = force || !isDeepStrictEqual(this.state, this.lastSentState);
+    if (!changed && nativeState === undefined) return;
+    const displaySleepState = {
+      status: this.state.status,
       // The renderer gets optimistic state, but sleep waits for LibVLC to pause.
-      paused: this.state.paused === true && (!this.player || Number(this.runtime.api.playerGetState(this.player)) === 4),
-    }, () => {
-      if (!this.owner.isDestroyed()) {
-        this.owner.send('media-control:command', { type: 'pause' }, true);
-      }
-      this.command({ type: 'set-paused', paused: true });
-    });
+      paused: this.state.paused === true && (!this.player || (nativeState ?? Number(this.runtime.api.playerGetState(this.player))) === 4),
+    };
+    if (!isDeepStrictEqual(displaySleepState, this.lastDisplaySleepState)) {
+      this.lastDisplaySleepState = displaySleepState;
+      syncNativePlaybackDisplaySleep(this.id, displaySleepState, () => {
+        if (!this.owner.isDestroyed()) {
+          this.owner.send('media-control:command', { type: 'pause' }, true);
+        }
+        this.command({ type: 'set-paused', paused: true });
+      });
+    }
+    if (!changed) return;
     // Track metadata only changes on discovery or selection. Do not clone it
     // across IPC with every position update; the renderer keeps the last list.
-    if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', { ...this.state, tracks: patch.tracks });
+    if (!this.owner.isDestroyed()) {
+      const tracksChanged = !isDeepStrictEqual(this.state.tracks, this.lastSentState?.tracks);
+      this.owner.send('libvlc:state', { ...this.state, tracks: tracksChanged ? this.state.tracks : undefined });
+      this.lastSentState = this.state;
+    }
   }
 
   private applyPendingRearmTrackSelection(): void {
@@ -1766,7 +1783,9 @@ class LibVlcPlaybackSession {
 
   private refreshNativeTracks(force = false): void {
     const now = Date.now();
-    if (!force && now - this.lastNativeTrackRefreshAt < 500) return;
+    // Probe often during stream discovery, then keep new tracks within a second.
+    const interval = now < Math.max(this.nativeTrackDiscoveryDeadline, this.nativeRearmUntil) ? 500 : 1_000;
+    if (!force && now - this.lastNativeTrackRefreshAt < interval) return;
     this.lastNativeTrackRefreshAt = now;
     const api = this.runtime.api;
     const tracks = [
@@ -1774,7 +1793,7 @@ class LibVlcPlaybackSession {
       ...this.readNativeTrackDescriptions('audio', api.audioGetTrackDescription, api.audioGetTrack),
       ...this.readNativeTrackDescriptions('subtitle', api.subtitleGetTrackDescription, api.subtitleGetTrack),
     ];
-    if (tracks.length === 0) return;
+    if (tracks.length === 0 && !this.nativeTracksSignature) return;
     const signature = JSON.stringify(tracks.map((track) => [track.type, track.id, track.title, track.selected]));
     if (signature === this.nativeTracksSignature) return;
     this.nativeTracksSignature = signature;
@@ -1785,8 +1804,10 @@ class LibVlcPlaybackSession {
     const player = this.player;
     if (!player || this.stopped) return false;
     const api = this.runtime.api;
+    this.resumeFastPolling();
     this.player = null;
     this.replaySeek = position;
+    this.pendingSeekState = true;
     this.requestedPaused = paused;
     this.lastPauseCommand = null;
     this.startApplied = true;
@@ -1805,21 +1826,25 @@ class LibVlcPlaybackSession {
     return true;
   }
 
+  private setPollInterval(intervalMs: number): void {
+    if (this.stopped || (this.timer && this.pollIntervalMs === intervalMs)) return;
+    if (this.timer) clearInterval(this.timer);
+    this.pollIntervalMs = intervalMs;
+    this.timer = setInterval(() => this.poll(), intervalMs);
+    this.timer.unref();
+  }
+
+  private resumeFastPolling(): void {
+    this.fastPollUntil = Date.now() + 750;
+    this.setPollInterval(16);
+  }
+
   private poll(): void {
     if (this.stopped || this.ended || !this.player) return;
     try {
       const api = this.runtime.api;
       const nativeState = Number(api.playerGetState(this.player));
       const status = nativeStateStatus(nativeState);
-      if (this.startupPolling && (status === 'ready' || Date.now() >= this.startupPollDeadline)) {
-        this.startupPolling = false;
-        if (this.timer) clearInterval(this.timer);
-        // Native subtitle overlays follow the latest playback timestamp from
-        // this poll. Keep the steady-state cadence close to a video frame so
-        // subtitle cues do not visibly trail the picture.
-        this.timer = setInterval(() => this.poll(), 16);
-        this.timer.unref();
-      }
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
       if (status === 'ended') {
         this.ended = true;
@@ -1828,6 +1853,7 @@ class LibVlcPlaybackSession {
         this.pauseAcknowledgementDeadline = 0;
         // EOF is a reusable player state, not session termination.
         this.emit({ status: 'ended', paused: true, position: this.state.duration || this.state.position });
+        this.setPollInterval(250);
         return;
       }
       if (status === 'ready' && this.replaySeek !== null) {
@@ -1858,7 +1884,12 @@ class LibVlcPlaybackSession {
         // set_pause is asynchronous inside VLC. Do not undo the acknowledged
         // button state with a poll from before the decoder applied the command.
         paused: Date.now() < this.pauseAcknowledgementDeadline ? this.requestedPaused : nativePaused,
-      });
+      }, nativeState, this.pendingSeekState);
+      this.pendingSeekState = false;
+      // Native subtitle overlays need frame-rate timestamps during playback.
+      // A confirmed pause can idle once seek and pause acknowledgement settle.
+      this.setPollInterval(status === 'ready' && nativePaused && this.state.paused === true
+        && this.pauseAcknowledgementDeadline === 0 && Date.now() >= this.fastPollUntil ? 250 : 16);
       if (status === 'closed') {
         this.finish('closed');
       } else if (status === 'error') {
@@ -1873,11 +1904,15 @@ class LibVlcPlaybackSession {
     if (this.stopped) return false;
     if (!this.player) {
       if (this.replaySeek === null) return false;
-      if (command.type === 'seek') this.replaySeek = Math.max(0, finite(command.position, 0));
+      if (command.type === 'seek') {
+        this.replaySeek = Math.max(0, finite(command.position, 0));
+        this.pendingSeekState = true;
+      }
       else if (command.type === 'set-paused') {
         this.requestedPaused = command.paused;
         this.emit({ paused: command.paused });
       } else return false;
+      if (command.type === 'seek' || (command.type === 'set-paused' && !command.paused)) this.resumeFastPolling();
       return true;
     }
     recordPlaybackDiagnostic('vlc.command', command.type);
@@ -1890,6 +1925,7 @@ class LibVlcPlaybackSession {
           }
           if (this.replaySeek !== null) {
             this.requestedPaused = command.paused;
+            if (!command.paused) this.resumeFastPolling();
             this.emit({ paused: command.paused });
             return true;
           }
@@ -1900,6 +1936,7 @@ class LibVlcPlaybackSession {
           this.lastPauseCommand = command.paused;
           this.requestedPaused = command.paused;
           this.pauseAcknowledgementDeadline = Date.now() + 750;
+          if (!command.paused) this.resumeFastPolling();
           this.emit({ paused: command.paused });
           return true;
         case 'seek': {
@@ -1907,8 +1944,16 @@ class LibVlcPlaybackSession {
           if (this.ended || Number(api.playerGetState(this.player)) === 6) {
             return this.replayFrom(position, this.requestedPaused);
           }
-          if (this.replaySeek !== null) { this.replaySeek = position; return true; }
+          if (this.replaySeek !== null) {
+            this.replaySeek = position;
+            this.pendingSeekState = true;
+            this.resumeFastPolling();
+            return true;
+          }
           api.playerSetTime(this.player, Math.round(position * 1_000));
+          // Even a seek to the current timestamp must settle the renderer's seek guard.
+          this.pendingSeekState = true;
+          this.resumeFastPolling();
           return true;
         }
         case 'set-volume': {
