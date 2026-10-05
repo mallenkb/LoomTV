@@ -131,6 +131,14 @@ test('folder planning checks files inside directories with media extensions', (t
   assert.ok(blocked.skipped.some((skip) => /notes.txt.*still being copied/.test(skip.reason)));
 });
 
+test('browsing a folder in Finder does not hold back folder changes', (t) => {
+  const { directory, plan } = fixture(t);
+  for (const name of ['.DS_Store', '._Show.S01E01.mkv', '.localized']) fs.writeFileSync(path.join(directory, name), 'metadata');
+  assert.ok(plan(() => true).entries.length === 0, 'visible files written just now still block');
+  const metadataOnly = plan((filePath) => /^(?:\.DS_Store|\._.*|\.localized)$/.test(path.basename(filePath)));
+  assert.ok(metadataOnly.entries.length > 0, JSON.stringify(metadataOnly.skipped));
+});
+
 test('non-video partial files also block parent folder changes', (t) => {
   const { directory, plan } = fixture(t);
   fs.writeFileSync(path.join(directory, '.copy-state.OPDOWNLOAD'), 'partial');

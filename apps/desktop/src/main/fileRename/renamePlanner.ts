@@ -7,6 +7,9 @@ import { cleanMediaTitle, normalizeTitleForMatch } from '../metadata/helpers.ts'
 import type { MediaItem } from '../metadata/types.ts';
 import { PARTIAL_EXTENSIONS, hasPartialSibling } from './fileSettling.ts';
 
+/** Files macOS rewrites whenever a folder is browsed; they never mean a copy is running. */
+const FOLDER_METADATA_FILE = /^(?:\.DS_Store|\.localized|\._.*|Icon\r)$/;
+
 /**
  * Plans renames of matched media files to the names LoomTV shows for them:
  *
@@ -412,7 +415,7 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
         }
         if (list(child) !== null) {
           pending.push({ directory: child, depth: depth + 1 });
-        } else if (input.isRecentlyModified?.(child)) {
+        } else if (!FOLDER_METADATA_FILE.test(name) && input.isRecentlyModified?.(child)) {
           return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
         }
       }
