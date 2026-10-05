@@ -19,6 +19,7 @@ import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
 import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
 import { tvMazeShowIsEnded } from './metadata/tvmaze.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
+import { alignAbsoluteEpisodes } from './metadata/episodeNumbering.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import {
   inferSeriesTitleFromEpisodeFiles,
@@ -389,7 +390,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       finalType === 'anime' && jikanEpisodesForLocalSeasons.episodes.length > 0 ? jikanEpisodesForLocalSeasons.episodes : null,
       matchedTmdbTVMeta?.episodes,
       completedSeries && omdbCompletedEpisodes.length > 0 ? omdbCompletedEpisodes : null,
-    ], { ratingSourceOrder: completedSeries ? [4] : [0] });
+    ].map((source) => alignAbsoluteEpisodes(localEpisodes, source)), { ratingSourceOrder: completedSeries ? [4] : [0] });
     const mergedEpisodeTitleByKey = new Map(
       mergedEpisodes.map((episode) => [`${episode.season}-${episode.number}`, episode.title]),
     );

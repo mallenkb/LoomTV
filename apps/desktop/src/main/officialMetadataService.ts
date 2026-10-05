@@ -22,6 +22,7 @@ import type { ContentRating, EpisodeMeta, MediaItem, StreamingProvider } from '.
 import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
 import { tvMazeShowIsEnded } from './metadata/tvmaze.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
+import { alignAbsoluteEpisodes } from './metadata/episodeNumbering.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import type { MetadataProviderIds } from './mediaTags.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
@@ -966,13 +967,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       : [];
     const hasLocalSpecials = item.episodeFiles?.some((file) => file.season === 0) === true;
     const hasTMDBSpecials = tmdbMeta?.episodes?.some((episode) => episode.season === 0) === true;
-    const providerEpisodes = hasLocalSpecials && hasTMDBSpecials
+    const localFiles = item.episodeFiles || [];
+    const providerEpisodes = alignAbsoluteEpisodes(localFiles, hasLocalSpecials && hasTMDBSpecials
       ? tmdbMeta?.episodes
-      : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes;
+      : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes) || undefined;
     const selectedRatingEpisodes = completedSeries ? omdbCompletedEpisodes : matchedTV?.episodes || [];
     const fallbackRatingEpisodes = [
       matchedTV?.episodes, tmdbMeta?.episodes, matchedTVDB?.episodes, likelyAnime ? matchedJikan?.episodes : undefined, providerEpisodes,
-    ];
+    ].map((source) => alignAbsoluteEpisodes(localFiles, source) || undefined);
     let episodes = mergeSelectedEpisodeRatings(providerEpisodes, selectedRatingEpisodes, fallbackRatingEpisodes);
     // An airing series reads IMDb episode ratings from OMDb only for seasons
     // that still have unrated episodes on disk: one request per such season.
