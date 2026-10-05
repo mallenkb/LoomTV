@@ -274,17 +274,24 @@ export function scanFilenameHints(filePath: string, fallbackName: string) {
 }
 
 let stagingCleaned = false;
+/**
+ * Removes scan staging folders left by crashed processes, once per process.
+ * It runs in the background: listing the system temp folder took tens of
+ * milliseconds on the main thread right as the launch sync started.
+ */
 export function cleanupAbandonedInventories(): void {
   if (stagingCleaned) return;
   stagingCleaned = true;
-  for (const entry of fs.readdirSync(os.tmpdir(), { withFileTypes: true })) {
-    const match = entry.name.match(/^loom-scan-([0-9]+)-[a-zA-Z0-9]+$/);
-    if (!entry.isDirectory() || !match) continue;
-    const pid = Number(match[1]);
-    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
-    try { process.kill(pid, 0); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') fs.rmSync(path.join(os.tmpdir(), entry.name), { recursive: true, force: true });
+  void (async () => {
+    for (const entry of await fs.promises.readdir(os.tmpdir(), { withFileTypes: true })) {
+      const match = entry.name.match(/^loom-scan-([0-9]+)-[a-zA-Z0-9]+$/);
+      if (!entry.isDirectory() || !match) continue;
+      const pid = Number(match[1]);
+      if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) continue;
+      try { process.kill(pid, 0); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') await fs.promises.rm(path.join(os.tmpdir(), entry.name), { recursive: true, force: true });
+      }
     }
-  }
+  })().catch(() => undefined);
 }

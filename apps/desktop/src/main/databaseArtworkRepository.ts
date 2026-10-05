@@ -50,7 +50,6 @@ const artworkCacheEntryRowSchema = z.object({
   cache_path: z.string().nullable().optional(),
   byte_length: z.number().finite(),
 });
-const artworkCachePathRowSchema = artworkCacheEntryRowSchema.pick({ source_url: true, cache_path: true });
 
 type ArtworkFileDigest = { byteLength: number; contentHash: string };
 
@@ -293,8 +292,8 @@ export function createDatabaseArtworkRepository(
     fs.mkdirSync(cacheDir, { recursive: true });
     const sourceSet = new Set(sources);
     const rows = parseDatabaseRows(
-      database.prepare('SELECT source_url, cache_path FROM artwork_cache').all(),
-      artworkCachePathRowSchema,
+      database.prepare("SELECT source_url, cache_path, byte_length, data_url != '' AS inline_data FROM artwork_cache").all(),
+      artworkCacheEntryRowSchema.extend({ inline_data: z.number().optional() }),
       'artwork cache path',
     );
     const deleteStale = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
@@ -316,9 +315,20 @@ export function createDatabaseArtworkRepository(
 
     if (sources.length === 0) return;
 
+    // Only deciding what to download: a file of the recorded size counts as
+    // cached. Hashing every cached image here held the main thread for about
+    // half a second after each sync; the full check still runs whenever an
+    // image is served, and a file that fails it is fetched again then.
     const existing = new Set<string>();
     for (const row of rows) {
-      if (sourceSet.has(row.source_url) && getCachedArtwork(row.source_url)) existing.add(row.source_url);
+      if (!sourceSet.has(row.source_url)) continue;
+      if (row.cache_path) {
+        try {
+          if (fs.statSync(row.cache_path).size === row.byte_length) existing.add(row.source_url);
+        } catch { /* missing file: fetch again */ }
+      } else if (row.inline_data) {
+        existing.add(row.source_url);
+      }
     }
     const pending = sources.filter((source) => !existing.has(source));
     let index = 0;
