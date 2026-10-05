@@ -405,13 +405,7 @@ protocol.registerSchemesAsPrivileged([
   ...MEDIA_PROTOCOL_SCHEMES.map((scheme) => ({ scheme, privileges: mediaSchemePrivileges })),
 ]);
 
-// Preserve the established runtime identity used by the OS credential store.
-app.setName('LoomTV');
-const configuredUserDataDir = String(process.env.LOOMTV_DATA_DIR || '').trim();
-const USER_DATA_DIR = configuredUserDataDir
-  ? path.resolve(configuredUserDataDir)
-  : path.join(app.getPath('appData'), 'LoomTV');
-app.setPath('userData', USER_DATA_DIR);
+const USER_DATA_DIR = app.getPath('userData');
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
