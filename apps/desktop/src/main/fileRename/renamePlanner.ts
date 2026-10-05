@@ -5,6 +5,7 @@ import { parseEpisodeFileName } from '../scanClassification.ts';
 import { seasonFromRelativePath, seasonNumberFromDirectoryName } from '../libraryScanFiles.ts';
 import { cleanMediaTitle, normalizeTitleForMatch } from '../metadata/helpers.ts';
 import type { MediaItem } from '../metadata/types.ts';
+import { PARTIAL_EXTENSIONS, hasPartialSibling } from './fileSettling.ts';
 
 /**
  * Plans renames of matched media files to the names LoomTV shows for them:
@@ -403,11 +404,11 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       if (visited.has(directory)) continue;
       visited.add(directory);
       if (visited.size > 1024 || depth > 16) return 'The folder is too deeply nested to organize automatically.';
-      for (const name of list(directory) || []) {
+      const names = list(directory) || [];
+      for (const name of names) {
         if (name.startsWith('.')) continue;
         const child = path.join(directory, name);
-        const incomplete = /\.(?:fdmdownload|crdownload|part|partial|download|!qb|!ut)$/i;
-        if (incomplete.test(name) && isVideoFileName(name.replace(incomplete, ''))) {
+        if (PARTIAL_EXTENSIONS.has(path.extname(name).toLowerCase() || name.toLowerCase()) || hasPartialSibling(name, names)) {
           return `"${name}" is still downloading. Folder changes wait until the download finishes.`;
         }
         if (isVideoFileName(name)) {

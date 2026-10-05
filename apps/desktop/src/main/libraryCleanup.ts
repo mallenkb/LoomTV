@@ -6,6 +6,7 @@ import { isImageFileName, isSubtitleFileName, isVideoFileName, normalizedArtwork
 import { subtitleLanguageFromFileName } from './subtitleLanguage.ts';
 import { fileStamp, planFileTransfer, resumeFileTransfer, type FileTransfer } from './fileRename/recoverableFileMove.ts';
 import { assertLibraryPath, inventoryIdentity, type ImportRecord } from './fileRename/importInventory.ts';
+import { PARTIAL_EXTENSIONS, hasPartialSibling } from './fileRename/fileSettling.ts';
 
 /** Recognized clutter and covered subtitles are held for 30 days, with a durable journal. */
 
@@ -13,7 +14,6 @@ export const CLEANUP_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 const JUNK_EXTENSIONS = new Set(['.url', '.webloc', '.website', '.torrent', '.sfv', '.md5', '.nzb']);
 const JUNK_NAMES = new Set(['thumbs.db', 'desktop.ini']);
-const PARTIAL_SUFFIX = /\.(?:part|partial|crdownload|download|fdmdownload|opdownload)$/i;
 const ARTWORK_WORDS = ['poster', 'folder', 'cover', 'thumbnail', 'thumb', 'default', 'movie', 'backdrop', 'fanart', 'background', 'landscape', 'banner', 'logo', 'clearlogo', 'clearart', 'disc', 'season', 'specials'];
 
 export type CleanupReason = 'download-note' | 'not-artwork' | 'only-junk' | 'embedded-copy' | 'episode-copy' | 'embedded-coverage';
@@ -46,7 +46,7 @@ const defaultFileSystem: CleanupFileSystem = {
 
 function junkReason(name: string, directory: string, videoStems: readonly string[]): CleanupReason | null {
   const lower = name.toLowerCase();
-  if (name.startsWith('.') || isVideoFileName(name) || isSubtitleFileName(name) || PARTIAL_SUFFIX.test(name)) return null;
+  if (name.startsWith('.') || isVideoFileName(name) || isSubtitleFileName(name) || PARTIAL_EXTENSIONS.has(path.extname(lower) || lower)) return null;
   if (JUNK_NAMES.has(lower) || JUNK_EXTENSIONS.has(path.extname(lower)) || (/\.(?:txt|html?|lnk)$/i.test(lower) && /downloaded[ ._-]?from|visit[ ._-]?(?:us|our)|website|torrent|advert|sample[ ._-]?url/.test(lower))) return 'download-note';
   if (isImageFileName(name)) {
     const base = normalizedArtworkBaseName(name);
@@ -65,11 +65,13 @@ export function findLeftovers(roots: readonly string[], fileSystem: CleanupFileS
   const visit = (directory: string) => {
     const entries = fileSystem.list(directory);
     if (!entries) return;
+    const files = entries.filter((entry) => !entry.isDirectory).map((entry) => entry.name);
     const videoStems = entries.filter((entry) => !entry.isDirectory && isVideoFileName(entry.name)).map((entry) => normalizedArtworkBaseName(entry.name));
     for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.isSymbolicLink) continue;
       const target = path.join(directory, entry.name);
       if (entry.isDirectory) { visit(target); continue; }
+      if (hasPartialSibling(entry.name, files)) continue;
       const reason = junkReason(entry.name, directory, videoStems);
       if (reason) {
         try { candidates.push({ path: target, reason, stamp: fileStamp(target) }); } catch { /* Inaccessible files stay. */ }

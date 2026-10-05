@@ -7,7 +7,16 @@ export const QUIET_MS = 5 * 60_000;
 export const STABLE_CHECK_MS = QUIET_MS;
 
 /** Names download managers and browsers write to until a download completes. */
-const PARTIAL_SUFFIX = /\.(?:part|partial|crdownload|download|fdmdownload|opdownload)$/i;
+export const PARTIAL_EXTENSIONS: ReadonlySet<string> = new Set(['.part', '.partial', '.crdownload', '.download', '.fdmdownload', '.opdownload', '.!qb', '.!ut']);
+
+/** A marker for this file, including aria2's separate progress file. */
+export function hasPartialSibling(name: string, entries: readonly string[]): boolean {
+  return entries.some((entry) => {
+    const extension = path.extname(entry).toLowerCase();
+    return (PARTIAL_EXTENSIONS.has(extension) || extension === '.aria2')
+      && entry.slice(0, -extension.length) === name;
+  });
+}
 
 type Observation = { size: number; mtimeMs: number; ctimeMs: number; at: number };
 
@@ -38,9 +47,8 @@ export function createFileSettling(options: {
     if (!current) return STABLE_CHECK_MS;
     const name = path.basename(filePath);
     const entries = listDirectory(path.dirname(filePath));
-    if (!entries || current.size <= 0 || PARTIAL_SUFFIX.test(name)
-      || entries.some((entry) => (PARTIAL_SUFFIX.test(entry) && entry.replace(PARTIAL_SUFFIX, '') === name)
-        || entry === `${name}.aria2` || entry === `${name}.!qB` || entry === `${name}.!ut`)) {
+    if (!entries || current.size <= 0 || PARTIAL_EXTENSIONS.has(path.extname(name).toLowerCase() || name.toLowerCase())
+      || hasPartialSibling(name, entries)) {
       observations.delete(filePath);
       return STABLE_CHECK_MS;
     }
