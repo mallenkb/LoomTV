@@ -61,7 +61,7 @@ export interface UpdateState {
 interface AutoUpdaterDeps {
   getMainWindow: () => BrowserWindow | null;
   closeMediaServer: () => Promise<void>;
-  stopNativePlayback: () => void;
+  stopNativePlayback: () => void | Promise<void>;
 }
 
 let deps: AutoUpdaterDeps = {

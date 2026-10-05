@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { callLibVlcAsync, trackLibVlcTeardown } from './libvlcTeardown.ts';
 
 /**
  * Keep one LibVLC instance alive for the lifetime of the desktop process.
@@ -18,7 +19,10 @@ import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 type NativeValue = string | number | bigint | boolean | null | undefined
   | Record<string, unknown>
   | readonly (string | null)[];
-type DynamicFunction = (...args: NativeValue[]) => NativeValue;
+type DynamicFunction = {
+  (...args: NativeValue[]): NativeValue;
+  async: (...args: [...NativeValue[], (error: Error | null, result: NativeValue) => void]) => void;
+};
 type KoffiLibrary = {
   func: (name: string, returnType: string, argumentTypes: readonly string[]) => DynamicFunction;
 };
@@ -221,7 +225,9 @@ function loadCandidate(koffi: KoffiRuntime, libraryPath: string): WarmRuntime | 
     const library = koffi.load(libraryPath);
     libraries.push(library);
     const create = library.func('libvlc_new', 'void *', ['int', 'const char **']);
-    const release = library.func('libvlc_release', 'void', ['void *']);
+    // Koffi void .async callbacks crash Electron 43. Ignore the ABI-safe
+    // integer result from the unused return register on arm64/x64.
+    const release = library.func('libvlc_release', 'int', ['void *']);
     const previousPluginPath = process.env.VLC_PLUGIN_PATH;
     const pluginPath = pluginPathForLibrary(libraryPath);
     if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;
@@ -271,15 +277,11 @@ export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance
   return warmRuntime.instance;
 }
 
-function releaseWarmLibVlcRuntime(): void {
+export function releaseWarmLibVlcRuntime(): Promise<void> {
   const loaded = warmRuntime;
   warmRuntime = null;
-  if (!loaded) return;
-  try {
-    loaded.release(loaded.instance);
-  } catch {
-    // Best-effort shutdown. Electron is already quitting.
-  }
+  if (!loaded) return Promise.resolve();
+  return trackLibVlcTeardown(() => callLibVlcAsync(loaded.release, loaded.instance));
 }
 
 function registerWarmup(): void {
@@ -288,7 +290,6 @@ function registerWarmup(): void {
   if (!enabled()) return;
   if (electronApp.isReady()) warmLibVlcRuntime();
   else electronApp.once('ready', () => { warmLibVlcRuntime(); });
-  electronApp.once('will-quit', () => { releaseWarmLibVlcRuntime(); });
 }
 
 registerWarmup();

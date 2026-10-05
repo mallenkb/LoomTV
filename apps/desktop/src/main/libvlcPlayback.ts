@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackState, PlaybackTrack, PlaybackViewport } from '../shared/playbackProtocol';
 import {
   releaseNativePlaybackDisplaySleep,
@@ -14,7 +15,8 @@ import {
   libVlcPlatformVariants,
   orderWindowsLibVlcChildren,
 } from './libvlcPlatform.ts';
-import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
+import { getWarmLibVlcInstance, releaseWarmLibVlcRuntime } from './libvlcWarmup.ts';
+import { callLibVlcAsync, trackLibVlcTeardown, waitForLibVlcTeardowns } from './libvlcTeardown.ts';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { playbackDiagnostics, recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 import { isScreenLocked } from './screenLock.ts';
@@ -41,7 +43,10 @@ type NativeValue = string | number | bigint | boolean | null | undefined
   | Buffer
   | Record<string, unknown>
   | readonly (string | null)[];
-type DynamicFunction = (...args: NativeValue[]) => NativeValue;
+type DynamicFunction = {
+  (...args: NativeValue[]): NativeValue;
+  async: (...args: [...NativeValue[], (error: Error | null, result: NativeValue) => void]) => void;
+};
 
 export type KoffiLibrary = {
   func: (name: string, returnType: KoffiTypeSpec, argumentTypes: readonly KoffiTypeSpec[]) => DynamicFunction;
@@ -132,6 +137,7 @@ const require = createRequire(__filename);
 const MISSING_RUNTIME_CACHE_MS = 5_000;
 let runtimeCache: RuntimeCache | null = null;
 let currentSession: LibVlcPlaybackSession | null = null;
+let shutdown: Promise<void> | null = null;
 
 /**
  * Narrow an FFI result to a pointer. koffi returns a BigInt address for a
@@ -416,18 +422,20 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         psz_name: 'str',
         p_next: 'void *',
       });
+      // Koffi void .async callbacks crash Electron 43. Teardown uses int and
+      // ignores the unused return register, which is ABI-safe on arm64/x64.
       const api: LibVlcApi = {
         newInstance: bind(library, 'libvlc_new', 'void *', ['int', 'const char **']),
-        releaseInstance: bind(library, 'libvlc_release', 'void', ['void *']),
+        releaseInstance: bind(library, 'libvlc_release', 'int', ['void *']),
         getVersion: bind(library, 'libvlc_get_version', 'str', []),
         mediaNewPath: bind(library, 'libvlc_media_new_path', 'void *', ['void *', 'str']),
         mediaNewLocation: bind(library, 'libvlc_media_new_location', 'void *', ['void *', 'str']),
         mediaAddOption: bind(library, 'libvlc_media_add_option', 'void', ['void *', 'str']),
-        mediaRelease: bind(library, 'libvlc_media_release', 'void', ['void *']),
+        mediaRelease: bind(library, 'libvlc_media_release', 'int', ['void *']),
         playerNewFromMedia: bind(library, 'libvlc_media_player_new_from_media', 'void *', ['void *']),
-        playerRelease: bind(library, 'libvlc_media_player_release', 'void', ['void *']),
+        playerRelease: bind(library, 'libvlc_media_player_release', 'int', ['void *']),
         playerPlay: bind(library, 'libvlc_media_player_play', 'int', ['void *']),
-        playerStop: bind(library, 'libvlc_media_player_stop', 'void', ['void *']),
+        playerStop: bind(library, 'libvlc_media_player_stop', 'int', ['void *']),
         playerSetPause: bind(library, 'libvlc_media_player_set_pause', 'void', ['void *', 'int']),
         playerGetState: bind(library, 'libvlc_media_player_get_state', 'int', ['void *']),
         playerGetTime: bind(library, 'libvlc_media_player_get_time', 'int64', ['void *']),
@@ -631,6 +639,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
     } catch { /* best effort */ }
   };
   const restoreWindowTransparency = (): void => {
+    if (ownerWindow.isDestroyed()) return;
     try { ownerWindow.setBackgroundColor('#00000000'); } catch { /* best effort */ }
     try { msgSendVoid1Bool(ownerWindowObject, selector('setOpaque:'), false); } catch { /* best effort */ }
     try {
@@ -1034,9 +1043,11 @@ class LibVlcPlaybackSession {
   private readonly ownsInstance: boolean;
   private readonly media: NativeHandle;
   private player: NativeHandle;
+  private playerOperation: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
-  private readonly startupPollDeadline = Date.now() + 2500;
-  private startupPolling = true;
+  private pollIntervalMs = 0;
+  private fastPollUntil = 0;
+  private readonly nativeTrackDiscoveryDeadline = Date.now() + 5_000;
   private nativeSyncTimer: NodeJS.Timeout | null = null;
   private nativeSyncRetryCount = 0;
   private nativeSyncForceRebind = false;
@@ -1054,6 +1065,7 @@ class LibVlcPlaybackSession {
   private stopped = false;
   private ended = false;
   private replaySeek: number | null = null;
+  private pendingSeekState = false;
   private startSeconds: number;
   private startApplied = false;
   private requestedPaused = false;
@@ -1075,6 +1087,8 @@ class LibVlcPlaybackSession {
   private occludedSince = 0;
   private suspendedVideoTrackId: number | null = null;
   private state: LibVlcPlaybackState;
+  private lastSentState: LibVlcPlaybackState | null = null;
+  private lastDisplaySleepState: Pick<LibVlcPlaybackState, 'status' | 'paused'> | null = null;
   private readonly windowListeners: Array<() => void> = [];
 
   constructor(
@@ -1112,11 +1126,11 @@ class LibVlcPlaybackSession {
         ? api.mediaNewLocation(this.instance, filePath)
         : api.mediaNewPath(this.instance, filePath));
     } catch (error) {
-      this.releaseOwnedInstance();
+      void trackLibVlcTeardown(() => this.releaseOwnedInstance());
       throw error;
     }
     if (!media) {
-      this.releaseOwnedInstance();
+      void trackLibVlcTeardown(() => this.releaseOwnedInstance());
       throw new Error(isRemoteLocation
         ? 'LibVLC could not open the live TV stream.'
         : 'LibVLC could not open the authorized local media path.');
@@ -1137,13 +1151,17 @@ class LibVlcPlaybackSession {
       this.media = media;
       this.player = nativeHandle(api.playerNewFromMedia(media));
     } catch (error) {
-      try { api.mediaRelease(media); } catch { /* best effort */ }
-      this.releaseOwnedInstance();
+      void trackLibVlcTeardown(async () => {
+        await callLibVlcAsync(api.mediaRelease, media);
+        await this.releaseOwnedInstance();
+      });
       throw error;
     }
     if (!this.player) {
-      try { api.mediaRelease(this.media); } catch { /* best effort */ }
-      this.releaseOwnedInstance();
+      void trackLibVlcTeardown(async () => {
+        await callLibVlcAsync(api.mediaRelease, media);
+        await this.releaseOwnedInstance();
+      });
       throw new Error('LibVLC could not create a media player.');
     }
 
@@ -1156,25 +1174,20 @@ class LibVlcPlaybackSession {
       this.nativeViewHost = createNativeViewHost(loadKoffi(), ownerWindow);
       this.configureNativePlayer(this.player);
       if (nativeInt(api.playerPlay(this.player)) < 0) throw new Error('LibVLC rejected the authorized local media source.');
+      this.attachNativeViewListeners();
+      const stopForDestroyedOwner = () => this.stop();
+      owner.once('destroyed', stopForDestroyedOwner);
+      this.windowListeners.push(() => owner.removeListener('destroyed', stopForDestroyedOwner));
+      const stopForClosedOwner = () => this.stop();
+      this.ownerWindow.once('closed', stopForClosedOwner);
+      this.windowListeners.push(() => this.ownerWindow.removeListener('closed', stopForClosedOwner));
+      this.emit({ status: 'loading' });
+      // Detect initial readiness and apply resume seeks at the playback cadence.
+      this.setPollInterval(16);
     } catch (error) {
-      this.clearWindowListeners();
-      this.release();
-      this.destroyNativeView();
-      throw error instanceof Error ? error : new Error('LibVLC could not start local playback.');
+      this.finish('error', error instanceof Error ? error.message : 'LibVLC could not start local playback.');
+      throw error;
     }
-
-    this.attachNativeViewListeners();
-    const stopForDestroyedOwner = () => this.stop();
-    owner.once('destroyed', stopForDestroyedOwner);
-    this.windowListeners.push(() => owner.removeListener('destroyed', stopForDestroyedOwner));
-    const stopForClosedOwner = () => this.stop();
-    this.ownerWindow.once('closed', stopForClosedOwner);
-    this.windowListeners.push(() => this.ownerWindow.removeListener('closed', stopForClosedOwner));
-    this.emit({ status: 'loading' });
-    // Detect initial readiness and apply resume seeks without waiting for the
-    // steady-state progress interval. Bound the faster polling for slow media.
-    this.timer = setInterval(() => this.poll(), 16);
-    this.timer.unref();
   }
 
   private configureNativePlayer(player: NativeHandle): void {
@@ -1327,7 +1340,7 @@ class LibVlcPlaybackSession {
           this.nativeViewHost.setVisible(true);
         }
       }
-      if (drawableNeedsRebind) {
+      if (drawableNeedsRebind && this.player) {
         this.runtime.api.setDrawable(this.player, this.nativeViewHost.drawable);
         // AppKit can invalidate LibVLC's vout on both sides of a fullscreen
         // transition. Re-arm only after the confirmed post-transition
@@ -1379,6 +1392,7 @@ class LibVlcPlaybackSession {
   }
 
   private resumeOffscreenVideo(): void {
+    if (!this.player || this.stopped) return;
     const trackId = this.suspendedVideoTrackId;
     if (trackId === null) return;
     const api = this.runtime.api;
@@ -1400,6 +1414,7 @@ class LibVlcPlaybackSession {
   }
 
   private rearmNativeVideoOutput(): void {
+    if (!this.player || this.stopped) return;
     this.resumeOffscreenVideo();
     const api = this.runtime.api;
     const positionMs = Number(api.playerGetTime(this.player));
@@ -1426,35 +1441,59 @@ class LibVlcPlaybackSession {
     // A macOS vout can report `closed` briefly while the new decoder and
     // surface are being constructed. Keep the session alive long enough for
     // that legitimate re-arm state instead of tearing the Loom player down.
-    this.nativeRearmUntil = Date.now() + 5_000;
-    try { api.playerStop(previousPlayer); } catch { /* release still runs */ }
-    try { api.playerRelease(previousPlayer); } catch { /* recreate below */ }
+    this.resumeFastPolling();
     this.player = null;
-    const nextPlayer = nativeHandle(api.playerNewFromMedia(this.media));
-    if (!nextPlayer) throw new Error('LibVLC could not recreate the native video output.');
-    this.player = nextPlayer;
-    this.lastPauseCommand = null;
-    this.configureNativePlayer(nextPlayer);
-    this.initialAudioSelectionApplied = this.preferredAudioTrackId === null;
-    this.initialAudioSelectionAttempts = 0;
-    if (Number(api.playerPlay(nextPlayer)) < 0) throw new Error('LibVLC could not re-arm the native video output.');
-    const restorePosition = () => {
-      if (this.stopped || this.player !== nextPlayer || positionMs < 0) return;
-      try { api.playerSetTime(nextPlayer, Math.round(positionMs)); } catch { /* best effort */ }
+    this.beginPlayerOperation(async () => {
+      await this.stopAndReleasePlayer(previousPlayer);
+      if (this.stopped) return;
+      this.nativeRearmUntil = Date.now() + 5_000;
+      const nextPlayer = nativeHandle(api.playerNewFromMedia(this.media));
+      if (!nextPlayer) throw new Error('LibVLC could not recreate the native video output.');
+      this.player = nextPlayer;
+      this.lastPauseCommand = null;
+      this.configureNativePlayer(nextPlayer);
+      this.initialAudioSelectionApplied = this.preferredAudioTrackId === null;
+      this.initialAudioSelectionAttempts = 0;
+      if (Number(api.playerPlay(nextPlayer)) < 0) throw new Error('LibVLC could not re-arm the native video output.');
+      const restorePosition = () => {
+        if (this.stopped || this.player !== nextPlayer || positionMs < 0) return;
+        try { api.playerSetTime(nextPlayer, Math.round(positionMs)); } catch { /* best effort */ }
+      };
+      const seekTimer = setTimeout(restorePosition, 180);
+      seekTimer.unref();
+      if (wasPaused) {
+        const pauseTimer = setTimeout(() => {
+          if (this.stopped || this.player !== nextPlayer) return;
+          try {
+            api.playerSetPause(nextPlayer, 1);
+            this.lastPauseCommand = true;
+            this.state = { ...this.state, paused: true };
+          } catch { /* best effort */ }
+        }, 360);
+        pauseTimer.unref();
+      }
+    });
+  }
+
+  private beginPlayerOperation(operation: () => Promise<void>): void {
+    const pending = trackLibVlcTeardown(async () => {
+      try {
+        await operation();
+      } catch (error) {
+        this.finish('error', error instanceof Error ? error.message : 'LibVLC playback failed.');
+        throw error;
+      }
+    });
+    this.playerOperation = pending;
+    const clearOperation = () => {
+      if (this.playerOperation === pending) this.playerOperation = null;
     };
-    const seekTimer = setTimeout(restorePosition, 180);
-    seekTimer.unref();
-    if (wasPaused) {
-      const pauseTimer = setTimeout(() => {
-        if (this.stopped || this.player !== nextPlayer) return;
-        try {
-          api.playerSetPause(nextPlayer, 1);
-          this.lastPauseCommand = true;
-          this.state = { ...this.state, paused: true };
-        } catch { /* best effort */ }
-      }, 360);
-      pauseTimer.unref();
-    }
+    void pending.then(clearOperation, clearOperation);
+  }
+
+  private async stopAndReleasePlayer(player: number | bigint): Promise<void> {
+    await callLibVlcAsync(this.runtime.api.playerStop, player);
+    await callLibVlcAsync(this.runtime.api.playerRelease, player);
   }
 
   private scheduleFinalViewportSync(delayMs = 140): void {
@@ -1622,25 +1661,38 @@ class LibVlcPlaybackSession {
     return false;
   }
 
-  private emit(patch: Partial<LibVlcPlaybackState>): void {
+  private emit(patch: Partial<LibVlcPlaybackState>, nativeState?: number, force = false): void {
     if (patch.status && patch.status !== this.state.status) {
       recordPlaybackDiagnostic('vlc.status', patch.status);
       if (patch.status === 'error') console.error('[playback] Recent state transitions', playbackDiagnostics());
     }
-    this.state = { ...this.state, ...patch };
-    syncNativePlaybackDisplaySleep(this.id, {
-      ...this.state,
+    if (Object.entries(patch).some(([key, value]) => !isDeepStrictEqual(this.state[key as keyof LibVlcPlaybackState], value))) {
+      this.state = { ...this.state, ...patch };
+    }
+    const changed = force || !isDeepStrictEqual(this.state, this.lastSentState);
+    if (!changed && nativeState === undefined) return;
+    const displaySleepState = {
+      status: this.state.status,
       // The renderer gets optimistic state, but sleep waits for LibVLC to pause.
-      paused: this.state.paused === true && (!this.player || Number(this.runtime.api.playerGetState(this.player)) === 4),
-    }, () => {
-      if (!this.owner.isDestroyed()) {
-        this.owner.send('media-control:command', { type: 'pause' }, true);
-      }
-      this.command({ type: 'set-paused', paused: true });
-    });
+      paused: this.state.paused === true && (!this.player || (nativeState ?? Number(this.runtime.api.playerGetState(this.player))) === 4),
+    };
+    if (!isDeepStrictEqual(displaySleepState, this.lastDisplaySleepState)) {
+      this.lastDisplaySleepState = displaySleepState;
+      syncNativePlaybackDisplaySleep(this.id, displaySleepState, () => {
+        if (!this.owner.isDestroyed()) {
+          this.owner.send('media-control:command', { type: 'pause' }, true);
+        }
+        this.command({ type: 'set-paused', paused: true });
+      });
+    }
+    if (!changed) return;
     // Track metadata only changes on discovery or selection. Do not clone it
     // across IPC with every position update; the renderer keeps the last list.
-    if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', { ...this.state, tracks: patch.tracks });
+    if (!this.owner.isDestroyed()) {
+      const tracksChanged = !isDeepStrictEqual(this.state.tracks, this.lastSentState?.tracks);
+      this.owner.send('libvlc:state', { ...this.state, tracks: tracksChanged ? this.state.tracks : undefined });
+      this.lastSentState = this.state;
+    }
   }
 
   private applyPendingRearmTrackSelection(): void {
@@ -1731,7 +1783,9 @@ class LibVlcPlaybackSession {
 
   private refreshNativeTracks(force = false): void {
     const now = Date.now();
-    if (!force && now - this.lastNativeTrackRefreshAt < 500) return;
+    // Probe often during stream discovery, then keep new tracks within a second.
+    const interval = now < Math.max(this.nativeTrackDiscoveryDeadline, this.nativeRearmUntil) ? 500 : 1_000;
+    if (!force && now - this.lastNativeTrackRefreshAt < interval) return;
     this.lastNativeTrackRefreshAt = now;
     const api = this.runtime.api;
     const tracks = [
@@ -1739,7 +1793,7 @@ class LibVlcPlaybackSession {
       ...this.readNativeTrackDescriptions('audio', api.audioGetTrackDescription, api.audioGetTrack),
       ...this.readNativeTrackDescriptions('subtitle', api.subtitleGetTrackDescription, api.subtitleGetTrack),
     ];
-    if (tracks.length === 0) return;
+    if (tracks.length === 0 && !this.nativeTracksSignature) return;
     const signature = JSON.stringify(tracks.map((track) => [track.type, track.id, track.title, track.selected]));
     if (signature === this.nativeTracksSignature) return;
     this.nativeTracksSignature = signature;
@@ -1747,38 +1801,50 @@ class LibVlcPlaybackSession {
   }
 
   private replayFrom(position: number, paused: boolean): boolean {
+    const player = this.player;
+    if (!player || this.stopped) return false;
     const api = this.runtime.api;
-    api.playerStop(this.player);
+    this.resumeFastPolling();
+    this.player = null;
     this.replaySeek = position;
+    this.pendingSeekState = true;
     this.requestedPaused = paused;
     this.lastPauseCommand = null;
     this.startApplied = true;
-    this.nativeRearmUntil = Date.now() + 5_000;
-    if (Number(api.playerPlay(this.player)) < 0) {
-      this.replaySeek = null;
-      this.finish('error', 'LibVLC could not resume this video.');
-      return false;
-    }
-    this.ended = false;
+    this.beginPlayerOperation(async () => {
+      await callLibVlcAsync(api.playerStop, player);
+      if (this.stopped) {
+        await callLibVlcAsync(api.playerRelease, player);
+        return;
+      }
+      this.player = player;
+      this.nativeRearmUntil = Date.now() + 5_000;
+      if (Number(api.playerPlay(player)) < 0) throw new Error('LibVLC could not resume this video.');
+      this.ended = false;
+    });
     this.emit({ status: 'loading', paused, position });
     return true;
   }
 
+  private setPollInterval(intervalMs: number): void {
+    if (this.stopped || (this.timer && this.pollIntervalMs === intervalMs)) return;
+    if (this.timer) clearInterval(this.timer);
+    this.pollIntervalMs = intervalMs;
+    this.timer = setInterval(() => this.poll(), intervalMs);
+    this.timer.unref();
+  }
+
+  private resumeFastPolling(): void {
+    this.fastPollUntil = Date.now() + 750;
+    this.setPollInterval(16);
+  }
+
   private poll(): void {
-    if (this.stopped || this.ended) return;
+    if (this.stopped || this.ended || !this.player) return;
     try {
       const api = this.runtime.api;
       const nativeState = Number(api.playerGetState(this.player));
       const status = nativeStateStatus(nativeState);
-      if (this.startupPolling && (status === 'ready' || Date.now() >= this.startupPollDeadline)) {
-        this.startupPolling = false;
-        if (this.timer) clearInterval(this.timer);
-        // Native subtitle overlays follow the latest playback timestamp from
-        // this poll. Keep the steady-state cadence close to a video frame so
-        // subtitle cues do not visibly trail the picture.
-        this.timer = setInterval(() => this.poll(), 16);
-        this.timer.unref();
-      }
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
       if (status === 'ended') {
         this.ended = true;
@@ -1787,6 +1853,7 @@ class LibVlcPlaybackSession {
         this.pauseAcknowledgementDeadline = 0;
         // EOF is a reusable player state, not session termination.
         this.emit({ status: 'ended', paused: true, position: this.state.duration || this.state.position });
+        this.setPollInterval(250);
         return;
       }
       if (status === 'ready' && this.replaySeek !== null) {
@@ -1817,7 +1884,12 @@ class LibVlcPlaybackSession {
         // set_pause is asynchronous inside VLC. Do not undo the acknowledged
         // button state with a poll from before the decoder applied the command.
         paused: Date.now() < this.pauseAcknowledgementDeadline ? this.requestedPaused : nativePaused,
-      });
+      }, nativeState, this.pendingSeekState);
+      this.pendingSeekState = false;
+      // Native subtitle overlays need frame-rate timestamps during playback.
+      // A confirmed pause can idle once seek and pause acknowledgement settle.
+      this.setPollInterval(status === 'ready' && nativePaused && this.state.paused === true
+        && this.pauseAcknowledgementDeadline === 0 && Date.now() >= this.fastPollUntil ? 250 : 16);
       if (status === 'closed') {
         this.finish('closed');
       } else if (status === 'error') {
@@ -1830,6 +1902,19 @@ class LibVlcPlaybackSession {
 
   command(command: LibVlcCommand): boolean {
     if (this.stopped) return false;
+    if (!this.player) {
+      if (this.replaySeek === null) return false;
+      if (command.type === 'seek') {
+        this.replaySeek = Math.max(0, finite(command.position, 0));
+        this.pendingSeekState = true;
+      }
+      else if (command.type === 'set-paused') {
+        this.requestedPaused = command.paused;
+        this.emit({ paused: command.paused });
+      } else return false;
+      if (command.type === 'seek' || (command.type === 'set-paused' && !command.paused)) this.resumeFastPolling();
+      return true;
+    }
     recordPlaybackDiagnostic('vlc.command', command.type);
     try {
       const api = this.runtime.api;
@@ -1840,6 +1925,7 @@ class LibVlcPlaybackSession {
           }
           if (this.replaySeek !== null) {
             this.requestedPaused = command.paused;
+            if (!command.paused) this.resumeFastPolling();
             this.emit({ paused: command.paused });
             return true;
           }
@@ -1850,6 +1936,7 @@ class LibVlcPlaybackSession {
           this.lastPauseCommand = command.paused;
           this.requestedPaused = command.paused;
           this.pauseAcknowledgementDeadline = Date.now() + 750;
+          if (!command.paused) this.resumeFastPolling();
           this.emit({ paused: command.paused });
           return true;
         case 'seek': {
@@ -1857,8 +1944,16 @@ class LibVlcPlaybackSession {
           if (this.ended || Number(api.playerGetState(this.player)) === 6) {
             return this.replayFrom(position, this.requestedPaused);
           }
-          if (this.replaySeek !== null) { this.replaySeek = position; return true; }
+          if (this.replaySeek !== null) {
+            this.replaySeek = position;
+            this.pendingSeekState = true;
+            this.resumeFastPolling();
+            return true;
+          }
           api.playerSetTime(this.player, Math.round(position * 1_000));
+          // Even a seek to the current timestamp must settle the renderer's seek guard.
+          this.pendingSeekState = true;
+          this.resumeFastPolling();
           return true;
         }
         case 'set-volume': {
@@ -1937,23 +2032,28 @@ class LibVlcPlaybackSession {
 
   stop(): boolean {
     if (this.stopped) return false;
-    try { this.runtime.api.playerStop(this.player); } catch { /* release still runs */ }
     this.finish();
     return true;
   }
 
-  private releaseOwnedInstance(): void {
+  private async releaseOwnedInstance(): Promise<void> {
     if (!this.ownsInstance || !this.instance) return;
-    try { this.runtime.api.releaseInstance(this.instance); } catch { /* best effort */ }
+    await callLibVlcAsync(this.runtime.api.releaseInstance, this.instance);
   }
 
   private release(): void {
-    if (this.player) {
-      try { this.runtime.api.playerRelease(this.player); } catch { /* best effort */ }
-      this.player = null;
-    }
-    try { this.runtime.api.mediaRelease(this.media); } catch { /* best effort */ }
-    this.releaseOwnedInstance();
+    const player = this.player;
+    this.player = null;
+    const pending = this.playerOperation;
+    void trackLibVlcTeardown(async () => {
+      await pending;
+      if (player) await this.stopAndReleasePlayer(player);
+      if (this.media) await callLibVlcAsync(this.runtime.api.mediaRelease, this.media);
+      await this.releaseOwnedInstance();
+      // Koffi completions return to JS on the main thread. Keep the drawable
+      // retained until VLC has finished closing its input and vout.
+      this.destroyNativeView();
+    });
   }
 
   private destroyNativeView(): void {
@@ -1982,13 +2082,14 @@ class LibVlcPlaybackSession {
     this.timer = null;
     this.clearWindowListeners();
     this.release();
-    this.destroyNativeView();
-    this.emit({
-      status: finalStatus || (this.ended ? 'ended' : 'closed'),
-      paused: true,
-      ...(error ? { error } : {}),
-    });
     this.onTerminated(this);
+    try {
+      this.emit({
+        status: finalStatus || (this.ended ? 'ended' : 'closed'),
+        paused: true,
+        ...(error ? { error } : {}),
+      });
+    } catch { /* the owner may already be destroyed */ }
   }
 }
 
@@ -1998,6 +2099,7 @@ export function startLibVlcPlayback(
   options: LibVlcStartOptions = {},
   sourcePolicy: { allowRemoteHttps?: boolean } = {},
 ): { ok: boolean; sessionId?: string; surface?: LibVlcSurface; error?: string } {
+  if (shutdown) return { ok: false, surface: 'unavailable', error: 'LibVLC is shutting down.' };
   if (!libVlcConfiguredEnabled() || libVlcKillSwitchEnabled() || !libVlcCompositionGateEnabled()) return { ok: false, surface: 'unavailable', error: disabledReason() };
   const isRemoteHttps = /^https:\/\//i.test(filePath);
   if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) && !(isRemoteHttps && sourcePolicy.allowRemoteHttps)) || /^\\\\/.test(filePath)) {
@@ -2047,7 +2149,19 @@ export function stopLibVlcPlayback(sessionId?: string): boolean {
   return stopped;
 }
 
-export function stopAllLibVlcPlayback(): void {
+export function stopAllLibVlcPlayback(timeoutMs = 4_000): Promise<void> {
+  if (shutdown) return shutdown;
   stopLibVlcPlayback();
   invalidateLibVlcRuntimeCache();
+  const deadline = Date.now() + timeoutMs;
+  shutdown = (async () => {
+    if (await waitForLibVlcTeardowns(timeoutMs)) {
+      // Sessions borrow the warm instance. Never drop its reference while a
+      // worker is still closing a player, even when quit's deadline expires.
+      void releaseWarmLibVlcRuntime();
+      if (await waitForLibVlcTeardowns(Math.max(0, deadline - Date.now()))) return;
+    }
+    console.warn('[libvlc] shutdown timed out waiting for native teardown.');
+  })();
+  return shutdown;
 }
