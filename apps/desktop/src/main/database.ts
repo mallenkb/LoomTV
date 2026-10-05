@@ -11,7 +11,6 @@ import {
   rememberArtworkFailure,
   rememberArtworkSuccess,
   sanitizeArtworkBytes,
-  sanitizeArtworkBytesWithDecoder,
 } from './artworkSecurity.ts';
 import type { LibraryData } from './appContracts.ts';
 import type { ProfileExportV1, StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
@@ -1154,21 +1153,7 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
       return null;
     }
     const bytes = Buffer.from(await response.arrayBuffer());
-    let sanitized: FetchedArtworkBytes;
-    try {
-      sanitized = await sanitizeArtworkBytes(bytes, mimeType);
-    } catch (error) {
-      // Electron builds differ in whether `nativeImage` is available from a
-      // worker thread. Keep the bounded byte/signature/dimension checks above,
-      // then use the host decoder as a compatibility fallback when the worker
-      // bridge itself cannot load. This restores the release artwork path for
-      // local library posters without exposing provider URLs to the renderer.
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/worker|electron|decoder process|decoder failed|time limit/i.test(message)) throw error;
-      sanitized = sanitizeArtworkBytesWithDecoder(bytes, mimeType, {
-        createFromBuffer: (buffer) => nativeImage.createFromBuffer(buffer),
-      });
-    }
+    const sanitized = await sanitizeArtworkBytes(bytes, mimeType, { fallbackDecoder: nativeImage });
     rememberArtworkSuccess(sourceUrl);
     return sanitized;
   } catch {
@@ -1301,7 +1286,7 @@ export async function cachePluginArtworkSource(addonId: string, sourceUrl: strin
       if (!response.ok) return null;
       const mimeType = response.headers.get('content-type')?.split(';')[0] || '';
       if (!mimeType.startsWith('image/')) return null;
-      return sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType);
+      return sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType, { fallbackDecoder: nativeImage });
     });
     if (!sanitized) return null;
     enforcePluginArtworkQuota(addonId, sanitized.byteLength, sourceUrl);

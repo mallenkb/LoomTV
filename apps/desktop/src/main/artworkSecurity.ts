@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { Worker } from 'node:worker_threads';
+import { createRequire } from 'node:module';
+import { Worker, type WorkerOptions } from 'node:worker_threads';
 
 const MAX_ARTWORK_INPUT_BYTES = 5 * 1024 * 1024;
 const MAX_ARTWORK_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -279,119 +280,187 @@ function runWithArtworkDecodeBudget<T>(pixels: number, task: () => Promise<T>): 
   });
 }
 
+const artworkRequire = createRequire(typeof __filename === 'string' ? __filename : import.meta.url);
+let artworkFallbackLogged = false;
+
+class ArtworkDecoderUnavailableError extends Error {}
+
+export type ArtworkSanitizerOptions = {
+  fallbackDecoder?: ArtworkDecoder;
+  workerFactory?: (source: string, options: WorkerOptions) => Worker;
+  warn?: (message: string) => void;
+};
+
 const ARTWORK_WORKER_SOURCE = String.raw`
   const { parentPort, workerData } = require('node:worker_threads');
-  const { nativeImage } = require('electron');
-  const fail = (message) => parentPort.postMessage({ ok: false, error: message });
-  try {
+  (async () => {
+    let sharp;
+    try {
+      sharp = require(workerData.decoderModulePath);
+      sharp.cache(false);
+      sharp.concurrency(1);
+    } catch (error) {
+      parentPort.postMessage({ unavailable: true, error: error.message });
+      return;
+    }
+    parentPort.postMessage({ ready: true });
+    await new Promise((resolve) => parentPort.once('message', resolve));
+    const checkSize = (size) => {
+      if (!Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height)
+        || size.width <= 0 || size.height <= 0
+        || size.width > workerData.maxDimension || size.height > workerData.maxDimension
+        || size.width * size.height > workerData.maxPixels) {
+        throw new Error('decoded dimensions exceed the host limit');
+      }
+      if (size.width !== workerData.expectedWidth || size.height !== workerData.expectedHeight) {
+        throw new Error('encoded and decoded dimensions differ');
+      }
+    };
     const input = Buffer.from(workerData.bytes.buffer, workerData.bytes.byteOffset, workerData.bytes.byteLength);
-    const decoded = nativeImage.createFromBuffer(input);
-    if (decoded.isEmpty()) throw new Error('image decoder returned an empty image');
-    const size = decoded.getSize();
-    if (!Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height)
-      || size.width <= 0 || size.height <= 0
-      || size.width > workerData.maxDimension || size.height > workerData.maxDimension
-      || size.width * size.height > workerData.maxPixels) {
-      throw new Error('decoded dimensions exceed the host limit');
-    }
-    if (size.width !== workerData.expectedWidth || size.height !== workerData.expectedHeight) {
-      throw new Error('encoded and decoded dimensions differ');
-    }
-    let normalized = decoded.toPNG();
+    const decoded = sharp(input, {
+      failOn: 'warning',
+      limitInputPixels: workerData.maxPixels,
+      limitInputChannels: 4,
+      sequentialRead: true,
+      ignoreIcc: true,
+      pages: 1,
+    }).timeout({ seconds: 4 });
+    checkSize(await decoded.metadata());
     let mimeType = 'image/png';
-    if (workerData.inputFormat === 'jpeg' && Buffer.isBuffer(normalized) && normalized.length > workerData.maxOutputBytes) {
+    let { data: normalized, info } = await decoded.clone().png().toBuffer({ resolveWithObject: true });
+    if (workerData.inputFormat === 'jpeg' && normalized.length > workerData.maxOutputBytes) {
       for (const quality of [90, 82, 72]) {
-        const jpeg = decoded.toJPEG(quality);
-        if (Buffer.isBuffer(jpeg) && jpeg.length > 0 && jpeg.length <= workerData.maxOutputBytes) {
-          normalized = jpeg;
+        const jpeg = await decoded.clone().jpeg({ quality }).toBuffer({ resolveWithObject: true });
+        if (jpeg.data.length > 0 && jpeg.data.length <= workerData.maxOutputBytes) {
+          normalized = jpeg.data;
+          info = jpeg.info;
           mimeType = 'image/jpeg';
           break;
         }
       }
     }
-    if (!Buffer.isBuffer(normalized) || normalized.length === 0 || normalized.length > workerData.maxOutputBytes) {
+    checkSize(info);
+    if (normalized.length === 0 || normalized.length > workerData.maxOutputBytes) {
       throw new Error('normalized image size is invalid');
     }
     const output = Uint8Array.from(normalized);
-    parentPort.postMessage({ ok: true, bytes: output, mimeType, width: size.width, height: size.height }, [output.buffer]);
-  } catch (error) {
-    fail('worker decoder: ' + (error instanceof Error ? error.message : 'image decoder failed'));
-  }
+    parentPort.postMessage({ ok: true, bytes: output, mimeType, width: info.width, height: info.height }, [output.buffer]);
+  })().catch((error) => parentPort.postMessage({ ok: false, error: error.message }));
 `;
 
-/**
- * Decode and normalize untrusted artwork outside Electron's main event loop.
- * The worker has a bounded V8 heap, the encoded and decoded sizes are bounded,
- * and a timeout terminates the worker instead of leaving a wedged decoder in
- * the long-lived host process.
- */
-export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Promise<SanitizedArtwork> {
-  const inspection = inspectArtworkBytes(bytes, contentType);
-  return runWithArtworkDecodeBudget(inspection.width * inspection.height, () => new Promise<SanitizedArtwork>((resolve, reject) => {
-    const input = Uint8Array.from(bytes);
-    const worker = new Worker(ARTWORK_WORKER_SOURCE, {
-      eval: true,
-      workerData: {
-        bytes: input,
-        expectedWidth: inspection.width,
-        expectedHeight: inspection.height,
-        inputFormat: inspection.format,
-        maxDimension: MAX_ARTWORK_DIMENSION,
-        maxPixels: MAX_ARTWORK_PIXELS,
-        maxOutputBytes: MAX_ARTWORK_OUTPUT_BYTES,
-      },
-      transferList: [input.buffer],
-      resourceLimits: {
-        maxOldGenerationSizeMb: 64,
-        maxYoungGenerationSizeMb: 16,
-        codeRangeSizeMb: 16,
-        stackSizeMb: 4,
-      },
-    });
+function decodeArtworkInWorker(bytes: Buffer, inspection: ArtworkInspection, options: ArtworkSanitizerOptions): Promise<SanitizedArtwork> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      const input = Uint8Array.from(bytes);
+      worker = (options.workerFactory ?? ((source, settings) => new Worker(source, settings)))(ARTWORK_WORKER_SOURCE, {
+        eval: true,
+        workerData: {
+          bytes: input,
+          decoderModulePath: artworkRequire.resolve('sharp'),
+          expectedWidth: inspection.width,
+          expectedHeight: inspection.height,
+          inputFormat: inspection.format,
+          maxDimension: MAX_ARTWORK_DIMENSION,
+          maxPixels: MAX_ARTWORK_PIXELS,
+          maxOutputBytes: MAX_ARTWORK_OUTPUT_BYTES,
+        },
+        transferList: [input.buffer],
+        resourceLimits: {
+          maxOldGenerationSizeMb: 64,
+          maxYoungGenerationSizeMb: 16,
+          codeRangeSizeMb: 16,
+          stackSizeMb: 4,
+        },
+      });
+    } catch (error) {
+      reject(new ArtworkDecoderUnavailableError(`decoder could not start: ${String(error)}`));
+      return;
+    }
+    let ready = false;
     let settled = false;
     const finish = (callback: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      // terminate() resolves when the worker exits. Keep its pixel reservation
-      // and the fetch admission slot until native decode memory is gone.
+      // Keep the pixel reservation and fetch slot until decode memory is gone.
       void worker.terminate().then(callback, (error: unknown) => {
         reject(new Error(`Artwork rejected: decoder termination failed: ${String(error)}`));
       });
     };
     const timeout = setTimeout(() => {
-      finish(() => reject(new Error('Artwork rejected: decoder exceeded the time limit')));
+      finish(() => reject(ready
+        ? new Error('Artwork rejected: decoder exceeded the time limit')
+        : new ArtworkDecoderUnavailableError('decoder did not start within the time limit')));
     }, ARTWORK_WORKER_TIMEOUT_MS);
-    worker.once('message', (message: unknown) => {
+    worker.on('message', (message: unknown) => {
+      if (settled) return;
       const result = message && typeof message === 'object' ? message as Record<string, unknown> : {};
-      if (result.ok !== true || !(result.bytes instanceof Uint8Array)) {
+      if (result.ready === true) {
+        ready = true;
+        try { worker.postMessage({ decode: true }); } catch (error) {
+          finish(() => reject(error));
+        }
+        return;
+      }
+      if (!ready && result.unavailable === true) {
+        finish(() => reject(new ArtworkDecoderUnavailableError(`decoder could not initialize: ${String(result.error)}`)));
+        return;
+      }
+      if (!ready || result.ok !== true || !(result.bytes instanceof Uint8Array)) {
         finish(() => reject(new Error(`Artwork rejected: ${String(result.error || 'image decoder failed')}`)));
         return;
       }
-      const normalized = Buffer.from(result.bytes);
-      if (normalized.length === 0 || normalized.length > MAX_ARTWORK_OUTPUT_BYTES) {
-        finish(() => reject(new Error('Artwork rejected: normalized image size is invalid')));
-        return;
+      try {
+        const normalized = Buffer.from(result.bytes);
+        if (normalized.length === 0 || normalized.length > MAX_ARTWORK_OUTPUT_BYTES) rejectArtwork('normalized image size is invalid');
+        if (result.mimeType !== 'image/png' && result.mimeType !== 'image/jpeg') rejectArtwork('normalized image content type is invalid');
+        const output = inspectArtworkBytes(normalized, result.mimeType);
+        if (output.width !== inspection.width || output.height !== inspection.height
+          || result.width !== output.width || result.height !== output.height) rejectArtwork('encoded and decoded dimensions differ');
+        const hash = createHash('sha256').update(normalized).digest('hex');
+        finish(() => resolve({
+          bytes: normalized,
+          mimeType: result.mimeType as SanitizedArtwork['mimeType'],
+          byteLength: normalized.byteLength,
+          contentHash: hash,
+          width: output.width,
+          height: output.height,
+          frames: 1,
+        }));
+      } catch (error) {
+        finish(() => reject(error));
       }
-      const hash = createHash('sha256').update(normalized).digest('hex');
-      finish(() => resolve({
-        bytes: normalized,
-        mimeType: result.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png',
-        byteLength: normalized.byteLength,
-        contentHash: hash,
-        width: Number(result.width),
-        height: Number(result.height),
-        frames: 1,
-      }));
     });
-    worker.once('error', (error) => finish(() => reject(new Error(`Artwork rejected: ${error.message}`))));
+    worker.once('error', (error) => finish(() => reject(ready
+      ? new Error(`Artwork rejected: ${error.message}`)
+      : new ArtworkDecoderUnavailableError(`decoder could not initialize: ${error.message}`))));
     worker.once('exit', (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      reject(new Error(`Artwork rejected: decoder exited without a result (${code})`));
+      reject(ready
+        ? new Error(`Artwork rejected: decoder exited without a result (${code})`)
+        : new ArtworkDecoderUnavailableError(`decoder exited before initialization (${code})`));
     });
-  }));
+  });
+}
+
+/** Decode untrusted artwork with bounded input, pixels, worker heap, and time. */
+export async function sanitizeArtworkBytes(bytes: Buffer, contentType = '', options: ArtworkSanitizerOptions = {}): Promise<SanitizedArtwork> {
+  const inspection = inspectArtworkBytes(bytes, contentType);
+  return runWithArtworkDecodeBudget(inspection.width * inspection.height, async () => {
+    try {
+      return await decodeArtworkInWorker(bytes, inspection, options);
+    } catch (error) {
+      if (!(error instanceof ArtworkDecoderUnavailableError) || !options.fallbackDecoder) throw error;
+      if (!artworkFallbackLogged) {
+        artworkFallbackLogged = true;
+        (options.warn ?? console.warn)(`[artwork] Off-thread decoder unavailable; using main-thread nativeImage fallback. ${error.message}`);
+      }
+      return sanitizeArtworkBytesWithDecoder(bytes, contentType, options.fallbackDecoder);
+    }
+  });
 }
 
 const negativeArtworkCache = new Map<string, number>();
