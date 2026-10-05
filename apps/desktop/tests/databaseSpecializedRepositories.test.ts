@@ -215,6 +215,45 @@ test('artwork repository persists custom artwork and maintains the disk cache th
   assert.deepEqual(fetched, [firstUrl, secondUrl]);
 });
 
+test('artwork repository reads existing PNG and new JPEG files with their stored hashes and mime types', async (t) => {
+  const database = createDatabase();
+  const cacheDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-artwork-formats-'));
+  t.after(() => {
+    database.close();
+    fs.rmSync(cacheDirectory, { recursive: true, force: true });
+  });
+  let fetches = 0;
+  const repository = createDatabaseArtworkRepository(database, {
+    cacheDirectory,
+    fetchArtworkBytes: async (sourceUrl) => {
+      fetches += 1;
+      const bytes = Buffer.from(`sanitized:${sourceUrl}`);
+      return { bytes, mimeType: 'image/jpeg', byteLength: bytes.length, contentHash: createHash('sha256').update(bytes).digest('hex') };
+    },
+  });
+  const png = Buffer.from('existing PNG bytes');
+  const pngPath = path.join(cacheDirectory, 'existing.png');
+  fs.writeFileSync(pngPath, png);
+  const pngHash = createHash('sha256').update(png).digest('hex');
+  database.prepare('INSERT INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, content_hash, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run('https://example.com/old.jpg', '', pngPath, 'image/png', png.length, pngHash, 1);
+  const existing = await repository.cacheArtworkSource('https://example.com/old.jpg');
+  assert.deepEqual(existing, { cachePath: pngPath, mimeType: 'image/png', byteLength: png.length, contentHash: pngHash });
+  assert.equal(fetches, 0);
+
+  const source = 'https://example.com/new.jpg';
+  const jpeg = await repository.cacheArtworkSource(source);
+  assert.ok(jpeg?.cachePath?.endsWith('.jpg'));
+  assert.equal(jpeg?.mimeType, 'image/jpeg');
+  assert.deepEqual(repository.getCachedArtwork(source), jpeg);
+  assert.equal(fetches, 1);
+  assert.equal(jpeg?.contentHash, createHash('sha256').update(fs.readFileSync(jpeg?.cachePath || '')).digest('hex'));
+  assert.ok(fs.existsSync(pngPath));
+  fs.writeFileSync(jpeg?.cachePath || '', 'corrupted JPEG');
+  assert.equal(repository.getCachedArtwork(source), null);
+  assert.ok(fs.existsSync(pngPath));
+});
+
 test('artwork file digests are reused per file version and recomputed after any rewrite', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-artwork-digest-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

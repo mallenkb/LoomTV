@@ -183,6 +183,71 @@ test('the fallback keeps decoded dimensions and normalized output bounded', asyn
   }), /normalized image size/);
 });
 
+test('JPEG posters stay JPEG, strip metadata, and are smaller than the previous PNG encoding', async (t) => {
+  const width = 500;
+  const height = 750;
+  const pixels = Buffer.alloc(width * height * 3);
+  let seed = 17;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        pixels[(y * width + x) * 3 + channel] = Math.round(100 + 60 * Math.sin(x / 40 + y / 80 + channel) + (seed % 31));
+      }
+    }
+  }
+  const input = await sharp(pixels, { raw: { width, height, channels: 3 } })
+    .withMetadata({ exif: { IFD0: { ImageDescription: 'Untrusted poster metadata' } } })
+    .jpeg({ quality: 92 }).toBuffer();
+  const previousPng = await sharp(input).png().toBuffer();
+  let fallbackCalls = 0;
+  const output = await sanitizeArtworkBytes(input, 'image/jpeg', {
+    fallbackDecoder: fallbackDecoder(input, () => { fallbackCalls += 1; }),
+  });
+  assert.equal(fallbackCalls, 0);
+  assert.equal(output.mimeType, 'image/jpeg');
+  assert.equal(inspectArtworkBytes(output.bytes, output.mimeType).format, 'jpeg');
+  assert.deepEqual([output.width, output.height], [width, height]);
+  assert.ok(output.byteLength < previousPng.byteLength / 3);
+  t.diagnostic(`500x750 poster fixture: JPEG input ${input.length} bytes, sanitized JPEG ${output.byteLength} bytes, reference PNG ${previousPng.length} bytes`);
+  assert.equal(output.contentHash, createHash('sha256').update(output.bytes).digest('hex'));
+  const metadata = await sharp(output.bytes).metadata();
+  assert.equal(metadata.exif, undefined);
+  assert.equal(metadata.icc, undefined);
+});
+
+test('WebP and single-frame GIF are re-encoded as PNG', async () => {
+  const png = await pngFixture();
+  for (const [input, mime] of [
+    [await sharp(png).webp().toBuffer(), 'image/webp'],
+    [await sharp(png).gif().toBuffer(), 'image/gif'],
+  ] as const) {
+    const output = await sanitizeArtworkBytes(input, mime);
+    assert.equal(output.mimeType, 'image/png');
+    assert.equal(inspectArtworkBytes(output.bytes, output.mimeType).format, 'png');
+    assert.deepEqual([output.width, output.height], [32, 48]);
+  }
+});
+
+test('JPEG fallback never encodes PNG and lowers quality only to meet the output limit', async () => {
+  const input = await sharp(await pngFixture()).jpeg().toBuffer();
+  const qualities: number[] = [];
+  const decoder = fallbackDecoder(input, () => undefined);
+  const decoded = decoder.createFromBuffer(input);
+  const output = sanitizeArtworkBytesWithDecoder(input, 'image/jpeg', {
+    createFromBuffer: () => ({
+      ...decoded,
+      toPNG: () => { throw new Error('JPEG must not encode PNG'); },
+      toJPEG: (quality) => {
+        qualities.push(quality);
+        return quality === 72 ? input : Buffer.alloc(2 * 1024 * 1024 + 1);
+      },
+    }),
+  });
+  assert.equal(output.mimeType, 'image/jpeg');
+  assert.deepEqual(qualities, [88, 82, 72]);
+});
+
 test('the real worker rejects a decoder dimension mismatch without fallback', async () => {
   const bytes = await pngFixture();
   let fallbackCalls = 0;

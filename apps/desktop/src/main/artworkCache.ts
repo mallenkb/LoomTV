@@ -125,7 +125,7 @@ export function cachedArtworkResponseHeaders(
   };
 }
 
-function artworkExtensionForMimeType(mimeType: string): string {
+export function artworkExtensionForMimeType(mimeType: string): string {
   const normalized = mimeType.toLowerCase().split(';')[0].trim();
   if (normalized === 'image/png') return '.png';
   if (normalized === 'image/webp') return '.webp';

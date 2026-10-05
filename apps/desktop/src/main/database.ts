@@ -5,6 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch.ts';
 import { runBoundedArtworkFetch } from './artworkFetchAdmission.ts';
+import { artworkExtensionForMimeType } from './artworkCache.ts';
 import { decryptLocalSecret, encryptLocalSecret, isLocalSecretCiphertext, localSecretStorage } from './localSecretStorage.ts';
 import {
   artworkNegativeCacheAllows,
@@ -1187,7 +1188,7 @@ function pluginArtworkObject(addonId: string, sourceUrl: string): PluginArtworkO
     JOIN plugin_artwork_objects AS object ON object.content_hash = reference.content_hash
     WHERE reference.addon_id = ? AND reference.source_url = ?
   `).get(addonId, sourceUrl) as PluginArtworkObjectRow | undefined;
-  if (!row || row.mime_type !== 'image/png' || !fs.existsSync(row.cache_path)) return null;
+  if (!row || (row.mime_type !== 'image/png' && row.mime_type !== 'image/jpeg') || !fs.existsSync(row.cache_path)) return null;
   try {
     // Streams and remembers the digest per file version rather than reading
     // the whole image into memory on every poster request.
@@ -1291,7 +1292,7 @@ export async function cachePluginArtworkSource(addonId: string, sourceUrl: strin
     if (!sanitized) return null;
     enforcePluginArtworkQuota(addonId, sanitized.byteLength, sourceUrl);
 
-    const cachePath = path.join(pluginArtworkCacheDirectory(), `${sanitized.contentHash}.png`);
+    const cachePath = path.join(pluginArtworkCacheDirectory(), `${sanitized.contentHash}${artworkExtensionForMimeType(sanitized.mimeType)}`);
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     if (!fs.existsSync(cachePath)) {
       try { fs.writeFileSync(cachePath, sanitized.bytes, { flag: 'wx' }); } catch (error) {
@@ -1304,9 +1305,9 @@ export async function cachePluginArtworkSource(addonId: string, sourceUrl: strin
     database.transaction(() => {
       database.prepare(`
         INSERT INTO plugin_artwork_objects (content_hash, cache_path, mime_type, byte_length, ref_count, updated_at)
-        VALUES (?, ?, 'image/png', ?, 0, ?)
+        VALUES (?, ?, ?, ?, 0, ?)
         ON CONFLICT(content_hash) DO UPDATE SET updated_at = excluded.updated_at
-      `).run(sanitized.contentHash, cachePath, sanitized.byteLength, Date.now());
+      `).run(sanitized.contentHash, cachePath, sanitized.mimeType, sanitized.byteLength, Date.now());
       database.prepare(`
         INSERT INTO plugin_artwork_references (addon_id, source_url, content_hash, updated_at)
         VALUES (?, ?, ?, ?)

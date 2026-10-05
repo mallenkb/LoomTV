@@ -6,6 +6,7 @@ import {
   cachedArtworkResponseHeaders,
   collectArtworkSourcesForCache,
   artworkCacheFileName,
+  artworkExtensionForMimeType,
   customArtworkReference,
   parseCustomArtworkReference,
 } from '../src/main/artworkCache.ts';
@@ -101,6 +102,11 @@ test('cached artwork responses are not duplicated into Chromium HTTP cache', () 
     'Cache-Control': 'no-store',
     'Content-Length': 1024,
   });
+  assert.deepEqual(cachedArtworkResponseHeaders('image/jpeg', 256, 'private, max-age=86400'), {
+    'Content-Type': 'image/jpeg',
+    'Cache-Control': 'private, max-age=86400',
+    'Content-Length': 256,
+  });
 });
 
 test('custom artwork references keep database artwork out of renderer state', () => {
@@ -123,4 +129,6 @@ test('disk artwork cache file names are stable and content-type aware', () => {
     artworkCacheFileName('https://images.example/poster.jpg?size=large', 'image/jpeg'),
     'a8f2d58f5d2bfa035bfdc0bd9101b5fd421de141b3c5843042b6c260961e6eab.jpg',
   );
+  assert.equal(artworkExtensionForMimeType('image/jpeg'), '.jpg');
+  assert.equal(artworkExtensionForMimeType('image/png'), '.png');
 });

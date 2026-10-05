@@ -218,14 +218,13 @@ export function sanitizeArtworkBytesWithDecoder(bytes: Buffer, contentType: stri
   const size = decoded.getSize();
   checkDimensions(size.width, size.height);
   if (inspection.width !== size.width || inspection.height !== size.height) rejectArtwork('encoded and decoded dimensions differ');
-  let normalized = decoded.toPNG();
-  let normalizedMimeType: SanitizedArtwork['mimeType'] = 'image/png';
+  const normalizedMimeType: SanitizedArtwork['mimeType'] = inspection.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+  let normalized = inspection.format === 'jpeg' ? decoded.toJPEG(88) : decoded.toPNG();
   if (inspection.format === 'jpeg' && Buffer.isBuffer(normalized) && normalized.length > MAX_ARTWORK_OUTPUT_BYTES) {
-    for (const quality of [90, 82, 72]) {
+    for (const quality of [82, 72]) {
       const jpeg = decoded.toJPEG(quality);
       if (Buffer.isBuffer(jpeg) && jpeg.length > 0 && jpeg.length <= MAX_ARTWORK_OUTPUT_BYTES) {
         normalized = jpeg;
-        normalizedMimeType = 'image/jpeg';
         break;
       }
     }
@@ -326,15 +325,15 @@ const ARTWORK_WORKER_SOURCE = String.raw`
       pages: 1,
     }).timeout({ seconds: 4 });
     checkSize(await decoded.metadata());
-    let mimeType = 'image/png';
-    let { data: normalized, info } = await decoded.clone().png().toBuffer({ resolveWithObject: true });
-    if (workerData.inputFormat === 'jpeg' && normalized.length > workerData.maxOutputBytes) {
-      for (const quality of [90, 82, 72]) {
+    const isJpeg = workerData.inputFormat === 'jpeg';
+    const mimeType = isJpeg ? 'image/jpeg' : 'image/png';
+    let { data: normalized, info } = await (isJpeg ? decoded.clone().jpeg({ quality: 88 }) : decoded.clone().png()).toBuffer({ resolveWithObject: true });
+    if (isJpeg && normalized.length > workerData.maxOutputBytes) {
+      for (const quality of [82, 72]) {
         const jpeg = await decoded.clone().jpeg({ quality }).toBuffer({ resolveWithObject: true });
         if (jpeg.data.length > 0 && jpeg.data.length <= workerData.maxOutputBytes) {
           normalized = jpeg.data;
           info = jpeg.info;
-          mimeType = 'image/jpeg';
           break;
         }
       }
