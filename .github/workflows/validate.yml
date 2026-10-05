@@ -87,6 +87,9 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
         run: corepack pnpm --filter loom-media-server-desktop test
 
+      - name: Check desktop performance budgets
+        run: corepack pnpm --filter loom-media-server-desktop check:performance-budgets
+
   rust:
     name: Test and audit Rust
     runs-on: ubuntu-latest

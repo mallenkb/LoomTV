@@ -43,6 +43,7 @@
     "lint": "eslint .",
     "pretest": "node scripts/ensure-node-natives.cjs && cargo build --locked --release --manifest-path native/scanner/Cargo.toml",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts",
+    "check:performance-budgets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-performance-budgets.ts",
     "scanner:build": "node scripts/build-scanner.cjs",
     "runtimes:fetch": "node scripts/fetch-native-runtimes.cjs",
     "libmpv:bundle": "node scripts/bundle-libmpv.cjs",
