@@ -19,8 +19,10 @@ export function useEpisodeUpdates(enabled = true): LibraryEpisodeUpdates {
         .catch(() => undefined);
     };
     load();
-    const unsubscribe = desktopApi.onLibraryFilesOrganized(load);
-    return () => { cancelled = true; unsubscribe(); };
+    const unsubscribeOrganized = desktopApi.onLibraryFilesOrganized(load);
+    // Schedules come from the cache at once and refresh in the background.
+    const unsubscribeSchedules = desktopApi.onLibraryEpisodeUpdatesChanged(load);
+    return () => { cancelled = true; unsubscribeOrganized(); unsubscribeSchedules(); };
   }, [enabled]);
   return updates;
 }

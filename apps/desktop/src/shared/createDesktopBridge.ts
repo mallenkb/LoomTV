@@ -191,6 +191,11 @@ const desktopApi = {
     ipcRenderer.on('library:files-organized', handler);
     return () => ipcRenderer.removeListener('library:files-organized', handler);
   },
+  onLibraryEpisodeUpdatesChanged: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('library:episode-updates-changed', handler);
+    return () => ipcRenderer.removeListener('library:episode-updates-changed', handler);
+  },
   listIptvChannels: (request: IptvChannelRequest) => ipcRenderer.invoke('iptv:list-channels', request),
   iptvGuide: (references: string[], fromMs: number, toMs: number) => ipcRenderer.invoke('iptv:guide', references, fromMs, toMs),
   explainIptvChannel: (reference: string) => ipcRenderer.invoke('iptv:explain-channel', reference),

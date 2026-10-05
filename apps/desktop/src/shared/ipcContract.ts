@@ -276,6 +276,7 @@ export interface IpcEventContract {
   /** Main requests unused UI cache cleanup after playback starts or during inactivity. */
   'app:trim-memory': { args: [] };
   'library:files-organized': { args: [result: { renamed: number }] };
+  'library:episode-updates-changed': { args: [] };
 }
 
 export type IpcEventChannel = keyof IpcEventContract;

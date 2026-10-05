@@ -122,7 +122,7 @@ import {
 } from './main/fileRename/matchConfirmation.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
-import { loadShowSchedules } from './main/showSchedule.ts';
+import { readShowSchedules, refreshShowSchedules } from './main/showSchedule.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
   createWindow,
@@ -2064,7 +2064,7 @@ const mediaRenameHandlers = {
       progress: getAllProgress(profileId),
       now: Date.now(),
       seen: firstSeenDates(),
-      schedules: await showSchedulesFor(items),
+      schedules: showSchedulesFor(items),
     });
   },
   libraryHealth: async () => {
@@ -2074,7 +2074,7 @@ const mediaRenameHandlers = {
       progress: profileId ? getAllProgress(profileId) : {},
       now: Date.now(),
       seen: firstSeenDates(),
-      schedules: await showSchedulesFor(items),
+      schedules: showSchedulesFor(items),
     });
     const skipped = mediaRenameExecutor.plan().skipped
       .map((skip) => ({ title: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason }));
@@ -2095,9 +2095,29 @@ const mediaRenameHandlers = {
   },
 };
 
+let scheduleRefresh: Promise<void> | null = null;
+
+/**
+ * Cached full episode lists, returned at once so the next episode and missing
+ * episodes show without waiting on TVmaze or AniList. Stale lists refresh in
+ * the background (one refresh at a time), and windows are told to re-read
+ * when anything changed.
+ */
 function showSchedulesFor(items: MediaItem[]) {
   const offline = loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode);
-  return loadShowSchedules(getMediaRenameDatabase(), items, { offline });
+  const database = getMediaRenameDatabase();
+  const { schedules, stale } = readShowSchedules(database, items, { offline });
+  if (stale.length && !scheduleRefresh) {
+    scheduleRefresh = refreshShowSchedules(database, stale)
+      .then((changed) => {
+        if (!changed) return;
+        const window = getMainWindow();
+        if (window && !window.isDestroyed()) window.webContents.send('library:episode-updates-changed');
+      })
+      .catch((error) => console.warn('[schedule] Background refresh failed:', describeErrorForLog(error)))
+      .finally(() => { scheduleRefresh = null; });
+  }
+  return schedules;
 }
 
 /** Records newly seen titles and episodes (whole library, every profile) and returns all dates. */
