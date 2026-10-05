@@ -406,15 +406,14 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       if (visited.size > 1024 || depth > 16) return 'The folder is too deeply nested to organize automatically.';
       const names = list(directory) || [];
       for (const name of names) {
-        if (name.startsWith('.')) continue;
         const child = path.join(directory, name);
         if (PARTIAL_EXTENSIONS.has(path.extname(name).toLowerCase() || name.toLowerCase()) || hasPartialSibling(name, names)) {
           return `"${name}" is still downloading. Folder changes wait until the download finishes.`;
         }
-        if (isVideoFileName(name)) {
-          if (input.isRecentlyModified?.(child)) return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
-        } else if (!SIDECAR_EXTENSIONS.has(path.extname(name).toLowerCase()) && list(child) !== null) {
+        if (list(child) !== null) {
           pending.push({ directory: child, depth: depth + 1 });
+        } else if (input.isRecentlyModified?.(child)) {
+          return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
         }
       }
     }

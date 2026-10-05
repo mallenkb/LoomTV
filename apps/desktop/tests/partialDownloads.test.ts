@@ -28,15 +28,15 @@ function fixture(t: test.TestContext) {
     providerIds: { tvdbId: '1' }, episodeFiles: [{ season: 1, episode: 1, filePath: source }],
     episodes: [{ season: 1, number: 1, title: 'The First Day' }],
   } as MediaItem;
-  const plan = () => planRenames({
+  const plan = (isRecentlyModified?: (filePath: string) => boolean) => planRenames({
     items: [item], libraryRoots: [root], listDirectory,
-    isLocked: () => false, sameDrive: () => true,
+    isLocked: () => false, sameDrive: () => true, isRecentlyModified,
   });
   const settling = createFileSettling({
     stat: () => ({ size: 10, mtimeMs: NOW - 10 * QUIET_MS, ctimeMs: NOW - 10 * QUIET_MS }),
     listDirectory,
   });
-  return { root, source, note, plan, settling };
+  return { root, directory, source, note, plan, settling, listDirectory };
 }
 
 for (const suffix of ['.part', '.partial', '.crdownload', '.download', '.fdmdownload', '.opdownload', '.!qB', '.!ut', '.aria2']) {
@@ -88,3 +88,52 @@ test('bare hidden partial names keep waiting as they did with the suffix check',
   assert.equal(settling.waitMs('/m/.PART', NOW + STABLE_CHECK_MS), STABLE_CHECK_MS);
 });
 
+for (const name of ['Show.S01E01.en.ass', 'poster.jpg', 'movie.nfo', 'notes.txt', 'archive.zip', '.copy-state', 'Extras/info.txt', '.sync/info.txt']) {
+  for (const timestamp of ['mtimeMs', 'ctimeMs'] as const) {
+    test(`folder planning waits the settling quiet window for ${name}'s ${timestamp}`, (t) => {
+      const { directory, source, note, plan, listDirectory } = fixture(t);
+      const recent = path.join(directory, name);
+      fs.mkdirSync(path.dirname(recent), { recursive: true });
+      fs.writeFileSync(recent, 'copy');
+      let now = NOW;
+      const settling = createFileSettling({
+        stat: (filePath) => {
+          assert.ok(fs.statSync(filePath).isFile(), 'folder timestamps do not count as file writes');
+          return { size: 10, mtimeMs: NOW - 10 * QUIET_MS, ctimeMs: NOW - 10 * QUIET_MS,
+            ...(filePath === recent ? { [timestamp]: NOW - 1_000 } : {}) };
+        },
+        listDirectory,
+      });
+      for (const filePath of [source, note, recent]) settling.waitMs(filePath, NOW - STABLE_CHECK_MS);
+      const check = (filePath: string) => settling.waitMs(filePath, now) > 0;
+      const blocked = plan(check);
+      assert.deepEqual(blocked.entries, []);
+      assert.ok(blocked.skipped.some((skip) => skip.reason.includes(path.basename(recent)) && /still being copied/.test(skip.reason)));
+      now = NOW + QUIET_MS - 1_001;
+      assert.deepEqual(plan(check).entries, []);
+      now += 1;
+      assert.ok(plan(check).entries.length > 0, 'folder changes resume at the unchanged quiet-window boundary');
+    });
+  }
+}
+
+test('folder planning checks files inside directories with media extensions', (t) => {
+  const { directory, plan } = fixture(t);
+  const folder = path.join(directory, 'Extras.jpg');
+  fs.mkdirSync(folder);
+  const recent = path.join(folder, 'notes.txt');
+  fs.writeFileSync(recent, 'copy');
+  const blocked = plan((filePath) => {
+    assert.notEqual(filePath, folder);
+    return filePath === recent;
+  });
+  assert.deepEqual(blocked.entries, []);
+  assert.ok(blocked.skipped.some((skip) => /notes.txt.*still being copied/.test(skip.reason)));
+});
+
+test('non-video partial files also block parent folder changes', (t) => {
+  const { directory, plan } = fixture(t);
+  fs.writeFileSync(path.join(directory, '.copy-state.OPDOWNLOAD'), 'partial');
+  assert.deepEqual(plan().entries, []);
+  assert.match(plan().skipped[0]?.reason || '', /still downloading/);
+});
