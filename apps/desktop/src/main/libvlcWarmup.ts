@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { callLibVlcAsync, trackLibVlcTeardown } from './libvlcTeardown.ts';
 
 /**
  * Keep one LibVLC instance alive for the lifetime of the desktop process.
@@ -18,7 +19,10 @@ import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 type NativeValue = string | number | bigint | boolean | null | undefined
   | Record<string, unknown>
   | readonly (string | null)[];
-type DynamicFunction = (...args: NativeValue[]) => NativeValue;
+type DynamicFunction = {
+  (...args: NativeValue[]): NativeValue;
+  async: (...args: [...NativeValue[], (error: Error | null, result: NativeValue) => void]) => void;
+};
 type KoffiLibrary = {
   func: (name: string, returnType: string, argumentTypes: readonly string[]) => DynamicFunction;
 };
@@ -271,15 +275,11 @@ export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance
   return warmRuntime.instance;
 }
 
-function releaseWarmLibVlcRuntime(): void {
+export function releaseWarmLibVlcRuntime(): Promise<void> {
   const loaded = warmRuntime;
   warmRuntime = null;
-  if (!loaded) return;
-  try {
-    loaded.release(loaded.instance);
-  } catch {
-    // Best-effort shutdown. Electron is already quitting.
-  }
+  if (!loaded) return Promise.resolve();
+  return trackLibVlcTeardown(() => callLibVlcAsync(loaded.release, loaded.instance));
 }
 
 function registerWarmup(): void {
@@ -288,7 +288,6 @@ function registerWarmup(): void {
   if (!enabled()) return;
   if (electronApp.isReady()) warmLibVlcRuntime();
   else electronApp.once('ready', () => { warmLibVlcRuntime(); });
-  electronApp.once('will-quit', () => { releaseWarmLibVlcRuntime(); });
 }
 
 registerWarmup();

@@ -14,8 +14,8 @@ import {
   libVlcPlatformVariants,
   orderWindowsLibVlcChildren,
 } from './libvlcPlatform.ts';
-import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
-import { callLibVlcAsync, trackLibVlcTeardown } from './libvlcTeardown.ts';
+import { getWarmLibVlcInstance, releaseWarmLibVlcRuntime } from './libvlcWarmup.ts';
+import { callLibVlcAsync, trackLibVlcTeardown, waitForLibVlcTeardowns } from './libvlcTeardown.ts';
 import { LIBVLC_INSTANCE_ARGUMENTS } from './libvlcRuntimeConfig.ts';
 import { playbackDiagnostics, recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 import { isScreenLocked } from './screenLock.ts';
@@ -136,6 +136,7 @@ const require = createRequire(__filename);
 const MISSING_RUNTIME_CACHE_MS = 5_000;
 let runtimeCache: RuntimeCache | null = null;
 let currentSession: LibVlcPlaybackSession | null = null;
+let shutdown: Promise<void> | null = null;
 
 /**
  * Narrow an FFI result to a pointer. koffi returns a BigInt address for a
@@ -2051,6 +2052,7 @@ export function startLibVlcPlayback(
   options: LibVlcStartOptions = {},
   sourcePolicy: { allowRemoteHttps?: boolean } = {},
 ): { ok: boolean; sessionId?: string; surface?: LibVlcSurface; error?: string } {
+  if (shutdown) return { ok: false, surface: 'unavailable', error: 'LibVLC is shutting down.' };
   if (!libVlcConfiguredEnabled() || libVlcKillSwitchEnabled() || !libVlcCompositionGateEnabled()) return { ok: false, surface: 'unavailable', error: disabledReason() };
   const isRemoteHttps = /^https:\/\//i.test(filePath);
   if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) && !(isRemoteHttps && sourcePolicy.allowRemoteHttps)) || /^\\\\/.test(filePath)) {
@@ -2100,7 +2102,19 @@ export function stopLibVlcPlayback(sessionId?: string): boolean {
   return stopped;
 }
 
-export function stopAllLibVlcPlayback(): void {
+export function stopAllLibVlcPlayback(timeoutMs = 4_000): Promise<void> {
+  if (shutdown) return shutdown;
   stopLibVlcPlayback();
   invalidateLibVlcRuntimeCache();
+  const deadline = Date.now() + timeoutMs;
+  shutdown = (async () => {
+    if (await waitForLibVlcTeardowns(timeoutMs)) {
+      // Sessions borrow the warm instance. Never drop its reference while a
+      // worker is still closing a player, even when quit's deadline expires.
+      void releaseWarmLibVlcRuntime();
+      if (await waitForLibVlcTeardowns(Math.max(0, deadline - Date.now()))) return;
+    }
+    console.warn('[libvlc] shutdown timed out waiting for native teardown.');
+  })();
+  return shutdown;
 }

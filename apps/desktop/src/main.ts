@@ -2921,7 +2921,7 @@ async function startBackgroundServices(): Promise<void> {
     getMainWindow,
     stopNativePlayback: () => {
       stopAllMpvPlayback();
-      stopAllLibVlcPlayback();
+      return stopAllLibVlcPlayback();
     },
     closeMediaServer: async () => {
       for (const scan of activeScans) scan.abort();
@@ -3103,8 +3103,22 @@ app.on('activate', () => {
 });
 
 let scannerQuitPending = false;
+let libVlcQuitPending = false;
+let libVlcQuitReady = false;
 app.on('before-quit', (event) => {
   for (const scan of activeScans) scan.abort();
+  if (!libVlcQuitReady) {
+    event.preventDefault();
+    isAppShuttingDown = true;
+    if (!libVlcQuitPending) {
+      libVlcQuitPending = true;
+      void stopAllLibVlcPlayback().finally(() => {
+        libVlcQuitReady = true;
+        app.quit();
+      });
+    }
+    return;
+  }
   if (hasScannerProcesses()) {
     event.preventDefault();
     isAppShuttingDown = true;
@@ -3122,7 +3136,6 @@ app.on('before-quit', (event) => {
   destroyServerTray();
   destroyLanDiscovery();
   stopAllMpvPlayback();
-  stopAllLibVlcPlayback();
   void stopUnifiedDesktopServer().catch((error) => {
     console.error('[unified desktop] Canonical server shutdown failed:', error);
   });

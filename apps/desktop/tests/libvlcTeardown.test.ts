@@ -365,3 +365,114 @@ for (const operation of ['replay', 're-arm']) {
     assert.equal(f.events.some((event) => event.startsWith('media-release:')), false);
   });
 }
+
+test('shutdown waits for replaced sessions and releases the warm instance only after all players', async () => {
+  const f = fixture(900);
+  f.start();
+  f.start();
+  let finished = false;
+  const quit = f.playback.stopAllLibVlcPlayback().then(() => { finished = true; });
+  assert.equal(f.playback.startLibVlcPlayback(f.owner as never, 'toy.mkv').ok, false);
+  await flush();
+  assert.equal(finished, false);
+  assert.equal(f.pending.filter((item) => item.name === 'stop').length, 2);
+  while (f.pending[0]?.name !== 'warm-release') await f.complete(f.pending[0].name);
+  assert.equal(f.players.size, 0);
+  assert.equal(f.warmup.getWarmLibVlcInstance('/mock/libvlc'), null);
+  assert.equal(finished, false);
+  assert.equal(f.pending.length, 1);
+  await f.complete('warm-release');
+  await quit;
+  assert.equal(finished, true);
+  assert.equal(f.views.get(1), false);
+  assert.equal(f.views.get(2), false);
+  const count = f.events.length;
+  await f.playback.stopAllLibVlcPlayback();
+  assert.equal(f.events.length, count);
+});
+
+test('shutdown gives up at the timeout and retains the warm instance and view while stop is pending', async () => {
+  const f = fixture(900);
+  f.start();
+  const quit = f.playback.stopAllLibVlcPlayback(15);
+  assert.equal(f.playback.stopAllLibVlcPlayback(), quit);
+  await quit;
+  assert.equal(f.pending[0].name, 'stop');
+  assert.equal(f.views.get(1), true);
+  assert.equal(f.warmup.getWarmLibVlcInstance('/mock/libvlc'), 900);
+  assert.equal(f.events.some((event) => event.startsWith('warm-release:')), false);
+  await f.drain();
+  assert.equal(f.views.get(1), false);
+});
+
+test('the shutdown deadline also bounds a warm instance release that does not complete', async () => {
+  const f = fixture(900);
+  const quit = f.playback.stopAllLibVlcPlayback(15);
+  await flush();
+  assert.equal(f.pending[0].name, 'warm-release');
+  await quit;
+  assert.equal(f.pending.length, 1);
+  await f.drain();
+});
+
+test('shutdown settles a failed worker call while retaining its unreleased drawable', async () => {
+  const f = fixture();
+  f.start();
+  const quit = f.playback.stopAllLibVlcPlayback(15);
+  await flush();
+  await f.complete('stop', new Error('Native stop failed'));
+  await quit;
+  assert.equal(f.views.get(1), true);
+  assert.equal(f.pending.length, 0);
+  assert.equal(f.events.some((event) => event.startsWith('player-release:')), false);
+});
+
+function quitFixture(f: ReturnType<typeof fixture>) {
+  const app = new EventEmitter();
+  const quits: boolean[] = [];
+  const quit = () => {
+    let prevented = false;
+    app.emit('before-quit', { preventDefault: () => { prevented = true; } });
+    quits.push(prevented);
+  };
+  Object.assign(app, { quit });
+  const source = fs.readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('let scannerQuitPending = false;'), source.indexOf('// Trim cold data'));
+  assert.ok(block.includes("app.on('before-quit'"));
+  const code = ts.transpileModule(block, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const noop = () => undefined;
+  vm.runInNewContext(code, {
+    app, console, activeScans: [], isAppShuttingDown: false,
+    stopAllLibVlcPlayback: () => f.playback.stopAllLibVlcPlayback(15),
+    hasScannerProcesses: () => false, stopScannerProcesses: () => Promise.resolve(),
+    releaseAllMediaSessions: noop, flushPairedDeviceTouches: noop, clearAllGuestProfiles: noop,
+    clearUpdateQuitFallback: noop, destroyServerTray: noop, destroyLanDiscovery: noop, stopAllMpvPlayback: noop,
+    stopUnifiedDesktopServer: () => Promise.resolve(), isUpdateInstalling: () => false,
+    stopAllTranscodes: noop, stopUpdateCheckTimer: noop, getMediaServer: () => null, getLanMediaServer: () => null,
+  });
+  return { quit, quits };
+}
+
+test('before-quit defers exit and repeated quit requests until worker teardown returns', async () => {
+  const f = fixture(900);
+  f.start();
+  const q = quitFixture(f);
+  q.quit();
+  q.quit();
+  await flush();
+  assert.deepEqual(q.quits, [true, true]);
+  await f.drain();
+  assert.deepEqual(q.quits, [true, true, false]);
+});
+
+test('before-quit resumes without blocking the event loop when teardown times out', async () => {
+  const f = fixture(900);
+  f.start();
+  const q = quitFixture(f);
+  q.quit();
+  await f.playback.stopAllLibVlcPlayback();
+  await flush();
+  assert.deepEqual(q.quits, [true, false]);
+  assert.equal(f.views.get(1), true);
+  await f.drain();
+});

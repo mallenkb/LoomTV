@@ -22,3 +22,19 @@ export function trackLibVlcTeardown(operation: () => Promise<void>): Promise<voi
   });
   return pending;
 }
+
+export async function waitForLibVlcTeardowns(timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const drained = async () => {
+    while (inFlightTeardowns.size > 0) await Promise.allSettled([...inFlightTeardowns]);
+    return true;
+  };
+  try {
+    return await Promise.race([
+      drained(),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs)); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
