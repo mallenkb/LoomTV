@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { registerHooks } from 'node:module';
+import vm from 'node:vm';
+import test, { afterEach } from 'node:test';
+
+const state = { legacy: {} as Record<string, string>, target: {} as Record<string, string>, windows: 0, destroyed: 0, targetLoads: 0 };
+class MigrationWindow {
+  storage = state.legacy;
+  constructor(options: { show: boolean; webPreferences: Record<string, unknown> }) {
+    state.windows++;
+    assert.equal(options.show, false);
+    assert.equal(options.webPreferences.javascript, false);
+    assert.equal(options.webPreferences.sandbox, true);
+    assert.equal(options.webPreferences.nodeIntegration, false);
+    assert.equal(options.webPreferences.preload, undefined);
+  }
+  webContents = {
+    setWindowOpenHandler(handler: () => unknown) { assert.deepEqual(handler(), { action: 'deny' }); },
+    on(_event: string, handler: (event: { preventDefault: () => void }) => void) {
+      let prevented = false;
+      handler({ preventDefault: () => { prevented = true; } });
+      assert.equal(prevented, true);
+    },
+    executeJavaScriptInIsolatedWorld: async (worldId: number, scripts: Array<{ code: string }>) => {
+      assert.equal(worldId, 1001);
+      assert.equal(scripts.length, 1);
+      const storage = this.storage;
+      const localStorage = { ...storage };
+      Object.defineProperties(localStorage, {
+        getItem: { value: (key: string) => storage[key] ?? null },
+        setItem: { value: (key: string, value: string) => { storage[key] = value; } },
+      });
+      return vm.runInNewContext(scripts[0].code, { localStorage });
+    },
+  };
+  async loadFile() { this.storage = state.legacy; }
+  async loadURL(url: string) {
+    assert.equal(url, 'loomtv://app/index.html');
+    state.targetLoads++;
+    this.storage = state.target;
+  }
+  destroy() { state.destroyed++; }
+}
+const stubKey = Symbol.for('loomtv.storage-migration-test.window');
+Object.defineProperty(globalThis, stubKey, { value: MigrationWindow, configurable: true });
+const moduleUrl = new URL('../src/main/rendererStorageMigration.ts', import.meta.url).href;
+const stubUrl = `data:text/javascript,${encodeURIComponent("export const BrowserWindow = globalThis[Symbol.for('loomtv.storage-migration-test.window')]")}`;
+const hooks = registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'electron' && context.parentURL === moduleUrl) return { url: stubUrl, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+});
+const { migrateRendererStorage } = await import('../src/main/rendererStorageMigration.ts');
+hooks.deregister();
+
+afterEach(() => Object.assign(state, { legacy: {}, target: {}, windows: 0, destroyed: 0, targetLoads: 0 }));
+
+test('origin migration copies Loom preferences once and keeps newer target preferences', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
+  try {
+    state.legacy = { 'loomtv:mode': 'host', 'loom:theme': 'blue', unrelated: 'omit' };
+    state.target = { 'loom:theme': 'red' };
+    await migrateRendererStorage('/renderer/index.html', directory);
+    assert.deepEqual(state.target, { 'loomtv:mode': 'host', 'loom:theme': 'red' });
+    assert.equal(state.destroyed, 1);
+    await migrateRendererStorage('/renderer/index.html', directory);
+    assert.equal(state.windows, 1);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('empty legacy storage skips the target document and marks migration complete', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
+  try {
+    await migrateRendererStorage('/renderer/index.html', directory);
+    assert.equal(state.targetLoads, 0);
+    assert.equal(state.destroyed, 1);
+    await fs.access(path.join(directory, 'renderer-origin-migrated.json'));
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('oversized legacy preferences leave migration retryable and close the hidden window', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
+  try {
+    state.legacy = Object.fromEntries(Array.from({ length: 257 }, (_, index) => [`loom:${index}`, 'value']));
+    await migrateRendererStorage('/renderer/index.html', directory);
+    assert.equal(state.targetLoads, 0);
+    assert.equal(state.destroyed, 1);
+    await assert.rejects(fs.access(path.join(directory, 'renderer-origin-migrated.json')));
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});

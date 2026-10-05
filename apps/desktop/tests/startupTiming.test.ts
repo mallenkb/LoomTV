@@ -74,4 +74,7 @@ test('startup IPC accepts only a finite timestamp and the bridge uses the valida
   assert.match(handlers, /handle\('startup:library-render'.+startupLibraryRenderArgsSchema\)/);
   const wrapper = handlers.slice(handlers.indexOf('const handle ='), handlers.indexOf('type NoArgChannel'));
   assert.ok(wrapper.indexOf('deps.isTrustedSender(event)') < wrapper.indexOf('parseIpcArguments(channel'));
+  const app = await fs.readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /if \(!homeReady \|\| appUnderlayHidden \|\| libraryRenderRecordedRef.current/);
+  assert.match(app, /recordFirstLibraryRender\?\.\(performance.timeOrigin \+ performance.now\(\)\)/);
 });

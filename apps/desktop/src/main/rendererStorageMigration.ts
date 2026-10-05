@@ -11,7 +11,7 @@ export async function migrateRendererStorage(legacyFile: string, userData: strin
   try { await fs.access(marker); return; } catch { /* first launch on this origin */ }
   const window = new BrowserWindow({
     show: false,
-    webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
+    webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, spellcheck: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -19,16 +19,22 @@ export async function migrateRendererStorage(legacyFile: string, userData: strin
   window.webContents.on('will-frame-navigate', (event) => event.preventDefault());
   try {
     await window.loadFile(legacyFile);
-    const values: unknown = await window.webContents.executeJavaScript(`Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('loom')))`);
+    // Chromium permits explicit isolated-world execution while page scripts
+    // are disabled. Main-world executeJavaScript honors javascript: false.
+    const values: unknown = await window.webContents.executeJavaScriptInIsolatedWorld(1001, [{
+      code: `Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('loom')))`,
+    }]);
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Invalid stored preferences.');
     const entries = Object.entries(values).filter(([key, value]) => key.startsWith('loom') && typeof value === 'string');
     if (entries.length > 256 || JSON.stringify(entries).length > 1024 * 1024) throw new Error('Stored preferences exceed migration limit.');
-    await window.loadURL(PACKAGED_RENDERER_URL);
-    await window.webContents.executeJavaScript(`
-      for (const [key, value] of ${JSON.stringify(entries)}) {
-        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
-      }
-    `);
+    if (entries.length) {
+      await window.loadURL(PACKAGED_RENDERER_URL);
+      await window.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code: `
+        for (const [key, value] of ${JSON.stringify(entries)}) {
+          if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+        }
+      ` }]);
+    }
     await fs.mkdir(userData, { recursive: true });
     await fs.writeFile(marker, '{}', { mode: 0o600 });
   } catch {

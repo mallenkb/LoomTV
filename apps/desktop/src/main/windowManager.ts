@@ -146,6 +146,7 @@ export function createWindow(): void {
   mainWindow = new BrowserWindow(windowOptions);
   recordPlaybackDiagnostic('desktop.window.created');
   recordStartupMark('windowCreated');
+  mainWindow.once('show', () => recordStartupMark('windowRevealed'));
   mainWindow.webContents.once('dom-ready', () => recordStartupMark('domContentLoaded'));
   installSettingsShortcut(mainWindow);
   const expectedAppUrl = expectedRendererAppUrl();
@@ -165,7 +166,6 @@ export function createWindow(): void {
     if (!revealed) {
       revealed = true;
       recordPlaybackDiagnostic('desktop.window.revealed');
-      mainWindow.once('show', () => recordStartupMark('windowRevealed'));
     }
     presentMainWindow(mainWindow);
   };

@@ -436,15 +436,17 @@ function AppShell({
     setHomeReady(true);
     markAppReady();
   }, [markAppReady]);
+  const libraryRenderRecordedRef = useRef(false);
   useEffect(() => {
-    if (!homeReady || !window.desktopApi?.recordFirstLibraryRender) return;
+    if (!homeReady || appUnderlayHidden || libraryRenderRecordedRef.current || !window.desktopApi?.recordFirstLibraryRender) return;
     let frame = window.requestAnimationFrame(() => {
       frame = window.requestAnimationFrame(() => {
+        libraryRenderRecordedRef.current = true;
         void window.desktopApi?.recordFirstLibraryRender?.(performance.timeOrigin + performance.now()).catch(() => undefined);
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [homeReady]);
+  }, [appUnderlayHidden, homeReady]);
 
   const handlePlayMedia = useCallback((
     filePath: string,
