@@ -41,6 +41,20 @@
       "requiredPathMarkers": [
         ">node-forge"
       ]
+    },
+    "GHSA-vfj7-8cjw-p6xm": {
+      "module": "braces",
+      "reviewedOn": "2026-10-05",
+      "expires": "2026-10-19",
+      "owner": "@mallenkb",
+      "reason": "No patched upstream release is available for braces 3.0.3. The local pnpm patch caps parser nesting, including parentheses, and the compile, expand, and stringify AST walkers at 128 levels. CI checks deep string and prebuilt-AST inputs plus ordinary glob compatibility. npm audit cannot recognize that source patch. This temporary exception covers only mobile and Android TV tooling paths through micromatch; remove it when an upstream fix is adopted, the advisory disappears, or a path escapes that scope.",
+      "allowedPathPrefixes": [
+        "apps__mobile>",
+        "apps__tv>"
+      ],
+      "requiredPathMarkers": [
+        ">micromatch>braces"
+      ]
     }
   }
 }

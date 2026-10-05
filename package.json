@@ -38,7 +38,7 @@
     "tv:test": "pnpm --filter @loom-media-server/tv test",
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
+    "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs scripts/dependency-patches.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
     "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
   },
   "devDependencies": {

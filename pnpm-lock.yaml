@@ -196,6 +196,7 @@ overrides:
 
 patchedDependencies:
   '@electron-forge/plugin-vite@7.11.1': 2147d1f08250871dbcefded7d6ba182b28e7b07355c5f5f2fa3c7271a8fb8c14
+  braces@3.0.3: f74126492b9552c676d4ab5618cf9b074f33b4e6ccb8c8f8c07678ed92a6741f
   image-size@1.2.1: 82a93c2a3e8763c6ff5d5ff6413f51621e10aa0390f2ce904b7032d27d9fa2d3
   node-forge@1.4.0: 050b680788faa8b324e14f0af46ef86414e2294c13c2ef62f12bb1ef2ee74da5
   react-native-zeroconf@0.14.0: 1fda3c41ebb5a91ed1c3542bda4ddb16c056b7fa5831b258443e0f660706b011
@@ -9950,7 +9951,7 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  braces@3.0.3:
+  braces@3.0.3(patch_hash=f74126492b9552c676d4ab5618cf9b074f33b4e6ccb8c8f8c07678ed92a6741f):
     dependencies:
       fill-range: 7.1.1
 
@@ -12254,7 +12255,7 @@ snapshots:
 
   micromatch@4.0.8:
     dependencies:
-      braces: 3.0.3
+      braces: 3.0.3(patch_hash=f74126492b9552c676d4ab5618cf9b074f33b4e6ccb8c8f8c07678ed92a6741f)
       picomatch: 2.3.2
 
   mime-db@1.52.0: {}
