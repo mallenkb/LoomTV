@@ -4,7 +4,7 @@ import process from 'node:process';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ffprobeMediaArguments, parseFfprobeMediaProbe } from '@loom-media-server/media-core';
-import { probeTranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
+import { getTranscodeCapabilities, probeTranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 
 const execFileAsync = promisify(execFile);
 
@@ -55,13 +55,11 @@ function resolveFfprobe(configuredPath, ffmpegPath) {
   }
 }
 
-/** @param {{ ffmpegPath?: string, ffprobePath?: string }} options */
+/** @param {{ ffmpegPath?: string, ffprobePath?: string, cacheDir?: string }} options */
 export function createHeadlessTranscoder(options = {}) {
   const ffmpegPath = resolveFfmpeg(options.ffmpegPath);
   const ffprobePath = resolveFfprobe(options.ffprobePath, ffmpegPath);
-  /** @type {import('@loom-media-server/transcode-capabilities').TranscodeCapabilities | undefined} */
-  let lastProbe;
-  let lastProbeAt = 0;
+  const probeOptions = { cacheDir: options.cacheDir, probeTimeoutMs: 5000 };
 
   return {
     path: ffmpegPath,
@@ -86,15 +84,14 @@ export function createHeadlessTranscoder(options = {}) {
         });
       }
     },
-    getCapabilities({ force = false } = {}) {
-      const now = Date.now();
-      if (!force && lastProbe && now - lastProbeAt < 30_000) return lastProbe;
-      lastProbe = probeTranscodeCapabilities(ffmpegPath, { probeTimeoutMs: 5000 });
-      lastProbeAt = now;
-      return lastProbe;
+    getCapabilities() {
+      return getTranscodeCapabilities(ffmpegPath, probeOptions);
     },
-    getSelfTest() {
-      const capabilities = this.getCapabilities({ force: true });
+    async awaitCapabilities() {
+      return probeTranscodeCapabilities(ffmpegPath, probeOptions);
+    },
+    async getSelfTest() {
+      const capabilities = await probeTranscodeCapabilities(ffmpegPath, { ...probeOptions, force: true });
       return {
         startedAt: capabilities.probedAt,
         completedAt: Date.now(),
@@ -126,7 +123,7 @@ export function createHeadlessTranscoder(options = {}) {
         available: capabilities.state !== 'unavailable',
         ffmpegPath,
         ffprobePath,
-        probing: Boolean(ffprobePath),
+        probing: capabilities.state === 'probing',
         recommendedBackend: capabilities.recommendedBackend,
         hardwareAcceleration: capabilities.hardwareAcceleration,
         codecs: capabilities.codecs,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FFmpegStatus } from '../shared/desktopProtocol.ts';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { LibraryMutationError, toLibraryMutationError, useLibrary, type LibraryFolderKind, type LibraryMutationOperation } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -188,7 +189,7 @@ export default function Settings() {
   const [savedKey, setSavedKey] = useState(false);
   const [isTestingKeys, setIsTestingKeys] = useState(false);
   const [metadataKeyTestResults, setMetadataKeyTestResults] = useState<MetadataKeyTestResult[]>([]);
-  const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; path: string | null } | null>(null);
+  const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
   const [libvlcAvailability, setLibvlcAvailability] = useState<LibVlcAvailability | null>(null);
   const [mpvAvailability, setMpvAvailability] = useState<MpvAvailability | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
@@ -1017,6 +1018,18 @@ export default function Settings() {
       cancelled = true;
       unsubscribeUpdates();
     };
+  }, [activeSection, ffmpegStatus]);
+
+  useEffect(() => {
+    if (activeSection !== 'about' && activeSection !== 'playback') return;
+    if (ffmpegStatus?.capabilities?.state !== 'probing') return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void desktopApi.checkFFmpeg().then((status) => {
+        if (!cancelled) setFfmpegStatus(status);
+      }).catch((error) => console.error('Failed to check FFmpeg:', error));
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [activeSection, ffmpegStatus]);
 
   useEffect(() => {

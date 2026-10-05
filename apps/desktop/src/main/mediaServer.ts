@@ -13,7 +13,7 @@ import {
   playbackPlanForMedia,
 } from '@loom-media-server/media-core';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './mimeTypes';
-import { findFFmpeg, getTranscodeCapabilities, preferredHardwareEncoder } from './mediaBinaries';
+import { awaitTranscodeCapabilities, findFFmpeg, getTranscodeCapabilities, preferredHardwareEncoder } from './mediaBinaries';
 import {
   parseSubtitleStyle,
   queryNumber,
@@ -283,10 +283,8 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     writeJson,
   } = deps;
   const iptvStreamProxy = createIptvStreamProxy(deps.resolveIptvStreamUrl);
-  const createRequestHandler = (listenerScope: 'loopback' | 'lan') => (
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ) => {
+  const createRequestHandler = (listenerScope: 'loopback' | 'lan') => {
+    const handleRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
       handleResponseErrors(res);
       const corsAllowed = applyCorsHeaders(req, res, deps);
       // Listener identity, not a request-controlled address, defines the trust
@@ -2085,7 +2083,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       const requestedCodec = ['h264', 'hevc', 'av1'].includes(reqUrl.searchParams.get('codec') || '')
         ? reqUrl.searchParams.get('codec') as TranscodeOptions['targetVideoCodec']
         : undefined;
-      const capabilities = requestedCodec && ffmpegPath ? getTranscodeCapabilities(ffmpegPath) : undefined;
+      const capabilities = requestedCodec && ffmpegPath ? await awaitTranscodeCapabilities(ffmpegPath) : undefined;
+      if (res.destroyed || res.writableEnded) return;
+      if (capabilities && !requireProfileMediaAccess(filePath)) return;
       const requestedCodecSupported = !requestedCodec || Boolean(
         capabilities?.codecs[requestedCodec]
         || capabilities?.softwareCodecs[requestedCodec],
@@ -2165,7 +2165,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const outputAudioCodec = copyAudio ? audioCodec : 'aac';
         const hardwareEncoder = copyVideo
           ? null
-          : preferredHardwareEncoder(ffmpegPath, targetCodec);
+          : await preferredHardwareEncoder(ffmpegPath, targetCodec);
+        if (res.destroyed || res.writableEnded) return;
+        if (!requireProfileMediaAccess(filePath)) return;
 
         console.log(`[stream] ${path.basename(filePath)} | mode:${playbackPlan.mode} reason:${playbackPlan.reason} video:${outputVideoCodec}(${copyVideo ? 'copy' : hardwareEncoder || 'libx264'}) audio:${outputAudioCodec}(${copyAudio ? 'copy' : 'encode'})`);
 
@@ -2270,6 +2272,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         }
       }
     };
+    return (req: http.IncomingMessage, res: http.ServerResponse) => {
+      void handleRequest(req, res).catch((error) => {
+        console.error('Media request failed:', error);
+        if (!res.headersSent && !res.destroyed) writeJson(res, 500, { error: 'Media request failed.' });
+        else safeEndResponse(res);
+      });
+    };
+  };
 
   const localServer = http.createServer(createRequestHandler('loopback'));
   localServer.on('upgrade', (req, socket, head) => {

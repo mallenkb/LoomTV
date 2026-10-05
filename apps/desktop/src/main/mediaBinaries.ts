@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
+  getTranscodeCapabilities as getCachedTranscodeCapabilities,
   probeTranscodeCapabilities,
   type TranscodeCapabilities,
 } from '@loom-media-server/transcode-capabilities';
@@ -93,8 +94,8 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string[]
   return [...new Set(candidates)];
 }
 
-export function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'hevc' | 'av1' = 'h264'): HardwareVideoEncoder | null {
-  const capabilities = getTranscodeCapabilities(binaryPath);
+export async function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'hevc' | 'av1' = 'h264'): Promise<HardwareVideoEncoder | null> {
+  const capabilities = await awaitTranscodeCapabilities(binaryPath);
   const preferred = capabilities.backends.find((entry) => entry.id === capabilities.recommendedBackend);
   const backend = preferred?.codecs[codec]?.available
     ? preferred
@@ -103,7 +104,15 @@ export function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'he
 }
 
 export function getTranscodeCapabilities(binaryPath = findFFmpeg()): TranscodeCapabilities {
-  return probeTranscodeCapabilities(binaryPath, { probeTimeoutMs: 5000 });
+  return getCachedTranscodeCapabilities(binaryPath, { cacheDir: transcodeCapabilityCacheDir(), probeTimeoutMs: 5000 });
+}
+
+function transcodeCapabilityCacheDir(): string {
+  return path.join(app.getPath('userData'), 'transcode-capabilities');
+}
+
+export function awaitTranscodeCapabilities(binaryPath = findFFmpeg()): Promise<TranscodeCapabilities> {
+  return probeTranscodeCapabilities(binaryPath, { cacheDir: transcodeCapabilityCacheDir(), probeTimeoutMs: 5000 });
 }
 
 export function findFFmpeg(): string | null {

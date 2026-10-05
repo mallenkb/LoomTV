@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { ffmpegFixture } from './fixtures/ffmpeg.mjs';
 import {
   clearTranscodeCapabilityCache,
+  getTranscodeCapabilities,
   probeTranscodeCapabilities,
 } from '../src/index.mjs';
 
@@ -24,9 +31,9 @@ function fixtureRunner({ smokeSucceeds = true } = {}) {
   return { calls, run };
 }
 
-test('a missing FFmpeg binary returns the fail-safe unavailable contract', () => {
+test('a missing FFmpeg binary returns the fail-safe unavailable contract', async () => {
   clearTranscodeCapabilityCache();
-  const result = probeTranscodeCapabilities(null, { platform: 'linux', environment: {} });
+  const result = await probeTranscodeCapabilities(null, { platform: 'linux', environment: {} });
 
   assert.equal(result.state, 'unavailable');
   assert.equal(result.ffmpegPath, null);
@@ -37,10 +44,10 @@ test('a missing FFmpeg binary returns the fail-safe unavailable contract', () =>
   assert.deepEqual(result.codecs, { h264: false, hevc: false, av1: false });
 });
 
-test('a successful hardware probe reports codecs, software fallbacks, and tone mapping', () => {
+test('a successful hardware probe reports codecs, software fallbacks, and tone mapping', async () => {
   clearTranscodeCapabilityCache();
   const fixture = fixtureRunner();
-  const result = probeTranscodeCapabilities(process.execPath, {
+  const result = await probeTranscodeCapabilities(process.execPath, {
     platform: 'darwin',
     environment: {},
     commandRunner: fixture.run,
@@ -65,10 +72,10 @@ test('a successful hardware probe reports codecs, software fallbacks, and tone m
   assert.ok(fixture.calls.some((args) => args.includes('-allow_sw') && args.includes('0')));
 });
 
-test('a failed hardware smoke probe remains limited with software available', () => {
+test('a failed hardware smoke probe remains limited with software available', async () => {
   clearTranscodeCapabilityCache();
   const fixture = fixtureRunner({ smokeSucceeds: false });
-  const result = probeTranscodeCapabilities(process.execPath, {
+  const result = await probeTranscodeCapabilities(process.execPath, {
     platform: 'darwin',
     environment: {},
     commandRunner: fixture.run,
@@ -85,9 +92,9 @@ test('a failed hardware smoke probe remains limited with software available', ()
   );
 });
 
-test('a command runner with no inspection output fails closed instead of throwing', () => {
+test('a command runner with no inspection output fails closed instead of throwing', async () => {
   clearTranscodeCapabilityCache();
-  const result = probeTranscodeCapabilities(process.execPath, {
+  const result = await probeTranscodeCapabilities(process.execPath, {
     platform: 'darwin',
     environment: {},
     commandRunner: () => undefined,
@@ -98,10 +105,10 @@ test('a command runner with no inspection output fails closed instead of throwin
   assert.deepEqual(result.softwareCodecs, { h264: false, hevc: false, av1: false });
 });
 
-test('skipSmokeTest trusts compiled encoders without executing a frame probe', () => {
+test('skipSmokeTest trusts compiled encoders without executing a frame probe', async () => {
   clearTranscodeCapabilityCache();
   const fixture = fixtureRunner({ smokeSucceeds: false });
-  const result = probeTranscodeCapabilities(process.execPath, {
+  const result = await probeTranscodeCapabilities(process.execPath, {
     platform: 'darwin',
     environment: {},
     commandRunner: fixture.run,
@@ -113,10 +120,10 @@ test('skipSmokeTest trusts compiled encoders without executing a frame probe', (
   assert.equal(fixture.calls.some((args) => args.includes('-frames:v')), false);
 });
 
-test('Windows QSV uses an implicit GPU and verifies each compiled encoder', () => {
+test('Windows QSV uses an implicit GPU and verifies each compiled encoder', async () => {
   for (const smokeSucceeds of [true, false]) {
     const calls = [];
-    const result = probeTranscodeCapabilities(process.execPath, {
+    const result = await probeTranscodeCapabilities(process.execPath, {
       platform: 'win32',
       environment: {},
       commandRunner: (_command, args, options) => {
@@ -143,4 +150,108 @@ test('Windows QSV uses an implicit GPU and verifies each compiled encoder', () =
       '-vf', 'format=nv12,hwupload', '-an', '-c:v', encoder, '-f', 'null', '-',
     ]));
   }
+});
+
+test('status reads return probing while one asynchronous probe serves concurrent callers', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t);
+  assert.equal(getTranscodeCapabilities(fixture.binary, fixture.options).state, 'probing');
+  const first = probeTranscodeCapabilities(fixture.binary, fixture.options);
+  const second = probeTranscodeCapabilities(fixture.binary, fixture.options);
+  assert.equal(first, second);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(getTranscodeCapabilities(fixture.binary, fixture.options).state, 'probing');
+  const result = await first;
+  assert.equal(result.state, 'available');
+  assert.equal(getTranscodeCapabilities(fixture.binary, fixture.options), result);
+  assert.equal((await fixture.calls()).length, 6);
+});
+
+test('the memory cache does not expire and explicit self-tests refresh it', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t);
+  const result = await probeTranscodeCapabilities(fixture.binary, fixture.options);
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now + 60_000);
+  assert.equal(await probeTranscodeCapabilities(fixture.binary, fixture.options), result);
+  assert.equal((await fixture.calls()).length, 6);
+  const refreshed = await probeTranscodeCapabilities(fixture.binary, { ...fixture.options, force: true });
+  assert.notEqual(refreshed, result);
+  assert.equal((await fixture.calls()).length, 12);
+});
+
+test('the disk cache survives a new process without running FFmpeg again', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t);
+  const result = await probeTranscodeCapabilities(fixture.binary, fixture.options);
+  const moduleUrl = new URL('../src/index.mjs', import.meta.url).href;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', `
+    const { probeTranscodeCapabilities } = await import(${JSON.stringify(moduleUrl)});
+    const result = await probeTranscodeCapabilities(${JSON.stringify(fixture.binary)}, ${JSON.stringify(fixture.options)});
+    console.log(JSON.stringify({ state: result.state, probedAt: result.probedAt }));
+  `]);
+  assert.deepEqual(JSON.parse(stdout), { state: 'available', probedAt: result.probedAt });
+  assert.equal((await fixture.calls()).length, 6);
+});
+
+test('binary path, size, mtime and OS changes invalidate memory and disk results', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t);
+  await probeTranscodeCapabilities(fixture.binary, fixture.options);
+  let binary = fixture.binary;
+  const release = os.release();
+  const changes = [
+    async () => {
+      binary = path.join(fixture.directory, 'replacement-ffmpeg');
+      await fs.copyFile(fixture.binary, binary);
+      await fs.chmod(binary, 0o700);
+    },
+    () => fs.appendFile(binary, '\n'),
+    () => fs.utimes(binary, new Date(), new Date(Date.now() + 60_000)),
+    async () => { t.mock.method(os, 'release', () => `${release}-changed`); },
+  ];
+  for (const [index, change] of changes.entries()) {
+    await change();
+    assert.equal(getTranscodeCapabilities(binary, fixture.options).state, 'probing');
+    assert.equal((await probeTranscodeCapabilities(binary, fixture.options)).state, 'available');
+    assert.equal((await fixture.calls()).length, 6 * (index + 2));
+  }
+});
+
+test('corrupt and malformed disk results are rebuilt instead of reaching callers', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t);
+  await probeTranscodeCapabilities(fixture.binary, fixture.options);
+  const [name] = await fs.readdir(fixture.options.cacheDir);
+  const target = path.join(fixture.options.cacheDir, name);
+  const saved = JSON.parse(await fs.readFile(target, 'utf8'));
+  for (const [index, content] of ['{broken', JSON.stringify({ ...saved, capabilities: { ...saved.capabilities, backends: [null] } })].entries()) {
+    await fs.writeFile(target, content);
+    clearTranscodeCapabilityCache();
+    assert.equal((await probeTranscodeCapabilities(fixture.binary, fixture.options)).state, 'available');
+    assert.equal((await fixture.calls()).length, 6 * (index + 2));
+  }
+});
+
+test('an unwritable cache still shares the completed in-memory result', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t);
+  const options = { ...fixture.options, cacheDir: fixture.binary };
+  const result = await probeTranscodeCapabilities(fixture.binary, options);
+  assert.equal(result.state, 'available');
+  assert.equal(await probeTranscodeCapabilities(fixture.binary, options), result);
+  assert.equal((await fixture.calls()).length, 6);
+});
+
+test('encoder timeouts are asynchronous and retain the software fallback', async (t) => {
+  clearTranscodeCapabilityCache();
+  const fixture = await ffmpegFixture(t, { hangSmokeTest: true });
+  const options = { ...fixture.options, probeTimeoutMs: 750 };
+  const pending = probeTranscodeCapabilities(fixture.binary, options);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(getTranscodeCapabilities(fixture.binary, options).state, 'probing');
+  const result = await pending;
+  assert.equal(result.state, 'limited');
+  assert.equal(result.softwareCodecs.h264, true);
+  assert.equal(result.backends.find(({ id }) => id === 'videotoolbox').codecs.h264.verified, false);
 });

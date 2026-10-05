@@ -2167,7 +2167,7 @@ export function createHeadlessAdminService(options) {
       const runtime = await getRuntimeHealth();
       const mediaState = runtime.media?.state || 'unconfigured';
       const transcoderHealth = runtime.transcoder || {};
-      const transcoderState = transcoderHealth.available
+      const transcoderState = transcoderHealth.state === 'probing' ? 'probing' : transcoderHealth.available
         ? (transcoderHealth.hardwareAcceleration ? 'available' : 'limited')
         : 'unavailable';
       const runtimeState = mediaState !== 'online'
@@ -2187,7 +2187,7 @@ export function createHeadlessAdminService(options) {
         { name: 'Server process', state: 'pass', message: runtime.deploymentMode === 'desktop-hosted' ? 'Running inside the Loom desktop app.' : 'Running as a standalone server.' },
         { name: 'Catalog', state: 'pass', message: `${catalogCount} media records are available.` },
         { name: 'Media root', state: mediaState === 'online' ? 'pass' : 'warn', message: runtime.media?.path && !summaryOnly ? `${runtime.media.path} is ${mediaState}.` : `Media root is ${mediaState}.` },
-        { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : transcoderState === 'limited' ? 'warn' : 'fail', message: transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
+        { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : ['limited', 'probing'].includes(transcoderState) ? 'warn' : 'fail', message: transcoderState === 'probing' ? 'FFmpeg capability probing is in progress.' : transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
       ];
       if (storage) {
         checks.push({ name: 'Persistent storage', state: storage.writable && (storage.freeBytes === undefined || storage.freeBytes > 64 * 1024 * 1024) ? 'pass' : 'warn', message: storageCheckMessage(storage) });
