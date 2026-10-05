@@ -14,6 +14,52 @@ function columns(database: BetterSqlite3.Database, table: string): string[] {
     .map((column) => column.name);
 }
 
+test('plugin artwork JPEG migration preserves cached PNG objects and provider references', () => {
+  const database = new BetterSqlite3(':memory:');
+  try {
+    database.pragma('foreign_keys = ON');
+    database.exec(`
+      CREATE TABLE plugin_artwork_objects (
+        content_hash TEXT PRIMARY KEY CHECK (length(content_hash) = 64),
+        cache_path TEXT NOT NULL UNIQUE,
+        mime_type TEXT NOT NULL CHECK (mime_type = 'image/png'),
+        byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+        ref_count INTEGER NOT NULL CHECK (ref_count >= 0),
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE plugin_artwork_references (
+        addon_id TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        content_hash TEXT NOT NULL REFERENCES plugin_artwork_objects(content_hash) ON DELETE RESTRICT,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (addon_id, source_url)
+      );
+    `);
+    const pngHash = 'a'.repeat(64);
+    database.prepare('INSERT INTO plugin_artwork_objects VALUES (?, ?, ?, ?, ?, ?)')
+      .run(pngHash, '/cache/existing.png', 'image/png', 123, 1, 456);
+    database.prepare('INSERT INTO plugin_artwork_references VALUES (?, ?, ?, ?)')
+      .run('provider', 'https://example.com/poster.jpg', pngHash, 789);
+    const pngRows = database.prepare('SELECT * FROM plugin_artwork_objects').all();
+    const references = database.prepare('SELECT * FROM plugin_artwork_references').all();
+
+    migrateDatabase(database);
+    migrateDatabase(database);
+    assert.deepEqual(database.prepare('SELECT * FROM plugin_artwork_objects').all(), pngRows);
+    assert.deepEqual(database.prepare('SELECT * FROM plugin_artwork_references').all(), references);
+    assert.equal(database.pragma('foreign_keys', { simple: true }), 1);
+    assert.deepEqual(database.pragma('foreign_key_check'), []);
+    database.prepare('INSERT INTO plugin_artwork_objects VALUES (?, ?, ?, ?, ?, ?)')
+      .run('b'.repeat(64), '/cache/new.jpg', 'image/jpeg', 50, 0, 999);
+    assert.throws(() => database.prepare('INSERT INTO plugin_artwork_objects VALUES (?, ?, ?, ?, ?, ?)')
+      .run('c'.repeat(64), '/cache/bad.gif', 'image/gif', 50, 0, 999), /CHECK constraint/);
+    assert.throws(() => database.prepare('INSERT INTO plugin_artwork_references VALUES (?, ?, ?, ?)')
+      .run('provider', 'https://example.com/missing.jpg', 'c'.repeat(64), 999), /FOREIGN KEY constraint/);
+  } finally {
+    database.close();
+  }
+});
+
 test('database migrations create the complete schema and remain idempotent', () => {
   const database = new BetterSqlite3(':memory:');
   try {

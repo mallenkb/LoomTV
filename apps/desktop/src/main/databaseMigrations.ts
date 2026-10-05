@@ -48,6 +48,7 @@ export const PHOTO_LIBRARY_MIGRATION_VERSION = 26;
 export const MEDIA_LIBRARY_MIGRATION_VERSION = 27;
 export const MEDIA_LIBRARY_DISCS_MIGRATION_VERSION = 28;
 export const LIBRARY_IMPORT_INVENTORY_MIGRATION_VERSION = 29;
+export const PLUGIN_ARTWORK_JPEG_MIGRATION_VERSION = 30;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -336,7 +337,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
     CREATE TABLE IF NOT EXISTS plugin_artwork_objects (
       content_hash TEXT PRIMARY KEY CHECK (length(content_hash) = 64),
       cache_path TEXT NOT NULL UNIQUE,
-      mime_type TEXT NOT NULL CHECK (mime_type = 'image/png'),
+      mime_type TEXT NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg')),
       byte_length INTEGER NOT NULL CHECK (byte_length > 0),
       ref_count INTEGER NOT NULL CHECK (ref_count >= 0),
       updated_at INTEGER NOT NULL
@@ -405,6 +406,41 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migratePhotoLibrary(database);
   migrateMediaLibraries(database);
   migrateMediaLibraryDiscs(database);
+  migratePluginArtworkJpeg(database);
+}
+
+function migratePluginArtworkJpeg(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PLUGIN_ARTWORK_JPEG_MIGRATION_VERSION)) return;
+  const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plugin_artwork_objects'")
+    .get() as { sql: string };
+  const foreignKeysEnabled = Boolean(database.pragma('foreign_keys', { simple: true }));
+  database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      if (!table.sql.includes("'image/jpeg'")) {
+        database.exec(`
+          CREATE TABLE plugin_artwork_objects_v30 (
+            content_hash TEXT PRIMARY KEY CHECK (length(content_hash) = 64),
+            cache_path TEXT NOT NULL UNIQUE,
+            mime_type TEXT NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg')),
+            byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+            ref_count INTEGER NOT NULL CHECK (ref_count >= 0),
+            updated_at INTEGER NOT NULL
+          );
+          INSERT INTO plugin_artwork_objects_v30 SELECT * FROM plugin_artwork_objects;
+          DROP TABLE plugin_artwork_objects;
+          ALTER TABLE plugin_artwork_objects_v30 RENAME TO plugin_artwork_objects;
+        `);
+      }
+      if ((database.pragma('foreign_key_check') as unknown[]).length > 0) {
+        throw new Error('Plugin artwork JPEG migration aborted: foreign key check failed.');
+      }
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+        .run(PLUGIN_ARTWORK_JPEG_MIGRATION_VERSION, Date.now());
+    })();
+  } finally {
+    if (foreignKeysEnabled) database.pragma('foreign_keys = ON');
+  }
 }
 
 function migrateMediaLibraryDiscs(database: BetterSqlite3.Database): void {
