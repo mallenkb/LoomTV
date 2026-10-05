@@ -29,6 +29,50 @@ function loadModule(name: string, dependencies: Record<string, unknown>, globals
 
 const flush = async () => { for (let index = 0; index < 30; index++) await Promise.resolve(); };
 
+test('every LibVLC async teardown binding has an integer return type for Electron 43', async () => {
+  const f = fixture();
+  const declarations = new Map<string, unknown>();
+  const calls: string[] = [];
+  const library = {
+    func: (name: string, returnType: unknown) => {
+      declarations.set(name, returnType);
+      return Object.assign(() => name === 'libvlc_get_version' ? '3.0.21' : 1, {
+        async: (_handle: number, callback: (error: Error | null, result: number) => void) => {
+          assert.equal(returnType, 'int', `${name} .async must not use a void return`);
+          calls.push(name);
+          callback(null, 0);
+        },
+      });
+    },
+  };
+  const runtime = f.playback.bindRuntime(library);
+  assert.ok(runtime);
+  const source = fs.readFileSync(new URL('../src/main/libvlcPlayback.ts', import.meta.url), 'utf8');
+  const bindings = new Set([...source.matchAll(/callLibVlcAsync\((?:this\.runtime\.api|api)\.(\w+),/g)]
+    .map((match) => match[1]));
+  assert.equal(bindings.size, 4);
+  for (const binding of bindings) await f.teardown.callLibVlcAsync(runtime.api[binding], 1);
+
+  const warmup = loadModule('libvlcWarmup', {
+    electron: {}, 'node:fs': fs, 'node:path': path,
+    './libvlcRuntimeConfig.ts': { LIBVLC_INSTANCE_ARGUMENTS: [] },
+    './playbackDiagnostics.ts': { recordPlaybackDiagnostic: () => undefined },
+    './libvlcTeardown.ts': f.teardown,
+  }, {
+    process: { platform: 'darwin', arch: 'arm64', env: {} },
+  }, 'module.exports.loadCandidate = loadCandidate;') as {
+    loadCandidate: (koffi: unknown, libraryPath: string) => {
+      instance: number; release: Parameters<typeof f.teardown.callLibVlcAsync>[0];
+    };
+  };
+  const warm = warmup.loadCandidate({ load: () => library }, '/mock/libvlc');
+  assert.ok(warm);
+  await f.teardown.callLibVlcAsync(warm.release, warm.instance);
+  assert.equal(calls.length, 5);
+  assert.equal(declarations.get('libvlc_media_add_option'), 'void');
+  assert.equal(declarations.get('libvlc_track_description_list_release'), 'void');
+});
+
 function fixture(sharedInstance: number | null = null) {
   const events: string[] = [];
   const pending: Array<{ name: string; handle: number; callback: (error: Error | null) => void }> = [];
@@ -131,8 +175,14 @@ function fixture(sharedInstance: number | null = null) {
     createNativeViewHost = fixtureHost;
     loadKoffi = () => ({});
     module.exports.session = () => currentSession;
+    module.exports.bindRuntime = (library) => {
+      loadKoffi = () => ({ load: () => library, struct: () => ({}), decode: () => ({}) });
+      candidateLibraryPaths = () => [{ path: '/mock/libvlc', source: 'environment' }];
+      return loadRuntime().runtime;
+    };
   `) as typeof import('../src/main/libvlcPlayback.ts') & {
     session: () => { stop: () => boolean; rearmNativeVideoOutput: () => void };
+    bindRuntime: (library: unknown) => { api: Record<string, Parameters<typeof teardown.callLibVlcAsync>[0]> };
   };
   const complete = async (name: string, error: Error | null = null) => {
     const item = pending.shift();

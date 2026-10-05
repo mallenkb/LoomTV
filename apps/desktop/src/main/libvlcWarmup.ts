@@ -225,7 +225,9 @@ function loadCandidate(koffi: KoffiRuntime, libraryPath: string): WarmRuntime | 
     const library = koffi.load(libraryPath);
     libraries.push(library);
     const create = library.func('libvlc_new', 'void *', ['int', 'const char **']);
-    const release = library.func('libvlc_release', 'void', ['void *']);
+    // Koffi void .async callbacks crash Electron 43. Ignore the ABI-safe
+    // integer result from the unused return register on arm64/x64.
+    const release = library.func('libvlc_release', 'int', ['void *']);
     const previousPluginPath = process.env.VLC_PLUGIN_PATH;
     const pluginPath = pluginPathForLibrary(libraryPath);
     if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;

@@ -421,18 +421,20 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         psz_name: 'str',
         p_next: 'void *',
       });
+      // Koffi void .async callbacks crash Electron 43. Teardown uses int and
+      // ignores the unused return register, which is ABI-safe on arm64/x64.
       const api: LibVlcApi = {
         newInstance: bind(library, 'libvlc_new', 'void *', ['int', 'const char **']),
-        releaseInstance: bind(library, 'libvlc_release', 'void', ['void *']),
+        releaseInstance: bind(library, 'libvlc_release', 'int', ['void *']),
         getVersion: bind(library, 'libvlc_get_version', 'str', []),
         mediaNewPath: bind(library, 'libvlc_media_new_path', 'void *', ['void *', 'str']),
         mediaNewLocation: bind(library, 'libvlc_media_new_location', 'void *', ['void *', 'str']),
         mediaAddOption: bind(library, 'libvlc_media_add_option', 'void', ['void *', 'str']),
-        mediaRelease: bind(library, 'libvlc_media_release', 'void', ['void *']),
+        mediaRelease: bind(library, 'libvlc_media_release', 'int', ['void *']),
         playerNewFromMedia: bind(library, 'libvlc_media_player_new_from_media', 'void *', ['void *']),
-        playerRelease: bind(library, 'libvlc_media_player_release', 'void', ['void *']),
+        playerRelease: bind(library, 'libvlc_media_player_release', 'int', ['void *']),
         playerPlay: bind(library, 'libvlc_media_player_play', 'int', ['void *']),
-        playerStop: bind(library, 'libvlc_media_player_stop', 'void', ['void *']),
+        playerStop: bind(library, 'libvlc_media_player_stop', 'int', ['void *']),
         playerSetPause: bind(library, 'libvlc_media_player_set_pause', 'void', ['void *', 'int']),
         playerGetState: bind(library, 'libvlc_media_player_get_state', 'int', ['void *']),
         playerGetTime: bind(library, 'libvlc_media_player_get_time', 'int64', ['void *']),
