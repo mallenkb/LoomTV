@@ -102,17 +102,4 @@ export async function fetchFanartTVArtwork(
   }
 }
 
-export async function fetchFanartMovieLogos(
-  tmdbId: string | undefined,
-  apiKey?: string,
-): Promise<string[]> {
-  return (await fetchFanartMovieArtwork(tmdbId, apiKey)).logoCandidates;
-}
-
-export async function fetchFanartTVLogos(
-  tvdbId: string | undefined,
-  apiKey?: string,
-): Promise<string[]> {
-  return (await fetchFanartTVArtwork(tvdbId, apiKey)).logoCandidates;
-}
 import { safeFetch } from '../safeFetch.ts';

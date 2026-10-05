@@ -65,7 +65,8 @@ function metadataDeps(): MetadataItemBuilderDependencies {
  fetchOMDbMetadata: none, fetchOMDbMetadataById: none, fetchOMDbSeasonEpisodes: async () => [],
  fetchTMDBMovieMetadata: none, fetchTMDBMovieMetadataById: none, fetchTMDBTVMetadata: none, fetchTMDBTVMetadataById: none,
  fetchTVDBMetadata: none, fetchTVDBMetadataById: none, fetchTVMetadata: none,
- fetchFanartMovieLogos: async () => [], fetchFanartTVLogos: async () => [],
+ fetchFanartMovieArtwork: async () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] }), fetchFanartTVArtwork: async () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] }),
+ fetchCinemetaMeta: async () => null,
  getEmbeddedArtworkUrl: () => '', getLocalFolderArtworkUrl: () => '', getLocalMovieArtworkUrl: () => '', getLocalThumbnailUrl: () => '',
  orderedArtworkCandidates: (...urls) => urls.filter((url): url is string => !!url),
  };

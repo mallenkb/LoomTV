@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import BetterSqlite3 from 'better-sqlite3';
-import { animeSeasonMalIds, readShowSchedules, refreshShowSchedules, type ScheduleFetchers } from '../src/main/showSchedule.ts';
+import { animeSeasonMalIds, consistentAnimeSeasons, readShowSchedules, refreshShowSchedules, type ScheduleFetchers } from '../src/main/showSchedule.ts';
 import { computeEpisodeUpdates } from '../src/main/libraryInsights.ts';
 import type { MediaItem } from '../src/main/metadata/types.ts';
 
@@ -61,4 +61,24 @@ test('reading never fetches; stale anime is refreshed in one batched request, th
 test('offline mode only reads the cache', () => {
   const { stale } = readShowSchedules(database(), [anime('temppal', { malId: '64340' }, [1])], { offline: true });
   assert.equal(stale.length, 0);
+});
+
+test('anime seasons without a MAL ID use a provider season only when it lists every episode on disk', async () => {
+  const slime = { ...anime('slime', { malId: '37430', malIdBySeason: { 1: '37430' }, tvdbId: '352408' }, [4]) } as MediaItem;
+  slime.episodeFiles = [1, 2, 3].map((episode) => ({ season: 4, episode, filePath: `/anime/slime/S4E${episode}.mkv` })) as MediaItem['episodeFiles'];
+  const provider = [
+    ...[1, 2, 3, 4, 5].map((number) => ({ season: 4, number, title: `S4E${number}`, airDate: `2026-10-0${number}` })),
+    ...[1, 2].map((number) => ({ season: 3, number, title: 'other', airDate: '2024-01-01' })),
+  ];
+  assert.deepEqual(consistentAnimeSeasons(slime, [4], provider).map((episode) => episode.number), [1, 2, 3, 4, 5]);
+  slime.episodeFiles?.push({ season: 4, episode: 9, filePath: '/anime/slime/S4E9.mkv' } as never);
+  assert.deepEqual(consistentAnimeSeasons(slime, [4], provider), [], 'a file the provider does not list means its numbering differs');
+
+  const db = database();
+  slime.episodeFiles = slime.episodeFiles?.slice(0, 3);
+  const { stale } = readShowSchedules(db, [slime], { offline: false, now: 1 });
+  assert.equal(stale.length, 1);
+  const fetchers: ScheduleFetchers = { tv: async () => provider, anime: async () => new Map() };
+  assert.equal(await refreshShowSchedules(db, stale, { now: 1, fetchers }), 1);
+  assert.deepEqual(readShowSchedules(db, [slime], { offline: false, now: 2 }).schedules.get('slime')?.map((episode) => episode.number), [1, 2, 3, 4, 5]);
 });

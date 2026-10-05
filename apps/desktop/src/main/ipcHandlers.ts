@@ -175,7 +175,7 @@ const manualMediaSegmentSchema = mediaSegmentRequestSchema.extend({
 });
 const artworkCandidateSchema = z.object({
   id: nonEmptyString,
-  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv']),
+  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv', 'Cinemeta']),
   title: z.string(),
   year: finiteNumber.optional(),
   genres: z.array(z.string()).optional(),

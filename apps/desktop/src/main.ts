@@ -122,7 +122,8 @@ import {
 } from './main/fileRename/matchConfirmation.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
-import { readShowSchedules, refreshShowSchedules } from './main/showSchedule.ts';
+import { fetchCinemetaMeta } from './main/metadata/cinemeta.ts';
+import { createScheduleFetchers, readShowSchedules, refreshShowSchedules } from './main/showSchedule.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
   createWindow,
@@ -325,9 +326,7 @@ import {
 import { fetchAniListAnimeMetadata } from './main/metadata/anilist';
 import {
   fetchFanartMovieArtwork,
-  fetchFanartMovieLogos,
   fetchFanartTVArtwork,
-  fetchFanartTVLogos,
 } from './main/metadata/fanart';
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
@@ -687,8 +686,9 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   })(),
   fetchTVMetadataById: metadataRequestWhenOnline(fetchTVMetadataById, () => null),
   extractSeasons,
-  fetchFanartMovieLogos: metadataRequestWhenOnline(fetchFanartMovieLogos, () => []),
-  fetchFanartTVLogos: metadataRequestWhenOnline(fetchFanartTVLogos, () => []),
+  fetchFanartMovieArtwork: metadataRequestWhenOnline(fetchFanartMovieArtwork, () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] })),
+  fetchFanartTVArtwork: metadataRequestWhenOnline(fetchFanartTVArtwork, () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] })),
+  fetchCinemetaMeta: metadataRequestWhenOnline(fetchCinemetaMeta, () => null),
   fetchAniListAnimeMetadata: metadataRequestWhenOnline(fetchAniListAnimeMetadata, () => null),
   fetchJikanEpisodesForLocalAnimeSeasons: metadataRequestWhenOnline(
     fetchJikanEpisodesForLocalAnimeSeasons,
@@ -1602,6 +1602,7 @@ const {
   fetchAniListAnimeMetadata,
   fetchFanartMovieArtwork,
   fetchFanartTVArtwork,
+  fetchCinemetaMeta: metadataRequestWhenOnline(fetchCinemetaMeta, () => null),
   fetchJikanMetadata,
   fetchJikanMetadataCandidates,
   fetchOMDbMetadata,
@@ -2096,6 +2097,10 @@ const mediaRenameHandlers = {
 };
 
 let scheduleRefresh: Promise<void> | null = null;
+const scheduleFetchers = createScheduleFetchers({
+  tvdb: () => getMetadataApiKey(loadSettings(), 'tvdb') || '',
+  tmdb: () => getMetadataApiKey(loadSettings(), 'tmdb') || '',
+});
 
 /**
  * Cached full episode lists, returned at once so the next episode and missing
@@ -2108,7 +2113,7 @@ function showSchedulesFor(items: MediaItem[]) {
   const database = getMediaRenameDatabase();
   const { schedules, stale } = readShowSchedules(database, items, { offline });
   if (stale.length && !scheduleRefresh) {
-    scheduleRefresh = refreshShowSchedules(database, stale)
+    scheduleRefresh = refreshShowSchedules(database, stale, { fetchers: scheduleFetchers })
       .then((changed) => {
         if (!changed) return;
         const window = getMainWindow();

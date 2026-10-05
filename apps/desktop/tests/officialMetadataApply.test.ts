@@ -68,8 +68,6 @@ function createHarness(item: MediaItem, omdbResponse: Record<string, unknown> | 
     localTitleFromPath: () => null,
     probeMediaFile: () => ({}),
     fetchAniListAnimeMetadata: none,
-    fetchFanartMovieLogos: empty,
-    fetchFanartTVLogos: empty,
     fetchJikanMetadata: none,
     fetchJikanMetadataCandidates: empty,
     fetchOMDbMetadata: none,
