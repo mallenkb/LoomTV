@@ -24,7 +24,7 @@ const hooks = registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { queryClient, trimQueryCache, cachedDesktopRead, invalidateDesktopData, setQueryProfile, queryScope } =
+const { queryClient, trimQueryCache, cachedDesktopRead, invalidateDesktopData, setQueryProfile, queryScope, prefetchLibraryDetails, DETAIL_CACHE_TTL_MS } =
   await import('../src/lib/queryClient.ts');
 hooks.deregister();
 
@@ -116,6 +116,56 @@ test('concurrent identical reads are deduplicated and fresh results are reused',
   assert.equal(values.length, 20);
   await cachedDesktopRead('detail', ['same'], read);
   assert.equal(calls, 1);
+});
+
+test('hovered details are reused on navigation and expire after fifteen seconds', async () => {
+  let calls = 0;
+  const read = () => cachedDesktopRead('detail', ['hovered'], async () => { calls++; return 'details'; }, 120_000);
+  prefetchLibraryDetails('hovered', read);
+  await nextTurn();
+  assert.equal(await read(), 'details');
+  assert.equal(calls, 1);
+  const query = queryClient.getQueryCache().getAll()[0];
+  assert.equal(query.options.staleTime, DETAIL_CACHE_TTL_MS);
+  assert.equal(query.options.gcTime, DETAIL_CACHE_TTL_MS);
+  query.setState({ dataUpdatedAt: Date.now() - DETAIL_CACHE_TTL_MS - 1 });
+  await read();
+  assert.equal(calls, 2);
+});
+
+test('different hovers run concurrently up to three, deduplicate ids, and release failed slots', async () => {
+  let started = 0;
+  const releases: Array<() => void> = [];
+  const read = () => new Promise<void>((resolve) => { started++; releases.push(resolve); });
+  prefetchLibraryDetails('first', read);
+  prefetchLibraryDetails('first', read);
+  prefetchLibraryDetails('second', read);
+  prefetchLibraryDetails('third', read);
+  prefetchLibraryDetails('fourth', read);
+  await nextTurn();
+  assert.equal(started, 3);
+  releases.shift()?.();
+  await nextTurn();
+  prefetchLibraryDetails('failure', async () => { throw new Error('Unavailable'); });
+  await nextTurn();
+  prefetchLibraryDetails('fourth', read);
+  await nextTurn();
+  assert.equal(started, 4);
+  releases.forEach((resolve) => resolve());
+  await nextTurn();
+});
+
+test('library invalidation discards hovered data and prevents an old in-flight response being reused', async () => {
+  let release!: (value: string) => void;
+  const old = cachedDesktopRead('detail', ['changed'], () => new Promise<string>((resolve) => { release = resolve; }));
+  const cancelled = assert.rejects(old, (error) => isCancelledError(error));
+  await nextTurn();
+  invalidateDesktopData(['detail']);
+  await cancelled;
+  release('old');
+  assert.equal(await cachedDesktopRead('detail', ['changed'], async () => 'new'), 'new');
+  invalidateDesktopData(['detail']);
+  assert.equal(await cachedDesktopRead('detail', ['changed'], async () => 'updated'), 'updated');
 });
 
 test('profile changes do not reuse the previous profile result', async () => {

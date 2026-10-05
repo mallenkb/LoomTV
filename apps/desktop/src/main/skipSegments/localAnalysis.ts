@@ -331,7 +331,7 @@ async function movieCreditIntervals(context: AnalysisContext, ffmpegPath: string
 export function createLocalSegmentAnalysis(deps: {
   loadLibrary: () => LibraryLike;
   loadSettings: () => { localSkipAnalysisEnabled?: boolean; skipAnalysis?: SkipAnalysisSettings };
-  probeMediaFile: (filePath: string) => ProbeMediaFileResult;
+  probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
 }) {
   let running: Promise<MediaSegmentResponse> | null = null;
 
@@ -364,42 +364,44 @@ export function createLocalSegmentAnalysis(deps: {
     return value.exclusions.paths.some((entry) => resolved === path.resolve(entry) || resolved.startsWith(`${path.resolve(entry)}${path.sep}`));
   }
 
-  function analysisFile(file: EpisodeFile): EpisodeFile {
+  async function analysisFile(file: EpisodeFile): Promise<EpisodeFile> {
     const metadata = file.localMetadata;
     const hasAudioTrack = metadata?.tracks?.some((track) => track.type === 'audio');
     if (metadata?.durationSeconds && hasAudioTrack) return file;
-    const probedMetadata = deps.probeMediaFile(file.filePath).localMetadata;
+    const probedMetadata = (await deps.probeMediaFile(file.filePath)).localMetadata;
     return probedMetadata ? { ...file, localMetadata: probedMetadata } : file;
   }
 
-  function contexts(mediaId: string, season: number): AnalysisContext[] {
+  async function contexts(mediaId: string, season: number): Promise<AnalysisContext[]> {
     const item = [...(deps.loadLibrary().tvShows || []), ...(deps.loadLibrary().animeShows || [])]
       .find((candidate) => candidate.id === mediaId);
     if (!item || item.type === 'movie') return [];
-    return (item.episodeFiles || [])
+    const files = (item.episodeFiles || [])
       .filter((file) => file.season === season && fs.existsSync(file.filePath) && !excluded(item, season, file.filePath))
-      .sort((a, b) => a.episode - b.episode)
-      .flatMap((file) => {
-        const analyzedFile = analysisFile(file);
-        const durationMs = Math.round((analyzedFile.localMetadata?.durationSeconds || 0) * 1000);
-        if (!durationMs) return [];
-        const audio = audioIdentity(analyzedFile);
-        if (!analyzedFile.localMetadata?.tracks?.some((track) => track.type === 'audio')) return [];
-        return [{
-          item,
-          file: analyzedFile,
-          durationMs,
-          audioTrack: audio.index,
-          audioLanguage: audio.language,
-          fileRevision: automaticRevision(file.filePath, durationMs, audio.index, audio.language),
-        }];
+      .sort((a, b) => a.episode - b.episode);
+    const result: AnalysisContext[] = [];
+    for (const file of files) {
+      const analyzedFile = await analysisFile(file);
+      const durationMs = Math.round((analyzedFile.localMetadata?.durationSeconds || 0) * 1000);
+      if (!durationMs) continue;
+      const audio = audioIdentity(analyzedFile);
+      if (!analyzedFile.localMetadata?.tracks?.some((track) => track.type === 'audio')) continue;
+      result.push({
+        item,
+        file: analyzedFile,
+        durationMs,
+        audioTrack: audio.index,
+        audioLanguage: audio.language,
+        fileRevision: automaticRevision(file.filePath, durationMs, audio.index, audio.language),
       });
+    }
+    return result;
   }
 
-  function movieContext(mediaId: string): AnalysisContext | null {
+  async function movieContext(mediaId: string): Promise<AnalysisContext | null> {
     const item = (deps.loadLibrary().movies || []).find((candidate) => candidate.id === mediaId);
     if (!item || item.type !== 'movie' || !item.filePath || !fs.existsSync(item.filePath) || excluded(item, 0, item.filePath)) return null;
-    const file = analysisFile({
+    const file = await analysisFile({
       season: 0,
       episode: 0,
       filePath: item.filePath,
@@ -436,7 +438,7 @@ export function createLocalSegmentAnalysis(deps: {
       const ffmpegPath = findFFmpeg();
       const ffprobePath = findFFprobe();
       if (!fpcalcPath || !ffmpegPath) throw new Error(!fpcalcPath ? 'fpcalc was not found. Provider and manual markers remain available.' : 'FFmpeg was not found.');
-      const episodes = contexts(mediaId, season);
+      const episodes = await contexts(mediaId, season);
       if (episodes.length < 3) throw new Error('At least three usable episodes are required for local analysis.');
       const identity = hashId(...episodes.map((episode) => episode.fileRevision));
       const jobKey = `season:${mediaId}:${season}:${identity}`;
@@ -729,7 +731,7 @@ export function createLocalSegmentAnalysis(deps: {
       for (const revision of requested) record(revision, { kind: 'complete', response });
       return outcomes;
     }
-    const episodes = contexts(mediaId, season);
+    const episodes = await contexts(mediaId, season);
     const known = new Set(episodes.map((episode) => episode.fileRevision));
     const targets = requested.filter((revision) => known.has(revision));
     for (const revision of requested) {
@@ -837,7 +839,7 @@ export function createLocalSegmentAnalysis(deps: {
     const task = (async () => {
       const ffmpegPath = findFFmpeg();
       if (!ffmpegPath) throw new Error('FFmpeg was not found. Provider and chapter markers remain available.');
-      const context = movieContext(mediaId);
+      const context = await movieContext(mediaId);
       if (!context) throw new Error('That movie file is unavailable.');
       if (!settings().enabledTypes.credits) {
         if (!shouldContinue()) throw new AnalysisInterruptedError();

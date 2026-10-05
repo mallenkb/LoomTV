@@ -3,6 +3,7 @@ import { BrowserWindow, type WebContents } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   MpvAvailability,
   MpvCommand,
@@ -226,8 +227,10 @@ class LibMpvSession {
   private readonly onOwnerDestroyed = () => this.stop();
   private request = 0;
   private stopped = false;
+  private pendingSeekState = false;
   private local4kCacheLimited = false;
   private state: MpvPlaybackState = { sessionId: this.id, status: 'starting' };
+  private lastSentState: MpvPlaybackState | null = null;
   private diagnostics: MpvPlaybackDiagnostics = {};
   private readonly subtitleSources: Map<string, 'sidecar' | 'opensubtitles'>;
   private afterLoad: unknown[][];
@@ -342,7 +345,10 @@ class LibMpvSession {
       return;
     }
     if (message.event !== 'property-change' || !message.name) return;
-    if (message.name === 'time-pos') this.emit({ position: finiteNumber(message.data) });
+    if (message.name === 'time-pos') {
+      this.emit({ position: finiteNumber(message.data) }, this.pendingSeekState);
+      this.pendingSeekState = false;
+    }
     else if (message.name === 'duration') this.emit({ duration: finiteNumber(message.data) });
     else if (message.name === 'pause') this.emit({ paused: mpvFlag(message.data) });
     else if (message.name === 'volume') this.emit({ volume: finiteNumber(message.data) === undefined ? undefined : Number(message.data) / 100 });
@@ -407,15 +413,24 @@ class LibMpvSession {
     this.emit({ diagnostics: this.diagnostics });
   }
 
-  private emit(patch: Partial<MpvPlaybackState>): void {
-    this.state = { ...this.state, ...patch, sessionId: this.id };
-    syncNativePlaybackDisplaySleep(this.id, this.state, () => {
-      if (!this.owner.isDestroyed()) {
-        this.owner.send('media-control:command', { type: 'pause' }, true);
-      }
-      this.command({ type: 'set-paused', paused: true });
-    });
-    if (!this.owner.isDestroyed()) this.owner.send('mpv:state', { ...patch, sessionId: this.id, status: this.state.status });
+  private emit(patch: Partial<MpvPlaybackState>, force = false): void {
+    if (Object.entries(patch).some(([key, value]) => !isDeepStrictEqual(this.state[key as keyof MpvPlaybackState], value))) {
+      this.state = { ...this.state, ...patch, sessionId: this.id };
+    }
+    const changed = !isDeepStrictEqual(this.state, this.lastSentState);
+    if (!changed && !force) return;
+    if (changed) {
+      syncNativePlaybackDisplaySleep(this.id, this.state, () => {
+        if (!this.owner.isDestroyed()) {
+          this.owner.send('media-control:command', { type: 'pause' }, true);
+        }
+        this.command({ type: 'set-paused', paused: true });
+      });
+    }
+    if (!this.owner.isDestroyed()) {
+      this.owner.send('mpv:state', { ...patch, sessionId: this.id, status: this.state.status });
+      this.lastSentState = this.state;
+    }
   }
 
   private fail(message: string): void {
@@ -494,7 +509,12 @@ class LibMpvSession {
   command(command: MpvCommand): boolean {
     if (command.type === 'set-muted') return this.applyMute(command.muted);
     if (command.type === 'set-video-track') this.suspendedVideoTrackId = null;
-    try { return commandList(command).every((entry) => this.send(entry)); }
+    try {
+      const applied = commandList(command).every((entry) => this.send(entry));
+      // Report the next timestamp even if a seek lands on the current position.
+      if (applied && command.type === 'seek') this.pendingSeekState = true;
+      return applied;
+    }
     catch (error) {
       const message = error instanceof Error ? error.message : 'libmpv rejected a playback command.';
       // A rejected display preference leaves the video playing as it was.

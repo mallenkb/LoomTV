@@ -429,6 +429,8 @@ const config: ForgeConfig = {
       // unpack rule here without the brace glob, which is incompatible with
       // the minimatch/brace-expansion versions resolved by this workspace.
       unpack: '**/*.node',
+      // Sharp's libvips libraries must accompany its native Node binding.
+      unpackDir: '**/node_modules/@img',
     },
     osxSign: {
       identity: process.env.MACOS_SIGNING_IDENTITY || '-',

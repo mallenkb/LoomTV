@@ -1,3 +1,7 @@
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { CANONICAL_STATE_FILENAME } from './canonical-state-store.js';
+
 /**
  * One source of truth for first-run setup.
  *
@@ -34,6 +38,31 @@ export const DEFAULT_METADATA_SETTINGS = {
 };
 
 const MAX_NAME_LENGTH = 80;
+
+/** Read only the setup decision before the desktop starts the full server. @param {string} dataDir */
+export async function isCanonicalSetupRequired(dataDir) {
+  let database;
+  try {
+    database = new DatabaseSync(path.join(dataDir, CANONICAL_STATE_FILENAME), { readOnly: true });
+    const reader = database;
+    const setup = createSetupService({
+      store: {
+        readMeta: (key) => {
+          const value = reader.prepare('SELECT value FROM meta WHERE key = ?').get(key)?.value;
+          return typeof value === 'string' ? value : null;
+        },
+        writeMeta: () => undefined,
+      },
+      isOwnerConfigured: () => Boolean(reader.prepare('SELECT account_id FROM owner_account WHERE singleton = 1').get()),
+    });
+    return (await setup.status()).required;
+  } catch {
+    // Missing or unreadable state needs the server's authoritative setup response.
+    return true;
+  } finally {
+    database?.close();
+  }
+}
 
 /**
  * @typedef {{ provider: string, artworkProvider: string, ratingSource: string, offlineMode: boolean, apiKeys?: Record<string, string>, apiKey?: string, skipped?: boolean }} SetupMetadata

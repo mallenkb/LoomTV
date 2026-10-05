@@ -1,11 +1,13 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import {
+  getTranscodeCapabilities as getCachedTranscodeCapabilities,
   probeTranscodeCapabilities,
   type TranscodeCapabilities,
 } from '@loom-media-server/transcode-capabilities';
+
+import { machOArchitectures } from './machO.ts';
 
 export type { HardwareVideoEncoder } from './transcodeFilters.ts';
 import type { HardwareVideoEncoder } from './transcodeFilters.ts';
@@ -30,16 +32,20 @@ function binaryName(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string {
 
 function isCompatibleDarwinBinary(binaryPath: string): boolean {
   if (process.platform !== 'darwin') return true;
-
+  let header: Buffer;
   try {
-    const description = execFileSync('file', [binaryPath], { encoding: 'utf8', timeout: 1000 });
-    if (process.arch === 'arm64') return description.includes('arm64');
-    if (process.arch === 'x64') return description.includes('x86_64');
+    const descriptor = fs.openSync(binaryPath, 'r');
+    try {
+      header = Buffer.alloc(512);
+      header = header.subarray(0, fs.readSync(descriptor, header, 0, header.length, 0));
+    } finally {
+      fs.closeSync(descriptor);
+    }
   } catch {
     return true;
   }
-
-  return true;
+  // Like `file`, anything that is not a Mach-O binary for this CPU is skipped.
+  return machOArchitectures(header)?.includes(process.arch) ?? false;
 }
 
 function existingCompatibleBinary(candidate?: string | null): string | null {
@@ -80,21 +86,17 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string[]
     `/snap/bin/${executable}`,
   ];
 
-  try {
-    const whichResult = execFileSync('which', ['-a', executable], { encoding: 'utf8', timeout: 1000 })
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-    candidates.push(...whichResult);
-  } catch {
-    // Some app launches do not have shell PATH configured.
+  // Same result as `which -a`, without a child process on the main thread.
+  // Some app launches do not have the shell PATH configured.
+  for (const directory of (process.env.PATH || '').split(path.delimiter)) {
+    if (directory) candidates.push(path.join(directory, executable));
   }
 
   return [...new Set(candidates)];
 }
 
-export function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'hevc' | 'av1' = 'h264'): HardwareVideoEncoder | null {
-  const capabilities = getTranscodeCapabilities(binaryPath);
+export async function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'hevc' | 'av1' = 'h264'): Promise<HardwareVideoEncoder | null> {
+  const capabilities = await awaitTranscodeCapabilities(binaryPath);
   const preferred = capabilities.backends.find((entry) => entry.id === capabilities.recommendedBackend);
   const backend = preferred?.codecs[codec]?.available
     ? preferred
@@ -103,7 +105,15 @@ export function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'he
 }
 
 export function getTranscodeCapabilities(binaryPath = findFFmpeg()): TranscodeCapabilities {
-  return probeTranscodeCapabilities(binaryPath, { probeTimeoutMs: 5000 });
+  return getCachedTranscodeCapabilities(binaryPath, { cacheDir: transcodeCapabilityCacheDir(), probeTimeoutMs: 5000 });
+}
+
+function transcodeCapabilityCacheDir(): string {
+  return path.join(app.getPath('userData'), 'transcode-capabilities');
+}
+
+export function awaitTranscodeCapabilities(binaryPath = findFFmpeg()): Promise<TranscodeCapabilities> {
+  return probeTranscodeCapabilities(binaryPath, { cacheDir: transcodeCapabilityCacheDir(), probeTimeoutMs: 5000 });
 }
 
 export function findFFmpeg(): string | null {

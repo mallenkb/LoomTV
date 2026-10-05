@@ -1,0 +1,35 @@
+{
+  "about": [
+    "Ceilings for scripts/check-performance-budgets.ts, run in CI by the Validate workflow.",
+    "Each value is checked against the median of several runs. Ceilings sit well above the measured value to absorb CI runner noise.",
+    "Ceilings only go down. After an improvement, append a lower value to `ceilings`.",
+    "Raising a ceiling needs a new entry with a `reason`; tests/performanceBudgets.test.ts enforces this."
+  ],
+  "budgets": {
+    "scan-persistence-delta-10000-ms": {
+      "description": "Saving an unchanged 10,000-movie scan as a delta (median of 5).",
+      "measured": { "value": 15, "on": "2026-10-05, Apple M-series, Node 24" },
+      "ceilings": [{ "value": 100 }]
+    },
+    "scan-persistence-delta-50000-ms": {
+      "description": "Saving an unchanged 50,000-movie scan as a delta (median of 5).",
+      "measured": { "value": 74, "on": "2026-10-05, Apple M-series, Node 24" },
+      "ceilings": [{ "value": 400 }]
+    },
+    "scan-persistence-replacement-50000-ms": {
+      "description": "Rewriting a 50,000-movie library in full (median of 5).",
+      "measured": { "value": 1009, "on": "2026-10-05, Apple M-series, Node 24" },
+      "ceilings": [{ "value": 5000 }]
+    },
+    "scan-projection-50000-ms": {
+      "description": "Artwork normalization of 50,000 committed and incoming records before delta planning (median of 3 fresh processes).",
+      "measured": { "value": 35, "on": "2026-10-05, Apple M-series, Node 24" },
+      "ceilings": [{ "value": 250 }]
+    },
+    "scan-projection-50000-peak-rss-mb": {
+      "description": "Peak RSS of the projection sample process, including its input (median of 3).",
+      "measured": { "value": 210, "on": "2026-10-05, Apple M-series, Node 24" },
+      "ceilings": [{ "value": 400 }]
+    }
+  }
+}

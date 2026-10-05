@@ -43,6 +43,7 @@
     "lint": "eslint .",
     "pretest": "node scripts/ensure-node-natives.cjs && cargo build --locked --release --manifest-path native/scanner/Cargo.toml",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts",
+    "check:performance-budgets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-performance-budgets.ts",
     "scanner:build": "node scripts/build-scanner.cjs",
     "runtimes:fetch": "node scripts/fetch-native-runtimes.cjs",
     "libmpv:bundle": "node scripts/bundle-libmpv.cjs",
@@ -108,6 +109,7 @@
     "motion": "12.38.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
+    "sharp": "0.35.5",
     "tailwind-merge": "3.5.0",
     "zod": "catalog:"
   },
@@ -204,6 +206,7 @@
     ],
     "asar": true,
     "asarUnpack": [
+      "**/node_modules/@img/**/*",
       "**/*.node",
       "**/ffmpeg*",
       "**/ffprobe*",

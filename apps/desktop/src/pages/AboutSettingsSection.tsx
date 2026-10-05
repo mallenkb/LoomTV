@@ -90,14 +90,16 @@ export default function AboutSettingsSection({
             {ffmpegStatus?.capabilities && (
               <div className="mt-3 text-xs text-[var(--loom-faint)]">
                 <span className="font-medium text-[var(--loom-muted)]">Transcoding:</span>{' '}
-                {ffmpegStatus.capabilities.hardwareAcceleration
-                  ? `${ffmpegStatus.capabilities.recommendedBackend} hardware encode`
-                  : 'software fallback'}
-                {' · '}
-                H.264 {ffmpegStatus.capabilities.codecs.h264 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.h264 ? 'software' : '—'}
-                {' · '}HEVC {ffmpegStatus.capabilities.codecs.hevc ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.hevc ? 'software' : '—'}
-                {' · '}AV1 {ffmpegStatus.capabilities.codecs.av1 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.av1 ? 'software' : '—'}
-                {ffmpegStatus.capabilities.toneMapping ? ' · HDR tone-map ready' : ''}
+                {ffmpegStatus.capabilities.state === 'probing' ? 'Checking FFmpeg capabilities...' : <>
+                  {ffmpegStatus.capabilities.hardwareAcceleration
+                    ? `${ffmpegStatus.capabilities.recommendedBackend} hardware encode`
+                    : 'software fallback'}
+                  {' · '}
+                  H.264 {ffmpegStatus.capabilities.codecs.h264 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.h264 ? 'software' : '—'}
+                  {' · '}HEVC {ffmpegStatus.capabilities.codecs.hevc ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.hevc ? 'software' : '—'}
+                  {' · '}AV1 {ffmpegStatus.capabilities.codecs.av1 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.av1 ? 'software' : '—'}
+                  {ffmpegStatus.capabilities.toneMapping ? ' · HDR tone-map ready' : ''}
+                </>}
               </div>
             )}
           </div>

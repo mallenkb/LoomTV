@@ -959,6 +959,7 @@ export function createHeadlessMediaService({
     // FFmpeg opens both paths by name. Recheck the authorized input identity
     // and anchor the output to the configured cache at the last async boundary
     // before spawn, including hardware-to-software fallback attempts.
+    const health = await transcoder.awaitCapabilities?.() || transcoder.getHealth();
     const input = await statContainedFile(session.mediaRootPath, session.filePath, { expectedFileId: session.fileId });
     const output = await resolveContainedPath(configuredCacheDir, session.outputDir);
     session.filePath = input.realPath;
@@ -967,7 +968,7 @@ export function createHeadlessMediaService({
     session.profile = profile;
     session.stderr = '';
     if (session.cleaned || stopping) throw cancelledError();
-    const child = spawnProcess(transcoder.path || '', transcodeArgs(session.filePath, session.outputDir, transcoder.getHealth(), profile), { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawnProcess(transcoder.path || '', transcodeArgs(session.filePath, session.outputDir, health, profile), { stdio: ['ignore', 'ignore', 'pipe'] });
     session.process = child;
     session.encoderSuspended = false;
     if (!session.pacingTimer) {
@@ -1099,7 +1100,7 @@ export function createHeadlessMediaService({
     // queued requests from creating untracked output directories.
     await reconcileOrphanedTranscodes();
     const transcodeRoot = await ensureTranscodeRoot();
-    const health = transcoder.getHealth();
+    const health = await transcoder.awaitCapabilities?.() || transcoder.getHealth();
     const profile = normalizeProfile(requestedProfile, health);
     await cacheQuota.checkAdmission();
     const permit = await admission.acquire(principal, { signal: requestSignal || undefined });
@@ -1281,8 +1282,11 @@ export function createHeadlessMediaService({
       };
     }
     let plan = playbackPlanForMedia({ ...probe, sourceId, sourceState: 'online' }, request.capabilities || {}, request);
-    if (plan.toneMap && transcoder.getHealth().toneMapping !== true) {
-      throw playbackError('playback_not_supported', 'This host cannot tone-map the selected HDR source.', 422);
+    if (plan.toneMap) {
+      const health = await transcoder.awaitCapabilities?.() || transcoder.getHealth();
+      if (health.toneMapping !== true) {
+        throw playbackError('playback_not_supported', 'This host cannot tone-map the selected HDR source.', 422);
+      }
     }
     const selectedSidecar = plan.selectedSubtitleTrackId
       ? (source.subtitleSidecars || []).find((sidecar) => sidecar.id === plan.selectedSubtitleTrackId)

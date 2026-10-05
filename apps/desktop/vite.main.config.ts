@@ -1,6 +1,17 @@
 import { defineConfig } from 'vite-plus';
+import fs from 'node:fs';
 
 export default defineConfig(({ mode }) => ({
+  plugins: [{
+    name: 'loomtv-main-entry',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'main.js',
+        source: fs.readFileSync(new URL('./src/mainEntry.cjs', import.meta.url), 'utf8'),
+      });
+    },
+  }],
   // Electron Forge supplies these globals while running its development
   // server. A standalone production build must load the bundled renderer,
   // never an unrelated site that happens to own the development port.
@@ -25,7 +36,7 @@ export default defineConfig(({ mode }) => ({
       ],
       output: {
         format: 'cjs',
-        entryFileNames: 'main.js',
+        entryFileNames: 'main-bundle.js',
       },
     },
   },

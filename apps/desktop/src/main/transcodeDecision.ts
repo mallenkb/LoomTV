@@ -1,4 +1,4 @@
-import { probeMediaFile } from './mediaProbeFile.ts';
+import { probeMediaFileAsync } from './mediaProbeFile.ts';
 import type { TranscodeOptions } from './mediaTypes.ts';
 import {
   browserPlaybackPlanForMetadata,
@@ -15,12 +15,12 @@ function isHdrMetadata(metadata?: { colorTransfer?: string; colorPrimaries?: str
     || (primaries.includes('bt2020') && /10|12/.test(pixelFormat));
 }
 
-export function browserPlaybackPlan(filePath: string, options: TranscodeOptions = {}) {
-  const probe = probeMediaFile(filePath);
+export async function browserPlaybackPlan(filePath: string, options: TranscodeOptions = {}) {
+  const probe = await probeMediaFileAsync(filePath);
   if (options.toneMap === undefined && isHdrMetadata(probe.localMetadata)) options.toneMap = true;
   return browserPlaybackPlanForMetadata(filePath, probe.localMetadata, options);
 }
 
-export function needsBrowserTranscoding(filePath: string): boolean {
-  return browserPlaybackPlan(filePath).mode !== 'direct';
+export async function needsBrowserTranscoding(filePath: string): Promise<boolean> {
+  return (await browserPlaybackPlan(filePath)).mode !== 'direct';
 }

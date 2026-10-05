@@ -22,7 +22,7 @@ export interface TranscodeBackendCapability {
 }
 
 export interface TranscodeCapabilities {
-  state: 'available' | 'limited' | 'unavailable';
+  state: 'available' | 'limited' | 'unavailable' | 'probing';
   ffmpegPath: string | null;
   platform: NodeJS.Platform | string;
   backends: TranscodeBackendCapability[];
@@ -42,14 +42,17 @@ export interface ProbeOptions {
   environment?: NodeJS.ProcessEnv;
   skipSmokeTest?: boolean;
   probeTimeoutMs?: number;
-  cacheMs?: number;
+  cacheDir?: string;
+  /** Explicit self-tests bypass the saved result but share an in-flight probe. */
+  force?: boolean;
   /** Override command execution for deterministic probes or embedded runtimes. */
   commandRunner?: (
     command: string,
     args: readonly string[],
     options: Record<string, unknown>,
-  ) => string | Buffer | void;
+  ) => string | Buffer | void | Promise<string | Buffer | void>;
 }
 
-export function probeTranscodeCapabilities(ffmpegPath: string | null | undefined, options?: ProbeOptions): TranscodeCapabilities;
+export function getTranscodeCapabilities(ffmpegPath: string | null | undefined, options?: ProbeOptions): TranscodeCapabilities;
+export function probeTranscodeCapabilities(ffmpegPath: string | null | undefined, options?: ProbeOptions): Promise<TranscodeCapabilities>;
 export function clearTranscodeCapabilityCache(): void;

@@ -49,6 +49,7 @@ type CompactLibraryBridgeApi = {
   getLibraryIndex: () => Promise<LibraryIndexPayload>;
   getLibraryIndexIfChanged: (knownFingerprint?: string) => Promise<LibraryIndexPayload | LibraryIndexUnchanged>;
   getLibraryItem: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
+  recordFirstLibraryRender: (timestamp: number) => Promise<boolean>;
 };
 
 export interface DesktopTransport {
@@ -109,6 +110,7 @@ const desktopApi = {
   getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
   getLibraryIndexIfChanged: (knownFingerprint?: string) => ipcRenderer.invoke('library:get-index-if-changed', knownFingerprint),
   getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),
+  recordFirstLibraryRender: (timestamp: number) => ipcRenderer.invoke('startup:library-render', timestamp),
   scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
   onLibraryScanProgress: (callback: (progress: LibraryScanProgress) => void) => {
     const handler = (

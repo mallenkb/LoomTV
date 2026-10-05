@@ -245,7 +245,7 @@ export function publicHealthSummary(health) {
   const media = health?.media || {};
   const transcoder = health?.transcoder || {};
   const mediaStates = new Set(['unconfigured', 'online', 'offline', 'not-directory', 'permission-denied']);
-  const transcoderStates = new Set(['available', 'limited', 'unavailable']);
+  const transcoderStates = new Set(['available', 'limited', 'unavailable', 'probing']);
   const publicStatuses = new Set(['ready', 'draining']);
   return {
     status: health && publicStatuses.has(health.status || '') ? health.status : 'unknown',

@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ffprobeMediaArguments, parseFfprobeMediaProbe } from '@loom-media-server/media-core';
-import { probeTranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
+import { getTranscodeCapabilities, probeTranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 
 const execFileAsync = promisify(execFile);
 
@@ -18,20 +18,28 @@ function existingExecutable(candidate) {
   }
 }
 
+/**
+ * First match on PATH, like `which`/`where.exe`, without a synchronous child
+ * process (this module also runs inside the desktop app's main process).
+ * @param {string} name
+ */
+function onPath(name) {
+  const names = process.platform === 'win32' ? [`${name}.exe`, name] : [name];
+  for (const directory of (process.env.PATH || '').split(path.delimiter)) {
+    if (!directory) continue;
+    for (const candidate of names) {
+      const found = existingExecutable(path.join(directory, candidate));
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 /** @param {string | undefined} configuredPath */
 function resolveFfmpeg(configuredPath) {
   const explicit = existingExecutable(configuredPath || process.env.LOOMTV_FFMPEG_PATH || process.env.FFMPEG_PATH);
   if (explicit) return explicit;
-  const command = process.platform === 'win32' ? 'where.exe' : 'which';
-  try {
-    const output = execFileSync(command, ['ffmpeg'], { encoding: 'utf8', timeout: 1000 })
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .find(Boolean);
-    return existingExecutable(output);
-  } catch {
-    return null;
-  }
+  return onPath('ffmpeg');
 }
 
 /** @param {string | undefined} configuredPath @param {string | null} ffmpegPath */
@@ -43,25 +51,14 @@ function resolveFfprobe(configuredPath, ffmpegPath) {
     const bundled = existingExecutable(sibling);
     if (bundled) return bundled;
   }
-  const command = process.platform === 'win32' ? 'where.exe' : 'which';
-  try {
-    const output = execFileSync(command, ['ffprobe'], { encoding: 'utf8', timeout: 1000 })
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .find(Boolean);
-    return existingExecutable(output);
-  } catch {
-    return null;
-  }
+  return onPath('ffprobe');
 }
 
-/** @param {{ ffmpegPath?: string, ffprobePath?: string }} options */
+/** @param {{ ffmpegPath?: string, ffprobePath?: string, cacheDir?: string }} options */
 export function createHeadlessTranscoder(options = {}) {
   const ffmpegPath = resolveFfmpeg(options.ffmpegPath);
   const ffprobePath = resolveFfprobe(options.ffprobePath, ffmpegPath);
-  /** @type {import('@loom-media-server/transcode-capabilities').TranscodeCapabilities | undefined} */
-  let lastProbe;
-  let lastProbeAt = 0;
+  const probeOptions = { cacheDir: options.cacheDir, probeTimeoutMs: 5000 };
 
   return {
     path: ffmpegPath,
@@ -86,15 +83,14 @@ export function createHeadlessTranscoder(options = {}) {
         });
       }
     },
-    getCapabilities({ force = false } = {}) {
-      const now = Date.now();
-      if (!force && lastProbe && now - lastProbeAt < 30_000) return lastProbe;
-      lastProbe = probeTranscodeCapabilities(ffmpegPath, { probeTimeoutMs: 5000 });
-      lastProbeAt = now;
-      return lastProbe;
+    getCapabilities() {
+      return getTranscodeCapabilities(ffmpegPath, probeOptions);
     },
-    getSelfTest() {
-      const capabilities = this.getCapabilities({ force: true });
+    async awaitCapabilities() {
+      return probeTranscodeCapabilities(ffmpegPath, probeOptions);
+    },
+    async getSelfTest() {
+      const capabilities = await probeTranscodeCapabilities(ffmpegPath, { ...probeOptions, force: true });
       return {
         startedAt: capabilities.probedAt,
         completedAt: Date.now(),
@@ -126,7 +122,7 @@ export function createHeadlessTranscoder(options = {}) {
         available: capabilities.state !== 'unavailable',
         ffmpegPath,
         ffprobePath,
-        probing: Boolean(ffprobePath),
+        probing: capabilities.state === 'probing',
         recommendedBackend: capabilities.recommendedBackend,
         hardwareAcceleration: capabilities.hardwareAcceleration,
         codecs: capabilities.codecs,

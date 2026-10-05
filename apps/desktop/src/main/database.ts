@@ -5,13 +5,13 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch.ts';
 import { runBoundedArtworkFetch } from './artworkFetchAdmission.ts';
+import { artworkExtensionForMimeType } from './artworkCache.ts';
 import { decryptLocalSecret, encryptLocalSecret, isLocalSecretCiphertext, localSecretStorage } from './localSecretStorage.ts';
 import {
   artworkNegativeCacheAllows,
   rememberArtworkFailure,
   rememberArtworkSuccess,
   sanitizeArtworkBytes,
-  sanitizeArtworkBytesWithDecoder,
 } from './artworkSecurity.ts';
 import type { LibraryData } from './appContracts.ts';
 import type { ProfileExportV1, StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
@@ -1154,21 +1154,7 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
       return null;
     }
     const bytes = Buffer.from(await response.arrayBuffer());
-    let sanitized: FetchedArtworkBytes;
-    try {
-      sanitized = await sanitizeArtworkBytes(bytes, mimeType);
-    } catch (error) {
-      // Electron builds differ in whether `nativeImage` is available from a
-      // worker thread. Keep the bounded byte/signature/dimension checks above,
-      // then use the host decoder as a compatibility fallback when the worker
-      // bridge itself cannot load. This restores the release artwork path for
-      // local library posters without exposing provider URLs to the renderer.
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/worker|electron|decoder process|decoder failed|time limit/i.test(message)) throw error;
-      sanitized = sanitizeArtworkBytesWithDecoder(bytes, mimeType, {
-        createFromBuffer: (buffer) => nativeImage.createFromBuffer(buffer),
-      });
-    }
+    const sanitized = await sanitizeArtworkBytes(bytes, mimeType, { fallbackDecoder: nativeImage });
     rememberArtworkSuccess(sourceUrl);
     return sanitized;
   } catch {
@@ -1202,7 +1188,7 @@ function pluginArtworkObject(addonId: string, sourceUrl: string): PluginArtworkO
     JOIN plugin_artwork_objects AS object ON object.content_hash = reference.content_hash
     WHERE reference.addon_id = ? AND reference.source_url = ?
   `).get(addonId, sourceUrl) as PluginArtworkObjectRow | undefined;
-  if (!row || row.mime_type !== 'image/png' || !fs.existsSync(row.cache_path)) return null;
+  if (!row || (row.mime_type !== 'image/png' && row.mime_type !== 'image/jpeg') || !fs.existsSync(row.cache_path)) return null;
   try {
     // Streams and remembers the digest per file version rather than reading
     // the whole image into memory on every poster request.
@@ -1301,12 +1287,12 @@ export async function cachePluginArtworkSource(addonId: string, sourceUrl: strin
       if (!response.ok) return null;
       const mimeType = response.headers.get('content-type')?.split(';')[0] || '';
       if (!mimeType.startsWith('image/')) return null;
-      return sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType);
+      return sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType, { fallbackDecoder: nativeImage });
     });
     if (!sanitized) return null;
     enforcePluginArtworkQuota(addonId, sanitized.byteLength, sourceUrl);
 
-    const cachePath = path.join(pluginArtworkCacheDirectory(), `${sanitized.contentHash}.png`);
+    const cachePath = path.join(pluginArtworkCacheDirectory(), `${sanitized.contentHash}${artworkExtensionForMimeType(sanitized.mimeType)}`);
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     if (!fs.existsSync(cachePath)) {
       try { fs.writeFileSync(cachePath, sanitized.bytes, { flag: 'wx' }); } catch (error) {
@@ -1319,9 +1305,9 @@ export async function cachePluginArtworkSource(addonId: string, sourceUrl: strin
     database.transaction(() => {
       database.prepare(`
         INSERT INTO plugin_artwork_objects (content_hash, cache_path, mime_type, byte_length, ref_count, updated_at)
-        VALUES (?, ?, 'image/png', ?, 0, ?)
+        VALUES (?, ?, ?, ?, 0, ?)
         ON CONFLICT(content_hash) DO UPDATE SET updated_at = excluded.updated_at
-      `).run(sanitized.contentHash, cachePath, sanitized.byteLength, Date.now());
+      `).run(sanitized.contentHash, cachePath, sanitized.mimeType, sanitized.byteLength, Date.now());
       database.prepare(`
         INSERT INTO plugin_artwork_references (addon_id, source_url, content_hash, updated_at)
         VALUES (?, ?, ?, ?)

@@ -502,6 +502,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       return false;
     }
     clearDetailStateIfScopeChanged(nextCatalogRevision);
+    if (nextCatalogRevision === null) queryClient.removeQueries({ queryKey: ['detail'] });
     libraryProfileIdRef.current = activeProfileId;
     libraryCatalogRevisionRef.current = nextCatalogRevision;
     dispatch({

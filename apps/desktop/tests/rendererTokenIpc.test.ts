@@ -201,7 +201,8 @@ test('IPC trust stays bound to the captured app identity after navigation', () =
   }), false);
 
   assert.equal(isExpectedAppUrl(packagedAppUrl, packagedAppUrl), true);
-  assert.equal(isExpectedAppUrl('loomtv://app/index.html', 'loomtv://app/index.html'), false);
+  assert.equal(isExpectedAppUrl('loomtv://app/index.html', 'loomtv://app/index.html'), true);
+  assert.equal(isExpectedAppUrl('loomtv://remote/index.html', 'loomtv://app/index.html'), false);
   assert.equal(isExpectedAppUrl(
     'file://attacker.example/Applications/LoomTV.app/renderer/index.html',
     packagedAppUrl,
@@ -216,7 +217,7 @@ test('window navigation guards use the immutable identity for navigations and re
   assert.match(windowManagerSource, /will-redirect/);
   assert.match(windowManagerSource, /will-frame-navigate/);
   assert.match(windowManagerSource, /expectedAppUrl/);
-  assert.match(windowManagerSource, /pathToFileURL/);
+  assert.match(windowManagerSource, /return PACKAGED_RENDERER_URL/);
   assert.match(windowManagerSource, /MAIN_WINDOW_DEV_SERVER_URL\)\.origin/);
   assert.doesNotMatch(mainSource, /webContents\.getURL\(\)/);
 });

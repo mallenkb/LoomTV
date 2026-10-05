@@ -92,7 +92,7 @@ export type OfficialMetadataServiceDependencies = {
   loadSettings: () => AppSettings;
   getMetadataApiKey: typeof import('./settings.ts').getMetadataApiKey;
   localTitleFromPath: (filePath?: string) => string | null;
-  probeMediaFile: (filePath: string) => ProbeMediaFileResult;
+  probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
   fetchAniListAnimeMetadata: typeof import('./metadata/anilist.ts').fetchAniListAnimeMetadata;
   fetchFanartMovieArtwork: typeof import('./metadata/fanart.ts').fetchFanartMovieArtwork;
   fetchFanartTVArtwork: typeof import('./metadata/fanart.ts').fetchFanartTVArtwork;
@@ -650,14 +650,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }));
   }
 
-  function itemArtworkLookupData(item: MediaItem): {
+  async function itemArtworkLookupData(item: MediaItem): Promise<{
     title: string;
     year?: number;
     localTitles: string[];
     providerIds: MetadataProviderIds;
-  } {
+  }> {
     const representativePath = item.episodeFiles?.[0]?.filePath || item.filePath;
-    const probe = representativePath && fs.existsSync(representativePath) ? probeMediaFile(representativePath) : {};
+    const probe = representativePath && fs.existsSync(representativePath) ? await probeMediaFile(representativePath) : {};
     const parsedPathTitle = representativePath ? cleanMediaTitle(path.basename(representativePath)).title : '';
     const folderTitle = item.filePath ? cleanMediaTitle(path.basename(item.filePath)).title : '';
     const embeddedTitle = item.type === 'movie' ? probe.embeddedTitle : probe.embeddedShowTitle;
@@ -713,7 +713,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
     const fanartApiKey = getMetadataApiKey(settings, 'fanart');
     const tvdbApiKey = getMetadataApiKey(settings, 'tvdb');
-    const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
+    const { title, year, localTitles, providerIds } = await itemArtworkLookupData(item);
 
     if (item.type === 'movie') {
       const [tmdbById, tmdbBySearch, tmdbCandidates, omdbById, omdbBySearch, tvMeta, tvCandidates] = await Promise.all([
@@ -837,7 +837,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
     const fanartApiKey = getMetadataApiKey(settings, 'fanart');
     const tvdbApiKey = getMetadataApiKey(settings, 'tvdb');
-    const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
+    const { title, year, localTitles, providerIds } = await itemArtworkLookupData(item);
 
     if (item.type === 'movie') {
       const [tmdbById, tmdbBySearch, omdbById, omdbBySearch, tvMeta] = await Promise.all([

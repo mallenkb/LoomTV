@@ -2,10 +2,11 @@ import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { windowChromeOptions } from './windowChrome';
-import { pathToFileURL } from 'node:url';
 import { isExpectedAppUrl } from './trustedIpcSender';
 import { installSettingsShortcut } from './openSettings';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
+import { recordStartupMark } from './startupTiming.ts';
+import { PACKAGED_RENDERER_URL } from './rendererProtocol.ts';
 
 const MAIN_WINDOW_DEV_SERVER_URL = (() => {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
@@ -26,13 +27,13 @@ export type MainWindowIpcIdentity = Readonly<{
 }>;
 let mainWindowIpcIdentity: MainWindowIpcIdentity | null = null;
 
-function packagedRendererFilePath(): string {
-  return path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`);
+export function packagedRendererRoot(): string {
+  return path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}`);
 }
 
 function expectedRendererAppUrl(): string {
   if (MAIN_WINDOW_DEV_SERVER_URL) return new URL(MAIN_WINDOW_DEV_SERVER_URL).origin;
-  return pathToFileURL(path.resolve(packagedRendererFilePath())).toString();
+  return PACKAGED_RENDERER_URL;
 }
 
 function isAllowedEmbeddedFrameUrl(value: string): boolean {
@@ -144,6 +145,9 @@ export function createWindow(): void {
 
   mainWindow = new BrowserWindow(windowOptions);
   recordPlaybackDiagnostic('desktop.window.created');
+  recordStartupMark('windowCreated');
+  mainWindow.once('show', () => recordStartupMark('windowRevealed'));
+  mainWindow.webContents.once('dom-ready', () => recordStartupMark('domContentLoaded'));
   installSettingsShortcut(mainWindow);
   const expectedAppUrl = expectedRendererAppUrl();
   mainWindowIpcIdentity = Object.freeze({
@@ -194,7 +198,7 @@ export function createWindow(): void {
     }
     mainWindow.loadURL(rendererUrl.toString());
   } else {
-    mainWindow.loadFile(packagedRendererFilePath());
+    mainWindow.loadURL(PACKAGED_RENDERER_URL);
   }
 
   mainWindow.webContents.on('did-finish-load', () => {

@@ -5,6 +5,10 @@ import { parseEpisodeFileName } from '../scanClassification.ts';
 import { seasonFromRelativePath, seasonNumberFromDirectoryName } from '../libraryScanFiles.ts';
 import { cleanMediaTitle, normalizeTitleForMatch } from '../metadata/helpers.ts';
 import type { MediaItem } from '../metadata/types.ts';
+import { PARTIAL_EXTENSIONS, hasPartialSibling } from './fileSettling.ts';
+
+/** Files macOS rewrites whenever a folder is browsed; they never mean a copy is running. */
+const FOLDER_METADATA_FILE = /^(?:\.DS_Store|\.localized|\._.*|Icon\r)$/;
 
 /**
  * Plans renames of matched media files to the names LoomTV shows for them:
@@ -403,17 +407,16 @@ export function planRenames(input: RenamePlannerInput): RenamePlan {
       if (visited.has(directory)) continue;
       visited.add(directory);
       if (visited.size > 1024 || depth > 16) return 'The folder is too deeply nested to organize automatically.';
-      for (const name of list(directory) || []) {
-        if (name.startsWith('.')) continue;
+      const names = list(directory) || [];
+      for (const name of names) {
         const child = path.join(directory, name);
-        const incomplete = /\.(?:fdmdownload|crdownload|part|partial|download|!qb|!ut)$/i;
-        if (incomplete.test(name) && isVideoFileName(name.replace(incomplete, ''))) {
+        if (PARTIAL_EXTENSIONS.has(path.extname(name).toLowerCase() || name.toLowerCase()) || hasPartialSibling(name, names)) {
           return `"${name}" is still downloading. Folder changes wait until the download finishes.`;
         }
-        if (isVideoFileName(name)) {
-          if (input.isRecentlyModified?.(child)) return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
-        } else if (!SIDECAR_EXTENSIONS.has(path.extname(name).toLowerCase()) && list(child) !== null) {
+        if (list(child) !== null) {
           pending.push({ directory: child, depth: depth + 1 });
+        } else if (!FOLDER_METADATA_FILE.test(name) && input.isRecentlyModified?.(child)) {
+          return `"${name}" is still being copied or downloaded. Folder changes wait until it finishes.`;
         }
       }
     }

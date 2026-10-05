@@ -6,6 +6,26 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+// A synchronous child process freezes the Electron main thread (and the
+// in-process canonical server) for as long as the command runs. Use the async
+// forms. Quit-time cleanup that genuinely must block can opt out on one line
+// with a comment saying why.
+const SYNC_CHILD_PROCESS = ['execFileSync', 'execSync', 'spawnSync'];
+const SYNC_CHILD_PROCESS_MESSAGE = 'Synchronous child processes block the main thread; use the async form.';
+const noSyncChildProcess = {
+  'no-restricted-imports': ['error', {
+    paths: ['child_process', 'node:child_process'].map((name) => ({
+      name,
+      importNames: SYNC_CHILD_PROCESS,
+      message: SYNC_CHILD_PROCESS_MESSAGE,
+    })),
+  }],
+  'no-restricted-syntax': ['error', {
+    selector: `MemberExpression[property.name=/^(${SYNC_CHILD_PROCESS.join('|')})$/]`,
+    message: SYNC_CHILD_PROCESS_MESSAGE,
+  }],
+};
+
 export default defineConfig([
   {
     ignores: [
@@ -101,6 +121,17 @@ export default defineConfig([
       globals: globals.node,
       parserOptions: { sourceType: 'module' },
     },
+  },
+  {
+    basePath: 'apps/desktop',
+    files: ['src/main.ts', 'src/main/**/*.ts'],
+    rules: noSyncChildProcess,
+  },
+  {
+    // The canonical server and capability probes also run inside the desktop
+    // main process.
+    files: ['apps/server/src/**/*.{js,mjs,cjs}', 'packages/transcode-capabilities/src/**/*.{js,mjs,cjs}'],
+    rules: noSyncChildProcess,
   },
   {
     basePath: 'apps/tv',

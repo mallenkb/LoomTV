@@ -8,10 +8,11 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 import { parseRequiredJson } from './runtimeValidation.ts';
 import { appendQueryToHlsPlaylist } from './hlsPlaylist';
 import { killAllManagedFfmpeg, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
-import { findFFmpeg, getTranscodeCapabilities } from './mediaBinaries';
+import { awaitTranscodeCapabilities, findFFmpeg } from './mediaBinaries';
 import { pipeResponse } from './httpResponses';
 import { assertLocalMediaPath, probeMedia } from './mediaProbe';
 import {
@@ -190,10 +191,9 @@ export async function cleanupOldTranscodes(): Promise<void> {
   }
 }
 
-function selectedPreset(ffmpegPath: string, options: TranscodeOptions): TranscodePreset {
+function selectedPreset(capabilities: TranscodeCapabilities, options: TranscodeOptions): TranscodePreset {
   const preset = options.preset || 'auto';
   if (preset === 'software') return 'software';
-  const capabilities = getTranscodeCapabilities(ffmpegPath);
   const codec = options.targetVideoCodec === 'hevc' || options.targetVideoCodec === 'av1' ? options.targetVideoCodec : 'h264';
   if (preset !== 'auto') {
     const requested = capabilities.backends.find((backend) => backend.id === preset);
@@ -204,9 +204,8 @@ function selectedPreset(ffmpegPath: string, options: TranscodeOptions): Transcod
   return capabilities.backends.find((backend) => backend.codecs[codec]?.available)?.id as TranscodePreset || 'software';
 }
 
-function normalizeTranscodeOptions(ffmpegPath: string, options: TranscodeOptions): TranscodeOptions {
+function normalizeTranscodeOptions(capabilities: TranscodeCapabilities, options: TranscodeOptions): TranscodeOptions {
   const codec = options.targetVideoCodec === 'hevc' || options.targetVideoCodec === 'av1' ? options.targetVideoCodec : 'h264';
-  const capabilities = getTranscodeCapabilities(ffmpegPath);
   const hardwareAvailable = capabilities.backends.some((backend) => backend.codecs[codec]?.available);
   const softwareAvailable = capabilities.softwareCodecs[codec];
   if (!(hardwareAvailable || softwareAvailable)) {
@@ -685,7 +684,8 @@ export async function startTranscode(
   assertLocalMediaPath(filePath);
   const ffmpeg = findFFmpeg();
   if (!ffmpeg) throw new Error('FFmpeg is not available.');
-  const effectiveOptions = normalizeTranscodeOptions(ffmpeg, options);
+  const capabilities = await awaitTranscodeCapabilities(ffmpeg);
+  const effectiveOptions = normalizeTranscodeOptions(capabilities, options);
   const sessionKey = `${sessionScope}\0${transcodeSessionKey(filePath, effectiveOptions)}`;
 
   const existingSession = reusableSession(sessionKey);
@@ -730,7 +730,7 @@ export async function startTranscode(
     outputDir,
     playlistUrl: playlistUrlFor(serverBase, sessionId),
     options: effectiveOptions,
-    preset: selectedPreset(ffmpeg, effectiveOptions),
+    preset: selectedPreset(capabilities, effectiveOptions),
     mediaInfo,
     durationSeconds,
     segmentSeconds,

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { createPrivateKey, X509Certificate } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
@@ -21,6 +22,8 @@ import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import { assertTransportConfiguration } from './transport-security.js';
 import { canonicalPublicError, errorDetails } from './public-error.js';
 import { createWebAppPage } from './web-app.js';
+
+export { isCanonicalSetupRequired } from './setup-service.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
 const CONTRACT_VERSION = VIDEO_CONTRACT_VERSION;
@@ -144,7 +147,7 @@ export function createCanonicalVideoServer(options) {
   let stopPromise;
   let draining = false;
   const transcoder = options.transcoder
-    || createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath, ffprobePath: options.ffprobePath });
+    || createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath, ffprobePath: options.ffprobePath, cacheDir: path.join(options.paths.dataDir, 'transcode-capabilities') });
   /** @type {ReturnType<typeof createHeadlessMediaService>} */
   let mediaService;
   const mediaClock = typeof options.clock === 'function' ? { now: options.clock } : options.clock;
@@ -450,7 +453,7 @@ export function createCanonicalVideoServer(options) {
           jsonResponse(res, 403, { ok: false, error: 'permission_denied' }, req.method);
           return;
         }
-        jsonResponse(res, 200, { ok: true, data: transcoder.getSelfTest() }, req.method);
+        jsonResponse(res, 200, { ok: true, data: await transcoder.getSelfTest() }, req.method);
         return;
       }
       if (requestUrl.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) {

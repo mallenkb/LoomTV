@@ -133,7 +133,7 @@ export type MediaTranscoderHealth = Pick<TranscodeCapabilities, 'backends' | 'so
 export interface MediaServiceOptions {
   adminService: MediaAdmin;
   clientState?: MediaClientState;
-  transcoder: { path: string | null; getHealth(): MediaTranscoderHealth; probeMedia(path: string, options: { sourceId: string }): Promise<MediaProbe> };
+  transcoder: { path: string | null; getHealth(): MediaTranscoderHealth; awaitCapabilities?(): Promise<TranscodeCapabilities>; probeMedia(path: string, options: { sourceId: string }): Promise<MediaProbe> };
   cacheDir: string;
   authorize: (req: MediaRequest, permission: string) => boolean | Promise<boolean>;
   clock?: MediaClock;

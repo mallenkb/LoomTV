@@ -198,7 +198,7 @@ async function queuedLookup(
 
 export function createSkipSegmentService(deps: {
   loadLibrary: () => LibraryLike;
-  probeMediaFile: (filePath: string) => ProbeMediaFileResult;
+  probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
   loadSettings?: () => { skipAnalysis?: SkipAnalysisSettings };
 }) {
   let warmGeneration = 0;
@@ -240,7 +240,7 @@ export function createSkipSegmentService(deps: {
     return durationMs >= limits.minSeconds * 1000 && durationMs <= limits.maxSeconds * 1000;
   }
 
-  function contextFor(request: MediaSegmentRequest): SegmentContext | null {
+  async function contextFor(request: MediaSegmentRequest): Promise<SegmentContext | null> {
     const item = findItem(deps.loadLibrary(), String(request.mediaId || ''));
     if (!item) return null;
     if (item.type === 'movie') {
@@ -254,7 +254,7 @@ export function createSkipSegmentService(deps: {
       };
       const probe = item.localMetadata
         ? { localMetadata: item.localMetadata }
-        : deps.probeMediaFile(item.filePath);
+        : await deps.probeMediaFile(item.filePath);
       const durationSeconds = item.localMetadata?.durationSeconds || probe.localMetadata?.durationSeconds || 0;
       if (!durationSeconds) return null;
       const durationMs = Math.round(durationSeconds * 1000);
@@ -280,7 +280,7 @@ export function createSkipSegmentService(deps: {
     if (!episodeFile || !fs.existsSync(episodeFile.filePath)) return null;
     const probe = episodeFile.localMetadata
       ? { localMetadata: episodeFile.localMetadata }
-      : deps.probeMediaFile(episodeFile.filePath);
+      : await deps.probeMediaFile(episodeFile.filePath);
     const durationSeconds = episodeFile.localMetadata?.durationSeconds || probe.localMetadata?.durationSeconds || 0;
     if (!durationSeconds) return null;
     const durationMs = Math.round(durationSeconds * 1000);
@@ -470,7 +470,7 @@ export function createSkipSegmentService(deps: {
     prefetchAdjacent: boolean,
     waitForProvider = false,
   ): Promise<MediaSegmentResponse> {
-    const context = contextFor(request);
+    const context = await contextFor(request);
     if (!context) return { segments: [], revision: segmentRevision([]) };
     const policy = policyFor(context);
     if (policy.excluded) {
@@ -592,8 +592,8 @@ export function createSkipSegmentService(deps: {
     timer.unref?.();
   }
 
-  function saveManualSegment(input: ManualMediaSegmentInput): MediaSegmentResponse {
-    const context = contextFor(input);
+  async function saveManualSegment(input: ManualMediaSegmentInput): Promise<MediaSegmentResponse> {
+    const context = await contextFor(input);
     if (!context) throw new Error('That media file is unavailable.');
     const normalized = normalizeSegment({
       type: input.type,
@@ -616,16 +616,16 @@ export function createSkipSegmentService(deps: {
     return { segments, revision: segmentRevision(segments) };
   }
 
-  function deleteManualSegment(input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }): MediaSegmentResponse {
-    const context = contextFor(input);
+  async function deleteManualSegment(input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }): Promise<MediaSegmentResponse> {
+    const context = await contextFor(input);
     if (!context) throw new Error('That episode file is unavailable.');
     deleteManualSegmentCandidate(context.fileRevision, input.type, input.candidateId);
     const segments = resolvedSegmentsForContext(context);
     return { segments, revision: segmentRevision(segments) };
   }
 
-  function undoManualSegment(input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }): MediaSegmentResponse {
-    const context = contextFor(input);
+  async function undoManualSegment(input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }): Promise<MediaSegmentResponse> {
+    const context = await contextFor(input);
     if (!context) throw new Error('That episode file is unavailable.');
     const segments = undoManualSegmentCandidate(context.fileRevision, input.type, input.candidateId);
     return { segments, revision: segmentRevision(segments) };
