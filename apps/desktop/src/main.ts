@@ -2,7 +2,7 @@ import { scanMetrics, startScanMetrics, measureScanWork } from './main/scanning/
 import { startMemoryMetrics } from './main/memoryMetrics.ts';
 import { discoverLibraryRoot, inspectLibraryRoot, scannerBinaryPath, type DiscoveryEngine } from './main/scanning/discover.ts';
 import { collectArtworkSourcesForCache } from './main/artworkCache';
-import { canCheckUnchangedRoot } from './main/scanning/quickScanCache';
+import { canCheckUnchangedRoot, reusableChildFolders } from './main/scanning/quickScanCache';
 import { scanInventory, type DiscoveryInventory } from './main/scanning/inventory.ts';
 import { isCurrentScanCommit, planScanDelta, scanCommits } from './main/scanning/scanPersistence.ts';
 import { hasScannerProcesses, stopScannerProcesses } from './main/scanning/rustScannerClient.ts';
@@ -985,7 +985,26 @@ async function scanLibrary(
           }
         }
 
-        const folderCtx: ScanContext = folderKind === 'auto' ? { ...ctx } : { ...ctx, folderKind };
+        // A changed root is usually one new episode. Rebuild only the
+        // top-level folders whose files changed and keep the rest as saved,
+        // when nothing else (version, providers, ratings age, a forced or
+        // metadata scan) asks for the whole root to be refreshed.
+        const childSignatures = await inventory.childSignaturesAsync();
+        const canReuseChildren = mode === 'quick'
+          && cachedEntry?.version === SCAN_CACHE_VERSION
+          && cachedEntry.folderKind === folderKind
+          && (cachedEntry.subtitleProfile || '') === metadataProviderProfile
+          && ratingsAreFresh
+          && Boolean(cachedEntry.childSignatures);
+        const reusableChildren = canReuseChildren
+          ? reusableChildFolders(folder, cachedItems, cachedEntry?.childSignatures || {}, childSignatures,
+            missingMetadataRetryIsDue)
+          : new Map<string, MediaItem[]>();
+        const folderCtx: ScanContext = {
+          ...ctx,
+          ...(folderKind === 'auto' ? {} : { folderKind }),
+          reuseDirectory: (fullPath) => reusableChildren.get(path.resolve(fullPath)),
+        };
         const directItem = await scanDirectoryAsItem(folder, folderCtx);
         if (directItem) inventory.stageItems(preserveItems([directItem]));
         else await scanFolder(folder, folderCtx, (partialItems) => { inventory.stageItems(preserveItems(partialItems)); }, false);
@@ -1003,7 +1022,11 @@ async function scanLibrary(
             ratingsRefreshedAt: refreshProviderRatings
               ? Date.now()
               : cachedEntry?.ratingsRefreshedAt || cachedEntry?.scannedAt || Date.now(),
+            childSignatures,
           };
+          if (reusableChildren.size) {
+            console.info('[scanner] reused unchanged folders', JSON.stringify({ root: path.basename(folder), reused: reusableChildren.size, total: Object.keys(childSignatures).length }));
+          }
         }
         if (!(await fs.promises.stat(folder)).isDirectory()) throw new Error('Library root disappeared during scanning.');
         completedRoots.add(folder);

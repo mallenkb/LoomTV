@@ -193,6 +193,31 @@ export class DiscoveryInventory {
     }
     return { signature: `inventory-v1:${fileCount}:${hash.digest('hex')}`, fileCount };
   }
+  /**
+   * One fingerprint per top-level folder (a show, a movie folder), built the
+   * same way as the root signature. Files directly in the root are left out:
+   * they are their own items and are always rebuilt.
+   */
+  async childSignaturesAsync(): Promise<Record<string, string>> {
+    if (!this.complete) throw new Error('Discovery is incomplete.');
+    const children = new Map<string, { hash: ReturnType<typeof createHash>; count: number }>();
+    let rows = 0;
+    for (const row of this.signatureRows()) {
+      this.signal?.throwIfAborted();
+      const relative = path.relative(this.root, row.path).split(path.sep).join('/');
+      const slash = relative.indexOf('/');
+      if (slash > 0) {
+        const name = relative.slice(0, slash);
+        let child = children.get(name);
+        if (!child) { child = { hash: createHash('sha256'), count: 0 }; children.set(name, child); }
+        child.hash.update(JSON.stringify([relative, row.size, row.mtime]));
+        child.hash.update('\n');
+        child.count += 1;
+      }
+      if (++rows % 256 === 0) await yieldToEventLoop();
+    }
+    return Object.fromEntries([...children].map(([name, child]) => [name, `child-v1:${child.count}:${child.hash.digest('hex')}`]));
+  }
   private *signatureRows(): IterableIterator<DiscoveryEntry> {
     if (this.memoryEntries) {
       const rows = [...this.memoryEntries.values()].filter((entry) => entry.kind === 'file')

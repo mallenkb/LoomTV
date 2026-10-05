@@ -30,6 +30,8 @@ export interface ScanContext {
   tvdbApiKey?: string;
   fanartApiKey?: string;
   folderKind?: ScanFolderKind;
+  /** Saved items for a top-level folder whose files have not changed, reused without rebuilding. */
+  reuseDirectory?: (fullPath: string) => MediaItem[] | undefined;
 }
 
 type SubtitleRecord = { lang: string; label: string; url: string };
@@ -171,14 +173,17 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
   const subtitleFiles = await subtitleFilesInDirectory(folderPath);
   const subDirs = dirEntries.filter((entry) => entry.isDirectory());
   const hasSeasonDirs = subDirs.some((entry) => isSeasonDirectoryName(entry.name));
-  const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? await scanEpisodeFiles(folderPath) : [];
   const detectedFolderKind = detectLibraryFolderKind(folderPath);
 
+  // Decide from the listing alone before probing anything: an "Anime" or
+  // "Movies" root used to have every episode in it probed only to be
+  // rejected here, which made each changed library root re-probe every file.
   if (ctx.folderKind && detectedFolderKind) return null;
   // An Others root can contain several loose videos and child folders. Let the
   // full walker enumerate every file instead of treating the root as one item.
   if (!ctx.folderKind && (videoFiles.length > 1 || subDirs.length > 0)) return null;
   if (ctx.folderKind === 'movies' && videoFiles.length > 1) return null;
+  const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? await scanEpisodeFiles(folderPath) : [];
 
   if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length === 0) return null;
 
@@ -330,6 +335,8 @@ async function scanFolder(
         LIBRARY_ITEM_CONCURRENCY,
         async (entry): Promise<MediaItem[]> => {
           const fullPath = path.join(folderPath, entry.name);
+          const reused = ctx.reuseDirectory?.(fullPath);
+          if (reused) return reused;
           const dirEntries = await readScanDirectory(fullPath);
           const videoFiles = dirEntries
             .filter((directoryEntry) => !directoryEntry.isDirectory())

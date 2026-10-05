@@ -165,7 +165,8 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       file_count INTEGER NOT NULL DEFAULT 0,
       item_count INTEGER NOT NULL DEFAULT 0,
       scanned_at INTEGER NOT NULL,
-      ratings_refreshed_at INTEGER NOT NULL DEFAULT 0
+      ratings_refreshed_at INTEGER NOT NULL DEFAULT 0,
+      child_signatures TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS playback_progress (
@@ -372,6 +373,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   ensureColumn(database, 'episode_files', 'still', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'scan_cache', 'subtitle_profile', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'scan_cache', 'ratings_refreshed_at', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(database, 'scan_cache', 'child_signatures', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'media_segment_candidates', 'analysis_metadata_json', 'TEXT');
   migrateArtworkCacheColumns(database);
   ensureColumn(database, 'artwork_cache', 'content_hash', "TEXT NOT NULL DEFAULT ''");
