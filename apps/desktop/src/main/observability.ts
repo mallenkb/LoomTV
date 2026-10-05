@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-type OperationResultCode = 'success' | 'http_error' | 'timeout' | 'rejected' | 'failed';
+type OperationResultCode = 'success' | 'http_error' | 'timeout' | 'rejected' | 'failed' | 'skipped_unreachable';
 export type CacheStatus = 'hit' | 'miss' | 'stale' | 'bypass' | 'not-applicable';
 
 export type OperationEvent = {

@@ -106,6 +106,7 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
         allowedHosts: ['api.jikan.moe'],
         maxBytes: 4 * 1024 * 1024,
         retries: 2,
+        timeoutMs: 5_000,
         provider: 'jikan',
         operation: `metadata.jikan.${request.path.replaceAll('/', '.')}`,
       });

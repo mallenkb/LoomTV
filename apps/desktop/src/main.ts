@@ -29,6 +29,7 @@ import { promisify } from 'node:util';
 import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
 import { startMainThreadWatchdog } from './main/mainThreadWatchdog.ts';
+import { startProviderHealthStore } from './main/providerHealthStore.ts';
 import { initializeStartupTimings, recordStartupMark, flushStartupTimings } from './main/startupTiming.ts';
 
 import {
@@ -2955,6 +2956,7 @@ async function startBackgroundServices(): Promise<void> {
 app.whenReady().then(async () => {
   recordStartupMark('appReady');
   startMainThreadWatchdog(app.getPath('userData'));
+  void startProviderHealthStore(app.getPath('userData'));
   startMemoryMetrics();
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');

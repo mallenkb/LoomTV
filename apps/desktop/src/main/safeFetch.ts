@@ -354,10 +354,88 @@ async function fetchAttempt(input: string | URL, init: RequestInit, options: Saf
   throw new Error('Provider redirected too many times.');
 }
 
+// A provider that stops answering would otherwise cost a full timeout on every
+// request, and a library sync makes hundreds of them. After two timeouts or
+// network failures in a row, requests to that host fail at once for a while;
+// any HTTP response proves it is reachable again.
+const UNREACHABLE_AFTER_FAILURES = 2;
+export const UNREACHABLE_HOST_SKIP_MS = 5 * 60_000;
+const MAX_UNREACHABLE_HOST_SKIP_MS = 6 * 60 * 60_000;
+// `strikes` counts consecutive skip windows, so a host that stays down is
+// tried again after 5 min, 20 min, 80 min, then every 6 h, not every launch.
+type HostHealth = { failures: number; skipUntil: number; strikes: number };
+const hostHealth = new Map<string, HostHealth>();
+let onHostHealthChange: ((state: Record<string, { skipUntil: number; strikes: number }>) => void) | undefined;
+
+/** Restore skip windows saved by an earlier run, and report every change so they can be saved. */
+export function restoreProviderHealth(
+  saved: unknown,
+  onChange: (state: Record<string, { skipUntil: number; strikes: number }>) => void,
+  now = Date.now(),
+): void {
+  onHostHealthChange = onChange;
+  if (!saved || typeof saved !== 'object') return;
+  for (const [host, value] of Object.entries(saved as Record<string, unknown>)) {
+    const entry = value as Partial<HostHealth> | null;
+    if (!/^[a-z0-9.-]{1,253}$/i.test(host) || !entry) continue;
+    const skipUntil = Number(entry.skipUntil);
+    const strikes = Number(entry.strikes);
+    if (!Number.isFinite(skipUntil) || !Number.isInteger(strikes) || strikes < 1 || strikes > 32) continue;
+    // A clock change must not skip a host for longer than the maximum window.
+    hostHealth.set(host, { failures: 0, strikes, skipUntil: Math.min(skipUntil, now + MAX_UNREACHABLE_HOST_SKIP_MS) });
+  }
+}
+
+function persistHostHealth(): void {
+  if (!onHostHealthChange) return;
+  onHostHealthChange(Object.fromEntries([...hostHealth].filter(([, health]) => health.strikes > 0)
+    .map(([host, health]) => [host, { skipUntil: health.skipUntil, strikes: health.strikes }])));
+}
+
+export class ProviderUnreachableError extends Error {
+  constructor(host: string) {
+    super(`${host} is not responding; skipped until it can be retried.`);
+    this.name = 'ProviderUnreachableError';
+  }
+}
+
+function noteHostFailure(host: string, now = Date.now()): void {
+  const health = hostHealth.get(host) ?? { failures: 0, skipUntil: 0, strikes: 0 };
+  health.failures += 1;
+  // A host that failed its retry after a skip window goes straight back to
+  // being skipped; a fresh host needs two failures in a row.
+  const threshold = health.strikes > 0 ? 1 : UNREACHABLE_AFTER_FAILURES;
+  if (health.failures >= threshold && health.skipUntil <= now) {
+    health.strikes += 1;
+    const skipMs = Math.min(UNREACHABLE_HOST_SKIP_MS * 4 ** (health.strikes - 1), MAX_UNREACHABLE_HOST_SKIP_MS);
+    health.skipUntil = now + skipMs;
+    health.failures = 0;
+    console.warn(`[provider] ${host} is not responding; skipping it for ${Math.round(skipMs / 60_000)} minutes.`);
+    hostHealth.set(host, health);
+    persistHostHealth();
+    return;
+  }
+  hostHealth.set(host, health);
+}
+
+/** Test seam: forget remembered provider failures. */
+export function resetProviderHealth(): void { hostHealth.clear(); onHostHealthChange = undefined; }
+
 export async function safeFetch(input: string | URL, init: RequestInit = {}, options: SafeFetchOptions = {}): Promise<Response> {
   const target = input instanceof URL ? input : new URL(input);
   const operation = createOperation(options.operation ?? 'provider.fetch');
   const provider = options.provider ?? target.hostname;
+  const host = target.hostname;
+  if ((hostHealth.get(host)?.skipUntil ?? 0) > Date.now()) {
+    operation.finish({
+      resultCode: 'skipped_unreachable',
+      cacheStatus: options.cacheStatus ?? 'not-applicable',
+      provider,
+      retryCount: 0,
+      context: { method: (init.method || 'GET').toUpperCase(), routeFamily: 'provider' },
+    });
+    throw new ProviderUnreachableError(host);
+  }
   const resolved = {
     allowedHosts: options.allowedHosts,
     timeoutMs: options.timeoutMs ?? 10_000,
@@ -376,6 +454,11 @@ export async function safeFetch(input: string | URL, init: RequestInit = {}, opt
       const metrics = scanMetrics.getStore();
       if (metrics) metrics.requestAttempts++;
       const response = await fetchAttempt(input, init, resolved);
+      if (hostHealth.has(host)) {
+        const recovered = (hostHealth.get(host)?.strikes ?? 0) > 0;
+        hostHealth.delete(host);
+        if (recovered) persistHostHealth();
+      }
       if (mayRetry && (response.status === 429 || response.status >= 500) && attempt < resolved.retries) {
         retryCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt) + Math.floor(Math.random() * 150)));
@@ -391,6 +474,12 @@ export async function safeFetch(input: string | URL, init: RequestInit = {}, opt
       return response;
     }
   } catch (error) {
+    // The caller cancelling, or our own address and redirect checks rejecting
+    // the request, says nothing about whether the provider is up.
+    const callerCancelled = init.signal?.aborted === true;
+    const transportFailure = error instanceof Error && (error.name === 'AbortError'
+      || /ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|socket hang up|fetch failed/i.test(`${error.message} ${(error as NodeJS.ErrnoException).code || ''}`));
+    if (!callerCancelled && transportFailure) noteHostFailure(host);
     operation.finish({
       resultCode: error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'failed',
       cacheStatus: options.cacheStatus ?? 'not-applicable',

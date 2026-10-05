@@ -87,7 +87,7 @@ async function jikanDelay(): Promise<void> {
 
 async function jikanFetch<TSchema extends z.ZodType>(path: string, schema: TSchema): Promise<z.output<TSchema>> {
   await jikanDelay();
-  const res = await safeFetch(`https://api.jikan.moe/v4${path}`, {}, { allowedHosts: ['api.jikan.moe'], retries: 2 });
+  const res = await safeFetch(`https://api.jikan.moe/v4${path}`, {}, { allowedHosts: ['api.jikan.moe'], retries: 2, timeoutMs: 5_000 });
   if (!res.ok) throw new Error(`Jikan ${path} → ${res.status}`);
   return schema.parse(await res.json());
 }
@@ -330,7 +330,8 @@ export async function fetchJikanMetadata(title: string, knownMalId?: number): Pr
       episodes,
     };
   } catch (err) {
-    console.error('[Jikan]', err);
+    // A skipped provider was already reported once when it stopped answering.
+    if (!(err instanceof Error && err.name === 'ProviderUnreachableError')) console.error('[Jikan]', err);
     return null;
   }
 }
