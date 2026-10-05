@@ -27,6 +27,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
+import { startMainThreadWatchdog } from './main/mainThreadWatchdog.ts';
 
 import {
   LOCAL_ACCESS_HEADER,
@@ -2949,6 +2950,7 @@ async function startBackgroundServices(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  startMainThreadWatchdog(app.getPath('userData'));
   startMemoryMetrics();
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');
