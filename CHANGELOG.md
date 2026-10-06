@@ -4,11 +4,15 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
-### [2.0.12](docs/releases/v2.0.12.md)
+### [2.0.13](docs/releases/v2.0.13.md)
+
+Adds Cinemeta defaults and live IMDb ratings, English TheTVDB metadata, smaller artwork controls, rewind on resume, import-specific organization, and dependency fixes.
+
+### [2.0.12](docs/releases/v2.0.12.md) (not published)
 
 Includes the metadata, playback, and library improvements prepared for 2.0.11, with dependency fixes required to pass the release audit.
 
-### [2.0.11](docs/releases/v2.0.11.md)
+### [2.0.11](docs/releases/v2.0.11.md) (not published)
 
 Adds Cinemeta defaults and live IMDb ratings, English TheTVDB metadata, smaller artwork controls, rewind on resume, and import-specific organization and recovery improvements.
 

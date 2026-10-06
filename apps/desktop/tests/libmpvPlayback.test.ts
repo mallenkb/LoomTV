@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import * as resumeRewind from '../src/shared/resumeRewind.ts';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,6 +31,7 @@ function fixture() {
     },
   };
   const dependencies: Record<string, unknown> = {
+    '../shared/resumeRewind.ts': resumeRewind,
     electron: { BrowserWindow: {} },
     'node:crypto': { randomUUID: () => 'mpv-session' },
     'node:fs': fs, 'node:path': path, 'node:util': { isDeepStrictEqual },

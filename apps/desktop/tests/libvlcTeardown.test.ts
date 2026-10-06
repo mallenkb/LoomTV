@@ -10,6 +10,7 @@ import type { PlaybackState } from '../src/shared/playbackProtocol.ts';
 import * as platform from '../src/main/libvlcPlatform.ts';
 import * as sessionState from '../src/main/libvlcSessionState.ts';
 import { restoreOffscreenTrack } from '../src/main/offscreenVideoRestore.ts';
+import * as resumeRewind from '../src/shared/resumeRewind.ts';
 
 function loadModule(name: string, dependencies: Record<string, unknown>, globals: Record<string, unknown> = {}, extra = '') {
   const source = fs.readFileSync(new URL(`../src/main/${name}.ts`, import.meta.url), 'utf8')
@@ -21,6 +22,7 @@ function loadModule(name: string, dependencies: Record<string, unknown>, globals
   vm.runInNewContext(code + extra, {
     module, exports: module.exports, Buffer, console, __filename: `/mock/${name}.js`,
     require: (id: string) => {
+      if (id === '../shared/resumeRewind.ts') return resumeRewind;
       assert.ok(id in dependencies, `Unexpected dependency ${id}`);
       return dependencies[id];
     },

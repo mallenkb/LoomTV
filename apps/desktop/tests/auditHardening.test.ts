@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import * as resumeRewind from '../src/shared/resumeRewind.ts';
 import { EventEmitter } from 'node:events';
 import { restoreOffscreenTrack } from '../src/main/offscreenVideoRestore.ts';
 import fs from 'node:fs';
@@ -17,6 +18,7 @@ function loadModule(name: string, dependencies: Record<string, unknown>, globals
   vm.runInNewContext(code, {
     module, exports: module.exports, Buffer, URL, process, console,
     require: (id: string) => {
+      if (id === '../shared/resumeRewind.ts') return resumeRewind;
       if (id in dependencies) return dependencies[id];
       if (id.startsWith('node:') || id === 'zod') return require(id);
       throw new Error(`Unexpected dependency ${id}`);
