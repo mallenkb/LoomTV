@@ -447,6 +447,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (!meta) return null;
     return metadataCandidate('Cinemeta', {
       title: meta.title,
+      year: meta.year,
       providerIds: imdbId ? { imdbId } : undefined,
       poster: meta.poster,
       backdrop: meta.backdrop,
