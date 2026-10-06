@@ -51,16 +51,6 @@ type ArtworkDimensions = {
   height: number;
 };
 
-const ARTWORK_PROVIDER_PRIORITY: Record<OfficialMetadataCandidate['source'], number> = {
-  AniList: 0,
-  TMDB: 1,
-  Jikan: 2,
-  TVmaze: 3,
-  OMDb: 4,
-  TVDB: 5,
-  'Fanart.tv': 6,
-};
-
 export type OfficialArtworkResult = {
   thumbnail?: string;
   cover?: string;
@@ -160,6 +150,7 @@ function preferredArtworkSource(
 }
 
 function artworkProviderLabel(url: string, fallback: OfficialMetadataCandidate['source']): string {
+  if (fallback === 'Cinemeta') return 'Cinemeta';
   try {
     const host = new URL(url).hostname.toLowerCase();
     if (host.includes('tmdb.org')) return 'TMDB';
@@ -570,7 +561,7 @@ export default function ArtworkEditorControls({
         showToast({
           title: 'Official artwork was not found',
           description: artworkTarget === 'logo'
-            ? 'I could not find a clear logo from TMDB, Fanart.tv, or TheTVDB.'
+            ? 'I could not find a clear logo from the connected metadata providers.'
             : fallbackFrameSource
             ? 'I could not get a matching poster or cover from the metadata APIs, so I used a video frame for now.'
             : 'I could not get a matching poster or cover from the metadata APIs. Check your metadata keys and try again.',
@@ -830,7 +821,7 @@ export default function ArtworkEditorControls({
     : metadataApplyTarget === 'cover'
       ? 'Choose any background returned by the connected metadata providers. Only the background will change, and your selection will be saved to the library database.'
       : metadataApplyTarget === 'logo'
-        ? 'Choose a clear logo from TMDB, Fanart.tv, or TheTVDB. Only the logo will change.'
+        ? 'Choose a clear logo from the connected metadata providers. Only the logo will change.'
       : metadataApplyTarget === 'summary'
         ? 'Choose a description returned by a metadata provider. Only the saved description will change.'
       : metadataApplyTarget === 'episodes'
@@ -841,6 +832,10 @@ export default function ArtworkEditorControls({
     if (!isArtworkTarget) return [];
 
     const seen = new Set<string>();
+    const providerPriority = new Map<OfficialMetadataCandidate['source'], number>();
+    metadataCandidates.forEach((candidate) => {
+      if (!providerPriority.has(candidate.source)) providerPriority.set(candidate.source, providerPriority.size);
+    });
     const artworkTarget = metadataApplyTarget === 'cover' ? 'cover' : metadataApplyTarget === 'logo' ? 'logo' : 'poster';
     return metadataCandidates.flatMap((candidate) => {
       const urls = metadataApplyTarget === 'cover'
@@ -880,11 +875,11 @@ export default function ArtworkEditorControls({
         },
       };
     }).sort((left, right) => (
-      artworkResolutionRank(metadataArtworkDimensions[left.imageUrl], artworkTarget)
+      (providerPriority.get(left.candidate.source) ?? 0) - (providerPriority.get(right.candidate.source) ?? 0)
+      || artworkResolutionRank(metadataArtworkDimensions[left.imageUrl], artworkTarget)
       - artworkResolutionRank(metadataArtworkDimensions[right.imageUrl], artworkTarget)
       || artworkPixelArea(metadataArtworkDimensions[right.imageUrl])
         - artworkPixelArea(metadataArtworkDimensions[left.imageUrl])
-      || ARTWORK_PROVIDER_PRIORITY[left.candidate.source] - ARTWORK_PROVIDER_PRIORITY[right.candidate.source]
       || left.imageUrl.localeCompare(right.imageUrl)
     ));
   }, [failedMetadataArtwork, isArtworkTarget, metadataApplyTarget, metadataArtworkDimensions, metadataCandidates]);
@@ -901,7 +896,9 @@ export default function ArtworkEditorControls({
     if (metadataApplyTarget === 'summary') {
       return metadataCandidates.filter((candidate) => Boolean(candidate.summary?.trim()));
     }
-    if (metadataApplyTarget === 'episodes') return metadataCandidates;
+    if (metadataApplyTarget === 'episodes') return metadataCandidates.filter((candidate) => (
+      candidate.source !== 'Cinemeta' || Boolean(candidate.episodes?.length)
+    ));
 
     return metadataCandidates.filter((candidate) => {
       const posterImages = [candidate.thumbnail, ...(candidate.posterCandidates || [])];
@@ -1286,13 +1283,14 @@ export default function ArtworkEditorControls({
                           </span>
                         ) : null}
                       </div>
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-end gap-2 bg-black/75 p-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+                      <div className="pointer-events-none absolute inset-0 flex items-end justify-end gap-2 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0.75)_70%)] p-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
                         <Button
                           type="button"
+                          size="sm"
                           onClick={() => applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId)}
                           aria-label={`${metadataApplyLabel} ${candidate.title} from ${sourceLabel}`}
-                          className="h-9 rounded-lg border border-white/20 bg-white px-3 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:bg-white/70"
+                          className="h-7 rounded-lg border border-white/20 bg-white px-2.5 text-[11px] font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:bg-white/70"
                         >
                           {isApplying ? 'Applying...' : metadataApplyLabel}
                         </Button>

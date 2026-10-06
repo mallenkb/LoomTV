@@ -142,8 +142,8 @@ export interface IpcContract {
   'library:imports': { args: [offset?: number]; result: LibraryImportSummary[] };
   'library:original-preview': { args: [importId: string]; result: LibraryOriginalPreview };
   'library:original-restore': { args: [importId: string]; result: LibraryOriginalResult };
-  'library:rename-preview': { args: []; result: MediaRenamePreview };
-  'library:rename-apply': { args: [entryIds: string[]]; result: MediaRenameApplyResult };
+  'library:rename-preview': { args: [importId?: string]; result: MediaRenamePreview };
+  'library:rename-apply': { args: [entryIds: string[], importId?: string]; result: MediaRenameApplyResult };
   'library:rename-history': { args: [offset?: number]; result: MediaRenameBatch[] };
   'library:rename-record': { args: [batchId: string]; result: MediaRenameRecord | null };
   'library:original-file-name': { args: [filePath: string]; result: string | null };

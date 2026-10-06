@@ -279,8 +279,8 @@ export type DesktopBridgeApi = {
       listLibraryImports?: (offset?: number) => Promise<LibraryImportSummary[]>;
       previewLibraryOriginal?: (importId: string) => Promise<LibraryOriginalPreview>;
       restoreLibraryOriginal?: (importId: string) => Promise<LibraryOriginalResult>;
-      previewMediaRenames?: () => Promise<MediaRenamePreview>;
-      applyMediaRenames?: (entryIds: string[]) => Promise<MediaRenameApplyResult>;
+      previewMediaRenames?: (importId?: string) => Promise<MediaRenamePreview>;
+      applyMediaRenames?: (entryIds: string[], importId?: string) => Promise<MediaRenameApplyResult>;
       listMediaRenames?: (offset?: number) => Promise<MediaRenameBatch[]>;
       getMediaRenameRecord?: (batchId: string) => Promise<MediaRenameRecord | null>;
       getOriginalFileName?: (filePath: string) => Promise<string | null>;
@@ -1438,14 +1438,14 @@ const desktopTransport = {
     return window.desktopApi.restoreLibraryOriginal(importId);
   },
 
-  async previewMediaRenames(): Promise<MediaRenamePreview> {
+  async previewMediaRenames(importId?: string): Promise<MediaRenamePreview> {
     if (!window.desktopApi?.previewMediaRenames) throw new Error('Renaming files is only available in the desktop app.');
-    return window.desktopApi.previewMediaRenames();
+    return window.desktopApi.previewMediaRenames(importId);
   },
 
-  async applyMediaRenames(entryIds: string[]): Promise<MediaRenameApplyResult> {
+  async applyMediaRenames(entryIds: string[], importId?: string): Promise<MediaRenameApplyResult> {
     if (!window.desktopApi?.applyMediaRenames) throw new Error('Renaming files is only available in the desktop app.');
-    return window.desktopApi.applyMediaRenames(entryIds);
+    return window.desktopApi.applyMediaRenames(entryIds, importId);
   },
 
   async listMediaRenames(offset = 0): Promise<MediaRenameBatch[]> {

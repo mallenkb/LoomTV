@@ -75,7 +75,7 @@ export const METADATA_ATTRIBUTIONS = [
   { name: 'Jikan / MyAnimeList', details: 'Anime posters, ratings, and anime metadata.', url: 'https://jikan.moe/' },
   { name: 'OMDb API', details: 'Ratings for movies and completed series, plus fallback title metadata.', url: 'https://www.omdbapi.com/' },
   { name: 'Fanart.tv', details: 'Clearlogos and media-center artwork.', url: 'https://fanart.tv/' },
-  { name: 'Cinemeta / Stremio', details: 'Movie and TV discovery catalogs and metadata when no TMDB key is configured.', url: 'https://v3-cinemeta.strem.io/' },
+  { name: 'Cinemeta / Stremio', details: 'Library metadata and artwork without an API key, plus movie and TV discovery when no TMDB key is configured.', url: 'https://v3-cinemeta.strem.io/' },
   { name: 'OpenSubtitles v3 / Stremio', details: 'Online subtitles from OpenSubtitles, delivered by the official Stremio v3 add-on. Discovered through the Stremio official add-on registry.', url: 'https://github.com/Stremio/stremio-official-addons' },
 ];
 

@@ -101,6 +101,7 @@ function legacyPreferences(preferences) {
   return {
     ...(preferences.themeMode ? { appThemeMode: preferences.themeMode } : {}),
     ...(preferences.themeColor ? { appThemeColor: preferences.themeColor } : {}),
+    ...(preferences.rewindOnResumeSeconds !== undefined ? { playbackRewindOnResumeSeconds: preferences.rewindOnResumeSeconds } : {}),
     ...(preferences.skipBackSeconds !== undefined ? { playbackSkipBackSeconds: preferences.skipBackSeconds } : {}),
     ...(preferences.skipForwardSeconds !== undefined ? { playbackSkipForwardSeconds: preferences.skipForwardSeconds } : {}),
     ...(preferences.autoplayNextEnabled !== undefined ? { autoplayNextEnabled: preferences.autoplayNextEnabled } : {}),
@@ -112,6 +113,7 @@ function canonicalPreferences(input) {
   return {
     ...(input.appThemeMode !== undefined ? { themeMode: input.appThemeMode } : {}),
     ...(input.appThemeColor !== undefined ? { themeColor: input.appThemeColor } : {}),
+    ...(input.playbackRewindOnResumeSeconds !== undefined ? { rewindOnResumeSeconds: input.playbackRewindOnResumeSeconds } : {}),
     ...(input.playbackSkipBackSeconds !== undefined ? { skipBackSeconds: input.playbackSkipBackSeconds } : {}),
     ...(input.playbackSkipForwardSeconds !== undefined ? { skipForwardSeconds: input.playbackSkipForwardSeconds } : {}),
     ...(input.autoplayNextEnabled !== undefined ? { autoplayNextEnabled: input.autoplayNextEnabled === true } : {}),

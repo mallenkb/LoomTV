@@ -433,6 +433,7 @@ function normalizePreferences(value: ProfilePreferences): ProfilePreferences {
       sidebarNavOrder: [...new Set(value.sidebarNavOrder.map(String).map((item) => item.trim()).filter(Boolean))].slice(0, 256),
     } : {}),
     ...(typeof value.autoplayNextEnabled === 'boolean' ? { autoplayNextEnabled: value.autoplayNextEnabled } : {}),
+    ...(typeof value.playbackRewindOnResumeSeconds === 'number' && Number.isFinite(value.playbackRewindOnResumeSeconds) ? { playbackRewindOnResumeSeconds: Math.min(30, Math.max(0, Math.round(value.playbackRewindOnResumeSeconds))) } : {}),
     ...(seconds(value.playbackSkipBackSeconds) !== undefined ? { playbackSkipBackSeconds: seconds(value.playbackSkipBackSeconds) } : {}),
     ...(seconds(value.playbackSkipForwardSeconds) !== undefined ? { playbackSkipForwardSeconds: seconds(value.playbackSkipForwardSeconds) } : {}),
   };

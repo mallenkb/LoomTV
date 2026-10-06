@@ -7,6 +7,8 @@ import SkipTimestampManager from './SkipTimestampManager';
 
 type PlaybackSettingsSectionProps = {
   showServerControls?: boolean;
+  rewindOnResumeSeconds: number;
+  onRewindOnResumeChange: (value: number) => void;
   skipBackSeconds: number;
   skipForwardSeconds: number;
   displaySleepTimeoutMinutes: number;
@@ -48,6 +50,8 @@ const STATE_LABELS: Record<string, string> = {
 
 export default function PlaybackSettingsSection({
   showServerControls = true,
+  rewindOnResumeSeconds,
+  onRewindOnResumeChange,
   skipBackSeconds,
   skipForwardSeconds,
   displaySleepTimeoutMinutes,
@@ -145,7 +149,7 @@ export default function PlaybackSettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Seek controls</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Choose how far to skip backward and forward.
+            Choose how far to skip and rewind when resuming after a pause.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -159,6 +163,13 @@ export default function PlaybackSettingsSection({
               <input type="number" min={1} step={1} value={skipForwardSeconds} onChange={(event) => onSkipForwardChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none" />
             </label>
           </div>
+          <label className="mt-4 block space-y-2">
+            <span className="text-sm font-medium text-white">Rewind on resume</span>
+            <select value={rewindOnResumeSeconds} onChange={(event) => onRewindOnResumeChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white">
+              {Array.from({ length: 31 }, (_, seconds) => <option key={seconds} value={seconds}>{seconds === 0 ? 'Off' : `${seconds} second${seconds === 1 ? '' : 's'}${seconds === 3 ? ' (default)' : ''}`}</option>)}
+            </select>
+            <span className="block text-xs text-[var(--loom-muted)]">Replay a few seconds when you press play after pausing a movie or episode. Live TV is excluded.</span>
+          </label>
           <div className="mt-4 flex justify-end">
             <Button type="button" disabled={!playbackSettingsDirty} onClick={onSave}>Save playback settings</Button>
           </div>
@@ -194,6 +205,13 @@ export default function PlaybackSettingsSection({
               </button>
             ))}
           </div>
+          <label className="mt-4 block space-y-2">
+            <span className="text-sm font-medium text-white">Rewind on resume</span>
+            <select value={rewindOnResumeSeconds} onChange={(event) => onRewindOnResumeChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white">
+              {Array.from({ length: 31 }, (_, seconds) => <option key={seconds} value={seconds}>{seconds === 0 ? 'Off' : `${seconds} second${seconds === 1 ? '' : 's'}${seconds === 3 ? ' (default)' : ''}`}</option>)}
+            </select>
+            <span className="block text-xs text-[var(--loom-muted)]">Replay a few seconds when you press play after pausing a movie or episode. Live TV is excluded.</span>
+          </label>
           <div className="mt-4 flex justify-end">
             <Button type="button" disabled={!displaySleepSettingsDirty} onClick={onDisplaySleepSave}>Save display timer</Button>
           </div>

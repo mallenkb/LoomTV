@@ -1,3 +1,4 @@
+import { DEFAULT_RESUME_REWIND_SECONDS, normalizeResumeRewind, resumeRewindTarget } from '@/shared/resumeRewind';
 /**
  * VideoPlayer — native-first player with browser and transcode fallback.
  *
@@ -498,6 +499,8 @@ export default function VideoPlayer({
   const [displaySleepTimerRemainingSeconds, setDisplaySleepTimerRemainingSeconds] = useState<number | null>(null);
   const [displaySleepTimeoutError, setDisplaySleepTimeoutError] = useState('');
   const [audioDelay, setAudioDelay] = useState(0);
+  const [rewindOnResumeSeconds, setRewindOnResumeSeconds] = useState(DEFAULT_RESUME_REWIND_SECONDS);
+  const browserResumeRewindPendingRef = useRef(false);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
   const [skipPromptTypes, setSkipPromptTypes] = useState<Record<MediaSegmentType, boolean>>({ intro: true, recap: true, outro: true, credits: true, preview: true });
@@ -680,6 +683,7 @@ export default function VideoPlayer({
     pendingEpisodeTransitionRef.current = null;
     pendingCreditsCompletionRef.current = false;
     nativeSeekGuardRef.current = null;
+    browserResumeRewindPendingRef.current = false;
   }, [filePath]);
 
   useEffect(() => {
@@ -687,6 +691,7 @@ export default function VideoPlayer({
     void Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()])
       .then(([settings, preferences]) => {
         if (cancelled) return;
+        setRewindOnResumeSeconds(normalizeResumeRewind(preferences.playbackRewindOnResumeSeconds));
         setSkipBackSeconds(
           Number.isFinite(preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds)
             ? Number(preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds)
@@ -706,6 +711,7 @@ export default function VideoPlayer({
       })
       .catch(() => {
         if (cancelled) return;
+        setRewindOnResumeSeconds(DEFAULT_RESUME_REWIND_SECONDS);
         setSkipBackSeconds(DEFAULT_SKIP_BACK_SECONDS);
         setSkipForwardSeconds(DEFAULT_SKIP_FORWARD_SECONDS);
       });
@@ -2650,7 +2656,8 @@ export default function VideoPlayer({
       const nextPaused = !wasPaused;
       userPausedRef.current = nextPaused;
       setPaused(nextPaused);
-      void (nextPaused ? engine.pause() : engine.play()).catch((error) => {
+      if (!nextPaused) nativeSeekGuardRef.current = null;
+      void (nextPaused ? engine.pause() : engine.play(isLiveStream ? 0 : rewindOnResumeSeconds)).catch((error) => {
         if (playbackEngineRef.current !== engine || userPausedRef.current !== nextPaused) return;
         userPausedRef.current = wasPaused;
         setPaused(wasPaused);
@@ -2661,15 +2668,28 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
+      if (browserResumeRewindPendingRef.current && !isLiveStream && !video.ended && rewindOnResumeSeconds > 0) {
+        // Seek within this source's timeline, including an offset transcode.
+        // A discarded earlier segment must not restart the entire stream.
+        const position = video.currentTime;
+        for (let index = 0; index < video.seekable.length; index += 1) {
+          if (position < video.seekable.start(index) || position > video.seekable.end(index)) continue;
+          try { video.currentTime = resumeRewindTarget(position, rewindOnResumeSeconds, video.seekable.start(index)); }
+          catch (error) { console.warn('[player] Resume rewind unavailable:', error); }
+          break;
+        }
+      }
+      browserResumeRewindPendingRef.current = false;
       userPausedRef.current = false;
       video.autoplay = true;
-      void video.play().catch(() => setPaused(true));
+      void video.play().catch(() => { userPausedRef.current = true; setPaused(true); });
       return;
     }
+    browserResumeRewindPendingRef.current = true;
     userPausedRef.current = true;
     video.autoplay = false;
     video.pause();
-  }, [playerState]);
+  }, [isLiveStream, playerState, rewindOnResumeSeconds]);
 
   const persistFinalPlaybackProgress = useCallback(async () => {
     if (playbackEngineRef.current) {
@@ -3516,10 +3536,12 @@ export default function VideoPlayer({
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
   const runMediaSessionCommand = usePlayerMediaCommands({
-    paused,
-    userPausedRef,
     playbackEngineRef,
     videoRef,
+    onNativeResume: () => { nativeSeekGuardRef.current = null; },
+    onManualPause: () => { if (videoRef.current && !videoRef.current.paused) browserResumeRewindPendingRef.current = true; },
+    paused,
+    userPausedRef,
     isLiveStreamRef,
     liveControlsRef,
     playbackPositionRef,
@@ -3564,6 +3586,7 @@ export default function VideoPlayer({
     canNextItem: Boolean(nextEpisodeFile),
     skipForwardSeconds,
     skipBackSeconds,
+    rewindOnResumeSeconds: isLiveStream ? 0 : rewindOnResumeSeconds,
     engine: nativePlaybackActive && (nativeEngineKind === 'libvlc' || nativeEngineKind === 'mpv')
       ? nativeEngineKind
       : 'chromium',

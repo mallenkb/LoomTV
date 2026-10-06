@@ -940,12 +940,13 @@ function validateCanonicalJsonState(database) {
   for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['operational_logs']>} */ (database.prepare('SELECT payload_json FROM operational_logs').all())) objectJson(row.payload_json, 'operational log');
   for (const row of /** @type {Array<import('./server-state-types.js').SqlRows['profile_preferences']>} */ (database.prepare('SELECT payload_json FROM profile_preferences').all())) {
     const preferences = objectJson(row.payload_json, 'profile preferences');
-    const allowed = new Set(['themeMode','themeColor','showProviderRatingBadges','sidebarNavOrder','autoplayNextEnabled','skipBackSeconds','skipForwardSeconds']);
+    const allowed = new Set(['themeMode','themeColor','showProviderRatingBadges','sidebarNavOrder','autoplayNextEnabled','skipBackSeconds','skipForwardSeconds','rewindOnResumeSeconds']);
     if (Object.keys(preferences).some((key) => !allowed.has(key))
       || (preferences.themeMode !== undefined && (typeof preferences.themeMode !== 'string' || !['dark','light'].includes(preferences.themeMode)))
       || (preferences.themeColor !== undefined && (typeof preferences.themeColor !== 'string' || !['orange','yellow','red','blue','twitch'].includes(preferences.themeColor)))
       || (preferences.showProviderRatingBadges !== undefined && typeof preferences.showProviderRatingBadges !== 'boolean')
       || (preferences.autoplayNextEnabled !== undefined && typeof preferences.autoplayNextEnabled !== 'boolean')
+      || (preferences.rewindOnResumeSeconds !== undefined && (typeof preferences.rewindOnResumeSeconds !== 'number' || !Number.isSafeInteger(preferences.rewindOnResumeSeconds) || preferences.rewindOnResumeSeconds < 0 || preferences.rewindOnResumeSeconds > 30))
       || (preferences.skipBackSeconds !== undefined && (typeof preferences.skipBackSeconds !== 'number' || !Number.isSafeInteger(preferences.skipBackSeconds) || preferences.skipBackSeconds < 0 || preferences.skipBackSeconds > 600))
       || (preferences.skipForwardSeconds !== undefined && (typeof preferences.skipForwardSeconds !== 'number' || !Number.isSafeInteger(preferences.skipForwardSeconds) || preferences.skipForwardSeconds < 0 || preferences.skipForwardSeconds > 600))
       || (preferences.sidebarNavOrder !== undefined && (!Array.isArray(preferences.sidebarNavOrder)

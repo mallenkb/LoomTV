@@ -1,3 +1,4 @@
+import { DEFAULT_RESUME_REWIND_SECONDS, normalizeResumeRewind } from '@/shared/resumeRewind';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FFmpegStatus } from '../shared/desktopProtocol.ts';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
@@ -85,6 +86,7 @@ const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
 
 type SavedPlaybackSettings = {
   skipBackSeconds: number;
+  rewindOnResumeSeconds: number;
   skipForwardSeconds: number;
   displaySleepTimeoutMinutes: number;
 };
@@ -201,6 +203,7 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
   const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
+  const [playbackRewindOnResumeSeconds, setPlaybackRewindOnResumeSeconds] = useState(DEFAULT_RESUME_REWIND_SECONDS);
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
   const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
@@ -438,6 +441,8 @@ export default function Settings() {
       const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
       const loadedSkipBack = Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10;
       const loadedSkipForward = Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15;
+      const loadedRewind = normalizeResumeRewind(profilePreferences.playbackRewindOnResumeSeconds);
+      setPlaybackRewindOnResumeSeconds(loadedRewind);
       setPlaybackSkipBackSeconds(loadedSkipBack);
       setPlaybackSkipForwardSeconds(loadedSkipForward);
       const loadedDisplaySleepTimeout = Number.isFinite(Number(s.playbackDisplaySleepTimeoutMinutes))
@@ -446,6 +451,7 @@ export default function Settings() {
       setPlaybackDisplaySleepTimeoutMinutes(loadedDisplaySleepTimeout);
       setSavedPlaybackSettings({
         skipBackSeconds: loadedSkipBack,
+        rewindOnResumeSeconds: loadedRewind,
         skipForwardSeconds: loadedSkipForward,
         displaySleepTimeoutMinutes: loadedDisplaySleepTimeout,
       });
@@ -683,11 +689,14 @@ export default function Settings() {
   const handleSavePlaybackSettings = async (): Promise<boolean> => {
     const normalizedBack = Math.max(1, Math.round(Number(playbackSkipBackSeconds) || 0));
     const normalizedForward = Math.max(1, Math.round(Number(playbackSkipForwardSeconds) || 0));
+    const normalizedRewind = normalizeResumeRewind(playbackRewindOnResumeSeconds);
+    setPlaybackRewindOnResumeSeconds(normalizedRewind);
     setPlaybackSkipBackSeconds(normalizedBack);
     setPlaybackSkipForwardSeconds(normalizedForward);
     try {
       await desktopApi.saveProfilePreferences({
         playbackSkipBackSeconds: normalizedBack,
+        playbackRewindOnResumeSeconds: normalizedRewind,
         playbackSkipForwardSeconds: normalizedForward,
       }, activeProfile?.id);
     } catch (error) {
@@ -704,6 +713,7 @@ export default function Settings() {
     setSavedPlaybackSettings((saved) => saved && ({
       ...saved,
       skipBackSeconds: normalizedBack,
+      rewindOnResumeSeconds: normalizedRewind,
       skipForwardSeconds: normalizedForward,
     }));
     return true;
@@ -722,7 +732,8 @@ export default function Settings() {
   };
 
   const playbackSettingsDirty = savedPlaybackSettings !== null && (
-    playbackSkipBackSeconds !== savedPlaybackSettings.skipBackSeconds
+    playbackRewindOnResumeSeconds !== savedPlaybackSettings.rewindOnResumeSeconds
+    || playbackSkipBackSeconds !== savedPlaybackSettings.skipBackSeconds
     || playbackSkipForwardSeconds !== savedPlaybackSettings.skipForwardSeconds
   );
   const displaySleepSettingsDirty = savedPlaybackSettings !== null
@@ -1191,6 +1202,8 @@ export default function Settings() {
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
                   showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
+                  rewindOnResumeSeconds={playbackRewindOnResumeSeconds}
+                  onRewindOnResumeChange={setPlaybackRewindOnResumeSeconds}
                   skipBackSeconds={playbackSkipBackSeconds}
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   displaySleepTimeoutMinutes={playbackDisplaySleepTimeoutMinutes}

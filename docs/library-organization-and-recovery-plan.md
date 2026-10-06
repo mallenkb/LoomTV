@@ -103,6 +103,7 @@ Preserve an established Season 2 even if Season 1 is absent. Never renumber seas
 - Protect other imports and unrelated files, including content added after organization.
 - Preview occupied destinations and missing content. Never overwrite unrelated files or claim full restoration when only part succeeded.
 - Keep unresolved entries retryable. Do not let automatic organization immediately reverse a user's restoration.
+- Offer **Rename using metadata** for an available import. Preview and apply only that import, preserve every first-recorded original, and release its restoration protection only after a successful rename. Cancelled, blocked, or failed attempts retain protection; other restored imports remain protected.
 - Update library paths, playback progress, artwork, subtitles, and other references alongside restored files.
 - Remove Loom-created directories only when empty. Never delete a user's existing library or show folder as restoration cleanup.
 
@@ -168,3 +169,12 @@ Validation performed against temporary fixtures, not the user's media:
 - ESLint, application and build-configuration TypeScript checks, static checking of the focused test sources, and whitespace checks passed.
 
 Additional tests are written for cleanup interruption and retention, subtitle coverage, deletion/re-import, inaccessible roots, download settling, and playback retry. Their execution is awaiting the pending authorization. Actual cross-drive operation, native playback, and visual UI verification have not been performed. Historical files already deleted from old cleanup storage cannot be recreated. Recorded symbolic links are preserved and reported for manual restoration instead of traversed.
+
+
+## Restore, rename again, and pause-resume follow-up
+
+- Original imports now offers **Rename using metadata**. It previews only the chosen import, applies only the reviewed changes, and keeps the first recorded paths for future restoration. Other restored imports remain protected. Cancelled or stale previews leave protection intact.
+- Repeated restore and metadata-rename cycles refresh the identity of each folder Loom recreates, so subsequent restoration can remove that folder if it is still empty and unchanged.
+- Playback defaults to a three-second rewind on explicit resume after a pause. Each profile can turn it off or choose 1 to 30 seconds in Playback settings. Movie and episode playback, play buttons, keyboard shortcuts, and system media controls use the same preference. Initial playback, automatic recovery, and live TV do not request a rewind.
+- Resume uses the current paused position, including a seek made while paused. Native adapters flush a pending scrub before resume. Browser playback stays inside its available seekable range.
+- Nine focused original-name and placement tests passed, including repeated restore/metadata-rename cycles and stale-preview protection. Playback behavior still needs runtime verification; it has been inspected and typechecked.

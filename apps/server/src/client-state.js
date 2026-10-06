@@ -77,7 +77,7 @@ function canonicalPreferencesInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw Object.assign(new Error('Profile preferences must be an object.'), { status: 400, code: 'invalid_request' });
   }
-  const allowed = new Set(['themeMode','themeColor','showProviderRatingBadges','sidebarNavOrder','autoplayNextEnabled','skipBackSeconds','skipForwardSeconds']);
+  const allowed = new Set(['themeMode','themeColor','showProviderRatingBadges','sidebarNavOrder','autoplayNextEnabled','skipBackSeconds','skipForwardSeconds','rewindOnResumeSeconds']);
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw Object.assign(new Error('Profile preferences contain an unsupported field.'), { status: 400, code: 'invalid_request' });
   }
@@ -104,9 +104,9 @@ function canonicalPreferencesInput(value) {
     }
     result.sidebarNavOrder = [...new Set(value.sidebarNavOrder)];
   }
-  for (const key of /** @type {const} */ (['skipBackSeconds','skipForwardSeconds'])) {
+  for (const key of /** @type {const} */ (['skipBackSeconds','skipForwardSeconds','rewindOnResumeSeconds'])) {
     if (value[key] !== undefined) {
-      if (typeof value[key] !== 'number' || !Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > 600) {
+      if (typeof value[key] !== 'number' || !Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > (key === 'rewindOnResumeSeconds' ? 30 : 600)) {
         throw Object.assign(new Error(`${key} is invalid.`), { status: 400, code: 'invalid_request' });
       }
       result[key] = value[key];

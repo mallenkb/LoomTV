@@ -322,6 +322,7 @@ import {
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
 import { fetchAniListAnimeMetadata } from './main/metadata/anilist';
+import { fetchCinemetaMetadataCandidates } from './main/metadata/cinemeta';
 import {
   fetchFanartMovieArtwork,
   fetchFanartMovieLogos,
@@ -685,6 +686,7 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
     };
   })(),
   fetchTVMetadataById: metadataRequestWhenOnline(fetchTVMetadataById, () => null),
+  fetchCinemetaMetadataCandidates: metadataRequestWhenOnline(fetchCinemetaMetadataCandidates, () => []),
   extractSeasons,
   fetchFanartMovieLogos: metadataRequestWhenOnline(fetchFanartMovieLogos, () => []),
   fetchFanartTVLogos: metadataRequestWhenOnline(fetchFanartTVLogos, () => []),
@@ -1576,6 +1578,7 @@ const {
   artworkDeliveryUrls,
   cacheArtworkNow,
   fetchAniListAnimeMetadata,
+  fetchCinemetaMetadataCandidates,
   fetchFanartMovieArtwork,
   fetchFanartTVArtwork,
   fetchJikanMetadata,
@@ -1873,13 +1876,14 @@ let matchConfirmationRefresh: Promise<void> | null = null;
  * within their rate limits; a confirmed item is never asked again unless
  * its match changes.
  */
-function refreshMatchConfirmations(): Promise<void> {
+async function refreshMatchConfirmations(importId?: string): Promise<void> {
+  if (importId && matchConfirmationRefresh) await matchConfirmationRefresh;
   matchConfirmationRefresh ||= (async () => {
     const data = loadLibrary();
     const groups = normalizeLibraryFolderGroups(data);
     const roots = flattenLibraryFolders(groups);
     const animeRoots = (groups.anime || []).map((root) => path.resolve(root));
-    const plan = mediaRenameExecutor.plan();
+    const plan = mediaRenameExecutor.plan({ importId });
     const wanted = new Set([
       ...plan.entries.map((entry) => entry.mediaId),
       // A title check failure may only need the sources' other titles.
@@ -1971,11 +1975,11 @@ const mediaRenameHandlers = {
     }
     return { ...result, complete: Boolean(restored.restoredAt) && result.issues.length === 0 };
   },
-  previewMediaRenames: async () => {
-    await refreshMatchConfirmations().catch((error) => {
+  previewMediaRenames: async (importId?: string) => {
+    await refreshMatchConfirmations(importId).catch((error) => {
       console.warn('[rename] Could not check matches with the metadata sources:', describeErrorForLog(error));
     });
-    const plan = mediaRenameExecutor.plan();
+    const plan = mediaRenameExecutor.plan({ importId });
     return {
       entries: plan.entries.map((entry) => ({
         id: entry.id,
@@ -1995,7 +1999,7 @@ const mediaRenameHandlers = {
       skipped: plan.skipped.map((skip) => ({ mediaTitle: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason })),
     };
   },
-  applyMediaRenames: (entryIds: string[]) => mediaRenameExecutor.apply(entryIds),
+  applyMediaRenames: (entryIds: string[], importId?: string) => mediaRenameExecutor.apply(entryIds, false, importId),
   listMediaRenames: (offset = 0) => mediaRenameExecutor.history(20, offset).map(mediaRenameBatchForRenderer),
   originalFileName: (filePath: string) => importInventory.originalPath(filePath) || originalNames.originalPath(filePath),
   libraryCleanupHistory: () => libraryCleanup.history().map((batch) => ({

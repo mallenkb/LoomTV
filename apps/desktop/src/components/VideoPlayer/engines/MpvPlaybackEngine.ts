@@ -76,10 +76,15 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     }
   }
 
-  private setPaused(paused: boolean): Promise<void> {
+  private async setPaused(paused: boolean, rewindSeconds = 0): Promise<void> {
+    if (!paused && this.pendingSeekPosition !== null) {
+      const position = this.pendingSeekPosition;
+      this.cancelSeek();
+      await this.sendSeek(position);
+    }
     if (this.lastPauseCommand === paused && this.lastState?.paused === paused) return Promise.resolve();
     this.lastPauseCommand = paused;
-    return this.command({ type: 'set-paused', paused }).catch((error) => {
+    return this.command({ type: 'set-paused', paused, ...(rewindSeconds > 0 ? { rewindSeconds } : {}) }).catch((error) => {
       this.lastPauseCommand = null;
       throw error;
     });
@@ -102,7 +107,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     this.lastSeekSentAt = 0;
   }
 
-  play(): Promise<void> { return this.setPaused(false); }
+  play(rewindSeconds = 0): Promise<void> { return this.setPaused(false, rewindSeconds); }
   pause(): Promise<void> { return this.setPaused(true); }
   seek(position: number): Promise<void> {
     if (this.destroyed) return Promise.resolve();

@@ -5,7 +5,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { createMediaItemId } from '../libraryItemHelpers.ts';
 import { mediaFileRevision } from '../skipSegments/fileIdentity.ts';
 import { createFileSettling } from './fileSettling.ts';
-import { inventoryIdentity, type createImportInventory } from './importInventory.ts';
+import { inventoryIdentity, inventoryTree, type createImportInventory } from './importInventory.ts';
 import { fileStamp } from './recoverableFileMove.ts';
 import type { LibraryData } from '../appContracts.ts';
 import type { MediaItem } from '../metadata/types.ts';
@@ -454,10 +454,22 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       .map((row) => [row.file_path, row.rejected_name.toLowerCase()]),
   );
 
-  function plan(options: { automatic?: boolean } = {}): RenamePlan & { waitingFiles: number; retryAfterMs?: number } {
+  function plan(options: { automatic?: boolean; importId?: string } = {}): RenamePlan & { waitingFiles: number; retryAfterMs?: number } {
     const data = deps.loadLibrary();
     const locks = lockedTargets();
-    const isRestored = deps.inventory?.protection();
+    const selected = options.importId ? deps.inventory?.get(options.importId) : null;
+    if (options.importId && (!selected || selected.removedAt)) throw new RenameError('This import is no longer available.');
+    if (selected && !deps.libraryRoots(data).some((root) => path.resolve(root) === selected.root)) throw new RenameError("Reconnect this import's library before renaming it.");
+    const owned = new Map(selected?.entries.filter((entry) => !entry.held).map((entry) => [entry.current, entry.identity]) || []);
+    const ownership = new Map<string, boolean>();
+    const owns = (target: string): boolean => {
+      if (ownership.has(target)) return ownership.get(target) === true;
+      if (!owned.has(target) || inventoryIdentity(target) !== owned.get(target)) return false;
+      const matches = inventoryTree(target).every((entry) => owned.get(entry.current) === entry.identity);
+      ownership.set(target, matches);
+      return matches;
+    };
+    const isRestored = deps.inventory?.protection(options.importId);
     const now = Date.now();
     const deferred = new Map<string, number>();
     const result = planRenames({
@@ -484,8 +496,12 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
           return null;
         }
       },
-      isLocked: (filePath, targetName) => Boolean(isRestored?.(filePath)) || locks.get(filePath) === targetName.toLowerCase(),
+      isLocked: (filePath, targetName) => Boolean(isRestored?.(filePath)) || (selected ? !owns(filePath) : locks.get(filePath) === targetName.toLowerCase()),
     });
+    if (selected) {
+      result.entries = result.entries.filter((entry) => owns(entry.from) && entry.sidecars.every((sidecar) => owns(sidecar.from)));
+      result.skipped = result.skipped.filter((skip) => owned.has(skip.filePath));
+    }
     const delays = [...deferred.values()];
     return { ...result, waitingFiles: deferred.size, ...(delays.length ? { retryAfterMs: Math.max(1000, Math.min(...delays) + 1000) } : {}) };
   }
@@ -676,9 +692,9 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       return { ...this.apply(entries.map((entry) => entry.id), true), retryAfterMs };
     },
 
-    apply(entryIds: readonly string[], automatic = false): { batchId: string; renamed: number } {
+    apply(entryIds: readonly string[], automatic = false, importId?: string): { batchId: string; renamed: number } {
       const wanted = new Set(entryIds);
-      const entries = plan({ automatic }).entries.filter((entry) => wanted.has(entry.id));
+      const entries = plan({ automatic, importId }).entries.filter((entry) => wanted.has(entry.id));
       // An entry's ID covers its exact source and destination. Any approved
       // entry missing from the fresh plan changed since the preview, so
       // nothing runs until the new plan has been reviewed.
@@ -686,6 +702,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
         const stale = wanted.size - entries.length;
         throw new RenameError(`${stale} of the approved ${stale === 1 ? 'change has' : 'changes have'} changed since the preview. Refresh the preview and review it again.`);
       }
+      if (!entries.length) return { batchId: '', renamed: 0 };
       const videos = new Set(entries.filter((entry) => entry.kind === 'file').map((entry) => entry.from));
       const folders = new Set(entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.from));
       const shows = new Map(entries.flatMap((entry) => entry.showFolder ? [[entry.from, entry.showFolder] as const] : []));
@@ -724,6 +741,15 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       const affectedVideos = new Set(libraryItems.flatMap((item) => item.type === 'movie' ? [item.filePath] : (item.episodeFiles || []).map((file) => file.filePath)).filter((file) => finalPath(file) !== file));
       const batchId = randomUUID();
       execute(operations, batchId, 'apply', (database) => {
+        if (importId && deps.inventory) {
+          const record = deps.inventory.get(importId);
+          if (!record || record.removedAt) throw new RenameError('This import is no longer available.');
+          record.restoreRequestedAt = 0;
+          record.restoredAt = 0;
+          deps.inventory.save(record);
+          const unlock = database.prepare('DELETE FROM media_rename_locks WHERE file_path = ?');
+          for (const entry of record.entries) { unlock.run(entry.current); unlock.run(entry.original); }
+        }
         database
           .prepare('INSERT INTO media_rename_batches (id, created_at, undone_at, operations_json) VALUES (?, ?, 0, ?)')
           .run(batchId, Date.now(), JSON.stringify(operations));

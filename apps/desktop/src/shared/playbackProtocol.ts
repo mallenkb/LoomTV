@@ -86,7 +86,7 @@ export type PlaybackStartOptions = {
 };
 
 export type PlaybackCommand =
-  | { type: 'set-paused'; paused: boolean }
+  | { type: 'set-paused'; paused: boolean; rewindSeconds?: number }
   | { type: 'seek'; position: number }
   | { type: 'set-volume'; volume: number }
   | { type: 'set-muted'; muted: boolean }

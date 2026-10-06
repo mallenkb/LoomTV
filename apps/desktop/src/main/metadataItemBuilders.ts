@@ -33,6 +33,7 @@ import {
 import type { BuildMovieItemRequest, BuildTVItemRequest } from './libraryScanner.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import { normalizeAnimeCast } from '../shared/animeCast.ts';
+import { lookupAutomaticCinemeta, preferCinemetaMetadata } from './metadata/cinemetaDefaults.ts';
 import {
   getBoundedLibraryProbe,
   LIBRARY_PROBE_CONCURRENCY,
@@ -42,6 +43,7 @@ import {
 export type MetadataItemBuilderDependencies = {
   getExistingItem?: (filePath: string) => MediaItem | undefined;
   fetchTVMetadataById?: typeof import('./metadata/tvmaze.ts').fetchTVMetadataById;
+  fetchCinemetaMetadataCandidates?: typeof import('./metadata/cinemeta.ts').fetchCinemetaMetadataCandidates;
   extractSeasons: (folderPath: string, folderName: string, episodeFiles?: EpisodeFile[]) => Promise<Array<{ number: number; title: string; episodeCount: number }>>;
   scanEpisodeFiles: (folderPath: string) => Promise<EpisodeFile[]>;
   probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
@@ -211,8 +213,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const localEpisodes = makeLocalEpisodeMeta(episodeFiles, searchTitle);
 
     // ── Fetch metadata sources ─────────────────────────────────────────────────
-    // Anime   → AniList primary, Jikan + TVmaze + TMDB + OMDb as fallbacks
-    // TV show → TMDB primary, TVmaze as free fallback, OMDb for extra fields
+    // Build provider fallbacks first to resolve IDs and anime title aliases.
+    // Cinemeta defaults are applied after the local item has been assembled.
     const [omdbById, omdbBySearch, anilistMeta, jikanMeta, tmdbTVById, tmdbTVBySearch, tvdbById, tvdbBySearch, tvMeta] = await Promise.all([
       providerIds.imdbId
         ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey)
@@ -405,7 +407,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     );
     const mergedSeasons = mergeLocalSeasonsWithMetadata(localSeasons, remoteSeasons);
 
-    return {
+    const item: MediaItem = {
       id,
       type: finalType,
       format: finalType === 'anime' ? (matchedAniListMeta?.format || matchedJikanMeta?.format || 'TV') : 'TV',
@@ -452,6 +454,12 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         } : {},
       ),
     };
+    const cinemeta = await lookupAutomaticCinemeta(
+      deps.fetchCinemetaMetadataCandidates, searchTitle, 'series', searchYear,
+      providerIds.imdbId || matchedOmdbData?.imdbID || item.providerIds?.imdbId,
+      [...localAndAnimeAliasTitles, resolvedTitle],
+    );
+    return preferCinemetaMetadata(item, cinemeta, { poster: localPoster, backdrop: localBackdrop });
   }
 
   async function buildMovieItemFromFile({
@@ -676,7 +684,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || (matchedOmdbData?.Year ? parseInt(matchedOmdbData.Year, 10) : 0)
       || searchYear || parsedFile.year;
 
-    const baseItem: MediaItem = {
+    const fallbackItem: MediaItem = {
       id: createMediaItemId(fullPath),
       type: finalType,
       format: finalType === 'anime'
@@ -730,6 +738,13 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       ),
     };
 
+    const cinemeta = await lookupAutomaticCinemeta(
+      deps.fetchCinemetaMetadataCandidates, searchTitle, useMovieMetadata ? 'movie' : 'series', searchYear,
+      providerIds.imdbId || matchedOmdbData?.imdbID || fallbackItem.providerIds?.imdbId,
+      [...localAndAnimeAliasTitles, resolvedTitle],
+    );
+    const baseItem = preferCinemetaMetadata(fallbackItem, cinemeta, { poster: localPoster, backdrop: localBackdrop });
+
     if (finalType === 'anime' || finalType === 'tv') {
       const season = useShowMetadata ? parsedEpisode?.season ?? probe.season ?? 1 : 1;
       const episodeNumber = useShowMetadata ? parsedEpisode?.episode ?? probe.episode ?? 1 : 1;
@@ -769,7 +784,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       );
       const episodeStill = singleEpisode?.still || officialBackdrop || embeddedPoster || localThumbnail;
 
-      return {
+      return preferCinemetaMetadata({
         ...baseItem,
         seasons,
         episodes: [{
@@ -789,7 +804,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
           localMetadata: probe.localMetadata,
           subtitles,
         }],
-      };
+      }, cinemeta, { poster: localPoster, backdrop: localBackdrop });
     }
 
     return baseItem;

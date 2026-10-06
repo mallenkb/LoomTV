@@ -86,6 +86,7 @@ const mediaSessionSnapshotSchema = z.object({
   ])).max(16),
   skipForwardSeconds: finiteNumber.positive(),
   skipBackSeconds: finiteNumber.positive(),
+  rewindOnResumeSeconds: finiteNumber.int().min(0).max(30).optional(),
   title: z.string().max(400),
   seriesTitle: z.string().max(400).optional(),
   season: finiteNumber.nonnegative().optional(),
@@ -132,6 +133,7 @@ const profilePreferencesSchema = z.object({
   sidebarNavOrder: z.array(z.string().max(8192)).max(1024).optional(),
   autoplayNextEnabled: z.boolean().optional(),
   playbackSkipBackSeconds: finiteNumber.optional(),
+  playbackRewindOnResumeSeconds: finiteNumber.int().min(0).max(30).optional(),
   playbackSkipForwardSeconds: finiteNumber.optional(),
 });
 const profileRestrictionsInputSchema = z.object({
@@ -175,7 +177,7 @@ const manualMediaSegmentSchema = mediaSegmentRequestSchema.extend({
 });
 const artworkCandidateSchema = z.object({
   id: nonEmptyString,
-  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv']),
+  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan', 'AniList', 'Fanart.tv', 'Cinemeta']),
   title: z.string(),
   year: finiteNumber.optional(),
   genres: z.array(z.string()).optional(),
@@ -372,8 +374,8 @@ export interface IpcHandlerDependencies<
   listLibraryImports: (offset?: number) => IpcResult<'library:imports'>;
   previewLibraryOriginal: (id: string) => IpcResult<'library:original-preview'>;
   restoreLibraryOriginal: (id: string) => Promise<IpcResult<'library:original-restore'>>;
-  previewMediaRenames: () => IpcResult<'library:rename-preview'> | Promise<IpcResult<'library:rename-preview'>>;
-  applyMediaRenames: (entryIds: string[]) => IpcResult<'library:rename-apply'>;
+  previewMediaRenames: (importId?: string) => IpcResult<'library:rename-preview'> | Promise<IpcResult<'library:rename-preview'>>;
+  applyMediaRenames: (entryIds: string[], importId?: string) => IpcResult<'library:rename-apply'>;
   listMediaRenames: (offset?: number) => IpcResult<'library:rename-history'>;
   getMediaRenameRecord: (batchId: string) => IpcResult<'library:rename-record'>;
   originalFileName: (filePath: string) => IpcResult<'library:original-file-name'>;
@@ -902,14 +904,14 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.restoreLibraryOriginal(id);
   }, z.tuple([z.string().uuid()]));
-  handleNoArgs('library:rename-preview', () => {
+  handle('library:rename-preview', (_event, importId) => {
     deps.authorizeSettingsWrite();
-    return deps.previewMediaRenames();
-  });
-  handle('library:rename-apply', (_event, entryIds) => {
+    return deps.previewMediaRenames(importId);
+  }, z.tuple([z.string().uuid().optional()]));
+  handle('library:rename-apply', (_event, entryIds, importId) => {
     deps.authorizeSettingsWrite();
-    return deps.applyMediaRenames(entryIds);
-  }, z.tuple([z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(20_000)]));
+    return deps.applyMediaRenames(entryIds, importId);
+  }, z.tuple([z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(20_000), z.string().uuid().optional()]));
   handle('library:rename-history', (_event, offset) => {
     deps.authorizeSettingsWrite();
     return deps.listMediaRenames(offset);

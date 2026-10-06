@@ -322,6 +322,7 @@ export const lanProfilePreferencesSchema = z.object({
   sidebarNavOrder: z.array(z.string()).optional(),
   autoplayNextEnabled: z.boolean().optional(),
   playbackSkipBackSeconds: nonNegativeNumber.optional(),
+  playbackRewindOnResumeSeconds: z.number().int().min(0).max(30).optional(),
   playbackSkipForwardSeconds: nonNegativeNumber.optional(),
 });
 

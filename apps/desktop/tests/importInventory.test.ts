@@ -74,6 +74,13 @@ for (const category of ['tv', 'anime'] as const) {
     assert.ok(fs.existsSync(incoming));
     assert.ok(fs.existsSync(first));
     assert.ok(fs.statSync(path.join(f.root, 'Person of Interest (2011)/Season 02')).isDirectory(), 'a pre-existing season folder stays');
+    const again = f.executor.plan({ importId: second.id });
+    assert.ok(again.entries.length);
+    f.executor.apply(again.entries.map((entry) => entry.id), false, second.id);
+    assert.ok(fs.existsSync(path.join(f.root, 'Person of Interest (2011)/Season 02/S02E05 - Bury the Lede.mkv')));
+    f.executor.restoreOriginal(second.id);
+    assert.ok(fs.existsSync(incoming));
+    assert.ok(fs.existsSync(first));
   });
 }
 
@@ -166,3 +173,46 @@ for (const category of ['tv', 'anime'] as const) {
     assert.ok(fs.existsSync(duplicate));
   });
 }
+
+
+test('metadata rename after restore preserves the first names and other restored imports', (t) => {
+  const f = organizationFixture(t);
+  const runner = f.file('Runner.2026.WEB-DL.mkv');
+  const other = f.file('Other.2025.WEB-DL.mkv');
+  f.setItems([f.item(runner), f.item(other, { title: 'Other', year: 2025, providerIds: { tmdbId: '456' } })]);
+  f.organize();
+  const first = f.inventory.all().find((record) => record.entries.some((entry) => entry.original === runner));
+  const second = f.inventory.all().find((record) => record.entries.some((entry) => entry.original === other));
+  assert.ok(first);
+  assert.ok(second);
+  f.executor.restoreOriginal(first.id);
+  f.executor.restoreOriginal(second.id);
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    const preview = f.executor.plan({ importId: first.id });
+    assert.ok(preview.entries.length, JSON.stringify(preview));
+    assert.ok(f.inventory.protection()(runner), 'preview does not remove restore protection');
+    assert.equal(f.executor.plan().entries.length, 0, 'cancelling preview leaves automatic organization blocked');
+    f.executor.apply(preview.entries.map((entry) => entry.id), false, first.id);
+    assert.equal(fs.existsSync(runner), false);
+    assert.equal(fs.readFileSync(other, 'utf8'), 'video');
+    assert.ok(f.inventory.get(second.id)?.restoreRequestedAt);
+    assert.equal(f.inventory.get(first.id)?.restoreRequestedAt, 0);
+    f.executor.restoreOriginal(first.id);
+    assert.equal(fs.readFileSync(runner, 'utf8'), 'video');
+    assert.equal(f.inventory.get(first.id)?.entries.find((entry) => entry.video)?.original, runner);
+  }
+});
+
+test('metadata rename rejects stale approval without releasing restoration protection', (t) => {
+  const f = organizationFixture(t);
+  const original = f.file('Runner.2026.mkv');
+  f.setItems([f.item(original)]);
+  f.organize();
+  const id = f.inventory.all()[0].id;
+  f.executor.restoreOriginal(id);
+  const planned = f.executor.plan({ importId: id });
+  f.setItems([f.item(original, { title: 'Other', year: 2025, providerIds: { tmdbId: '456' } })]);
+  assert.throws(() => f.executor.apply(planned.entries.map((entry) => entry.id), false, id), /changed since the preview/);
+  assert.ok(f.inventory.get(id)?.restoreRequestedAt);
+  assert.equal(fs.readFileSync(original, 'utf8'), 'video');
+});

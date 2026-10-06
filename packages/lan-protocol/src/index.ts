@@ -249,6 +249,7 @@ export type LanProfilePreferences = {
   sidebarNavOrder?: string[];
   autoplayNextEnabled?: boolean;
   playbackSkipBackSeconds?: number;
+  playbackRewindOnResumeSeconds?: number;
   playbackSkipForwardSeconds?: number;
 };
 

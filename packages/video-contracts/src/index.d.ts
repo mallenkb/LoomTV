@@ -154,6 +154,7 @@ export interface ProfilePreferences {
   sidebarNavOrder?: string[];
   autoplayNextEnabled?: boolean;
   skipBackSeconds?: number;
+  rewindOnResumeSeconds?: number;
   skipForwardSeconds?: number;
 }
 

@@ -43,6 +43,44 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function tvdbRecordId(record: JsonRecord): string {
+  const id = text(record.tvdb_id || record.tvdbId || record.id).replace(/^(?:series|movie)-/, '');
+  return /^\d+$/.test(id) ? id : '';
+}
+
+function tvdbRecordTitles(record: JsonRecord): string[] {
+  const translations = asRecord(record.translations) || {};
+  return unique([
+    text(record.name || record.title || record.seriesName),
+    ...asArray(record.aliases).map((alias) => typeof alias === 'string' ? alias : text(asRecord(alias)?.name)),
+    ...Object.values(translations).filter((value): value is string => typeof value === 'string'),
+    ...asArray(translations.nameTranslations).map((translation) => text(asRecord(translation)?.name)),
+  ]);
+}
+
+function metadataWithSearchTitles(metadata: TVMetadata | null, result: JsonRecord): TVMetadata | null {
+  if (!metadata) return null;
+  return {
+    ...metadata,
+    title: text(asRecord(result.translations)?.eng) || metadata.title,
+    aliases: unique([metadata.title || '', ...(metadata.aliases || []), ...tvdbRecordTitles(result)]),
+    summary: text(asRecord(result.overviews)?.eng) || metadata.summary,
+  };
+}
+
+function englishSearchMetadata(result: JsonRecord, localYear: number | undefined, artworkTypes: Map<string, string>): TVMetadata | null {
+  const originalIsEnglish = ['eng', 'en'].includes(text(result.primary_language || result.originalLanguage).toLowerCase());
+  const title = text(asRecord(result.translations)?.eng) || (originalIsEnglish ? searchResultTitle(result) : '');
+  if (!title) return null;
+  return tvdbSeriesToMetadata({
+    ...result,
+    name: title,
+    overview: text(asRecord(result.overviews)?.eng) || (originalIsEnglish ? text(result.overview) : ''),
+    summary: '',
+    episodes: [],
+  }, title, localYear, artworkTypes);
+}
+
 function normalizeImage(value: unknown): string {
   const source = text(value);
   if (!source) return '';
@@ -145,7 +183,7 @@ function tvdbSeriesToMetadata(
   localYear?: number,
   artworkTypes = new Map<string, string>(),
 ): TVMetadata | null {
-  const id = text(series.id || series.tvdb_id || series.tvdbId);
+  const id = tvdbRecordId(series);
   const title = text(series.name || series.title) || fallbackTitle;
   if (!id && !title) return null;
 
@@ -192,6 +230,7 @@ function tvdbSeriesToMetadata(
 
   return {
     title,
+    aliases: tvdbRecordTitles(series),
     year: resolvedYear,
     poster,
     backdrop,
@@ -215,7 +254,7 @@ function tvdbSeriesToMetadata(
 }
 
 function searchResultTitle(result: JsonRecord): string {
-  return text(result.name || result.title || result.seriesName);
+  return text(asRecord(result.translations)?.eng) || text(result.name || result.title || result.seriesName);
 }
 
 function searchResultYear(result: JsonRecord): number {
@@ -297,15 +336,44 @@ async function searchTVDB(title: string, localYear: number | undefined, apiKey: 
   return asArray(responseData(payload)).map(asRecord).filter((result): result is JsonRecord => Boolean(result));
 }
 
+async function fetchEnglishEpisodes(id: string, apiKey: string): Promise<unknown[]> {
+  const episodes: unknown[] = [];
+  for (let page = 0; page < 40; page += 1) {
+    const payload = asRecord(await fetchTVDBJson(`/series/${id}/episodes/default/eng?page=${page}`, apiKey));
+    if (!payload) break;
+    const data = asRecord(responseData(payload));
+    const records = asArray(data?.episodes || asRecord(data?.series)?.episodes).slice(0, 500);
+    episodes.push(...records);
+    if (!records.length || !asRecord(payload.links)?.next) break;
+  }
+  return episodes;
+}
+
 export async function fetchTVDBMetadataById(tvdbId: string | undefined, apiKey?: string): Promise<TVMetadata | null> {
-  const id = text(tvdbId);
+  const id = tvdbRecordId({ id: tvdbId });
   const key = text(apiKey);
   if (!id || !key) return null;
   try {
-    const payload = await fetchTVDBJson(`/series/${encodeURIComponent(id)}/extended?meta=episodes`, key);
+    const [payload, translationPayload, episodes, artworkTypes] = await Promise.all([
+      fetchTVDBJson(`/series/${id}/extended`, key),
+      fetchTVDBJson(`/series/${id}/translations/eng`, key).catch(() => null),
+      fetchEnglishEpisodes(id, key).catch(() => []),
+      fetchTVDBArtworkTypes(key),
+    ]);
     const series = asRecord(responseData(payload));
-    const artworkTypes = series ? await fetchTVDBArtworkTypes(key) : new Map<string, string>();
-    return series ? tvdbSeriesToMetadata(series, '', undefined, artworkTypes) : null;
+    if (!series) return null;
+    const translation = asRecord(responseData(translationPayload));
+    const originalIsEnglish = ['eng', 'en'].includes(text(series.originalLanguage).toLowerCase());
+    const title = text(translation?.name) || (originalIsEnglish ? text(series.name) : '');
+    if (!title) return null;
+    return tvdbSeriesToMetadata({
+      ...series,
+      name: title,
+      overview: text(translation?.overview) || (originalIsEnglish ? text(series.overview) : ''),
+      summary: '',
+      episodes,
+      seasons: asArray(series.seasons).map((season) => ({ ...(asRecord(season) || {}), name: '', title: '' })),
+    }, title, undefined, artworkTypes);
   } catch (error) {
     console.error('[TVDB series]', error);
     return null;
@@ -318,11 +386,13 @@ export async function fetchTVDBMetadataCandidates(title: string, localYear?: num
   try {
     const results = await searchTVDB(title, localYear, key);
     const artworkTypes = await fetchTVDBArtworkTypes(key);
-    const candidates = await Promise.all(results.map(async (result) => {
-      const id = text(result.id || result.tvdb_id || result.tvdbId);
-      return id
-        ? fetchTVDBMetadataById(id, key)
-        : tvdbSeriesToMetadata(result, searchResultTitle(result) || title, localYear, artworkTypes);
+    const matches = results.filter((result) => tvdbRecordTitles(result).some((remoteTitle) => (
+      remoteMatchesAnyLocalTitle([title], remoteTitle)
+    ))).slice(0, 5);
+    const candidates = await Promise.all(matches.map(async (result) => {
+      const id = tvdbRecordId(result);
+      const detailed = id ? await fetchTVDBMetadataById(id, key) : null;
+      return metadataWithSearchTitles(detailed || englishSearchMetadata(result, localYear, artworkTypes), result);
     }));
     return candidates.filter((candidate): candidate is TVMetadata => Boolean(candidate));
   } catch (error) {
@@ -340,14 +410,13 @@ export async function fetchTVDBMetadata(title: string, localYear?: number, apiKe
     const artworkTypes = await fetchTVDBArtworkTypes(key);
     const localTitles = uniqueLocalTitles([title]);
     const selected = results.find((result) => {
-      const resultTitle = searchResultTitle(result);
       const resultYear = searchResultYear(result);
-      return remoteMatchesAnyLocalTitle(localTitles, resultTitle) && (!localYear || !resultYear || Math.abs(localYear - resultYear) <= 1);
+      return tvdbRecordTitles(result).some((resultTitle) => remoteMatchesAnyLocalTitle(localTitles, resultTitle))
+        && (!localYear || !resultYear || Math.abs(localYear - resultYear) <= 1);
     }) || results[0];
-    const id = text(selected.id || selected.tvdb_id || selected.tvdbId);
-    return id
-      ? fetchTVDBMetadataById(id, key)
-      : tvdbSeriesToMetadata(selected, searchResultTitle(selected) || title, localYear, artworkTypes);
+    const id = tvdbRecordId(selected);
+    const detailed = id ? await fetchTVDBMetadataById(id, key) : null;
+    return metadataWithSearchTitles(detailed || englishSearchMetadata(selected, localYear, artworkTypes), selected);
   } catch (error) {
     console.error('[TVDB]', error);
     return null;
@@ -381,13 +450,11 @@ export async function searchTVDBIdentity(
     const localTitles = uniqueLocalTitles([title]);
     for (const result of results) {
       const name = searchResultTitle(result);
-      const aliases = asArray(result.aliases).map(text).filter(Boolean);
-      const translations = Object.values(asRecord(result.translations) || {}).map(text).filter(Boolean);
-      const titles = [...new Set([name, ...aliases, ...translations].filter(Boolean))];
+      const titles = tvdbRecordTitles(result);
       const year = searchResultYear(result) || undefined;
       if (localYear && year && Math.abs(localYear - year) > 1) continue;
       if (!titles.some((candidate) => remoteMatchesAnyLocalTitle(localTitles, candidate))) continue;
-      const id = text(result.tvdb_id || result.tvdbId || String(result.id || '').replace(/^\D+-/, ''));
+      const id = tvdbRecordId(result);
       const ids = providerIds(result, type === 'series' ? id : '');
       return { title: name, titles, year, providerIds: ids };
     }

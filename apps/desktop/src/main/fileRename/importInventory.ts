@@ -70,7 +70,7 @@ export function assertLibraryPath(file: string, root: string): void {
   }
 }
 
-function inventoryTree(target: string): InventoryEntry[] {
+export function inventoryTree(target: string): InventoryEntry[] {
   const stat = fs.lstatSync(target);
   const kind = stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file';
   const entry: InventoryEntry = {
@@ -228,7 +228,11 @@ export function createImportInventory(getDatabase: () => BetterSqlite3.Database)
           const folder = mapper(operation.to);
           if (!record.entries.some((entry) => within(entry.current, folder))) continue;
           const identity = inventoryIdentity(folder);
-          if (identity && !record.createdDirectories.some((value) => value.path === folder)) record.createdDirectories.push({ path: folder, identity });
+          if (identity) {
+            const previous = record.createdDirectories.find((value) => value.path === folder);
+            if (previous) previous.identity = identity;
+            else record.createdDirectories.push({ path: folder, identity });
+          }
         }
         record.restoredAt = 0;
         save(record);
@@ -255,9 +259,9 @@ export function createImportInventory(getDatabase: () => BetterSqlite3.Database)
   }
 
   /** Build once per planning pass, rather than rereading history for every file. */
-  function protection(): (target: string) => boolean {
+  function protection(exceptImportId?: string): (target: string) => boolean {
     const paths = new Set<string>();
-    for (const record of all().filter((value) => !value.removedAt && value.restoreRequestedAt > 0)) {
+    for (const record of all().filter((value) => value.id !== exceptImportId && !value.removedAt && value.restoreRequestedAt > 0)) {
       for (const entry of record.entries) {
         if (entry.held) continue;
         for (let target = entry.current; within(target, record.root); target = path.dirname(target)) {

@@ -62,7 +62,7 @@ export type MediaSessionAdapterCandidate = {
  * renderer instead of dropping it.
  */
 export type MediaSessionEngineDispatcher = {
-  setPaused: (engine: MediaSessionEngine, sessionId: string, paused: boolean) => boolean;
+  setPaused: (engine: MediaSessionEngine, sessionId: string, paused: boolean, rewindSeconds?: number) => boolean;
   seek: (engine: MediaSessionEngine, sessionId: string, positionSeconds: number) => boolean;
   setRate: (engine: MediaSessionEngine, sessionId: string, rate: number) => boolean;
 };
@@ -150,11 +150,11 @@ export function createMediaSessionController(
       const sessionId = snapshot.engineSessionId as string;
       try {
         if (command.type === 'play') {
-          handledInMain = engine.setPaused(nativeEngine, sessionId, false);
+          handledInMain = engine.setPaused(nativeEngine, sessionId, false, snapshot.rewindOnResumeSeconds);
         } else if (command.type === 'pause') {
           handledInMain = engine.setPaused(nativeEngine, sessionId, true);
         } else if (command.type === 'toggle') {
-          handledInMain = engine.setPaused(nativeEngine, sessionId, snapshot.state === 'playing');
+          handledInMain = engine.setPaused(nativeEngine, sessionId, snapshot.state === 'playing', snapshot.rewindOnResumeSeconds);
         } else if (command.type === 'setRate') {
           handledInMain = engine.setRate(nativeEngine, sessionId, command.rate);
         } else if (command.type === 'seekAbsolute' || command.type === 'seekRelative') {

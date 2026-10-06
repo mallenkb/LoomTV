@@ -29,7 +29,7 @@ export function createEngineDispatcher(engines: NativeEngineCommands): MediaSess
   };
 
   return {
-    setPaused: (engine, sessionId, paused) => send(engine, sessionId, { type: 'set-paused', paused }),
+    setPaused: (engine, sessionId, paused, rewindSeconds = 0) => send(engine, sessionId, { type: 'set-paused', paused, ...(rewindSeconds > 0 ? { rewindSeconds } : {}) }),
     seek: (engine, sessionId, positionSeconds) => send(engine, sessionId, {
       type: 'seek',
       position: Math.max(0, positionSeconds),

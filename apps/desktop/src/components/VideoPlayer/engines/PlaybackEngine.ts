@@ -9,7 +9,7 @@ export interface PlaybackEngine {
   readonly kind: PlaybackEngineKind;
   readonly surface: PlaybackEngineSurface;
   load(filePath: string, options?: PlaybackStartOptions): Promise<boolean>;
-  play(): Promise<void>;
+  play(rewindSeconds?: number): Promise<void>;
   pause(): Promise<void>;
   seek(seconds: number): Promise<void>;
   setVolume(volume: number): Promise<void>;

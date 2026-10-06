@@ -1,3 +1,4 @@
+import { normalizeResumeRewind, resumeRewindTarget } from '../shared/resumeRewind.ts';
 import { restoreOffscreenTrack } from './offscreenVideoRestore.ts';
 import { BrowserWindow, type WebContents } from 'electron';
 import { createRequire } from 'node:module';
@@ -1069,6 +1070,8 @@ class LibVlcPlaybackSession {
   private startSeconds: number;
   private startApplied = false;
   private requestedPaused = false;
+  private resumeRewindPending = false;
+  private pausedSeekPosition: number | null = null;
   private lastPauseCommand: boolean | null = null;
   private pauseAcknowledgementDeadline = 0;
   private preferredAudioTrackId: number | null;
@@ -1919,7 +1922,9 @@ class LibVlcPlaybackSession {
     try {
       const api = this.runtime.api;
       switch (command.type) {
-        case 'set-paused':
+        case 'set-paused': {
+          const rewind = this.resumeRewindPending ? normalizeResumeRewind(command.rewindSeconds, 0) : 0;
+          if (!command.paused) this.resumeRewindPending = false;
           if (!command.paused && (this.ended || Number(api.playerGetState(this.player)) === 6)) {
             return this.replayFrom(0, false);
           }
@@ -1932,13 +1937,24 @@ class LibVlcPlaybackSession {
           if (this.lastPauseCommand === command.paused
             && (Date.now() < this.pauseAcknowledgementDeadline
               || (Number(api.playerGetState(this.player)) === 4) === command.paused)) return true;
+          if (!command.paused && this.requestedPaused && rewind > 0
+            && Number(api.playerGetLength(this.player)) > 0) {
+            const position = this.pausedSeekPosition ?? Number(api.playerGetTime(this.player)) / 1000;
+            if (Number.isFinite(position) && position > 0) {
+              try { api.playerSetTime(this.player, Math.round(resumeRewindTarget(position, rewind) * 1000)); }
+              catch (error) { console.warn('[playback] Resume rewind unavailable:', error); }
+            }
+          }
           api.playerSetPause(this.player, command.paused ? 1 : 0);
+          if (command.paused) this.resumeRewindPending = true;
+          this.pausedSeekPosition = null;
           this.lastPauseCommand = command.paused;
           this.requestedPaused = command.paused;
           this.pauseAcknowledgementDeadline = Date.now() + 750;
           if (!command.paused) this.resumeFastPolling();
           this.emit({ paused: command.paused });
           return true;
+        }
         case 'seek': {
           const position = Math.max(0, finite(command.position, 0));
           if (this.ended || Number(api.playerGetState(this.player)) === 6) {
@@ -1954,6 +1970,7 @@ class LibVlcPlaybackSession {
           // Even a seek to the current timestamp must settle the renderer's seek guard.
           this.pendingSeekState = true;
           this.resumeFastPolling();
+          if (this.requestedPaused) this.pausedSeekPosition = position;
           return true;
         }
         case 'set-volume': {

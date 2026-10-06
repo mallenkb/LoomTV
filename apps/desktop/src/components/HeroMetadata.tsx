@@ -79,8 +79,8 @@ export default function HeroMetadata({ item, isOther = false }: HeroMetadataProp
           label: 'IMDb',
           value: item.providerRatings.imdb.value.toFixed(1),
           title: item.providerRatings.imdb.votes === undefined
-            ? 'IMDb rating supplied by OMDb'
-            : `IMDb rating from ${item.providerRatings.imdb.votes.toLocaleString()} votes, supplied by OMDb`,
+            ? 'IMDb user rating'
+            : `IMDb rating from ${item.providerRatings.imdb.votes.toLocaleString()} votes`,
           provider: 'imdb' as const,
           logoClassName: 'h-5 w-10 object-contain',
         }

@@ -1,3 +1,4 @@
+import { normalizeResumeRewind } from './resumeRewind.ts';
 /**
  * The single system-media-session contract shared by the Electron main process,
  * the preload bridge, and the renderer.
@@ -63,6 +64,7 @@ export type MediaSessionSnapshot = {
   supportedCommands: MediaSessionCommandType[];
   skipForwardSeconds: number;
   skipBackSeconds: number;
+  rewindOnResumeSeconds?: number;
   title: string;
   seriesTitle?: string;
   season?: number;
@@ -206,6 +208,7 @@ export function normalizeMediaSessionSnapshot(input: unknown): MediaSessionSnaps
     supportedCommands: normalizeSupportedCommands(raw.supportedCommands),
     skipForwardSeconds: normalizeSkipSeconds(raw.skipForwardSeconds),
     skipBackSeconds: normalizeSkipSeconds(raw.skipBackSeconds),
+    rewindOnResumeSeconds: normalizeResumeRewind(raw.rewindOnResumeSeconds, 0),
     title: normalizeText(raw.title, 'Loom'),
     ...(seriesTitle ? { seriesTitle } : {}),
     ...(season ? { season } : {}),
@@ -309,6 +312,7 @@ export function isMediaSessionDiscontinuity(
   if (previous.queueIndex !== next.queueIndex || previous.queueCount !== next.queueCount) return true;
   if (previous.skipForwardSeconds !== next.skipForwardSeconds) return true;
   if (previous.skipBackSeconds !== next.skipBackSeconds) return true;
+  if (previous.rewindOnResumeSeconds !== next.rewindOnResumeSeconds) return true;
   if (previous.supportedCommands.join('|') !== next.supportedCommands.join('|')) return true;
 
   // A paused session never moves on its own, so any position change is a seek.

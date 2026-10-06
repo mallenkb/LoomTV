@@ -13,6 +13,8 @@ type PlayerMediaCommandOptions = {
   liveControlsRef: RefObject<LiveControls>;
   playbackPositionRef: RefObject<number>;
   togglePlay: () => void;
+  onManualPause: () => void;
+  onNativeResume: () => void;
   seekTo: (targetSeconds: number) => void;
   setPlaybackRate: (rate: number) => void;
   setMediaSessionStopped: (stopped: boolean) => void;
@@ -43,6 +45,8 @@ export function usePlayerMediaCommands({
   liveControlsRef,
   playbackPositionRef,
   togglePlay,
+  onManualPause,
+  onNativeResume,
   seekTo,
   setPlaybackRate,
   setMediaSessionStopped,
@@ -65,6 +69,7 @@ export function usePlayerMediaCommands({
     if (handledInMain) {
       // The engine already moved. Record the user's intent so the player does
       // not treat the resulting state change as an unexpected pause.
+      if (command.type === 'play' || (command.type === 'toggle' && paused)) onNativeResume();
       if (command.type === 'play') userPausedRef.current = false;
       else if (command.type === 'pause') userPausedRef.current = true;
       else if (command.type === 'toggle') userPausedRef.current = !paused;
@@ -76,6 +81,7 @@ export function usePlayerMediaCommands({
         if (paused) togglePlay();
         break;
       case 'pause': {
+        onManualPause();
         userPausedRef.current = true;
         const engine = playbackEngineRef.current;
         if (engine) {
@@ -126,6 +132,8 @@ export function usePlayerMediaCommands({
     setMediaSessionStopped,
     setPlaybackRate,
     togglePlay,
+    onManualPause,
+    onNativeResume,
     userPausedRef,
     videoRef,
   ]);

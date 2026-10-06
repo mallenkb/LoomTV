@@ -28,6 +28,7 @@ export type MediaSessionSnapshotInput = {
   canNextItem: boolean;
   skipForwardSeconds: number;
   skipBackSeconds: number;
+  rewindOnResumeSeconds?: number;
   engine: MediaSessionEngine;
   engineSessionId?: string;
   artworkUrl?: string;
@@ -61,6 +62,7 @@ export function buildMediaSessionSnapshot(input: MediaSessionSnapshotInput): Med
     supportedCommands: supportedMediaSessionCommands(input),
     skipForwardSeconds: input.skipForwardSeconds,
     skipBackSeconds: input.skipBackSeconds,
+    ...(input.rewindOnResumeSeconds !== undefined ? { rewindOnResumeSeconds: input.rewindOnResumeSeconds } : {}),
     title: input.title,
     ...(input.seriesTitle ? { seriesTitle: input.seriesTitle } : {}),
     ...(input.season ? { season: input.season } : {}),

@@ -1,3 +1,4 @@
+import { normalizeResumeRewind } from '../shared/resumeRewind.ts';
 import { restoreOffscreenTrack } from './offscreenVideoRestore.ts';
 import { BrowserWindow, type WebContents } from 'electron';
 import crypto from 'node:crypto';
@@ -241,6 +242,7 @@ class LibMpvSession {
   // avfoundation implements ao-mute, and coreaudio only ao-volume on its
   // private audio unit.
   private desiredMuted = false;
+  private resumeRewindPending = false;
   private softMuted = false;
   private lastOcclusionCheckAt = 0;
   private occludedSince = 0;
@@ -510,6 +512,16 @@ class LibMpvSession {
     if (command.type === 'set-muted') return this.applyMute(command.muted);
     if (command.type === 'set-video-track') this.suspendedVideoTrackId = null;
     try {
+      if (command.type === 'set-paused') {
+        const rewind = this.resumeRewindPending ? normalizeResumeRewind(command.rewindSeconds, 0) : 0;
+        if (!command.paused) this.resumeRewindPending = false;
+        if (!command.paused && rewind > 0 && (this.state.duration || 0) > 0) {
+          if (this.trySend(['seek', -rewind, 'relative+exact'])) this.pendingSeekState = true;
+        }
+        const applied = commandList(command).every((entry) => this.send(entry));
+        if (applied && command.paused) this.resumeRewindPending = true;
+        return applied;
+      }
       const applied = commandList(command).every((entry) => this.send(entry));
       // Report the next timestamp even if a seek lands on the current position.
       if (applied && command.type === 'seek') this.pendingSeekState = true;

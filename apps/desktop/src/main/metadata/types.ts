@@ -19,6 +19,7 @@ export type OriginPlatform = LanOriginPlatform;
 export type MediaItem = WireMediaItem;
 
 export interface TVMetadata extends Partial<MediaItem> {
+  aliases?: string[];
   language?: string;
   country?: string;
   showType?: string;

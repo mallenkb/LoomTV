@@ -42,7 +42,7 @@ export const playbackStartOptionsSchema = z.object({
   nativeSubtitles: z.boolean().optional(),
 });
 export const playbackCommandSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('set-paused'), paused: z.boolean() }),
+  z.object({ type: z.literal('set-paused'), paused: z.boolean(), rewindSeconds: finiteNumber.int().min(0).max(30).optional() }),
   z.object({ type: z.literal('seek'), position: playbackTimeSchema }),
   z.object({ type: z.literal('set-volume'), volume: finiteNumber.min(0).max(1) }),
   z.object({ type: z.literal('set-muted'), muted: z.boolean() }),
