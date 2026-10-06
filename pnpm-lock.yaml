@@ -191,7 +191,7 @@ overrides:
   '@xmldom/xmldom@0.9.10': 0.9.12
   fast-uri@3.1.2: 3.1.8
   nanoid: 3.3.18
-  react-devtools-core>shell-quote: 1.9.0
+  react-devtools-core>shell-quote: 1.11.0
   tar@7.5.15: 7.5.21
   tar@7.5.16: 7.5.21
   xcode>uuid: 11.1.1
@@ -5977,8 +5977,8 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
-  shell-quote@1.9.0:
-    resolution: {integrity: sha512-Iov+JwFv/2HcTpcwNMKd8+IWNb8tboQJNQTkAY/LLVK7gGH9jy+LGkVqPxfekHl+yMmiqXszdGWXgkfml7hjqA==}
+  shell-quote@1.11.0:
+    resolution: {integrity: sha512-JdxDPD0DBTyu08pq0kPC0xSNet/qsU07qT6IsX1AS8oO2ICNRY4ldNa8OAI6PuwAH8tG3lxEhbqmyp4Dw4036g==}
     engines: {node: '>= 0.4'}
 
   siginfo@2.0.0:
@@ -12858,7 +12858,7 @@ snapshots:
 
   react-devtools-core@6.1.5:
     dependencies:
-      shell-quote: 1.9.0
+      shell-quote: 1.11.0
       ws: 7.5.11
     transitivePeerDependencies:
       - bufferutil
@@ -13209,7 +13209,7 @@ snapshots:
 
   shebang-regex@3.0.0: {}
 
-  shell-quote@1.9.0: {}
+  shell-quote@1.11.0: {}
 
   siginfo@2.0.0: {}
 

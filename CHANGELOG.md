@@ -4,9 +4,13 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
-### [2.0.14](docs/releases/v2.0.14.md)
+### [2.0.15](docs/releases/v2.0.15.md)
 
-Republishes the Electron desktop app with no app-code changes since 2.0.13.
+Republishes the Electron desktop app with a shell-quote dependency fix required by the production audit.
+
+### [2.0.14](docs/releases/v2.0.14.md) (not published)
+
+Prepared a desktop republication, but the dependency audit blocked publication.
 
 ### [2.0.13](docs/releases/v2.0.13.md)
 
