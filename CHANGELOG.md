@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.16](docs/releases/v2.0.16.md)
+
+Adds the compact next-episode calendar card with clearer month labels, episode codes, a larger countdown, and tighter spacing.
+
 ### [2.0.15](docs/releases/v2.0.15.md)
 
 Republishes the Electron desktop app with a shell-quote dependency fix required by the production audit.
