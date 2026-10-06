@@ -1137,6 +1137,7 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
         '.metahub.space',
         '.myanimelist.net',
         '.themoviedb.org',
+        '.thetvdb.com',
         '.tmdb.org',
         '.tvmaze.com',
       ],

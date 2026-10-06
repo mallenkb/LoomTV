@@ -78,6 +78,7 @@ export function preferCinemetaMetadata<T extends Partial<MediaItem>>(
       imdb: { ...fallback.providerRatings?.imdb, ...imdb },
     } : fallback.providerRatings,
     runtime: metadata.runtime || fallback.runtime,
+    trailerUrl: metadata.trailerUrl || fallback.trailerUrl,
     seasonCount: metadata.seasonCount || fallback.seasonCount,
     episodeCount: metadata.episodeCount || fallback.episodeCount,
     genres: metadata.genres?.length ? metadata.genres : fallback.genres,

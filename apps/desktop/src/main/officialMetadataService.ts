@@ -22,6 +22,7 @@ import type { ContentRating, EpisodeMeta, MediaItem, StreamingProvider } from '.
 import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
 import { tvMazeShowIsEnded } from './metadata/tvmaze.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
+import { alignAbsoluteEpisodes } from './metadata/episodeNumbering.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import type { MetadataProviderIds } from './mediaTags.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
@@ -99,6 +100,7 @@ export type OfficialMetadataServiceDependencies = {
   fetchCinemetaMetadataCandidates?: typeof import('./metadata/cinemeta.ts').fetchCinemetaMetadataCandidates;
   fetchFanartMovieArtwork: typeof import('./metadata/fanart.ts').fetchFanartMovieArtwork;
   fetchFanartTVArtwork: typeof import('./metadata/fanart.ts').fetchFanartTVArtwork;
+  fetchCinemetaMeta: typeof import('./metadata/cinemeta.ts').fetchCinemetaMeta;
   fetchJikanMetadata: typeof import('./metadata/jikan.ts').fetchJikanMetadata;
   fetchJikanMetadataCandidates: typeof import('./metadata/jikan.ts').fetchJikanMetadataCandidates;
   fetchOMDbMetadata: typeof import('./metadata/omdb.ts').fetchOMDbMetadata;
@@ -262,15 +264,23 @@ function localSeasonNumbers(item: MediaItem): number[] {
     .sort((left, right) => left - right);
 }
 
-function mergeSelectedEpisodeRatings(
+export function mergeSelectedEpisodeRatings(
   episodes: EpisodeMeta[] | undefined,
   ratingEpisodes: EpisodeMeta[],
+  fallbackSources: ReadonlyArray<readonly EpisodeMeta[] | undefined> = [],
 ): EpisodeMeta[] | undefined {
   if (!episodes?.length) return ratingEpisodes;
 
+  // The selected source wins. An episode it has not rated takes the first
+  // rating another provider has, instead of dropping to none.
   const merged = episodes.map((episode) => {
-    const ratingEpisode = findEpisodeMetadataMatch(episode, ratingEpisodes);
-    return { ...episode, rating: numericRating(ratingEpisode?.rating) };
+    const selected = numericRating(findEpisodeMetadataMatch(episode, ratingEpisodes)?.rating);
+    if (selected > 0) return { ...episode, rating: selected };
+    for (const source of fallbackSources) {
+      const fallback = numericRating(source && findEpisodeMetadataMatch(episode, source as EpisodeMeta[])?.rating);
+      if (fallback > 0) return { ...episode, rating: fallback };
+    }
+    return { ...episode, rating: 0 };
   });
   for (const ratingEpisode of ratingEpisodes) {
     if (!findEpisodeMetadataMatch(ratingEpisode, episodes)) merged.push(ratingEpisode);
@@ -280,6 +290,7 @@ function mergeSelectedEpisodeRatings(
 
 const STREAMING_PROVIDER_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MISSING_TRAILER_RETRY_MS = 7 * DAY_MS;
 const METADATA_REFRESH_INTERVALS: Record<MetadataRefreshCategory, number> = {
   core: 30 * DAY_MS,
   cast: 30 * DAY_MS,
@@ -306,6 +317,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     cacheArtworkNow,
     fetchFanartMovieArtwork,
     fetchFanartTVArtwork,
+    fetchCinemetaMeta,
     fetchAniListAnimeMetadata,
     fetchCinemetaMetadataCandidates,
     fetchJikanMetadata,
@@ -427,6 +439,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       }))
       .digest('hex')
       .slice(0, 12);
+  }
+
+  /** Cinemeta as one more result to pick, by the IMDb ID any other source found. */
+  async function cinemetaCandidate(type: 'movie' | 'series', imdbId: string | undefined, title: string): Promise<OfficialMetadataCandidate | null> {
+    const meta = await safeMetadataProvider(fetchCinemetaMeta(type, imdbId), null);
+    if (!meta) return null;
+    return metadataCandidate('Cinemeta', {
+      title: meta.title,
+      providerIds: imdbId ? { imdbId } : undefined,
+      poster: meta.poster,
+      backdrop: meta.backdrop,
+      logo: meta.logo,
+      summary: meta.summary,
+      rating: meta.rating,
+      providerRatings: meta.providerRatings,
+      genres: meta.genres,
+      trailerUrl: meta.trailerUrl,
+      episodes: meta.episodes,
+    }, title);
   }
 
   function metadataCandidate(
@@ -768,10 +799,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
         ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
       ]), title, localTitles, item.type);
-      const fanartArtwork = await fetchFanartMovieArtwork(
+      const [fanartArtwork, cinemetaResult] = await Promise.all([fetchFanartMovieArtwork(
         tmdbById?.providerIds?.tmdbId || tmdbBySearch?.providerIds?.tmdbId || providerIds.tmdbId,
         fanartApiKey,
-      );
+      ), cinemetaCandidate('movie', providerIds.imdbId || omdbById?.imdbID || tmdbById?.providerIds?.imdbId
+        || tmdbBySearch?.providerIds?.imdbId || omdbBySearch?.imdbID, title)]);
       const fanartCandidate = metadataCandidate('Fanart.tv', (
         fanartArtwork.posterCandidates.length
         || fanartArtwork.backdropCandidates.length
@@ -786,7 +818,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         logo: fanartArtwork.logoCandidates[0],
         logoCandidates: fanartArtwork.logoCandidates,
       } : null, title);
-      return fanartCandidate ? [...candidates, fanartCandidate] : candidates;
+      return sortMetadataCandidates(uniqueMetadataCandidates([...candidates, cinemetaResult, fanartCandidate]), title, localTitles, item.type);
     }
 
     const likelyAnime = item.type === 'anime';
@@ -841,14 +873,15 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       ...animeCandidates,
       ...providerCandidates,
     ]), title, localTitles, item.type);
-    const fanartArtwork = await fetchFanartTVArtwork(
+    const [fanartArtwork, cinemetaResult] = await Promise.all([fetchFanartTVArtwork(
       tmdbById?.providerIds?.tvdbId
         || tmdbBySearch?.providerIds?.tvdbId
         || tvdbById?.providerIds?.tvdbId
         || tvdbBySearch?.providerIds?.tvdbId
         || providerIds.tvdbId,
       fanartApiKey,
-    );
+    ), cinemetaCandidate('series', providerIds.imdbId || omdbById?.imdbID || tmdbById?.providerIds?.imdbId
+      || tvdbById?.providerIds?.imdbId || tmdbBySearch?.providerIds?.imdbId || omdbBySearch?.imdbID, title)]);
     const fanartCandidate = metadataCandidate('Fanart.tv', (
       fanartArtwork.posterCandidates.length
       || fanartArtwork.backdropCandidates.length
@@ -863,7 +896,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       logo: fanartArtwork.logoCandidates[0],
       logoCandidates: fanartArtwork.logoCandidates,
     } : null, title);
-    return fanartCandidate ? [...candidates, fanartCandidate] : candidates;
+    return sortMetadataCandidates(uniqueMetadataCandidates([...candidates, cinemetaResult, fanartCandidate]), title, localTitles, item.type);
   }
 
   async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
@@ -878,8 +911,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const withCinemetaDefaults = async (
       fallback: OfficialArtworkRefreshResult,
       type: 'movie' | 'series',
+      cachedMetadata?: Partial<MediaItem> | null,
     ): Promise<OfficialArtworkRefreshResult> => {
-      const metadata = await lookupAutomaticCinemeta(
+      const metadata = cachedMetadata || await lookupAutomaticCinemeta(
         deps.fetchCinemetaMetadataCandidates, title, type, year,
         providerIds.imdbId || fallback.providerIds?.imdbId,
         [...localTitles, fallback.title || ''],
@@ -919,22 +953,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const omdbMeta = omdbById || omdbBySearch || null;
       const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
       const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
-      const fanartArtwork = await fetchFanartMovieArtwork(
-        tmdbMeta?.providerIds?.tmdbId || providerIds.tmdbId,
-        fanartApiKey,
-      );
+      const [fanartArtwork, cinemeta] = await Promise.all([
+        fetchFanartMovieArtwork(tmdbMeta?.providerIds?.tmdbId || providerIds.tmdbId, fanartApiKey),
+        safeMetadataProvider(fetchCinemetaMeta('movie', providerIds.imdbId || omdbMeta?.imdbID || tmdbMeta?.providerIds?.imdbId), null),
+      ]);
       const posterCandidates = officialArtworkOnly([
         tmdbMeta?.poster,
         omdbPoster,
+        cinemeta?.poster,
         ...fanartArtwork.posterCandidates,
       ]);
       const backdropCandidates = officialArtworkOnly([
         tmdbMeta?.backdrop,
+        cinemeta?.backdrop,
         ...fanartArtwork.backdropCandidates,
       ]);
       const logoCandidates = orderedArtworkCandidates(
         ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
         ...fanartArtwork.logoCandidates,
+        ...officialArtworkOnly([cinemeta?.logo]),
       );
       return withCinemetaDefaults({
         title: tmdbMeta?.title || title,
@@ -943,10 +980,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         format: 'Movie',
         thumbnail: posterCandidates[0] || '',
         cover: backdropCandidates[0] || '',
-        summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
+        summary: tmdbMeta?.summary || omdbMeta?.Plot || cinemeta?.summary || '',
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
         ratingSource: 'OMDb',
-        trailerUrl: tmdbMeta?.trailerUrl,
+        trailerUrl: tmdbMeta?.trailerUrl || cinemeta?.trailerUrl,
         runtime: tmdbMeta?.runtime,
         providerRatings: omdbProviderRatings(omdbMeta),
         genres: tmdbMeta?.genres || [],
@@ -957,7 +994,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         logo: logoCandidates[0] || '',
         logoCandidates,
         cast: tmdbMeta?.cast || matchedTV?.cast || [],
-      }, 'movie');
+      }, 'movie', cinemeta);
     }
 
     const likelyAnime = item.type === 'anime';
@@ -984,10 +1021,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const fallbackPosters = preferOmdbFallback
       ? [omdbPoster, matchedTV?.poster, matchedTVDB?.poster]
       : [matchedTV?.poster, omdbPoster, matchedTVDB?.poster];
-    const fanartArtwork = await fetchFanartTVArtwork(
-      tmdbMeta?.providerIds?.tvdbId || matchedTVDB?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
-      fanartApiKey,
-    );
+    const [fanartArtwork, cinemeta] = await Promise.all([
+      fetchFanartTVArtwork(
+        tmdbMeta?.providerIds?.tvdbId || matchedTVDB?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
+        fanartApiKey,
+      ),
+      safeMetadataProvider(fetchCinemetaMeta('series', providerIds.imdbId || omdbMeta?.imdbID || tmdbMeta?.providerIds?.imdbId
+        || matchedTVDB?.providerIds?.imdbId || matchedTV?.providerIds?.imdbId), null),
+    ]);
     const posterCandidates = officialArtworkOnly([
       likelyAnime ? matchedAniList?.poster : '',
       tmdbMeta?.poster,
@@ -995,6 +1036,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       likelyAnime ? matchedJikan?.poster : '',
       ...(likelyAnime ? matchedJikan?.posterCandidates || [] : []),
       ...(matchedTV?.posterCandidates || []),
+      cinemeta?.poster,
       ...fanartArtwork.posterCandidates,
     ]);
     const backdropCandidates = officialArtworkOnly([
@@ -1004,6 +1046,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       matchedTV?.backdrop,
       ...(matchedTV?.backdropCandidates || []),
       matchedTVDB?.backdrop,
+      cinemeta?.backdrop,
       ...fanartArtwork.backdropCandidates,
     ]);
     const logoCandidates = orderedArtworkCandidates(
@@ -1013,6 +1056,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       ...officialArtworkOnly(matchedTV?.logoCandidates || []),
       matchedTVDB?.logo,
       ...officialArtworkOnly(matchedTVDB?.logoCandidates || []),
+      ...officialArtworkOnly([cinemeta?.logo]),
     );
     const animeMovie = likelyAnime && item.format?.trim().toUpperCase() === 'MOVIE';
     const completedSeries = !animeMovie && tvMazeShowIsEnded(matchedTV?.showStatus);
@@ -1025,11 +1069,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       : [];
     const hasLocalSpecials = item.episodeFiles?.some((file) => file.season === 0) === true;
     const hasTMDBSpecials = tmdbMeta?.episodes?.some((episode) => episode.season === 0) === true;
-    const providerEpisodes = hasLocalSpecials && hasTMDBSpecials
+    const localFiles = item.episodeFiles || [];
+    const providerEpisodes = alignAbsoluteEpisodes(localFiles, hasLocalSpecials && hasTMDBSpecials
       ? tmdbMeta?.episodes
-      : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes;
+      : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes || cinemeta?.episodes) || undefined;
     const selectedRatingEpisodes = completedSeries ? omdbCompletedEpisodes : matchedTV?.episodes || [];
-    const episodes = mergeSelectedEpisodeRatings(providerEpisodes, selectedRatingEpisodes);
+    const fallbackRatingEpisodes = [
+      matchedTV?.episodes, tmdbMeta?.episodes, matchedTVDB?.episodes, likelyAnime ? matchedJikan?.episodes : undefined, cinemeta?.episodes, providerEpisodes,
+    ].map((source) => alignAbsoluteEpisodes(localFiles, source) || undefined);
+    let episodes = mergeSelectedEpisodeRatings(providerEpisodes, selectedRatingEpisodes, fallbackRatingEpisodes);
+    // An airing series reads IMDb episode ratings from OMDb only for seasons
+    // that still have unrated episodes on disk: one request per such season.
+    const unratedSeasons = completedSeries ? [] : [...new Set((item.episodeFiles || [])
+      .filter((file) => file.season > 0 && !(episodes || []).some((episode) => (
+        episode.season === file.season && episode.number === file.episode && numericRating(episode.rating) > 0)))
+      .map((file) => file.season))];
+    if (unratedSeasons.length && (omdbMeta?.imdbID || providerIds.imdbId)) {
+      const omdbEpisodes = await safeMetadataProvider(fetchOMDbSeasonEpisodes(omdbMeta?.imdbID || providerIds.imdbId, unratedSeasons, omdbApiKey), []);
+      if (omdbEpisodes.length) episodes = mergeSelectedEpisodeRatings(episodes, selectedRatingEpisodes, [...fallbackRatingEpisodes, omdbEpisodes]);
+    }
     const episodeSource = completedSeries && omdbCompletedEpisodes.some((episode) => numericRating(episode.rating) > 0)
       ? 'OMDb'
       : hasLocalSpecials && hasTMDBSpecials
@@ -1059,11 +1117,13 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         || matchedTV?.summary
         || matchedTVDB?.summary
         || omdbMeta?.Plot
+        || cinemeta?.summary
         || ''
       : tmdbMeta?.summary
         || matchedTV?.summary
         || matchedTVDB?.summary
         || omdbMeta?.Plot
+        || cinemeta?.summary
         || '';
 
     return withCinemetaDefaults({
@@ -1085,7 +1145,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         ? movieMetadataRating(tmdbMeta, omdbMeta, matchedTV)
         : showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
       ratingSource: animeMovie || completedSeries ? 'OMDb' : 'TVmaze',
-      trailerUrl: tmdbMeta?.trailerUrl || matchedAniList?.trailerUrl || matchedJikan?.trailerUrl,
+      trailerUrl: tmdbMeta?.trailerUrl || matchedAniList?.trailerUrl || matchedJikan?.trailerUrl || cinemeta?.trailerUrl,
       runtime: tmdbMeta?.runtime || matchedAniList?.runtime || matchedJikan?.runtime,
       seasonCount: tmdbMeta?.seasonCount || matchedTV?.seasonCount || matchedJikan?.seasonCount || matchedTVDB?.seasonCount,
       episodeCount: tmdbMeta?.episodeCount || matchedTV?.episodeCount || matchedJikan?.episodeCount || matchedTVDB?.episodeCount,
@@ -1112,7 +1172,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         : tmdbMeta?.cast || matchedTV?.cast || matchedTVDB?.cast || [],
       streamingProviders: tmdbMeta?.streamingProviders,
       originPlatform: matchedTV?.originPlatform,
-    }, animeMovie ? 'movie' : 'series');
+    }, animeMovie ? 'movie' : 'series', cinemeta);
   }
 
   /* Candidates without provider scores can obtain IMDb, Rotten Tomatoes and
@@ -1546,7 +1606,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     const now = Date.now();
     const displayCategories: MetadataRefreshCategory[] = ['core', 'cast', 'artwork', 'ratings', 'episodes'];
-    const initialCategories = displayCategories.filter((category) => metadataCategoryIsDue(mediaId, category, now));
+    // A title still missing its trailer checks again weekly instead of monthly,
+    // since providers often add trailers after a title first appears.
+    const isDue = (item: MediaItem, category: MetadataRefreshCategory, at: number) => (
+      category === 'core' && !hasText(item.trailerUrl)
+        ? metadataCategoryIsDue(mediaId, category, at, MISSING_TRAILER_RETRY_MS)
+        : metadataCategoryIsDue(mediaId, category, at)
+    );
+    const initialCategories = displayCategories.filter((category) => isDue(initialTarget, category, now));
     if (initialCategories.length === 0) return false;
     const previousAttempt = displayMetadataRefreshState.get(mediaId);
     if (previousAttempt?.pending) return previousAttempt.pending;
@@ -1555,7 +1622,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const library = loadLibrary();
       const target = findLibraryMediaItem(library, mediaId);
       if (!target) return false;
-      const categories = displayCategories.filter((category) => metadataCategoryIsDue(mediaId, category, Date.now()));
+      const categories = displayCategories.filter((category) => isDue(target, category, Date.now()));
       if (categories.length === 0) return false;
       const refreshes = (category: MetadataRefreshCategory) => categories.includes(category);
 

@@ -110,7 +110,22 @@ const scanCacheRowSchema = z.object({
   item_count: z.number().finite().nonnegative(),
   scanned_at: z.number().finite().nonnegative(),
   ratings_refreshed_at: z.number().finite().nonnegative(),
+  child_signatures: nullableString,
 });
+
+const childSignaturesSchema = z.record(z.string().max(4096), z.string().max(256));
+
+function parseChildSignatures(value: string | null | undefined): Record<string, string> | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = childSignaturesSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
+  } catch { return undefined; }
+}
+
+function serializeChildSignatures(value: Record<string, string> | undefined): string {
+  return value && Object.keys(value).length ? JSON.stringify(value) : '';
+}
 
 function jsonString(value: unknown): string {
   return JSON.stringify(value ?? null);
@@ -268,6 +283,7 @@ export function loadLibrary(
       itemCount: row.item_count,
       scannedAt: row.scanned_at,
       ratingsRefreshedAt: row.ratings_refreshed_at || row.scanned_at,
+      childSignatures: parseChildSignatures(row.child_signatures),
     },
   ]));
 
@@ -486,8 +502,8 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
     }
 
     const insertScanCache = database.prepare(`
-      INSERT OR REPLACE INTO scan_cache (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at, ratings_refreshed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO scan_cache (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at, ratings_refreshed_at, child_signatures)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const [folder, entry] of Object.entries(data.scanCache || {})) {
       insertScanCache.run(
@@ -500,6 +516,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         entry.itemCount || 0,
         entry.scannedAt || now,
         entry.ratingsRefreshedAt || entry.scannedAt || now,
+        serializeChildSignatures(entry.childSignatures),
       );
     }
     database.prepare(`
@@ -686,11 +703,12 @@ export function saveLibraryScanDelta(
   const changes = database.prepare('SELECT total_changes() AS n');
   const before = (changes.get() as { n: number }).n;
   const cacheStatement = database.prepare(`INSERT INTO scan_cache
-    (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at, ratings_refreshed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at, ratings_refreshed_at, child_signatures)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(folder_path) DO UPDATE SET version=excluded.version, folder_kind=excluded.folder_kind,
     signature=excluded.signature, subtitle_profile=excluded.subtitle_profile, file_count=excluded.file_count,
-    item_count=excluded.item_count, scanned_at=excluded.scanned_at, ratings_refreshed_at=excluded.ratings_refreshed_at`);
+    item_count=excluded.item_count, scanned_at=excluded.scanned_at, ratings_refreshed_at=excluded.ratings_refreshed_at,
+    child_signatures=excluded.child_signatures`);
   const remove = database.prepare('DELETE FROM media_items WHERE id = ?');
   const removeMetadata = database.prepare('DELETE FROM media_metadata_refresh_state WHERE media_id = ?');
   database.transaction(() => {
@@ -706,7 +724,7 @@ export function saveLibraryScanDelta(
     }
     for (const [folder, entry] of Object.entries(cache)) cacheStatement.run(folder, entry.version ?? null,
       entry.folderKind, entry.signature, entry.subtitleProfile || '', entry.fileCount, entry.itemCount,
-      entry.scannedAt, entry.ratingsRefreshedAt || entry.scannedAt);
+      entry.scannedAt, entry.ratingsRefreshedAt || entry.scannedAt, serializeChildSignatures(entry.childSignatures));
   })();
   return (changes.get() as { n: number }).n - before;
 }

@@ -18,6 +18,7 @@ const ANILIST_DETAIL_QUERY = `
       startDate { year }
       coverImage { extraLarge large medium }
       bannerImage
+      trailer { id site }
       characters(page: 1, perPage: 20, sort: [ROLE, FAVOURITES_DESC]) {
         edges {
           node {
@@ -70,6 +71,7 @@ const aniListMediaSchema = z.object({
   startDate: z.object({ year: z.number().finite().nullable().optional() }).nullable().optional(),
   coverImage: aniListImageSchema.nullable().optional(),
   bannerImage: z.string().nullable().optional(),
+  trailer: z.object({ id: z.string().nullable().optional(), site: z.string().nullable().optional() }).nullable().optional(),
   characters: z.object({ edges: z.array(aniListCharacterEdgeSchema).nullable().optional() }).nullable().optional(),
 });
 
@@ -187,7 +189,16 @@ function mapAniListMedia(media: AniListMedia): AniListAnimeResult {
       : 0,
     genres: media.genres?.filter(Boolean) || [],
     cast: mapAniListCharacterEdges(media.characters?.edges || []),
+    trailerUrl: youtubeTrailerUrl(media.trailer),
   };
+}
+
+/** Loom plays YouTube trailers; AniList also lists Dailymotion ones, which are skipped. */
+function youtubeTrailerUrl(trailer: AniListMedia['trailer']): string | undefined {
+  const id = trailer?.id?.trim();
+  return id && trailer?.site?.toLowerCase() === 'youtube' && /^[\w-]{6,20}$/.test(id)
+    ? `https://www.youtube.com/watch?v=${id}`
+    : undefined;
 }
 
 export async function fetchAniListAnimeMetadata(
@@ -215,4 +226,103 @@ export async function fetchAniListAnimeMetadata(
 
 export async function fetchAniListAnimeCast(malId: number, title: string): Promise<MediaItem['cast']> {
   return (await fetchAniListAnimeMetadata(malId, title))?.cast || [];
+}
+
+const ANILIST_SCHEDULE_QUERY = `
+  query ($ids: [Int]) {
+    Page(perPage: 50) {
+      media(idMal_in: $ids, type: ANIME) {
+        idMal
+        episodes
+        status
+        startDate { year month day }
+        endDate { year month day }
+        nextAiringEpisode { episode airingAt }
+        airingSchedule(perPage: 50) { nodes { episode airingAt } }
+      }
+    }
+  }
+`;
+
+const aniListFuzzyDateSchema = z.object({
+  year: z.number().int().nullable().optional(),
+  month: z.number().int().nullable().optional(),
+  day: z.number().int().nullable().optional(),
+}).nullable().optional();
+
+const aniListScheduleSchema = z.object({
+  data: z.object({
+    Page: z.object({
+      media: z.array(z.object({
+        idMal: z.number().int().nullable().optional(),
+        episodes: z.number().int().nonnegative().nullable().optional(),
+        status: z.string().nullable().optional(),
+        startDate: aniListFuzzyDateSchema,
+        endDate: aniListFuzzyDateSchema,
+        nextAiringEpisode: z.object({ episode: z.number().int().positive(), airingAt: z.number().int() }).nullable().optional(),
+        airingSchedule: z.object({
+          nodes: z.array(z.object({ episode: z.number().int().positive(), airingAt: z.number().int() }).nullable()).nullable().optional(),
+        }).nullable().optional(),
+      }).nullable()).nullable().optional(),
+    }).nullable().optional(),
+  }).nullable().optional(),
+  errors: z.array(z.object({ message: z.string().optional() })).optional(),
+});
+
+/** An episode number with its first airing day (YYYY-MM-DD, local time). */
+export type AnimeAiring = { episode: number; airDate: string };
+
+function localDay(epochSeconds: number): string {
+  const date = new Date(epochSeconds * 1000);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function fuzzyDay(value: z.infer<typeof aniListFuzzyDateSchema>): string | null {
+  if (!value?.year) return null;
+  return `${value.year}-${String(value.month || 1).padStart(2, '0')}-${String(value.day || 1).padStart(2, '0')}`;
+}
+
+/**
+ * Each episode's airing day for the given MAL IDs, from one AniList request
+ * per 50 titles. Episodes AniList has no exact time for are dated from the
+ * season's start or end so aired ones still count as aired; episodes with no
+ * known date and not yet aired are left out.
+ */
+export async function fetchAniListAiringSchedules(malIds: readonly number[]): Promise<Map<number, AnimeAiring[]>> {
+  const result = new Map<number, AnimeAiring[]>();
+  const unique = [...new Set(malIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  for (let start = 0; start < unique.length; start += 50) {
+    const ids = unique.slice(start, start + 50);
+    const response = await safeFetch(
+      ANILIST_API_URL,
+      {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ query: ANILIST_SCHEDULE_QUERY, variables: { ids } }),
+      },
+      { allowedHosts: ['graphql.anilist.co'], timeoutMs: 12_000, maxBytes: 1_500_000, retries: 1 },
+    );
+    if (!response.ok) throw new Error(`AniList request failed: ${response.status}`);
+    const payload = aniListScheduleSchema.parse(await response.json());
+    if (payload.errors?.length) throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
+    for (const media of payload.data?.Page?.media || []) {
+      if (!media?.idMal) continue;
+      const exact = new Map<number, string>();
+      for (const node of media.airingSchedule?.nodes || []) if (node) exact.set(node.episode, localDay(node.airingAt));
+      const next = media.nextAiringEpisode;
+      if (next) exact.set(next.episode, localDay(next.airingAt));
+      const finished = media.status === 'FINISHED';
+      // Before this episode everything has aired; FINISHED means all of it has.
+      const airedBefore = next ? next.episode : finished ? Infinity : 0;
+      const fallbackDay = fuzzyDay(media.endDate) || fuzzyDay(media.startDate);
+      const last = Math.max(media.episodes || 0, next?.episode || 0, ...exact.keys());
+      const airings: AnimeAiring[] = [];
+      for (let episode = 1; episode <= last; episode += 1) {
+        const airDate = exact.get(episode) ?? (episode < airedBefore && fallbackDay ? fallbackDay : null);
+        if (airDate) airings.push({ episode, airDate });
+      }
+      result.set(media.idMal, airings);
+    }
+  }
+  return result;
 }

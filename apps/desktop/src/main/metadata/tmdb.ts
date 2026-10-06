@@ -48,6 +48,7 @@ interface TMDBVideo {
   site?: string;
   type?: string;
   official?: boolean;
+  iso_639_1?: string | null;
 }
 
 interface TMDBImage {
@@ -145,6 +146,7 @@ const tmdbVideoSchema: z.ZodType<TMDBVideo> = z.object({
   site: z.string().optional(),
   type: z.string().optional(),
   official: z.boolean().optional(),
+  iso_639_1: z.string().nullable().optional(),
 });
 const tmdbImageSchema: z.ZodType<TMDBImage> = z.object({
   file_path: z.string().nullable().optional(),
@@ -234,6 +236,9 @@ async function fetchTMDBJson<TSchema extends z.ZodType>(
 
   const url = new URL(`https://api.themoviedb.org/3/${path}`);
   url.searchParams.set('language', 'en-US');
+  // `language` alone filters videos to English, which drops the only trailer
+  // most anime and many foreign titles have.
+  if (/[?&]append_to_response=[^&]*\bvideos\b/.test(path)) url.searchParams.set('include_video_language', 'en,null,ja,ko,zh,es,fr,de,it,pt,hi');
 
   const requestInit: RequestInit = {};
   if (isTMDBReadAccessToken(credential)) {
@@ -312,9 +317,12 @@ function tmdbTrailerUrl(d: TMDBMedia): string {
   const trailer = [...videos]
     .filter((video) => video.key && video.site?.toLowerCase() === 'youtube')
     .sort((left, right) => {
+      // A trailer beats a teaser, an official video beats a fan upload, and
+      // English is preferred over the other languages now requested.
       const score = (video: TMDBVideo) => (
-        (video.type?.toLowerCase() === 'trailer' ? 2 : 0)
-        + (video.official ? 1 : 0)
+        (video.type?.toLowerCase() === 'trailer' ? 4 : 0)
+        + (video.official ? 2 : 0)
+        + (video.iso_639_1 === 'en' ? 1 : 0)
       );
       return score(right) - score(left);
     })[0];

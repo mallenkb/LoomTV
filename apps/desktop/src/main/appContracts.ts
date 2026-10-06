@@ -25,6 +25,8 @@ export interface ScanCacheEntry {
   itemCount: number;
   scannedAt: number;
   ratingsRefreshedAt?: number;
+  /** Fingerprint of each top-level folder, so one changed show does not rebuild its siblings. */
+  childSignatures?: Record<string, string>;
 }
 
 export type LibraryScanCache = Record<string, ScanCacheEntry>;

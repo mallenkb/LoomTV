@@ -291,6 +291,7 @@ export type DesktopBridgeApi = {
       libraryEpisodeUpdates?: () => Promise<LibraryEpisodeUpdates>;
       libraryHealth?: () => Promise<LibraryHealthReport>;
       onLibraryFilesOrganized?: (callback: (result: { renamed: number }) => void) => () => void;
+      onLibraryEpisodeUpdatesChanged?: (callback: () => void) => () => void;
       listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
       explainIptvChannel?: (reference: string) => Promise<string | null>;
       iptvGuide?: (references: string[], fromMs: number, toMs: number) => Promise<IptvGuide>;
@@ -1493,6 +1494,9 @@ const desktopTransport = {
   /** Automatic organizing after a sync renamed files; the library should be re-read. */
   onLibraryFilesOrganized(callback: (result: { renamed: number }) => void): () => void {
     return window.desktopApi?.onLibraryFilesOrganized?.(callback) ?? (() => undefined);
+  },
+  onLibraryEpisodeUpdatesChanged(callback: () => void): () => void {
+    return window.desktopApi?.onLibraryEpisodeUpdatesChanged?.(callback) ?? (() => undefined);
   },
 
   async undoMediaRename(batchId: string): Promise<MediaRenameBatch[]> {

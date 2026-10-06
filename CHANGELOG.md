@@ -4,6 +4,14 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.11](docs/releases/v2.0.11.md)
+
+Adds Cinemeta defaults and live IMDb ratings, English TheTVDB metadata, smaller artwork controls, rewind on resume, and import-specific organization and recovery improvements.
+
+### [2.0.10](docs/releases/v2.0.10.md)
+
+Moves artwork decoding, media probing, and LibVLC teardown off the desktop main thread, adds startup code caches, and protects file organization while downloads are unfinished.
+
 ### [2.0.9](docs/releases/v2.0.9.md)
 
 Adds recoverable library organization and cleanup, reduces desktop playback memory use, and integrates the first local photo, audio, and reading-library implementations.

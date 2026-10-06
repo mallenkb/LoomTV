@@ -37,3 +37,47 @@ export function canCheckUnchangedRoot(options: {
   }
   return true;
 }
+
+/**
+ * Saved items for each top-level folder of `root` whose file fingerprint is
+ * unchanged, keyed by the folder's absolute path. A folder is reused only when
+ * every saved item touching it lives entirely inside it, so items that span
+ * folders, or sit directly in the root, are always rebuilt.
+ */
+export function reusableChildFolders(
+  root: string,
+  cachedItems: readonly MediaItem[],
+  previous: Readonly<Record<string, string>>,
+  current: Readonly<Record<string, string>>,
+  requireCompleteMetadata: boolean,
+): Map<string, MediaItem[]> {
+  const rootPath = path.resolve(root);
+  const childOf = (filePath: string | undefined) => {
+    if (!filePath) return undefined;
+    const relative = path.relative(rootPath, path.resolve(filePath));
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+    const name = relative.split(path.sep)[0];
+    return Object.hasOwn(current, name) ? name : undefined;
+  };
+  const groups = new Map<string, MediaItem[]>();
+  const unsafe = new Set<string>();
+  for (const item of cachedItems) {
+    const paths = [item.filePath, ...(item.episodeFiles || []).map((file) => file.filePath)].filter(Boolean);
+    const children = new Set(paths.map(childOf));
+    const [only] = children;
+    if (children.size !== 1 || !only) {
+      for (const child of children) if (child) unsafe.add(child);
+      continue;
+    }
+    const group = groups.get(only) ?? [];
+    group.push(item);
+    groups.set(only, group);
+  }
+  const reusable = new Map<string, MediaItem[]>();
+  for (const [name, items] of groups) {
+    if (unsafe.has(name) || !previous[name] || previous[name] !== current[name]) continue;
+    if (requireCompleteMetadata && !cachedItemsAreComplete(items)) continue;
+    reusable.set(path.join(rootPath, name), items);
+  }
+  return reusable;
+}

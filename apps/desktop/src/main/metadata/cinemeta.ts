@@ -8,13 +8,14 @@ const METADATA_ORIGIN = 'https://cinemeta-live.strem.io';
 const IMDB_ID = /^tt\d{5,12}$/;
 const MAX_CANDIDATES = 5;
 const optionalText = z.string().nullable().optional();
+const videoInteger = z.union([z.number().int().nonnegative(), z.string().regex(/^\d{1,9}$/).transform(Number)]);
 const videoSchema = z.object({
-  id: z.string(),
+  id: optionalText,
   title: optionalText,
   name: optionalText,
-  season: z.number().int().nonnegative().nullable().optional(),
-  episode: z.number().int().positive().nullable().optional(),
-  number: z.number().int().positive().nullable().optional(),
+  season: videoInteger.nullable().optional(),
+  episode: videoInteger.refine((value) => value > 0).nullable().optional(),
+  number: videoInteger.refine((value) => value > 0).nullable().optional(),
   overview: optionalText,
   description: optionalText,
   thumbnail: optionalText,
@@ -37,9 +38,14 @@ const metaSchema = z.object({
   imdbRating: z.union([z.string(), z.number().finite()]).nullable().optional(),
   genres: z.array(z.string()).max(100).nullable().optional(),
   cast: z.array(z.string()).max(500).nullable().optional(),
-  videos: z.array(videoSchema).max(20_000).nullable().optional(),
+  trailerStreams: z.array(z.object({ ytId: optionalText }).nullable()).max(100).nullable().optional(),
+  videos: z.array(videoSchema.nullable()).max(20_000).nullable().optional(),
 });
-type CinemetaMeta = z.infer<typeof metaSchema>;
+type CinemetaPayload = z.infer<typeof metaSchema>;
+export type CinemetaMeta = Partial<MediaItem> & {
+  title: string; poster: string; backdrop: string; logo: string;
+  summary: string; rating: number; genres: string[]; episodes: EpisodeMeta[];
+};
 
 function artworkUrl(value?: string | null): string {
   if (!value || value.length > 8192) return '';
@@ -51,20 +57,22 @@ function artworkUrl(value?: string | null): string {
   }
 }
 
-function metadataYear(meta: CinemetaMeta): number | undefined {
+function metadataYear(meta: CinemetaPayload): number | undefined {
   const value = meta.releaseInfo?.match(/^\d{4}/)?.[0] || meta.released?.match(/^\d{4}/)?.[0];
   return value ? Number(value) : undefined;
 }
 
-function normalizeMetadata(meta: CinemetaMeta): Partial<MediaItem> {
+function normalizeMetadata(meta: CinemetaPayload): Partial<MediaItem> {
   const poster = artworkUrl(meta.poster);
   const backdrop = artworkUrl(meta.background);
   const logo = artworkUrl(meta.logo);
   const rating = Number(meta.imdbRating);
+  const trailerId = meta.trailerStreams?.find((stream) => stream?.ytId && /^[\w-]{6,20}$/.test(stream.ytId))?.ytId;
   const episodesByKey = new Map<string, EpisodeMeta>();
   if (meta.type === 'series') {
     for (const video of meta.videos || []) {
-      const parts = /^tt\d+:(\d+):(\d+)$/.exec(video.id);
+      if (!video) continue;
+      const parts = /^tt\d+:(\d+):(\d+)$/.exec(video.id || '');
       const season = video.season ?? (parts ? Number(parts[1]) : undefined);
       const number = video.episode ?? video.number ?? (parts ? Number(parts[2]) : undefined);
       if (season === undefined || number === undefined || number < 1) continue;
@@ -95,6 +103,7 @@ function normalizeMetadata(meta: CinemetaMeta): Partial<MediaItem> {
     providerRatings: Number.isFinite(rating) && rating > 0 && rating <= 10
       ? { imdb: { value: rating, scale: 10 } } : undefined,
     runtime: meta.runtime?.trim() || undefined,
+    trailerUrl: trailerId ? `https://www.youtube.com/watch?v=${trailerId}` : undefined,
     genres: meta.genres || [],
     cast: (meta.cast || []).map((name) => ({ name, character: '', image: '' })),
     ...(episodes.length ? {
@@ -106,6 +115,28 @@ function normalizeMetadata(meta: CinemetaMeta): Partial<MediaItem> {
         episodeCount: episodes.filter((episode) => episode.season === number).length,
       })),
     } : {}),
+  };
+}
+
+export async function fetchCinemetaMeta(
+  type: 'movie' | 'series',
+  imdbId: string | undefined,
+): Promise<CinemetaMeta | null> {
+  const id = imdbId?.trim();
+  if (!id || !IMDB_ID.test(id)) return null;
+  const result = z.object({ meta: metaSchema.nullable() }).parse(await requestJson(`meta/${type}/${id}.json`));
+  if (!result.meta || result.meta.id !== id || result.meta.type !== type) return null;
+  const metadata = normalizeMetadata(result.meta);
+  return {
+    ...metadata,
+    title: metadata.title || '',
+    poster: metadata.poster || '',
+    backdrop: metadata.backdrop || '',
+    logo: metadata.logo || '',
+    summary: metadata.summary || '',
+    rating: metadata.rating || 0,
+    genres: metadata.genres || [],
+    episodes: metadata.episodes || [],
   };
 }
 

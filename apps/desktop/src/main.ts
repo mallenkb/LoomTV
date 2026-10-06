@@ -2,7 +2,7 @@ import { scanMetrics, startScanMetrics, measureScanWork } from './main/scanning/
 import { startMemoryMetrics } from './main/memoryMetrics.ts';
 import { discoverLibraryRoot, inspectLibraryRoot, scannerBinaryPath, type DiscoveryEngine } from './main/scanning/discover.ts';
 import { collectArtworkSourcesForCache } from './main/artworkCache';
-import { canCheckUnchangedRoot } from './main/scanning/quickScanCache';
+import { canCheckUnchangedRoot, reusableChildFolders } from './main/scanning/quickScanCache';
 import { scanInventory, type DiscoveryInventory } from './main/scanning/inventory.ts';
 import { isCurrentScanCommit, planScanDelta, scanCommits } from './main/scanning/scanPersistence.ts';
 import { hasScannerProcesses, stopScannerProcesses } from './main/scanning/rustScannerClient.ts';
@@ -29,6 +29,7 @@ import { promisify } from 'node:util';
 import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
 import { startMainThreadWatchdog } from './main/mainThreadWatchdog.ts';
+import { startProviderHealthStore } from './main/providerHealthStore.ts';
 import { initializeStartupTimings, recordStartupMark, flushStartupTimings } from './main/startupTiming.ts';
 
 import {
@@ -121,7 +122,8 @@ import {
 } from './main/fileRename/matchConfirmation.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
-import { loadShowSchedules } from './main/showSchedule.ts';
+import { fetchCinemetaMeta } from './main/metadata/cinemeta.ts';
+import { createScheduleFetchers, readShowSchedules, refreshShowSchedules } from './main/showSchedule.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
   createWindow,
@@ -325,9 +327,7 @@ import { fetchAniListAnimeMetadata } from './main/metadata/anilist';
 import { fetchCinemetaMetadataCandidates } from './main/metadata/cinemeta';
 import {
   fetchFanartMovieArtwork,
-  fetchFanartMovieLogos,
   fetchFanartTVArtwork,
-  fetchFanartTVLogos,
 } from './main/metadata/fanart';
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
@@ -688,8 +688,9 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   fetchTVMetadataById: metadataRequestWhenOnline(fetchTVMetadataById, () => null),
   fetchCinemetaMetadataCandidates: metadataRequestWhenOnline(fetchCinemetaMetadataCandidates, () => []),
   extractSeasons,
-  fetchFanartMovieLogos: metadataRequestWhenOnline(fetchFanartMovieLogos, () => []),
-  fetchFanartTVLogos: metadataRequestWhenOnline(fetchFanartTVLogos, () => []),
+  fetchFanartMovieArtwork: metadataRequestWhenOnline(fetchFanartMovieArtwork, () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] })),
+  fetchFanartTVArtwork: metadataRequestWhenOnline(fetchFanartTVArtwork, () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] })),
+  fetchCinemetaMeta: metadataRequestWhenOnline(fetchCinemetaMeta, () => null),
   fetchAniListAnimeMetadata: metadataRequestWhenOnline(fetchAniListAnimeMetadata, () => null),
   fetchJikanEpisodesForLocalAnimeSeasons: metadataRequestWhenOnline(
     fetchJikanEpisodesForLocalAnimeSeasons,
@@ -986,7 +987,26 @@ async function scanLibrary(
           }
         }
 
-        const folderCtx: ScanContext = folderKind === 'auto' ? { ...ctx } : { ...ctx, folderKind };
+        // A changed root is usually one new episode. Rebuild only the
+        // top-level folders whose files changed and keep the rest as saved,
+        // when nothing else (version, providers, ratings age, a forced or
+        // metadata scan) asks for the whole root to be refreshed.
+        const childSignatures = await inventory.childSignaturesAsync();
+        const canReuseChildren = mode === 'quick'
+          && cachedEntry?.version === SCAN_CACHE_VERSION
+          && cachedEntry.folderKind === folderKind
+          && (cachedEntry.subtitleProfile || '') === metadataProviderProfile
+          && ratingsAreFresh
+          && Boolean(cachedEntry.childSignatures);
+        const reusableChildren = canReuseChildren
+          ? reusableChildFolders(folder, cachedItems, cachedEntry?.childSignatures || {}, childSignatures,
+            missingMetadataRetryIsDue)
+          : new Map<string, MediaItem[]>();
+        const folderCtx: ScanContext = {
+          ...ctx,
+          ...(folderKind === 'auto' ? {} : { folderKind }),
+          reuseDirectory: (fullPath) => reusableChildren.get(path.resolve(fullPath)),
+        };
         const directItem = await scanDirectoryAsItem(folder, folderCtx);
         if (directItem) inventory.stageItems(preserveItems([directItem]));
         else await scanFolder(folder, folderCtx, (partialItems) => { inventory.stageItems(preserveItems(partialItems)); }, false);
@@ -1004,7 +1024,11 @@ async function scanLibrary(
             ratingsRefreshedAt: refreshProviderRatings
               ? Date.now()
               : cachedEntry?.ratingsRefreshedAt || cachedEntry?.scannedAt || Date.now(),
+            childSignatures,
           };
+          if (reusableChildren.size) {
+            console.info('[scanner] reused unchanged folders', JSON.stringify({ root: path.basename(folder), reused: reusableChildren.size, total: Object.keys(childSignatures).length }));
+          }
         }
         if (!(await fs.promises.stat(folder)).isDirectory()) throw new Error('Library root disappeared during scanning.');
         completedRoots.add(folder);
@@ -1581,6 +1605,7 @@ const {
   fetchCinemetaMetadataCandidates,
   fetchFanartMovieArtwork,
   fetchFanartTVArtwork,
+  fetchCinemetaMeta: metadataRequestWhenOnline(fetchCinemetaMeta, () => null),
   fetchJikanMetadata,
   fetchJikanMetadataCandidates,
   fetchOMDbMetadata,
@@ -2044,7 +2069,7 @@ const mediaRenameHandlers = {
       progress: getAllProgress(profileId),
       now: Date.now(),
       seen: firstSeenDates(),
-      schedules: await showSchedulesFor(items),
+      schedules: showSchedulesFor(items),
     });
   },
   libraryHealth: async () => {
@@ -2054,7 +2079,7 @@ const mediaRenameHandlers = {
       progress: profileId ? getAllProgress(profileId) : {},
       now: Date.now(),
       seen: firstSeenDates(),
-      schedules: await showSchedulesFor(items),
+      schedules: showSchedulesFor(items),
     });
     const skipped = mediaRenameExecutor.plan().skipped
       .map((skip) => ({ title: skip.mediaTitle, fileName: path.basename(skip.filePath), reason: skip.reason }));
@@ -2075,9 +2100,33 @@ const mediaRenameHandlers = {
   },
 };
 
+let scheduleRefresh: Promise<void> | null = null;
+const scheduleFetchers = createScheduleFetchers({
+  tvdb: () => getMetadataApiKey(loadSettings(), 'tvdb') || '',
+  tmdb: () => getMetadataApiKey(loadSettings(), 'tmdb') || '',
+});
+
+/**
+ * Cached full episode lists, returned at once so the next episode and missing
+ * episodes show without waiting on TVmaze or AniList. Stale lists refresh in
+ * the background (one refresh at a time), and windows are told to re-read
+ * when anything changed.
+ */
 function showSchedulesFor(items: MediaItem[]) {
   const offline = loadMetadataOfflineModeFromDatabase() ?? Boolean(loadSettings().metadataOfflineMode);
-  return loadShowSchedules(getMediaRenameDatabase(), items, { offline });
+  const database = getMediaRenameDatabase();
+  const { schedules, stale } = readShowSchedules(database, items, { offline });
+  if (stale.length && !scheduleRefresh) {
+    scheduleRefresh = refreshShowSchedules(database, stale, { fetchers: scheduleFetchers })
+      .then((changed) => {
+        if (!changed) return;
+        const window = getMainWindow();
+        if (window && !window.isDestroyed()) window.webContents.send('library:episode-updates-changed');
+      })
+      .catch((error) => console.warn('[schedule] Background refresh failed:', describeErrorForLog(error)))
+      .finally(() => { scheduleRefresh = null; });
+  }
+  return schedules;
 }
 
 /** Records newly seen titles and episodes (whole library, every profile) and returns all dates. */
@@ -2959,6 +3008,7 @@ async function startBackgroundServices(): Promise<void> {
 app.whenReady().then(async () => {
   recordStartupMark('appReady');
   startMainThreadWatchdog(app.getPath('userData'));
+  void startProviderHealthStore(app.getPath('userData'));
   startMemoryMetrics();
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');

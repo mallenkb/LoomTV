@@ -156,6 +156,7 @@ function artworkProviderLabel(url: string, fallback: OfficialMetadataCandidate['
     if (host.includes('tmdb.org')) return 'TMDB';
     if (host.includes('fanart.tv')) return 'Fanart.tv';
     if (host.includes('thetvdb.com')) return 'TVDB';
+    if (host.includes('metahub.space')) return 'Cinemeta';
   } catch {
     // Non-URL artwork keeps the metadata provider label.
   }

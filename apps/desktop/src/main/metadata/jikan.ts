@@ -64,6 +64,7 @@ const jikanAnimeHitSchema = z.object({
   year: z.number().finite().nullable().optional(),
   aired: z.object({ from: z.string().nullable().optional() }).optional(),
   rating: z.string().nullable().optional(),
+  trailer: z.object({ youtube_id: z.string().nullable().optional() }).nullable().optional(),
 });
 
 type JikanEpisodeEntry = z.infer<typeof jikanEpisodeEntrySchema>;
@@ -87,7 +88,7 @@ async function jikanDelay(): Promise<void> {
 
 async function jikanFetch<TSchema extends z.ZodType>(path: string, schema: TSchema): Promise<z.output<TSchema>> {
   await jikanDelay();
-  const res = await safeFetch(`https://api.jikan.moe/v4${path}`, {}, { allowedHosts: ['api.jikan.moe'], retries: 2 });
+  const res = await safeFetch(`https://api.jikan.moe/v4${path}`, {}, { allowedHosts: ['api.jikan.moe'], retries: 2, timeoutMs: 5_000 });
   if (!res.ok) throw new Error(`Jikan ${path} → ${res.status}`);
   return schema.parse(await res.json());
 }
@@ -324,13 +325,17 @@ export async function fetchJikanMetadata(title: string, knownMalId?: number): Pr
       summary: hit.synopsis || '',
       rating: hit.score ?? 0,
       contentRatings: jikanContentRating(hit.rating),
+      trailerUrl: hit.trailer?.youtube_id && /^[\w-]{6,20}$/.test(hit.trailer.youtube_id)
+        ? `https://www.youtube.com/watch?v=${hit.trailer.youtube_id}`
+        : undefined,
       genres: (hit.genres ?? []).flatMap((genre) => genre.name ? [genre.name] : []),
       year: hit.year ?? (hit.aired?.from ? new Date(hit.aired.from).getFullYear() : 0),
       cast,
       episodes,
     };
   } catch (err) {
-    console.error('[Jikan]', err);
+    // A skipped provider was already reported once when it stopped answering.
+    if (!(err instanceof Error && err.name === 'ProviderUnreachableError')) console.error('[Jikan]', err);
     return null;
   }
 }
