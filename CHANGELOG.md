@@ -6,7 +6,7 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ### [2.0.14](docs/releases/v2.0.14.md)
 
-Preserves Cinemeta release years when combining metadata picker results.
+Republishes the Electron desktop app with no app-code changes since 2.0.13.
 
 ### [2.0.13](docs/releases/v2.0.13.md)
 
