@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.17](docs/releases/v2.0.17.md)
+
+Gives the next-episode countdown 20 pixels of right padding while preserving the compact calendar layout.
+
 ### [2.0.16](docs/releases/v2.0.16.md)
 
 Adds the compact next-episode calendar card with clearer month labels, episode codes, a larger countdown, and tighter spacing.
