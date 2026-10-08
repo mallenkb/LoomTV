@@ -90,6 +90,8 @@ export interface CanonicalRuntimeOptions {
 export interface CanonicalVideoServer {
   address(): { host: string; port: number };
   start(): Promise<{ host: string; port: number }>;
+  /** In-process native access only; unavailable to standalone hosts or HTTP callers. */
+  createDesktopOwnerSession(): Promise<{ adminToken: string; expiresAt: number }>;
   stop(): Promise<void>;
 }
 

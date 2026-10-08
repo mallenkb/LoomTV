@@ -1175,3 +1175,35 @@ test('completed full and quick scans persist missing sources while retaining off
     assert.equal(store.readAdminState().catalog.find((item) => item.id === missing.id).available, false);
   });
 });
+
+test('a native owner session authenticates as the owner, expires, and needs a configured owner', async () => {
+  const { service: fresh } = await makeService();
+  await assert.rejects(() => fresh.createNativeOwnerSession(), { code: 'owner_required' });
+
+  const { service } = await onboardedService();
+  const session = await service.createNativeOwnerSession();
+  assert.ok(session.adminToken);
+  assert.ok(Number.isFinite(session.expiresAt) && session.expiresAt > Date.now());
+  const principal = await service.authenticateRequest(bearer(session.adminToken));
+  assert.equal(principal?.role, 'owner');
+});
+
+test('a standalone server never issues native owner sessions', async () => {
+  const { createCanonicalVideoServer } = await import('../src/server.js');
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-native-owner-'));
+  const server = createCanonicalVideoServer({
+    host: '127.0.0.1', port: 0, version: 'test',
+    paths: { dataDir, cacheDir: dataDir, mediaDir: dataDir },
+  });
+  await assert.rejects(() => server.createDesktopOwnerSession(), { code: 'native_owner_access_unavailable' });
+  await fs.rm(dataDir, { recursive: true, force: true });
+});
+
+test('no HTTP route exposes native owner session creation', async () => {
+  const sources = await Promise.all(['public-api.js', 'admin-api.js', 'server.js', 'web-app.js'].map(async (name) => (
+    fs.readFile(new URL(`../src/${name}`, import.meta.url), 'utf8').catch(() => '')
+  )));
+  const callers = sources.map((source, index) => [index, (source.match(/createNativeOwnerSession|createDesktopOwnerSession/g) || []).length]);
+  // server.js defines the in-process method; nothing else may call it.
+  assert.deepEqual(callers.filter(([, count]) => count > 0).map(([index]) => index), [2]);
+});

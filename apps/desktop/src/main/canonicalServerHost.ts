@@ -120,6 +120,11 @@ export function createCanonicalServerHost(options: CanonicalServerHostOptions) {
       return runtime?.address() || null;
     },
 
+    async createDesktopOwnerSession(): Promise<{ adminToken: string; expiresAt: number }> {
+      if (!runtime || stopPromise) throw new Error('The canonical desktop host is not running.');
+      return runtime.createDesktopOwnerSession();
+    },
+
     async stop(): Promise<void> {
       if (!stopPromise) {
         stopPromise = (async () => {

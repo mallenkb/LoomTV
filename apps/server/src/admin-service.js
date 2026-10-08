@@ -1570,6 +1570,16 @@ export function createHeadlessAdminService(options) {
       }
     },
 
+    // In-process desktop host only. There is deliberately no HTTP route for
+    // obtaining an owner session without the account password.
+    async createNativeOwnerSession() {
+      const state = await loadState();
+      if (!state.owner) throw Object.assign(new Error('Configure the owner before requesting native access.'), {
+        status: 409, code: 'owner_required',
+      });
+      return issueToken(state, publicOwnerPrincipal(state.owner));
+    },
+
     /** @param {Record<string, unknown>} input */
     async createSession(input) {
       const state = await loadState();

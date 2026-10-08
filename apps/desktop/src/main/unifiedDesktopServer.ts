@@ -20,6 +20,12 @@ import { decryptLocalSecret, encryptLocalSecret, localSecretStorage } from './lo
 
 type ProtectedSecret = { version: 1; encrypted: string };
 type ApiEnvelope<T> = { ok?: boolean; data?: T; error?: { message?: string } };
+type LocalRequestOptions = {
+  method?: 'GET' | 'POST' | 'DELETE';
+  body?: Record<string, unknown>;
+  token?: string;
+  trustedSetup?: boolean;
+};
 
 const TEST_FLAG = 'LOOMTV_UNIFIED_DESKTOP';
 const BOOTSTRAP_SECRET_NAME = 'canonical-bootstrap.secure.json';
@@ -31,6 +37,8 @@ let origin = '';
 let bootstrapSecret: string | null = null;
 let desktopSetupToken = '';
 let adminToken: string | null = null;
+let adminTokenExpiresAt = 0;
+let adminTokenRefresh: Promise<string> | null = null;
 let certificatePinInstalled = false;
 let setupRequired = false;
 let restoredAdminOnly = false;
@@ -126,12 +134,7 @@ function removeBootstrapSecret(dataDir: string): void {
   bootstrapSecret = null;
 }
 
-function requestJson<T>(pathname: string, requestIdentity: LanTlsIdentity, options: {
-  method?: 'GET' | 'POST' | 'DELETE';
-  body?: Record<string, unknown>;
-  token?: string;
-  trustedSetup?: boolean;
-} = {}): Promise<T> {
+function requestJson<T>(pathname: string, requestIdentity: LanTlsIdentity, options: LocalRequestOptions = {}): Promise<T> {
   if (!origin) return Promise.reject(new Error('The unified LoomTV server is not running.'));
   const url = new URL(pathname, origin);
   const body = options.body ? JSON.stringify(options.body) : undefined;
@@ -173,7 +176,9 @@ function requestJson<T>(pathname: string, requestIdentity: LanTlsIdentity, optio
           }
           const payload = JSON.parse(responseBody) as ApiEnvelope<T>;
           if ((response.statusCode || 500) >= 400 || payload.ok === false) {
-            reject(new Error(payload.error?.message || `The local LoomTV server rejected the request (${response.statusCode || 500}).`));
+            reject(Object.assign(new Error(payload.error?.message || `The local LoomTV server rejected the request (${response.statusCode || 500}).`), {
+              status: response.statusCode || 500,
+            }));
             return;
           }
           resolve((payload.data ?? payload) as T);
@@ -187,6 +192,59 @@ function requestJson<T>(pathname: string, requestIdentity: LanTlsIdentity, optio
     if (body) request.write(body);
     request.end();
   });
+}
+
+async function ensureNativeOwnerSession(): Promise<string> {
+  const currentHost = host;
+  const currentIdentity = identity;
+  if (!currentHost || !currentIdentity || !origin || restoredAdminOnly) {
+    throw new Error('The unified desktop host is not available for native access.');
+  }
+  if (adminToken && adminTokenExpiresAt > Date.now() + 30_000) return adminToken;
+  if (adminTokenRefresh) return adminTokenRefresh;
+  // The in-process host issues a normal expiring session. Neither the owner
+  // password nor a bearer credential needs to be saved on disk.
+  const pending = currentHost.createDesktopOwnerSession().then((session) => {
+    if (host !== currentHost || identity !== currentIdentity || restoredAdminOnly) {
+      throw new Error('The unified desktop host changed during authentication.');
+    }
+    if (!session.adminToken || !Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
+      throw new Error('The unified desktop host returned an expired native session.');
+    }
+    adminToken = session.adminToken;
+    adminTokenExpiresAt = session.expiresAt;
+    return session.adminToken;
+  });
+  adminTokenRefresh = pending;
+  try {
+    return await pending;
+  } finally {
+    if (adminTokenRefresh === pending) adminTokenRefresh = null;
+  }
+}
+
+async function requestNativeJson<T>(pathname: string, options: Pick<LocalRequestOptions, 'method' | 'body'> = {}): Promise<T> {
+  const requestIdentity = identity;
+  const requestHost = host;
+  if (!requestIdentity || !requestHost) throw new Error('The unified desktop host is not running.');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await ensureNativeOwnerSession();
+    if (identity !== requestIdentity || host !== requestHost) {
+      throw new Error('The unified desktop host changed before the request.');
+    }
+    try {
+      return await requestJson<T>(pathname, requestIdentity, { ...options, token });
+    } catch (error) {
+      // Authentication is checked before a root mutation, so one retry after
+      // an expired/revoked credential cannot duplicate an accepted mutation.
+      if (attempt || (error as { status?: number } | null)?.status !== 401) throw error;
+      if (adminToken === token) {
+        adminToken = null;
+        adminTokenExpiresAt = 0;
+      }
+    }
+  }
+  throw new Error('The unified desktop request could not be authenticated.');
 }
 
 function installCanonicalCertificatePin(): void {
@@ -221,14 +279,10 @@ export function getUnifiedDesktopLanAdvertisement(): { port: number; certFingerp
 }
 
 async function ensureCanonicalProfile(name: string): Promise<void> {
-  if (!identity || !adminToken) return;
-  const listed = await requestJson<{ profiles: Array<{ name?: string }> }>('/api/v1/profiles', identity, {
-    token: adminToken,
-  });
+  const listed = await requestNativeJson<{ profiles: Array<{ name?: string }> }>('/api/v1/profiles');
   if (listed.profiles.some((profile) => profile.name === name)) return;
-  await requestJson('/api/v1/profiles', identity, {
+  await requestNativeJson('/api/v1/profiles', {
     method: 'POST',
-    token: adminToken,
     body: { name },
   });
 }
@@ -305,8 +359,9 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
       },
       setupHooks: restoredAdminOnly ? undefined : {
         ...setupHooks,
-        ownerCreated: ({ adminToken: createdToken }) => {
+        ownerCreated: ({ adminToken: createdToken, expiresAt }) => {
           adminToken = createdToken;
+          adminTokenExpiresAt = expiresAt;
         },
       },
       adminHtmlPath: packagedAsset('admin.html', path.join(desktopAssets, 'admin.html')),
@@ -345,6 +400,7 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
     });
     setupRequired = setup.required;
     if (setup.ownerConfigured) removeBootstrapSecret(dataDir);
+    if (setup.ownerConfigured && !restoredAdminOnly) await ensureNativeOwnerSession();
     state = {
       enabled: true,
       ready: true,
@@ -377,12 +433,13 @@ export async function configureUnifiedDesktopOwner(input: { name: string; passwo
     await ensureCanonicalProfile(name);
     return getUnifiedDesktopServerState();
   }
-  const created = await requestJson<{ adminToken: string }>('/api/v1/setup/owner', identity, {
+  const created = await requestJson<{ adminToken: string; expiresAt: number }>('/api/v1/setup/owner', identity, {
     method: 'POST',
     trustedSetup: true,
     body: { name, password, serverName: `${name}'s LoomTV`, language: 'en', sessionMode: 'bearer' },
   });
   adminToken = created.adminToken;
+  adminTokenExpiresAt = created.expiresAt;
   const dataDir = configuredDataDir();
   if (dataDir) removeBootstrapSecret(dataDir);
   state = { ...state, ownerConfigured: true };
@@ -397,15 +454,13 @@ function canonicalRootId(folderPath: string): string {
 export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others'): Promise<boolean> {
   await startup;
   if (!state.enabled || restoredAdminOnly) return false;
-  if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
-  const added = await requestJson<{ root?: { id?: string } }>('/api/v1/library/roots', identity, {
+  if (!state.ready || !identity) throw new Error('The unified server is not ready to change library folders.');
+  const added = await requestNativeJson<{ root?: { id?: string } }>('/api/v1/library/roots', {
     method: 'POST',
-    token: adminToken,
     body: { path: path.resolve(folderPath), kind: kind === 'tvShows' ? 'tv' : kind },
   });
-  await requestJson('/api/v1/library/scan', identity, {
+  await requestNativeJson('/api/v1/library/scan', {
     method: 'POST',
-    token: adminToken,
     body: { mode: 'quick', rootId: added.root?.id || canonicalRootId(folderPath) },
   }).catch((error) => {
     // Root persistence succeeded. Scan scheduling is a separate operation;
@@ -418,10 +473,9 @@ export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'mo
 export async function removeUnifiedDesktopLibraryRoot(folderPath: string): Promise<boolean> {
   await startup;
   if (!state.enabled || restoredAdminOnly) return false;
-  if (!state.ready || !identity || !adminToken) throw new Error('The unified server is not ready to change library folders.');
-  await requestJson(`/api/v1/library/roots/${canonicalRootId(folderPath)}`, identity, {
+  if (!state.ready || !identity) throw new Error('The unified server is not ready to change library folders.');
+  await requestNativeJson(`/api/v1/library/roots/${canonicalRootId(folderPath)}`, {
     method: 'DELETE',
-    token: adminToken,
   });
   return true;
 }
@@ -453,6 +507,8 @@ export async function stopUnifiedDesktopServer(): Promise<void> {
   origin = '';
   identity = null;
   adminToken = null;
+  adminTokenExpiresAt = 0;
+  adminTokenRefresh = null;
   desktopSetupToken = '';
   setupRequired = false;
   state = { ...state, ready: false };
