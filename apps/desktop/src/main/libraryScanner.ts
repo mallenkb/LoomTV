@@ -182,7 +182,12 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
   // An Others root can contain several loose videos and child folders. Let the
   // full walker enumerate every file instead of treating the root as one item.
   if (!ctx.folderKind && (videoFiles.length > 1 || subDirs.length > 0)) return null;
-  if (ctx.folderKind === 'movies' && videoFiles.length > 1) return null;
+  // A Movies root with real child folders is a collection, whatever it is
+  // named. Only extras-style folders may sit beside a single-movie root.
+  if (ctx.folderKind === 'movies' && (
+    videoFiles.length > 1
+    || subDirs.some((entry) => !isExcludedLibraryAuxiliaryDirectory(entry.name))
+  )) return null;
   const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? await scanEpisodeFiles(folderPath) : [];
 
   if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length === 0) return null;

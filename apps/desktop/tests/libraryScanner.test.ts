@@ -94,3 +94,33 @@ test('mixed Others scans retain every loose video and detect structured TV folde
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a custom-named Movies root with one loose video and child folders is scanned as a collection', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'loomtv-movies-collection-'));
+  mkdirSync(path.join(root, 'Nested Movie (2020)'));
+  writeFileSync(path.join(root, 'Loose Movie.mkv'), 'video');
+  writeFileSync(path.join(root, 'Nested Movie (2020)', 'Nested Movie.mkv'), 'video');
+  const singleMovieRoot = mkdtempSync(path.join(tmpdir(), 'loomtv-single-movie-'));
+  mkdirSync(path.join(singleMovieRoot, 'Extras'));
+  writeFileSync(path.join(singleMovieRoot, 'Single Movie.mkv'), 'video');
+  writeFileSync(path.join(singleMovieRoot, 'Extras', 'Trailer.mkv'), 'video');
+  const scanner = createLibraryScanner({
+    buildMovieItemFromFile: async (request) => item(request.fullPath, request.forcedType || 'movie'),
+    buildTVItemFromFolder: async () => null,
+    probeMediaFile: () => ({}),
+    scanEpisodeFiles: () => [],
+    shouldSplitContainerFolder: () => false,
+  });
+
+  try {
+    assert.equal(await scanner.scanDirectoryAsItem(root, { folderKind: 'movies' }), null);
+    const items = await scanner.scanFolder(root, { folderKind: 'movies' });
+    assert.deepEqual(items.map((media) => path.basename(media.filePath)).sort(), ['Loose Movie.mkv', 'Nested Movie.mkv']);
+
+    const single = await scanner.scanDirectoryAsItem(singleMovieRoot, { folderKind: 'movies' });
+    assert.equal(single && path.basename(single.filePath), 'Single Movie.mkv');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(singleMovieRoot, { recursive: true, force: true });
+  }
+});
