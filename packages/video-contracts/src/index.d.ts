@@ -168,6 +168,13 @@ export interface ProfileRestrictions {
   revision: number;
 }
 
+export interface ProfileRestrictionsUpdate {
+  country?: 'US' | 'GB' | 'CA' | 'AU';
+  maximumAge?: number | null;
+  allowUnrated?: boolean;
+  allowedRootIds?: LibraryRootId[] | null;
+}
+
 export type ProfileListKind = 'watchlist' | 'favorite' | 'watched';
 export interface ProfileListEntry {
   profileId: ProfileId;

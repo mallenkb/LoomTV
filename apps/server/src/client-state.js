@@ -7,6 +7,8 @@ import { sharedKdfLimiter } from './kdf-admission.js';
 const MAX_PROFILES = 32;
 const MAX_PROGRESS = 20_000;
 const MAX_NAME_LENGTH = 80;
+const RESTRICTION_COUNTRIES = new Set(['US', 'GB', 'CA', 'AU']);
+const DEFAULT_CHILD_MAXIMUM_AGE = 12;
 const PROFILE_UNLOCK_TTL_MS = 30 * 60 * 1000;
 const MAX_PIN_FAILURES = 2_048;
 // Failed PINs allowed before each further failure adds a growing wait.
@@ -46,6 +48,78 @@ function legacyProfileType(kind) {
   if (kind === 'adult') return 'standard';
   if (kind === 'child') return 'kid';
   return 'guest';
+}
+
+/** @param {string} profileId @param {import('@loom-media-server/video-contracts').ProfileKind} kind @returns {import('@loom-media-server/video-contracts').ProfileRestrictions} */
+function defaultProfileRestrictions(profileId, kind) {
+  return { profileId, country: 'US', maximumAge: kind === 'child' ? DEFAULT_CHILD_MAXIMUM_AGE : null,
+    allowUnrated: kind !== 'child', allowedRootIds: null, revision: 1 };
+}
+
+/** @param {unknown} value @returns {import('@loom-media-server/video-contracts').ProfileRestrictionsUpdate} */
+function profileRestrictionsInput(value) {
+  const invalid = () => Object.assign(new Error('Profile restrictions are invalid.'), { status: 400, code: 'invalid_request' });
+  if (!isRecord(value) || Array.isArray(value)
+    || Object.keys(value).some((key) => !['country', 'maximumAge', 'allowUnrated', 'allowedRootIds'].includes(key))) throw invalid();
+  /** @type {import('@loom-media-server/video-contracts').ProfileRestrictionsUpdate} */
+  const result = {};
+  if (value.country !== undefined) {
+    if (typeof value.country !== 'string' || !RESTRICTION_COUNTRIES.has(value.country)) throw invalid();
+    result.country = /** @type {'US' | 'GB' | 'CA' | 'AU'} */ (value.country);
+  }
+  if (value.maximumAge !== undefined) {
+    if (value.maximumAge !== null && (typeof value.maximumAge !== 'number' || !Number.isSafeInteger(value.maximumAge)
+      || value.maximumAge < 0 || value.maximumAge > 18)) throw invalid();
+    result.maximumAge = value.maximumAge;
+  }
+  if (value.allowUnrated !== undefined) {
+    if (typeof value.allowUnrated !== 'boolean') throw invalid();
+    result.allowUnrated = value.allowUnrated;
+  }
+  if (value.allowedRootIds !== undefined) {
+    if (value.allowedRootIds !== null && (!Array.isArray(value.allowedRootIds) || value.allowedRootIds.length > 1_024
+      || value.allowedRootIds.some((id) => typeof id !== 'string' || !id || id !== id.trim() || id.length > 128 || id.includes('\u0000')))) throw invalid();
+    result.allowedRootIds = value.allowedRootIds === null ? null : [...new Set(/** @type {string[]} */ (value.allowedRootIds))].sort();
+  }
+  return result;
+}
+
+/** @param {import('./server-state-types.js').ClientState} state @param {string} profileId */
+function invalidateProfileSelections(state, profileId) {
+  for (const selection of state.selections) if (selection.profileId === profileId) selection.revision += 1;
+}
+
+/** @param {import('./server-state-types.js').ClientState} state @param {import('./server-state-types.js').Profile} profile @param {boolean} [conversion] */
+function ensureChildProfileRestrictions(state, profile, conversion = false) {
+  if (profile.kind !== 'child') return false;
+  const existing = state.profileRestrictions.find((item) => item.profileId === profile.id);
+  if (!existing) {
+    state.profileRestrictions.push(defaultProfileRestrictions(profile.id, 'child'));
+    return true;
+  }
+  if (!conversion) return false;
+  // Converting to a child preserves tighter limits and existing root grants.
+  existing.maximumAge = typeof existing.maximumAge === 'number' && Number.isSafeInteger(existing.maximumAge) && existing.maximumAge >= 0
+    ? Math.min(existing.maximumAge, DEFAULT_CHILD_MAXIMUM_AGE) : DEFAULT_CHILD_MAXIMUM_AGE;
+  existing.allowUnrated = false;
+  if (!RESTRICTION_COUNTRIES.has(existing.country)) existing.country = 'US';
+  existing.revision += 1;
+  return true;
+}
+
+/**
+ * Converting a child profile to another kind removes the child age defaults.
+ * Restrictions apply to every profile kind, so leaving them would keep an
+ * adult profile limited to children's ratings. Root grants are kept.
+ * @param {import('./server-state-types.js').ClientState} state @param {string} profileId
+ */
+function releaseChildAgeLimits(state, profileId) {
+  const existing = state.profileRestrictions.find((item) => item.profileId === profileId);
+  if (!existing || (existing.maximumAge === null && existing.allowUnrated === true)) return false;
+  existing.maximumAge = null;
+  existing.allowUnrated = true;
+  existing.revision += 1;
+  return true;
 }
 
 /** @param {Record<string, unknown>} profile @returns {import('./server-state-types.js').Profile} */
@@ -281,10 +355,46 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     return { profile, assignment };
   };
 
+  /** @param {import('./server-state-types.js').ClientState} state @param {import('./server-state-types.js').Profile} profile @param {unknown} input @param {string} accountId */
+  const updateRestrictions = (state, profile, input, accountId) => {
+    const patch = profileRestrictionsInput(input);
+    const current = state.profileRestrictions.find((item) => item.profileId === profile.id);
+    const next = { ...(current || defaultProfileRestrictions(profile.id, profile.kind)), ...patch };
+    profileRestrictionsInput({ country: next.country, maximumAge: next.maximumAge,
+      allowUnrated: next.allowUnrated, allowedRootIds: next.allowedRootIds });
+    if (profile.kind === 'child' && (next.maximumAge === null || !Number.isSafeInteger(next.maximumAge)
+      || next.maximumAge < 0 || next.maximumAge > 18)) {
+      throw Object.assign(new Error('A child profile requires a maximum age from 0 to 18.'), { status: 400, code: 'invalid_request' });
+    }
+    if (patch.allowedRootIds !== undefined && patch.allowedRootIds !== null) {
+      const admin = store.readAdminState();
+      const account = admin.owner?.id === accountId ? admin.owner : admin.users.find((item) => item.id === accountId);
+      const knownRootIds = new Set(admin.roots.map((item) => item.id));
+      if (patch.allowedRootIds.some((id) => !knownRootIds.has(id))) {
+        throw Object.assign(new Error('Profile root access must use a current library root.'), { status: 400, code: 'invalid_request' });
+      }
+      if (!account || account.disabled || (admin.owner?.id !== accountId && account.rootIds !== null
+        && patch.allowedRootIds.some((id) => !account.rootIds?.includes(id)))) {
+        throw Object.assign(new Error('This account cannot grant access to those library roots.'), { status: 403, code: 'permission_denied' });
+      }
+    }
+    const unchanged = current && current.country === next.country && current.maximumAge === next.maximumAge
+      && current.allowUnrated === next.allowUnrated
+      && JSON.stringify(current.allowedRootIds === null ? null : [...new Set(current.allowedRootIds)].sort())
+        === JSON.stringify(next.allowedRootIds === null ? null : [...new Set(next.allowedRootIds)].sort());
+    if (unchanged) return { restrictions: current, changed: false };
+    next.revision = current ? current.revision + 1 : 1;
+    if (current) state.profileRestrictions[state.profileRestrictions.indexOf(current)] = next;
+    else state.profileRestrictions.push(next);
+    return { restrictions: next, changed: true };
+  };
+
   /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {import('./server-state-types.js').Profile} profile @param {Pick<import('@loom-media-server/video-contracts').ProfileAssignment, 'access'>} assignment @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {{ deviceId: string; selectionRevision: number }} context @returns {import('./server-state-types.js').PlaybackProfileContext} */
   const restrictedProfileContext = (state, accountId, profile, assignment, media, context) => {
     const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
-    if (profile.kind === 'child' && !restrictions) {
+    if (profile.kind === 'child' && (!restrictions || !RESTRICTION_COUNTRIES.has(restrictions.country)
+      || restrictions.maximumAge === null || !Number.isSafeInteger(restrictions.maximumAge)
+      || restrictions.maximumAge < 0 || restrictions.maximumAge > 18 || typeof restrictions.allowUnrated !== 'boolean')) {
       throw Object.assign(new Error('The child profile has no enforceable restriction record.'), { status: 403, code: 'permission_denied' });
     }
     if (restrictions && media) {
@@ -343,10 +453,28 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
 
   return {
     async ready() {},
+    async repairChildProfileRestrictions() {
+      const before = store.readClientState();
+      if (!before.profiles.some((profile) => profile.kind === 'child'
+        && !before.profileRestrictions.some((item) => item.profileId === profile.id))) return [];
+      return store.mutateClientState((state) => {
+        const repairedIds = [];
+        for (const profile of state.profiles) if (ensureChildProfileRestrictions(state, profile)) {
+          invalidateProfileSelections(state, profile.id);
+          repairedIds.push(profile.id);
+        }
+        return repairedIds;
+      });
+    },
     async exportState() { return legacySnapshot(store.readClientState()); },
     /** @param {unknown} raw */
     async importState(raw) {
       const normalized = normalizeHeadlessClientState(raw);
+      for (const profile of normalized.profiles) if (ensureChildProfileRestrictions(normalized, profile)) {
+        invalidateProfileSelections(normalized, profile.id);
+      }
+      unlockedSelections.clear();
+      pinFailures.clear();
       store.replaceClientState(normalized);
       return legacySnapshot(normalized);
     },
@@ -369,6 +497,8 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
         const profile = { id: randomUUID(), name, kind, avatarKey: String(input.avatarKey || 'glyph-01').slice(0, 80),
           colorKey: String(input.colorKey || 'ember').slice(0, 80), hasPin: false, isGuest: kind === 'guest',
           sortOrder: state.profiles.length, createdAt: now, updatedAt: now };
+        ensureChildProfileRestrictions(state, profile);
+        if (input.restrictions !== undefined) updateRestrictions(state, profile, input.restrictions, accountId);
         state.profiles.push(profile);
         state.assignments.push({ profileId: profile.id, accountId, access: 'manage', createdAt: now });
         if (!state.selections.some((item) => item.accountId === accountId)) state.selections.push({ accountId, deviceId: `account:${accountId}`, profileId: profile.id, revision: 0, automaticSignIn: false, selectedAt: now });
@@ -380,16 +510,40 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       return store.mutateClientState((state) => {
         const { profile, assignment } = requireProfile(state, profileId, accountId, canSeeAll);
         if (assignment.access !== 'manage') throw Object.assign(new Error('That account cannot manage this profile.'), { status: 403, code: 'profile_forbidden' });
+        const previousKind = profile.kind;
         if (input.name !== undefined) {
           const name = String(input.name || '').trim().slice(0, MAX_NAME_LENGTH);
           if (!name) throw Object.assign(new Error('Profile name is required.'), { status: 400, code: 'profile_name_required' });
           profile.name = name;
         }
         if (input.kind !== undefined || input.type !== undefined) profile.kind = profileKindInput(input, profile.kind);
+        const ensuredRestrictions = ensureChildProfileRestrictions(state, profile, previousKind !== profile.kind);
+        const releasedChildLimits = previousKind === 'child' && profile.kind !== 'child'
+          && releaseChildAgeLimits(state, profile.id);
+        const restrictionsChanged = input.restrictions === undefined ? false
+          : updateRestrictions(state, profile, input.restrictions, accountId).changed;
+        if (previousKind !== profile.kind || ensuredRestrictions || releasedChildLimits || restrictionsChanged) invalidateProfileSelections(state, profile.id);
         if (input.avatarKey !== undefined) profile.avatarKey = String(input.avatarKey || '').trim().slice(0, 80);
         if (input.colorKey !== undefined) profile.colorKey = String(input.colorKey || '').trim().slice(0, 80);
         profile.updatedAt = Date.now();
         return publicProfile(profile);
+      });
+    },
+    /** @param {string} profileId @param {string} accountId */
+    async getProfileRestrictions(profileId, accountId, canSeeAll = false) {
+      const state = store.readClientState();
+      requireProfile(state, profileId, accountId, canSeeAll);
+      const restrictions = state.profileRestrictions.find((item) => item.profileId === profileId);
+      return restrictions ? { ...restrictions, allowedRootIds: restrictions.allowedRootIds === null ? null : [...restrictions.allowedRootIds] } : null;
+    },
+    /** @param {string} profileId @param {unknown} input @param {string} accountId */
+    async saveProfileRestrictions(profileId, input, accountId, canSeeAll = false) {
+      return store.mutateClientState((state) => {
+        const { profile, assignment } = requireProfile(state, profileId, accountId, canSeeAll);
+        if (assignment.access !== 'manage') throw Object.assign(new Error('That account cannot manage this profile.'), { status: 403, code: 'profile_forbidden' });
+        const result = updateRestrictions(state, profile, input, accountId);
+        if (result.changed) invalidateProfileSelections(state, profileId);
+        return { ...result.restrictions, allowedRootIds: result.restrictions.allowedRootIds === null ? null : [...result.restrictions.allowedRootIds] };
       });
     },
     /** @param {string} profileId @param {string} accountId */

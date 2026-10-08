@@ -201,3 +201,51 @@ test('PIN success preserves a newer failure even when timestamps are equal', asy
     assert.equal((await attempt).status, index === 3 ? 429 : 403);
   }
 });
+
+test('a new child profile gets enforceable age limits that only a manager can change', async () => {
+  const { store } = await makeStore();
+  const child = await store.createProfile({ name: 'Kid', kind: 'child' }, 'parent');
+  const restrictions = await store.getProfileRestrictions(child.id, 'parent');
+  assert.equal(restrictions.maximumAge, 12);
+  assert.equal(restrictions.allowUnrated, false);
+  assert.equal(restrictions.allowedRootIds, null);
+
+  await assert.rejects(() => store.saveProfileRestrictions(child.id, { maximumAge: null }, 'parent'), { status: 400 });
+  await assert.rejects(() => store.saveProfileRestrictions(child.id, { maximumAge: 19 }, 'parent'), { status: 400 });
+  await assert.rejects(() => store.saveProfileRestrictions(child.id, { unknown: true }, 'parent'), { status: 400 });
+  await assert.rejects(() => store.getProfileRestrictions(child.id, 'stranger'), { status: 403 });
+  await assert.rejects(() => store.saveProfileRestrictions(child.id, { maximumAge: 18, allowUnrated: true }, 'stranger'), { status: 403 });
+
+  const tightened = await store.saveProfileRestrictions(child.id, { maximumAge: 7 }, 'parent');
+  assert.equal(tightened.maximumAge, 7);
+  assert.equal(tightened.revision, restrictions.revision + 1);
+});
+
+test('converting between child and adult applies and then releases the child age limits', async () => {
+  const { store } = await makeStore();
+  const profile = await store.createProfile({ name: 'Teen' }, 'parent');
+  await store.updateProfile(profile.id, { kind: 'child' }, 'parent');
+  const asChild = await store.getProfileRestrictions(profile.id, 'parent');
+  assert.equal(asChild.maximumAge, 12);
+  assert.equal(asChild.allowUnrated, false);
+
+  await store.saveProfileRestrictions(profile.id, { maximumAge: 9 }, 'parent');
+  await store.updateProfile(profile.id, { kind: 'adult' }, 'parent');
+  const asAdult = await store.getProfileRestrictions(profile.id, 'parent');
+  assert.equal(asAdult.maximumAge, null);
+  assert.equal(asAdult.allowUnrated, true);
+
+  await store.updateProfile(profile.id, { kind: 'child' }, 'parent');
+  assert.equal((await store.getProfileRestrictions(profile.id, 'parent')).maximumAge, 12);
+});
+
+test('imported or restored child profiles without a restriction record receive the child defaults', async () => {
+  const { store } = await makeStore();
+  const child = await store.createProfile({ name: 'Kid', kind: 'child' }, 'parent');
+  const exported = await store.exportState();
+  const stripped = { ...exported, profileRestrictions: [] };
+  await store.importState(stripped);
+  const restrictions = await store.getProfileRestrictions(child.id, 'parent');
+  assert.equal(restrictions?.maximumAge, 12);
+  assert.equal(restrictions?.allowUnrated, false);
+});

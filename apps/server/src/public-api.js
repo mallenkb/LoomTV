@@ -1618,6 +1618,16 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         ) });
         return true;
       }
+      if (resource === 'profiles' && segments.length === 3 && segments[2] === 'restrictions'
+        && ['GET','PATCH'].includes(req.method || '')) {
+        const principal = await requirePrincipal(req);
+        const profileId = decodeSegment(segments[1], 'profileId');
+        const restrictions = req.method === 'GET'
+          ? await clientState.getProfileRestrictions(profileId, principal.id, canSeeAllProfiles(principal))
+          : await clientState.saveProfileRestrictions(profileId, await readJsonBody(req), principal.id, canSeeAllProfiles(principal));
+        writeData(res, 200, { restrictions });
+        return true;
+      }
       if (resource === 'profiles' && segments.length === 3 && segments[2] === 'preferences'
         && ['GET','PATCH'].includes(req.method || '')) {
         const principal = await requirePrincipal(req);

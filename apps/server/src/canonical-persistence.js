@@ -40,7 +40,10 @@ export function createCanonicalPersistence(options) {
       adminState,
       clientState: normalizeHeadlessClientState(clientState),
     }),
-    onCanonicalRestore: () => profiles.revokeAllAccess(),
+    onCanonicalRestore: async () => {
+      await profiles.revokeAllAccess();
+      await profiles.repairChildProfileRestrictions();
+    },
     stateStore: store,
     pairingService: pairing,
     clientAddress: options.clientAddress,

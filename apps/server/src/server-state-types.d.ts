@@ -31,7 +31,7 @@ export interface PlaybackProfileContext {
   deviceId: string;
   selectionRevision: number;
 }
-export type ProfileInput = { name?: unknown; kind?: unknown; type?: unknown; avatarKey?: unknown; colorKey?: unknown };
+export type ProfileInput = { name?: unknown; kind?: unknown; type?: unknown; avatarKey?: unknown; colorKey?: unknown; restrictions?: unknown };
 export interface StoredAccount {
   id: string; name: string; salt: string; hash: string;
   role?: string; permissions?: string[]; rootIds?: string[] | null; deviceIds?: string[] | null;

@@ -505,6 +505,7 @@ export function createCanonicalVideoServer(options) {
       });
       try {
         await persistence.start();
+        await clientState.repairChildProfileRestrictions();
         await bootstrapSecurity.initialize({ ownerConfigured: await adminService.isOwnerConfigured() });
         await new Promise(/** @param {(value?: void) => void} resolve */ (resolve, reject) => {
           /** @param {Error} error */
