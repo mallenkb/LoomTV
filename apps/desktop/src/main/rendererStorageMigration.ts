@@ -40,11 +40,21 @@ export async function migrateRendererStorage(legacyFile: string, userData: strin
     if (entries.length > MAX_ENTRIES || JSON.stringify(entries).length > MAX_JSON_LENGTH) throw new Error('Stored preferences exceed migration limit.');
     if (entries.length) {
       await window.loadURL(PACKAGED_RENDERER_URL);
-      await window.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code: `
-        for (const [key, value] of ${JSON.stringify(entries)}) {
-          try { if (localStorage.getItem(key) === null) localStorage.setItem(key, value); } catch {}
-        }
+      // A key counts as migrated once the destination holds a value, either
+      // the copied one or a newer one the renderer already saved. Any other
+      // key (a quota failure) keeps the marker unwritten so the next launch
+      // retries it.
+      const failed: unknown = await window.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code: `
+        (() => {
+          let failed = 0;
+          for (const [key, value] of ${JSON.stringify(entries)}) {
+            try { if (localStorage.getItem(key) === null) localStorage.setItem(key, value); } catch {}
+            try { if (localStorage.getItem(key) === null) failed += 1; } catch { failed += 1; }
+          }
+          return failed;
+        })()
       ` }]);
+      if (failed !== 0) throw new Error(`${String(failed)} stored preferences could not be copied.`);
     }
     await fs.mkdir(userData, { recursive: true });
     await fs.writeFile(marker, '{}', { mode: 0o600 });

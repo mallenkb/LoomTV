@@ -6,7 +6,7 @@ import { registerHooks } from 'node:module';
 import vm from 'node:vm';
 import test, { afterEach } from 'node:test';
 
-const state = { legacy: {} as Record<string, string>, target: {} as Record<string, string>, windows: 0, destroyed: 0, targetLoads: 0 };
+const state = { legacy: {} as Record<string, string>, target: {} as Record<string, string>, windows: 0, destroyed: 0, targetLoads: 0, quotaExceeded: false };
 class MigrationWindow {
   storage = state.legacy;
   constructor(options: { show: boolean; webPreferences: Record<string, unknown> }) {
@@ -31,7 +31,10 @@ class MigrationWindow {
       const localStorage = { ...storage };
       Object.defineProperties(localStorage, {
         getItem: { value: (key: string) => storage[key] ?? null },
-        setItem: { value: (key: string, value: string) => { storage[key] = value; } },
+        setItem: { value: (key: string, value: string) => {
+          if (state.quotaExceeded && storage === state.target) throw new Error('QuotaExceededError');
+          storage[key] = value;
+        } },
       });
       return vm.runInNewContext(scripts[0].code, { localStorage });
     },
@@ -57,7 +60,7 @@ const hooks = registerHooks({
 const { migrateRendererStorage } = await import('../src/main/rendererStorageMigration.ts');
 hooks.deregister();
 
-afterEach(() => Object.assign(state, { legacy: {}, target: {}, windows: 0, destroyed: 0, targetLoads: 0 }));
+afterEach(() => Object.assign(state, { legacy: {}, target: {}, windows: 0, destroyed: 0, targetLoads: 0, quotaExceeded: false }));
 
 test('origin migration copies Loom preferences once and keeps newer target preferences', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
@@ -105,5 +108,22 @@ test('oversized legacy preferences leave migration retryable and close the hidde
     assert.equal(state.targetLoads, 0);
     assert.equal(state.destroyed, 1);
     await assert.rejects(fs.access(path.join(directory, 'renderer-origin-migrated.json')));
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('a quota failure leaves migration retryable and a later launch copies the key', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-storage-'));
+  try {
+    state.legacy = { 'loom:theme': 'blue', 'loom:volume': '0.5' };
+    state.target = { 'loom:volume': '0.8' };
+    state.quotaExceeded = true;
+    await migrateRendererStorage('/renderer/index.html', directory);
+    await assert.rejects(fs.access(path.join(directory, 'renderer-origin-migrated.json')));
+    assert.deepEqual(state.target, { 'loom:volume': '0.8' });
+
+    state.quotaExceeded = false;
+    await migrateRendererStorage('/renderer/index.html', directory);
+    assert.deepEqual(state.target, { 'loom:theme': 'blue', 'loom:volume': '0.8' });
+    await fs.access(path.join(directory, 'renderer-origin-migrated.json'));
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
