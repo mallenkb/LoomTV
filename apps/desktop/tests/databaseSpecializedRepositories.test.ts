@@ -14,7 +14,7 @@ import {
   setProfileStremioAccess,
 } from '../src/main/databasePluginRepository.ts';
 import { createProfile } from '../src/main/databaseProfilesRepository.ts';
-import { createDatabaseSegmentsRepository } from '../src/main/databaseSegmentsRepository.ts';
+import { createDatabaseSegmentsRepository, FAILED_ANALYSIS_RETRY_MS } from '../src/main/databaseSegmentsRepository.ts';
 import type { MediaSegmentCandidate, ProviderCacheEntry } from '../src/main/skipSegments/types.ts';
 import type { SegmentAnalysisJob } from '../src/main/skipSegments/analysisJobs.ts';
 
@@ -104,6 +104,35 @@ test('a manual analysis request supersedes every parked request for the same rev
     assert.equal(states.get('incremental'), 'cancelled');
     assert.equal(states.get('manual-old'), 'cancelled');
     assert.equal(states.get('manual-new'), 'pending');
+  } finally {
+    database.close();
+  }
+});
+
+test('a failed automatic analysis job requeues after its retry delay, and a manual one at once', () => {
+  const database = createDatabase();
+  const repository = createDatabaseSegmentsRepository(database);
+  const job = (jobKey: string, kind: SegmentAnalysisJob['kind'], updatedAt: number): SegmentAnalysisJob => ({
+    jobKey, kind, state: 'pending', mediaId: 'show', season: 1, episode: 1, fileRevision: `revision-${jobKey}`,
+    configHash: 'config', detail: '', createdAt: 1, updatedAt,
+  });
+  const stateOf = (jobKey: string) => repository.getSegmentAnalysisJobs().find((entry) => entry.jobKey === jobKey)?.state;
+  try {
+    repository.enqueueSegmentAnalysisJob(job('auto', 'incremental', 1_000));
+    repository.updateSegmentAnalysisJob('auto', 'running');
+    repository.updateSegmentAnalysisJob('auto', 'error', 'Drive unavailable');
+    const failedAt = repository.getSegmentAnalysisJobs().find((entry) => entry.jobKey === 'auto')!.updatedAt;
+
+    repository.enqueueSegmentAnalysisJob(job('auto', 'incremental', failedAt + 1_000));
+    assert.equal(stateOf('auto'), 'error');
+    repository.enqueueSegmentAnalysisJob(job('auto', 'incremental', failedAt + FAILED_ANALYSIS_RETRY_MS));
+    assert.equal(stateOf('auto'), 'pending');
+
+    repository.enqueueSegmentAnalysisJob(job('manual', 'manual', 1_000));
+    repository.updateSegmentAnalysisJob('manual', 'running');
+    repository.updateSegmentAnalysisJob('manual', 'error', 'Decoder failed');
+    repository.enqueueSegmentAnalysisJob(job('manual', 'manual', 2_000));
+    assert.equal(stateOf('manual'), 'pending');
   } finally {
     database.close();
   }

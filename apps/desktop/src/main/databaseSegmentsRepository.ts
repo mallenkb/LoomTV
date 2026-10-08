@@ -153,6 +153,16 @@ const analysisStateRowSchema = z.object({
   updated_at: finiteNumber,
 });
 
+/** How long an automatic analysis job that failed waits before it may run again. */
+export const FAILED_ANALYSIS_RETRY_MS = 6 * 60 * 60 * 1000;
+
+// Re-enqueueing a job key replaces a finished job. A failed job is replaced
+// right away for a manual request, and otherwise once its retry delay passes,
+// so a transient failure (an unmounted drive) does not park the file forever.
+const REQUEUEABLE_JOB = `(segment_analysis_jobs.state = 'complete'
+  OR (segment_analysis_jobs.state = 'error'
+    AND (excluded.kind = 'manual' OR segment_analysis_jobs.updated_at <= excluded.updated_at - @retryAfterMs)))`;
+
 export function createDatabaseSegmentsRepository(database: BetterSqlite3.Database) {
   const getDb = (): BetterSqlite3.Database => database;
   const jsonString = (value: unknown): string => JSON.stringify(value ?? null);
@@ -607,13 +617,16 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     getDb().prepare(`
       INSERT INTO segment_analysis_jobs (
         job_key, kind, media_id, season, episode, file_revision, config_hash, state, detail, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (@jobKey, @kind, @mediaId, @season, @episode, @fileRevision, @configHash, @state, @detail, @createdAt, @updatedAt)
       ON CONFLICT(job_key) DO UPDATE SET
-        state = CASE WHEN segment_analysis_jobs.state = 'complete' THEN excluded.state ELSE segment_analysis_jobs.state END,
-        detail = CASE WHEN segment_analysis_jobs.state = 'complete' THEN excluded.detail ELSE segment_analysis_jobs.detail END,
-        updated_at = CASE WHEN segment_analysis_jobs.state = 'complete' THEN excluded.updated_at ELSE segment_analysis_jobs.updated_at END
-    `).run(job.jobKey, job.kind, job.mediaId, job.season, job.episode, job.fileRevision,
-      job.configHash, job.state, job.detail, job.createdAt, job.updatedAt);
+        state = CASE WHEN ${REQUEUEABLE_JOB} THEN excluded.state ELSE segment_analysis_jobs.state END,
+        detail = CASE WHEN ${REQUEUEABLE_JOB} THEN excluded.detail ELSE segment_analysis_jobs.detail END,
+        updated_at = CASE WHEN ${REQUEUEABLE_JOB} THEN excluded.updated_at ELSE segment_analysis_jobs.updated_at END
+    `).run({
+      jobKey: job.jobKey, kind: job.kind, mediaId: job.mediaId, season: job.season, episode: job.episode,
+      fileRevision: job.fileRevision, configHash: job.configHash, state: job.state, detail: job.detail,
+      createdAt: job.createdAt, updatedAt: job.updatedAt, retryAfterMs: FAILED_ANALYSIS_RETRY_MS,
+    });
   }
 
   function analysisJobFromRow(row: z.infer<typeof analysisJobRowSchema>): SegmentAnalysisJob {
