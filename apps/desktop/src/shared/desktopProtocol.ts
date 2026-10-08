@@ -404,6 +404,7 @@ export interface SubtitleStyleOptions {
   borderEnabled?: boolean;
   backgroundColor?: string;
   backgroundEnabled?: boolean;
+  backgroundOpacity?: number;
 }
 
 export interface TranscodeOptions {

@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from '@/lib/navigation';
 import { Bookmark as LucideBookmark, Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import {
   Archive as ArchivePhosphorIcon,
-  Images, MusicNotes, Headphones, BookOpen, Books,
 } from '@phosphor-icons/react';
 import { motion } from 'motion/react';
 import DelayedIconTooltip from '@/components/DelayedIconTooltip';
@@ -22,12 +21,12 @@ import { useToast } from '@/components/ToastProvider';
 import { isCategoryVisible } from '@/components/sidebarNavigation';
 import { iptvSourceDisplayName, liveTvRoute, useIptvSources } from '@/lib/liveTvSources';
 import { liveTvSourceIconPair } from '@/components/LiveTvSourceIcons';
-import { DEFAULT_SIDEBAR_NAV_ORDER, normalizeSidebarNavOrder } from '@/lib/sidebarNavOrder';
-import { loadCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
+import { DEFAULT_SIDEBAR_NAV_ORDER, MEDIA_SIDEBAR_NAV_ITEM_IDS, normalizeSidebarNavOrder } from '@/lib/sidebarNavOrder';
+import { isBrowsableStremioSource } from '@/lib/stremioPluginSidebarCache';
+import { useStremioSidebarSources } from '@/lib/stremioSourceNavigation';
 
 type LibrarySidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
-type MediaSidebarNavItemId = 'photos' | 'music' | 'audiobooks' | 'books' | 'comics';
-type NavItemId = 'home' | 'my-list' | 'discover' | LibrarySidebarNavItemId | MediaSidebarNavItemId | 'settings';
+type NavItemId = 'home' | 'my-list' | 'discover' | LibrarySidebarNavItemId | 'settings';
 type SidebarIcon = React.ComponentType<{ className?: string }>;
 type SidebarNavItem = { id: string; path: string; label: string; icon: SidebarIcon; activeIcon?: SidebarIcon; kind?: 'link' | 'divider' };
 type ModernCategoryItem = {
@@ -193,14 +192,6 @@ const sidebarNavItems: Record<LibrarySidebarNavItemId, SidebarNavItem> = {
   others: { id: 'others', path: '/others', label: 'Others', icon: folderIcons.regular, activeIcon: folderIcons.fill },
 };
 
-const mediaSidebarItems: SidebarNavItem[] = [
-  { id: 'photos', path: '/photos', label: 'Photos', icon: Images },
-  { id: 'music', path: '/music', label: 'Music', icon: MusicNotes },
-  { id: 'audiobooks', path: '/audiobooks', label: 'Audiobooks', icon: Headphones },
-  { id: 'books', path: '/books', label: 'Books', icon: BookOpen },
-  { id: 'comics', path: '/comics', label: 'Comics and manga', icon: Books },
-];
-
 function SidebarDownloadProgress({ percent }: { percent: number }) {
   const numberClassName = 'grid h-[38px] place-items-center text-[12px] font-semibold tabular-nums';
 
@@ -242,8 +233,6 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   if (activePath === '/tv' || activePath.startsWith('/tv/')) return 'tv';
   if (activePath === '/anime' || activePath.startsWith('/anime/')) return 'anime';
   if (activePath === '/others' || activePath.startsWith('/others/')) return 'others';
-  const mediaItem = mediaSidebarItems.find((item) => activePath === item.path || activePath.startsWith(`${item.path}/`));
-  if (mediaItem) return mediaItem.id as MediaSidebarNavItemId;
   if (activePath.startsWith('/live/')) return null;
   if (activePath === '/settings') return 'settings';
 
@@ -519,34 +508,6 @@ export default function Sidebar() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
   const [libraryActionError, setLibraryActionError] = useState('');
-  const [configuredMediaNavIds, setConfiguredMediaNavIds] = useState<string[]>([]);
-  useEffect(() => {
-    setConfiguredMediaNavIds([]);
-    if (activeProfile?.type !== 'owner' || desktopApi.isRemoteLibraryMode()) return;
-    let mounted = true;
-    const refresh = () => {
-      if (document.hidden) return;
-      const photos = window.desktopApi?.photos;
-      const media = window.desktopApi?.mediaLibraries;
-      if (!photos || !media) return;
-      void Promise.all([
-        photos.roots(),
-        ...(['music', 'audiobooks', 'books', 'comics'] as const).map((kind) => media.roots(kind)),
-      ]).then((roots) => {
-        if (mounted) setConfiguredMediaNavIds(mediaSidebarItems.filter((_, index) => roots[index].length > 0).map((item) => item.id));
-      }).catch(() => { if (mounted) setConfiguredMediaNavIds([]); });
-    };
-    refresh();
-    const timer = window.setInterval(refresh, 5000);
-    window.addEventListener('loomtv:library-roots-changed', refresh);
-    window.addEventListener('focus', refresh);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-      window.removeEventListener('loomtv:library-roots-changed', refresh);
-      window.removeEventListener('focus', refresh);
-    };
-  }, [activeProfile?.id, activeProfile?.type]);
 
   const handleScanLibrary = async () => {
     setLibraryActionError('');
@@ -614,8 +575,8 @@ export default function Sidebar() {
     [libraryFolderGroups],
   );
   const primaryNavItems = useMemo(
-    () => [...videoNavItems, ...mediaSidebarItems.filter((item) => configuredMediaNavIds.includes(item.id)), discoverNavItem, myListNavItem],
-    [videoNavItems, configuredMediaNavIds],
+    () => [...videoNavItems, discoverNavItem, myListNavItem],
+    [videoNavItems],
   );
   const mobileNavItems = useMemo(
     () => [homeNavItem, ...primaryNavItems],
@@ -650,14 +611,8 @@ export default function Sidebar() {
     return [...groupItems, ...folderItems];
   }, [customFolderNames, libraryFolderGroups.others, otherFolderGroups, otherFolderIcon]);
   const { sources: iptvSources } = useIptvSources();
-  const [stremioPlugins, setStremioPlugins] = useState(loadCachedSidebarPlugins);
-  useEffect(() => {
-    const refresh = () => {
-      setStremioPlugins(loadCachedSidebarPlugins());
-    };
-    window.addEventListener('loomtv:plugins-changed', refresh);
-    return () => window.removeEventListener('loomtv:plugins-changed', refresh);
-  }, []);
+  const stremioPlugins = useStremioSidebarSources();
+
   // Each added playlist is its own destination, the way Discover is: a tab in
   // the sidebar pointing at a page that belongs to that source alone.
   const liveTvNavItems = useMemo(
@@ -675,13 +630,13 @@ export default function Sidebar() {
   );
   const stremioNavItems = useMemo(
     () => stremioPlugins
-      .filter((plugin) => plugin.state === 'enabled' && plugin.trusted && plugin.addonId === 'org.archive.clean')
+      .filter(isBrowsableStremioSource)
       .map((plugin) => ({
         id: `stremio:${plugin.addonId}`,
-        label: plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Archive.org',
+        label: plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on',
         path: `/addons/stremio/${encodeURIComponent(plugin.addonId)}`,
-        icon: archiveIcons.regular,
-        activeIcon: archiveIcons.fill,
+        icon: plugin.addonId === 'org.archive.clean' ? archiveIcons.regular : compassIcons.regular,
+        activeIcon: plugin.addonId === 'org.archive.clean' ? archiveIcons.fill : compassIcons.fill,
       })),
     [stremioPlugins],
   );
@@ -701,7 +656,6 @@ export default function Sidebar() {
   const reorderableSidebarItems = useMemo(
     () => [
       ...videoNavItems,
-      ...mediaSidebarItems.filter((item) => configuredMediaNavIds.includes(item.id)),
       discoverNavItem,
       myListNavItem,
       dividerNavItem,
@@ -709,7 +663,7 @@ export default function Sidebar() {
       ...stremioNavItems,
       ...customFolderNavItems,
     ],
-    [customFolderNavItems, liveTvNavItems, stremioNavItems, videoNavItems, configuredMediaNavIds],
+    [customFolderNavItems, liveTvNavItems, stremioNavItems, videoNavItems],
   );
   const orderedSidebarItems = useMemo(() => {
     const itemById = new Map(reorderableSidebarItems.map((item) => [item.id, item]));
@@ -921,7 +875,7 @@ export default function Sidebar() {
         {!location.pathname.startsWith('/settings')
           && !location.pathname.startsWith('/live/')
           && !location.pathname.startsWith('/addons/stremio/')
-          && !mediaSidebarItems.some((item) => location.pathname === item.path)
+          && !MEDIA_SIDEBAR_NAV_ITEM_IDS.some((id) => location.pathname === `/${id}`)
           && !isExploreContext && (
           <ModernCategoryPill pathname={location.pathname} />
         )}

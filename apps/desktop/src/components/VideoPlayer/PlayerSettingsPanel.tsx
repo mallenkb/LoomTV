@@ -3,6 +3,8 @@ import { X } from 'lucide-react';
 import { compareSubtitleLanguages, subtitleLanguageLabel } from '../../lib/openSubtitlesV3';
 import { ScrollArea } from '../ui/scroll-area';
 import { clampSidePanelWidth, trackLabel } from './helpers';
+import SubtitleAppearancePanel from './SubtitleAppearancePanel';
+import type { SubtitleStylePreset } from './subtitleStylePresets';
 import type {
   AspectMode,
   ControlTab,
@@ -47,21 +49,6 @@ const DISPLAY_SLEEP_OPTIONS = [
   { value: 90, label: 'After 1.5 hours' },
   { value: 120, label: 'After 2 hours' },
 ] as const;
-
-function colorInputValue(value: string): string {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
-}
-
-const SUBTITLE_REFERENCE_FONT_SIZE_PX = 32;
-const SUBTITLE_MAX_OUTLINE_WIDTH_PX = 10;
-
-function subtitleSizePercent(fontSize: number): number {
-  return Math.round((fontSize / SUBTITLE_REFERENCE_FONT_SIZE_PX) * 100);
-}
-
-function subtitleOutlinePercent(borderWidth: number): number {
-  return Math.round((borderWidth / SUBTITLE_MAX_OUTLINE_WIDTH_PX) * 100);
-}
 
 function SegmentedSetting<T extends string | number>({
   options,
@@ -150,10 +137,9 @@ interface PlayerSettingsPanelProps {
   selectedSecondarySubtitleTrackIndex: number;
   selectSecondarySubtitleTrack: (trackIndex: number) => void;
   subtitleStyle: SubtitleStyleSettings;
-  subtitleCueFontSize: number;
   subtitleStyleCompatibilityMessage?: string;
-  updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string) => void;
-  applySubtitleStyleToStream: () => void;
+  updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string | boolean) => void;
+  applySubtitlePreset: (preset: SubtitleStylePreset) => void;
   onCorrectSkipTiming: () => void;
 }
 
@@ -199,10 +185,9 @@ export default function PlayerSettingsPanel({
   selectedSecondarySubtitleTrackIndex,
   selectSecondarySubtitleTrack,
   subtitleStyle,
-  subtitleCueFontSize,
   subtitleStyleCompatibilityMessage,
   updateSubtitleStyle,
-  applySubtitleStyleToStream,
+  applySubtitlePreset,
   onCorrectSkipTiming,
 }: PlayerSettingsPanelProps) {
   const activeTab: ControlTab = videoOnly ? 'video' : mediaPanelTab;
@@ -579,96 +564,11 @@ export default function PlayerSettingsPanel({
                   <p className="mt-1 text-xs leading-relaxed text-white/75">{subtitleStyleCompatibilityMessage}</p>
                 </div>
               ) : (
-                <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-semibold text-white">Position</p>
-                    <span className="text-xs text-[var(--loom-accent)]">{Math.round(subtitleStyle.position)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={subtitleStyle.position}
-                    onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
-                    aria-label="Subtitle position"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={subtitleStyle.position}
-                    aria-valuetext={`${Math.round(subtitleStyle.position)} percent`}
-                    className="w-full accent-[var(--loom-accent)]"
-                  />
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-semibold text-white">Size</p>
-                    <span className="text-xs text-[var(--loom-accent)]">{subtitleSizePercent(subtitleCueFontSize)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={24}
-                    max={96}
-                    step={1}
-                    value={subtitleStyle.fontSize}
-                    onChange={(event) => updateSubtitleStyle('fontSize', Number(event.target.value))}
-                    aria-label="Subtitle size"
-                    aria-valuemin={24}
-                    aria-valuemax={96}
-                    aria-valuenow={subtitleStyle.fontSize}
-                    aria-valuetext={`${subtitleSizePercent(subtitleStyle.fontSize)} percent`}
-                    className="w-full accent-[var(--loom-accent)]"
-                  />
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-semibold text-white">Outline</p>
-                    <span className="text-xs text-[var(--loom-accent)]">{subtitleOutlinePercent(subtitleStyle.borderWidth)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={subtitleStyle.borderWidth}
-                    onChange={(event) => updateSubtitleStyle('borderWidth', Number(event.target.value))}
-                    aria-label="Subtitle outline"
-                    aria-valuemin={0}
-                    aria-valuemax={10}
-                    aria-valuenow={subtitleStyle.borderWidth}
-                    aria-valuetext={`${subtitleOutlinePercent(subtitleStyle.borderWidth)} percent`}
-                    className="w-full accent-[var(--loom-accent)]"
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {([
-                    ['fontColor', 'Text'],
-                    ['borderColor', 'Outline'],
-                    ['backgroundColor', 'Background'],
-                  ] as Array<[keyof SubtitleStyleSettings, string]>).map(([key, label]) => (
-                    <label key={key} className="space-y-2">
-                      <span className="block text-xs font-semibold text-white">{label}</span>
-                      <input
-                        type="color"
-                        value={colorInputValue(String(subtitleStyle[key]))}
-                        onChange={(event) => updateSubtitleStyle(key, event.target.value)}
-                        className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1"
-                      />
-                    </label>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={applySubtitleStyleToStream}
-                  className="w-full rounded-md bg-white/10 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/15"
-                >
-                  Apply subtitle style
-                </button>
-                </div>
+                <SubtitleAppearancePanel
+                  style={subtitleStyle}
+                  updateStyle={updateSubtitleStyle}
+                  applyPreset={applySubtitlePreset}
+                />
               )}
 
             </div>

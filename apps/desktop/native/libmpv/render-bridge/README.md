@@ -18,6 +18,14 @@ thread before destroying the core on the worker thread.
 
 ## Build
 
+Bridge ABI 2 adds a viewport-local subtitle shape for native GPU blur. Soft box
+copies only the surrounding video region into GPU textures, applies horizontal
+and vertical Gaussian passes, and composites through the same rounded shape
+used by the subtitle overlay. No video pixels cross IPC. Plain and Solid box
+clear the blur region. The renderer reports geometry during subtitle and layout
+changes, including the controls' position transition. Rebuild the bundled bridge
+alongside the desktop code when updating this ABI.
+
 `corepack pnpm --filter loom-media-server-desktop libmpv:bundle` builds the
 bridge and the libmpv bundle together. To build only the bridge on macOS:
 

@@ -37,6 +37,7 @@ type BridgeApi = {
   library: KoffiLibrary;
   create: NativeFunction;
   attach: NativeFunction;
+  setSubtitleBlur: NativeFunction;
   command: NativeFunction;
   pollInto: NativeFunction;
   destroy: NativeFunction;
@@ -165,7 +166,7 @@ function loadRuntime(force = false): Runtime | null {
     const koffi = loadKoffi();
     const library = koffi.load(paths.bridgePath);
     const version = bind(library, 'loom_mpv_bridge_version', 'uint32', []);
-    if (Number(version()) !== 1) throw new Error('The bundled libmpv bridge version is unsupported.');
+    if (Number(version()) !== 2) throw new Error('The bundled libmpv bridge version is unsupported.');
     cachedWarning = '';
     cachedRuntime = {
       ...paths,
@@ -173,6 +174,7 @@ function loadRuntime(force = false): Runtime | null {
         library,
         create: bind(library, 'loom_mpv_create', 'void *', ['str', 'void *', 'size_t']),
         attach: bind(library, 'loom_mpv_attach', 'int', ['void *', 'void *', 'void *', 'size_t']),
+        setSubtitleBlur: bind(library, 'loom_mpv_set_subtitle_blur', 'int', ['void *', 'str']),
         command: bind(library, 'loom_mpv_command', 'int', ['void *', 'uint64', 'str', 'void *', 'size_t']),
         pollInto: bind(library, 'loom_mpv_poll_into', 'int', ['void *', 'void *', 'size_t']),
         destroy: bind(library, 'loom_mpv_destroy', 'int', ['void *']),
@@ -245,13 +247,18 @@ function commandList(command: MpvCommand): unknown[][] {
       // Saved styles can hold CSS colors such as "transparent" or rgba().
       // Convert them, and leave out any mpv cannot represent rather than let
       // one rejected color end the whole playback session.
+      const background = mpvColor(command.backgroundColor);
+      const boxed = Boolean(background && background.slice(1, 3) !== '00');
       const colors = [
         ['sub-color', mpvColor(command.color)],
         ['sub-border-color', mpvColor(command.borderColor)],
-        ['sub-back-color', mpvColor(command.backgroundColor)],
+        ['sub-back-color', background],
       ] as const;
       return [
         ['set_property', 'sub-font-size', command.fontSize],
+        ['set_property', 'sub-bold', boxed ? 'yes' : 'no'],
+        ['set_property', 'sub-border-style', boxed ? 'background-box' : 'outline-and-shadow'],
+        ['set_property', 'sub-shadow-offset', boxed ? 6 : 0],
         ...colors.flatMap(([name, value]) => (value ? [['set_property', name, value]] : [])),
         ['set_property', 'sub-border-size', command.borderWidth],
         ['set_property', 'sub-pos', command.position],
@@ -585,6 +592,12 @@ class LibMpvSession {
   setViewport(owner: WebContents, viewport: PlaybackViewport): boolean {
     if (owner !== this.owner || this.stopped || !this.host) return false;
     this.host.syncBounds(viewport);
+    if (this.engine) {
+      const blur = viewport.subtitleBlur;
+      return Number(this.runtime.api.setSubtitleBlur(this.engine, JSON.stringify(blur ? {
+        ...blur, width: viewport.width, height: viewport.height,
+      } : null))) === 0;
+    }
     return true;
   }
 

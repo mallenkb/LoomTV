@@ -105,9 +105,12 @@ import type { OnlineSubtitle, SubtitleVideo } from '../lib/openSubtitlesV3';
 import { hasSubtitleImdbId, resolveOnlineSubtitleVideo } from '../lib/subtitleVideoResolver';
 import { cachedDesktopRead } from '@/lib/queryClient';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
+import { applySubtitleStylePreset, MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY, selectedSubtitleStylePreset, type SubtitleStylePreset } from './VideoPlayer/subtitleStylePresets';
 import { isAssDialogueTrack, isAssSignsTrack, parseAssDialogueCues } from './VideoPlayer/subtitleCues';
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
+import { subtitleBackgroundColor } from '../shared/subtitleBackground.ts';
+import type { SubtitleBlurRegion } from '../shared/playbackProtocol';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
 import { activeSkipSegmentAt, buildSkipAction, pinVisibleTarget, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
 import { isProfileSelectionRequiredError } from './VideoPlayer/playbackProfileGuard';
@@ -235,6 +238,8 @@ export default function VideoPlayer({
   );
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const nativeSubtitleBlurRef = useRef<SubtitleBlurRegion | null>(null);
+  const nativeSubtitleBlurKeyRef = useRef('');
   const { state: libraryState } = useLibrary();
   const [playbackActivityKey] = useState(() => `desktop-player:${crypto.randomUUID()}`);
   const playbackActivityKeyRef = useRef(playbackActivityKey);
@@ -525,8 +530,22 @@ export default function VideoPlayer({
       y: rect.top,
       width: rect.width,
       height: rect.height,
+      subtitleBlur: nativeSubtitleBlurRef.current,
     });
   }, [libVlcSurfaceActive]);
+  const syncNativeSubtitleBlur = useCallback((region: SubtitleBlurRegion | null) => {
+    const rect = videoViewportRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const next = region ? {
+      ...region,
+      lines: region.lines.map(line => ({ ...line, x: line.x - rect.left, y: line.y - rect.top })),
+    } : null;
+    const key = JSON.stringify(next);
+    if (key === nativeSubtitleBlurKeyRef.current) return;
+    nativeSubtitleBlurKeyRef.current = key;
+    nativeSubtitleBlurRef.current = next;
+    void syncNativeViewport().catch(() => undefined);
+  }, [syncNativeViewport]);
   const playerStateRef = useRef<PlayerState>(playerState);
   const {
     fullscreen,
@@ -1772,8 +1791,8 @@ export default function VideoPlayer({
                   fontSize: Math.round(style.fontSize * style.scale),
                   color: style.fontColor,
                   borderColor: style.borderColor,
-                  borderWidth: style.borderEnabled ? style.borderWidth : 0,
-                  backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+                  borderWidth: style.borderEnabled && !style.backgroundEnabled ? style.borderWidth : 0,
+                  backgroundColor: subtitleBackgroundColor(style),
                   position: style.position,
                 },
                 subtitleFiles: visibleSubtitlesRef.current.flatMap((subtitle) => {
@@ -2037,10 +2056,8 @@ export default function VideoPlayer({
                 fontSize: Math.round(initialSubtitleStyle.fontSize * initialSubtitleStyle.scale),
                 color: initialSubtitleStyle.fontColor,
                 borderColor: initialSubtitleStyle.borderColor,
-                borderWidth: initialSubtitleStyle.borderEnabled ? initialSubtitleStyle.borderWidth : 0,
-                backgroundColor: initialSubtitleStyle.backgroundEnabled
-                  ? initialSubtitleStyle.backgroundColor
-                  : '#00000000',
+                borderWidth: initialSubtitleStyle.borderEnabled && !initialSubtitleStyle.backgroundEnabled ? initialSubtitleStyle.borderWidth : 0,
+                backgroundColor: subtitleBackgroundColor(initialSubtitleStyle),
                 position: initialSubtitleStyle.position,
               },
               subtitleFiles: allSubtitleFiles,
@@ -2938,8 +2955,8 @@ export default function VideoPlayer({
         fontSize: Math.round(style.fontSize * style.scale),
         color: style.fontColor,
         borderColor: style.borderColor,
-        borderWidth: style.borderEnabled ? style.borderWidth : 0,
-        backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+        borderWidth: style.borderEnabled && !style.backgroundEnabled ? style.borderWidth : 0,
+        backgroundColor: subtitleBackgroundColor(style),
         position: style.position,
       });
     }
@@ -3205,8 +3222,8 @@ export default function VideoPlayer({
           fontSize: Math.round(style.fontSize * style.scale),
           color: style.fontColor,
           borderColor: style.borderColor,
-          borderWidth: style.borderEnabled ? style.borderWidth : 0,
-          backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+          borderWidth: style.borderEnabled && !style.backgroundEnabled ? style.borderWidth : 0,
+          backgroundColor: subtitleBackgroundColor(style),
           position: style.position,
         });
       }
@@ -3257,11 +3274,20 @@ export default function VideoPlayer({
     scheduleSubtitleStyleToStream();
   }, [scheduleSubtitleStyleToStream]);
 
-  const updateSubtitleStyle = useCallback((key: keyof SubtitleStyleSettings, value: number | string) => {
+  const updateSubtitleStyle = useCallback((key: keyof SubtitleStyleSettings, value: number | string | boolean) => {
     setLiveSubtitleStyle((current) => ({
       ...current,
       [key]: value,
+      ...(key === 'backgroundOpacity' && selectedSubtitleStylePreset(current) === 'soft'
+        ? { backgroundOpacity: Math.max(MIN_SOFT_BOX_OPACITY, Math.min(MAX_SOFT_BOX_OPACITY, Number(value))) } : {}),
+      ...(key === 'borderWidth' ? { borderEnabled: Number(value) > 0 } : {}),
+      ...(key === 'backgroundEnabled' && value === true && current.backgroundColor === 'transparent'
+        ? { backgroundColor: '#000000' } : {}),
     }));
+  }, [setLiveSubtitleStyle]);
+
+  const applySubtitlePreset = useCallback((preset: SubtitleStylePreset) => {
+    setLiveSubtitleStyle(current => applySubtitleStylePreset(current, preset));
   }, [setLiveSubtitleStyle]);
 
   const updateAudioDelay = useCallback((seconds: number) => {
@@ -3729,7 +3755,7 @@ export default function VideoPlayer({
   }, [applyNativeTextTrackVisibility, useNativeSubtitleTracks, selectedSubtitleTrackIndex, subtitleCues.length]);
 
   const subtitleCueFontSize = Math.round(subtitleStyle.fontSize * subtitleStyle.scale);
-  const subtitleCueShadow = subtitleStyle.borderWidth > 0
+  const subtitleCueShadow = subtitleStyle.borderEnabled && !subtitleStyle.backgroundEnabled && subtitleStyle.borderWidth > 0
     ? `-${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, -${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}`
     : 'none';
   const aspectRatio = aspectMode === 'default' ? undefined : aspectMode;
@@ -3951,7 +3977,8 @@ export default function VideoPlayer({
         {`video::cue {
           color: ${subtitleStyle.fontColor};
           font-size: ${subtitleCueFontSize}px;
-          background-color: ${subtitleStyle.backgroundColor};
+          background-color: ${subtitleBackgroundColor(subtitleStyle)};
+          font-weight: ${subtitleStyle.backgroundEnabled ? 700 : 600};
           text-shadow: ${subtitleCueShadow};
         }
         .loom-player-root *:focus:not(input):not(select):not(textarea),
@@ -4061,6 +4088,7 @@ export default function VideoPlayer({
             seekableTimelineRef={streamIsSeekableRef}
             style={subtitleStyle}
             visible={Boolean(activeOnlineCaption) || showSubtitleOverlay}
+            onBlurLayout={nativePlaybackActive && nativeEngineKind === 'mpv' ? syncNativeSubtitleBlur : undefined}
           />
         </div>
 
@@ -4417,10 +4445,9 @@ export default function VideoPlayer({
             selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
             selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
             subtitleStyle={subtitleStyle}
-            subtitleCueFontSize={subtitleCueFontSize}
             subtitleStyleCompatibilityMessage={subtitleStyleCompatibilityMessage}
             updateSubtitleStyle={updateSubtitleStyle}
-            applySubtitleStyleToStream={applySubtitleStyleToStream}
+            applySubtitlePreset={applySubtitlePreset}
             onCorrectSkipTiming={() => {
               setShowMediaPanel(false);
               openMarkerEditor();

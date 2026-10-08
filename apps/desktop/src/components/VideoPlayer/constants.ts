@@ -1,4 +1,5 @@
 import type { SubtitleStyleSettings } from './types';
+import { DEFAULT_SUBTITLE_BACKGROUND_BLUR_PERCENT, DEFAULT_SUBTITLE_BACKGROUND_OPACITY } from '../../shared/subtitleBackground.ts';
 
 export const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
 export const SUBTITLE_STYLE_KEY = 'loomtvSubtitleStyle';
@@ -37,4 +38,6 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   borderEnabled: true,
   backgroundColor: 'transparent',
   backgroundEnabled: false,
+  backgroundOpacity: DEFAULT_SUBTITLE_BACKGROUND_OPACITY,
+  backgroundBlurPercent: DEFAULT_SUBTITLE_BACKGROUND_BLUR_PERCENT,
 };

@@ -8,7 +8,16 @@ const pluginStates = new Set<StremioPluginSummary['state']>([
   'broken',
 ]);
 
-export type CachedSidebarPlugin = Pick<StremioPluginSummary, 'addonId' | 'name' | 'state' | 'trusted'>;
+export type CachedSidebarPlugin = Pick<StremioPluginSummary, 'addonId' | 'name' | 'state' | 'trusted'> & {
+  catalogCount?: number;
+  resources?: readonly string[];
+  configured?: boolean;
+};
+
+export function isBrowsableStremioSource(plugin: CachedSidebarPlugin): boolean {
+  return plugin.state === 'enabled' && plugin.trusted && plugin.configured !== false
+    && (Boolean(plugin.catalogCount && plugin.catalogCount > 0) || plugin.addonId === 'org.archive.clean');
+}
 
 function cachedSidebarPlugin(value: unknown): CachedSidebarPlugin | null {
   if (!value || typeof value !== 'object') return null;
@@ -22,6 +31,9 @@ function cachedSidebarPlugin(value: unknown): CachedSidebarPlugin | null {
     name: candidate.name,
     state: candidate.state,
     trusted: candidate.trusted,
+    ...(Number.isSafeInteger(candidate.catalogCount) && Number(candidate.catalogCount) >= 0 ? { catalogCount: candidate.catalogCount } : {}),
+    ...(Array.isArray(candidate.resources) ? { resources: candidate.resources.filter((resource): resource is string => typeof resource === 'string') } : {}),
+    ...(typeof candidate.configured === 'boolean' ? { configured: candidate.configured } : {}),
   };
 }
 
@@ -37,7 +49,7 @@ export function loadCachedSidebarPlugins(): CachedSidebarPlugin[] {
 }
 
 export function saveCachedSidebarPlugins(plugins: readonly StremioPluginSummary[]): void {
-  const cached = plugins.map(({ addonId, name, state, trusted }) => ({ addonId, name, state, trusted }));
+  const cached = plugins.map(({ addonId, name, state, trusted, resources, catalogs, configured }) => ({ addonId, name, state, trusted, resources, catalogCount: catalogs.length, configured }));
   try {
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(cached));
   } catch {

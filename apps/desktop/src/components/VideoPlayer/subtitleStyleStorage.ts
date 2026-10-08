@@ -3,11 +3,12 @@ import {
   SUBTITLE_STYLE_KEY,
 } from './constants.ts';
 import type { SubtitleStyleSettings } from './types.ts';
+import { MIN_SUBTITLE_BACKGROUND_BLUR_PERCENT } from '../../shared/subtitleBackground.ts';
+import { MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY } from './subtitleStylePresets';
 
 function clampStyleNumber(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, parsed));
+  return Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : fallback));
 }
 
 function styleColor(value: unknown, fallback: string): string {
@@ -16,6 +17,9 @@ function styleColor(value: unknown, fallback: string): string {
 
 function normalizeSubtitleStyle(value: unknown): SubtitleStyleSettings {
   const style = value && typeof value === 'object' ? value as Partial<SubtitleStyleSettings> : {};
+  const backgroundMode = style.backgroundMode === 'soft' || style.backgroundMode === 'solid'
+    ? style.backgroundMode : style.backgroundOpacity === 1 ? 'solid' : 'soft';
+  const softBox = style.backgroundEnabled === true && backgroundMode === 'soft';
   return {
     // Subtitle timing follows the active playback clock. Do not carry an old
     // manual offset into a new playback session.
@@ -29,6 +33,10 @@ function normalizeSubtitleStyle(value: unknown): SubtitleStyleSettings {
     borderEnabled: typeof style.borderEnabled === 'boolean' ? style.borderEnabled : DEFAULT_SUBTITLE_STYLE.borderEnabled,
     backgroundColor: styleColor(style.backgroundColor, DEFAULT_SUBTITLE_STYLE.backgroundColor),
     backgroundEnabled: typeof style.backgroundEnabled === 'boolean' ? style.backgroundEnabled : DEFAULT_SUBTITLE_STYLE.backgroundEnabled,
+    backgroundOpacity: clampStyleNumber(style.backgroundOpacity, DEFAULT_SUBTITLE_STYLE.backgroundOpacity,
+      softBox ? MIN_SOFT_BOX_OPACITY : 0, softBox ? MAX_SOFT_BOX_OPACITY : 1),
+    backgroundBlurPercent: clampStyleNumber(style.backgroundBlurPercent, DEFAULT_SUBTITLE_STYLE.backgroundBlurPercent, MIN_SUBTITLE_BACKGROUND_BLUR_PERCENT, 100),
+    backgroundMode,
   };
 }
 

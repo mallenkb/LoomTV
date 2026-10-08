@@ -59,6 +59,14 @@ export type PlaybackViewport = {
   y: number;
   width: number;
   height: number;
+  /** Measured subtitle shape in viewport-local CSS pixels, for native GPU blur. */
+  subtitleBlur?: SubtitleBlurRegion | null;
+};
+
+export type SubtitleBlurRegion = {
+  radius: number;
+  cornerRadius: number;
+  lines: Array<{ x: number; y: number; width: number; height: number }>;
 };
 
 export type PlaybackStartOptions = {

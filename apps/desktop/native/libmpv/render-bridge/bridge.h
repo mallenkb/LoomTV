@@ -12,6 +12,8 @@ extern "C" {
 uint32_t loom_mpv_bridge_version(void);
 void *loom_mpv_create(const char *absolute_library_path, char *error, size_t capacity);
 int loom_mpv_attach(void *engine, void *parent_nsview, char *error, size_t capacity);
+/* Viewport-local CSS layout, or JSON null to clear the GPU subtitle blur. */
+int loom_mpv_set_subtitle_blur(void *engine, const char *layout_json);
 int loom_mpv_command(void *engine, uint64_t request, const char *arguments_json,
                      char *error, size_t capacity);
 /* Returns an allocated JSON array, or NULL when no events are queued. */

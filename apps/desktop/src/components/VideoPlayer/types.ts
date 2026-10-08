@@ -16,6 +16,9 @@ export type SubtitleStyleSettings = {
   borderEnabled: boolean;
   backgroundColor: string;
   backgroundEnabled: boolean;
+  backgroundOpacity: number;
+  backgroundBlurPercent: number;
+  backgroundMode?: 'soft' | 'solid';
 };
 
 export interface MediaTrack {

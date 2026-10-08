@@ -198,7 +198,10 @@ export function transcodeSessionKey(filePath: string, options: TranscodeOptions)
           fontColor: options.subtitleStyle.fontColor,
           borderColor: options.subtitleStyle.borderColor,
           borderWidth: options.subtitleStyle.borderWidth,
+          borderEnabled: options.subtitleStyle.borderEnabled,
           backgroundColor: options.subtitleStyle.backgroundColor,
+          backgroundEnabled: options.subtitleStyle.backgroundEnabled,
+          backgroundOpacity: options.subtitleStyle.backgroundOpacity,
         }
         : undefined,
     },

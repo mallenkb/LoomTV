@@ -102,6 +102,16 @@ const playbackViewportSchema = z.object({
   y: finiteNumber.min(-10_000).max(100_000),
   width: finiteNumber.positive().max(100_000),
   height: finiteNumber.positive().max(100_000),
+  subtitleBlur: z.object({
+    radius: finiteNumber.min(0).max(24),
+    cornerRadius: finiteNumber.min(0).max(12),
+    lines: z.array(z.object({
+      x: finiteNumber.min(-100_000).max(100_000),
+      y: finiteNumber.min(-100_000).max(100_000),
+      width: finiteNumber.positive().max(100_000),
+      height: finiteNumber.positive().max(100_000),
+    })).min(1).max(32),
+  }).nullable().optional(),
 });
 const mpvStartOptionsSchema = playbackStartOptionsSchema.omit({ nativeSubtitles: true });
 const libraryScanOptionsSchema = z.object({
@@ -225,6 +235,7 @@ const transcodeOptionsSchema = z.object({
     borderEnabled: z.boolean().optional(),
     backgroundColor: z.string().max(8192).optional(),
     backgroundEnabled: z.boolean().optional(),
+    backgroundOpacity: finiteNumber.min(0).max(1).optional(),
   }).optional(),
   forceTranscode: z.boolean().optional(),
 });

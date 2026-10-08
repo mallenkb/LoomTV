@@ -43,7 +43,8 @@ import type {
 } from './Settings.types';
 import { parseStoredValue } from '@/lib/desktopDecoders';
 import { iptvSourceDisplayName, useIptvSources } from '@/lib/liveTvSources';
-import { loadCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
+import { isBrowsableStremioSource } from '@/lib/stremioPluginSidebarCache';
+import { useStremioSidebarSources } from '@/lib/stremioSourceNavigation';
 import { z } from 'zod';
 
 const savedRemoteLibrarySchema = z.object({ baseUrl: z.string() });
@@ -215,7 +216,7 @@ export default function Settings() {
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const { sources: iptvSources } = useIptvSources();
-  const [stremioPlugins, setStremioPlugins] = useState(loadCachedSidebarPlugins);
+  const stremioPlugins = useStremioSidebarSources();
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
@@ -223,13 +224,6 @@ export default function Settings() {
   const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
 
-  useEffect(() => {
-    const refresh = () => {
-      setStremioPlugins(loadCachedSidebarPlugins());
-    };
-    window.addEventListener('loomtv:plugins-changed', refresh);
-    return () => window.removeEventListener('loomtv:plugins-changed', refresh);
-  }, []);
 
   const availableSidebarItems = useMemo<SidebarOrderItem[]>(() => {
     const builtInItems = DEFAULT_SIDEBAR_NAV_ORDER.map((id) => ({
@@ -241,10 +235,10 @@ export default function Settings() {
       label: `${iptvSourceDisplayName(source.name)} (IPTV)`,
     }));
     const addonItems = stremioPlugins
-      .filter((plugin) => plugin.state === 'enabled' && plugin.trusted && plugin.addonId === 'org.archive.clean')
+      .filter(isBrowsableStremioSource)
       .map((plugin) => ({
         id: `stremio:${plugin.addonId}`,
-        label: `${plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Archive.org'} (Add-on)`,
+        label: `${plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on'} (Add-on)`,
       }));
     const groupedFolders = new Set(Object.values(otherFolderGroups).flatMap((group) => group.folders));
     const groupItems = Object.entries(otherFolderGroups).map(([groupId, group]) => ({

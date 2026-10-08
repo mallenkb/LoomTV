@@ -1,20 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, KeyRound, PackagePlus, Plug, ShieldCheck, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, KeyRound, PackagePlus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   desktopApi,
-  type OfficialStremioAddon,
   type ProfileSummary,
   type StremioPluginReview,
   type StremioPluginSummary,
   type StremioPluginAuditEntry,
 } from '@/lib/desktopApi';
 import { saveCachedSidebarPlugins } from '@/lib/stremioPluginSidebarCache';
+import { stremioManifestInput } from '@/lib/stremioSourceNavigation';
 
 const BUILT_IN_SUBTITLE_ADDON_ID = 'org.stremio.opensubtitlesv3';
+const BUILT_IN_METADATA_ADDON_ID = 'com.linvo.cinemeta';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The add-on request failed.';
@@ -36,7 +37,6 @@ function hasConfigurationValue(value: unknown): boolean {
 export default function PluginsSettingsSection() {
   const confirm = useConfirm();
   const [installed, setInstalled] = useState<StremioPluginSummary[]>([]);
-  const [official, setOfficial] = useState<OfficialStremioAddon[]>([]);
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
   const [profileAccess, setProfileAccess] = useState<Record<string, readonly string[]>>({});
   const [manifestUrl, setManifestUrl] = useState('');
@@ -46,11 +46,12 @@ export default function PluginsSettingsSection() {
   const [error, setError] = useState<string | null>(null);
   const [configurationValues, setConfigurationValues] = useState<Record<string, Record<string, unknown>>>({});
   const [auditByAddon, setAuditByAddon] = useState<Record<string, readonly StremioPluginAuditEntry[]>>({});
+  const userInstalled = installed.filter(plugin => plugin.addonId !== BUILT_IN_METADATA_ADDON_ID
+    && plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID);
 
   const refresh = useCallback(async () => {
-    const [nextInstalled, nextOfficial, nextProfiles] = await Promise.all([
+    const [nextInstalled, nextProfiles] = await Promise.all([
       desktopApi.listStremioPlugins(),
-      desktopApi.listOfficialStremioAddons(),
       desktopApi.listProfiles(),
     ]);
     // Retire the old plugin record now that captions use the built-in provider.
@@ -68,7 +69,6 @@ export default function PluginsSettingsSection() {
     }));
     setInstalled(remainingInstalled);
     saveCachedSidebarPlugins(remainingInstalled);
-    setOfficial(nextOfficial.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID));
     setProfiles(grantableProfiles);
     setProfileAccess(Object.fromEntries(accessEntries));
     setAuditByAddon(Object.fromEntries(auditEntries));
@@ -81,11 +81,6 @@ export default function PluginsSettingsSection() {
       .finally(() => { if (mounted) setBusyKey(null); });
     return () => { mounted = false; };
   }, [refresh]);
-
-  const installedById = useMemo(
-    () => new Map(installed.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID).map((plugin) => [plugin.addonId, plugin])),
-    [installed],
-  );
 
   const runReview = async (key: string, operation: () => Promise<StremioPluginReview>) => {
     setBusyKey(key);
@@ -339,7 +334,7 @@ export default function PluginsSettingsSection() {
             Add by manifest URL
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Advanced: enter a remote HTTPS Stremio manifest. Local addresses, HTTP, IPFS, and executable packages are rejected.
+            Add a source using its HTTPS manifest link. The Archive.org listing link also works. Catalog sources appear in the sidebar after approval.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -349,7 +344,7 @@ export default function PluginsSettingsSection() {
               event.preventDefault();
               const url = manifestUrl.trim();
               if (!url) return;
-              void runReview('manual', () => desktopApi.reviewStremioManifestUrl(url));
+              void runReview('manual', () => desktopApi.reviewStremioManifestUrl(stremioManifestInput(url)));
             }}
           >
             <label className="sr-only" htmlFor="stremio-manifest-url">Stremio manifest URL</label>
@@ -373,55 +368,17 @@ export default function PluginsSettingsSection() {
 
       <Card className="settings-panel">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <Plug className="h-4 w-4 text-[var(--loom-accent)]" />
-            Official Stremio add-ons
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Review and approve remote HTTPS providers before Loom can contact their catalog, metadata, or subtitle endpoints.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {busyKey === 'load' && <p className="text-sm text-[var(--loom-muted)]">Loading add-ons…</p>}
-          {official.filter(addon => addon.addonId !== BUILT_IN_SUBTITLE_ADDON_ID).map((addon) => {
-            const installedPlugin = installedById.get(addon.addonId);
-            return (
-              <div key={addon.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-white">{addon.name}</p>
-                    <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-xs text-[var(--loom-accent)]">Official</span>
-                    {installedPlugin && <span className="text-xs text-[var(--loom-faint)]">{stateLabel(installedPlugin)}</span>}
-                  </div>
-                  <p className="mt-1 text-sm leading-6 text-[var(--loom-muted)]">{addon.description}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant={installedPlugin?.state === 'enabled' ? 'outline' : 'default'}
-                  disabled={busyKey !== null}
-                  onClick={() => void runReview(`official:${addon.id}`, () => desktopApi.reviewOfficialStremioAddon(addon.id))}
-                >
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                  {busyKey === `official:${addon.id}` ? 'Reviewing…' : installedPlugin ? 'Review again' : 'Review & install'}
-                </Button>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader>
           <CardTitle className="text-white">Installed add-ons</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
             Owner always has access. Grant each Standard profile explicitly; Kids and Guest profiles are always denied.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {busyKey !== 'load' && installed.every(plugin => plugin.addonId === BUILT_IN_SUBTITLE_ADDON_ID) && (
+          {busyKey === 'load' && <p className="text-sm text-[var(--loom-muted)]">Loading add-ons…</p>}
+          {busyKey !== 'load' && userInstalled.length === 0 && (
             <p className="text-sm text-[var(--loom-muted)]">No add-ons installed yet.</p>
           )}
-          {installed.filter(plugin => plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID).map((plugin) => (
+          {userInstalled.map((plugin) => (
             <div key={plugin.addonId} className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">

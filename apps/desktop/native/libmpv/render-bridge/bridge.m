@@ -11,6 +11,7 @@
 #include <mpv/render_gl.h>
 #include <stdbool.h>
 #include "bridge.h"
+#include "subtitle-blur.h"
 
 #define LM_API_TYPE MPV_RENDER_PARAM_API_TYPE
 #define LM_GL_INIT MPV_RENDER_PARAM_OPENGL_INIT_PARAMS
@@ -63,6 +64,7 @@ typedef struct {
 @public _Atomic(int) renderError;
 }
 @property(nonatomic, strong) LMSignal *signal;
+@property(nonatomic, strong) LMSubtitleBlur *subtitleBlur;
 - (void)renderFrame;
 @end
 
@@ -129,13 +131,14 @@ static void renderUpdate(void *context) {
     int result = api.mpv_render_context_render(renderer, params);
     if (result < 0) { atomic_store(&renderError, result); return; }
     if (!skip) {
+        [self.subtitleBlur renderWidth:fbo.w height:fbo.h];
         [self.openGLContext flushBuffer];
         api.mpv_render_context_report_swap(renderer);
     }
 }
 @end
 
-LM_EXPORT uint32_t loom_mpv_bridge_version(void) { return 1; }
+LM_EXPORT uint32_t loom_mpv_bridge_version(void) { return 2; }
 
 // Call on a worker thread. No AppKit objects or playback surfaces are created
 // here. The caller can keep one prepared, idle core ready for the next session.
@@ -227,6 +230,7 @@ LM_EXPORT int loom_mpv_attach(void *opaque, void *parent, char *error, size_t ca
                 LMView *view = [[LMView alloc] initWithFrame:host.bounds pixelFormat:format];
                 if (!view || !view.openGLContext) { result = -1; copyError(error, capacity, @"Could not create the libmpv render view."); return; }
                 view->api = engine->api;
+                view.subtitleBlur = [LMSubtitleBlur new];
                 atomic_init(&view->renderError, 0);
                 view.wantsBestResolutionOpenGLSurface = YES;
                 view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -366,6 +370,47 @@ LM_EXPORT char *loom_mpv_poll(void *opaque) {
     }
 }
 LM_EXPORT void loom_mpv_free(void *pointer) { free(pointer); }
+LM_EXPORT int loom_mpv_set_subtitle_blur(void *opaque, const char *json) {
+    if (!opaque || !json) return -1;
+    @autoreleasepool {
+        size_t size = strnlen(json, 16385);
+        if (size > 16384) return -1;
+        NSData *data = [NSData dataWithBytes:json length:size];
+        id value = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];
+        if (value != [NSNull null] && ![value isKindOfClass:[NSDictionary class]]) return -1;
+        NSDictionary *layout = value == [NSNull null] ? nil : value;
+        if (layout) {
+            id lines = layout[@"lines"];
+            if (![lines isKindOfClass:[NSArray class]] || [lines count] > 32 || [lines count] < 1) return -1;
+            NSArray *keys = @[@"width", @"height", @"radius", @"cornerRadius"];
+            for (NSString *key in keys) {
+                id number = layout[key];
+                if (![number isKindOfClass:[NSNumber class]] || !isfinite([number doubleValue]) || [number doubleValue] < 0) return -1;
+            }
+            if ([layout[@"width"] doubleValue] <= 0 || [layout[@"height"] doubleValue] <= 0
+                || [layout[@"radius"] doubleValue] > 24 || [layout[@"cornerRadius"] doubleValue] > 12) return -1;
+            for (id line in lines) {
+                if (![line isKindOfClass:[NSDictionary class]]) return -1;
+                for (NSString *key in @[@"x", @"y", @"width", @"height"]) {
+                    id number = line[key];
+                    if (![number isKindOfClass:[NSNumber class]] || !isfinite([number doubleValue])
+                        || fabs([number doubleValue]) > 100000) return -1;
+                }
+                if ([line[@"width"] doubleValue] <= 0 || [line[@"height"] doubleValue] <= 0) return -1;
+            }
+        }
+        LMEngine *engine = (__bridge LMEngine *)opaque;
+        __block int result = -1;
+        mainSync(^{
+            LMView *view = engine->view;
+            if (!view || !view->renderer) return;
+            [view.subtitleBlur setLayout:layout];
+            [view setNeedsDisplay:YES];
+            result = 0;
+        });
+        return result;
+    }
+}
 LM_EXPORT int loom_mpv_poll_into(void *opaque, char *output, size_t capacity) {
     if (!output || capacity < 2) return -1;
     output[0] = '\0';
@@ -396,6 +441,7 @@ LM_EXPORT int loom_mpv_destroy(void *opaque) {
                 [view.openGLContext makeCurrentContext];
                 engine->api.mpv_render_context_set_update_callback(view->renderer, NULL, NULL);
                 engine->api.mpv_render_context_free(view->renderer);
+                [view.subtitleBlur dispose];
                 view->renderer = NULL;
                 [view removeFromSuperview];
                 [view.openGLContext clearDrawable];

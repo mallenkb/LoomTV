@@ -1,6 +1,7 @@
 import type { SubtitleStyleOptions, TranscodeOptions } from './mediaTypes';
 import { z } from 'zod';
 import { parseRequiredJson } from './runtimeValidation.ts';
+import { DEFAULT_SUBTITLE_BACKGROUND_OPACITY, subtitleBackgroundColor } from '../shared/subtitleBackground.ts';
 
 const subtitleStyleOptionsSchema = z.object({
   delaySeconds: z.number().finite().optional(),
@@ -13,6 +14,7 @@ const subtitleStyleOptionsSchema = z.object({
   borderEnabled: z.boolean().optional(),
   backgroundColor: z.string().optional(),
   backgroundEnabled: z.boolean().optional(),
+  backgroundOpacity: z.number().finite().optional(),
 });
 
 type H264HardwareEncoder =
@@ -207,11 +209,12 @@ function clampStyleNumber(value: unknown, fallback: number, min: number, max: nu
 }
 
 function assColor(value: unknown, fallback: string): string {
-  const hex = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  const hex = typeof value === 'string' && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value) ? value : fallback;
   const red = hex.slice(1, 3);
   const green = hex.slice(3, 5);
   const blue = hex.slice(5, 7);
-  return `&H00${blue}${green}${red}`.toUpperCase();
+  const alpha = hex.length === 9 ? 255 - Number.parseInt(hex.slice(7, 9), 16) : 0;
+  return `&H${alpha.toString(16).padStart(2, '0')}${blue}${green}${red}`.toUpperCase();
 }
 
 function subtitleForceStyle(style?: SubtitleStyleOptions, placement: SubtitlePlacement = 'primary'): string {
@@ -220,15 +223,17 @@ function subtitleForceStyle(style?: SubtitleStyleOptions, placement: SubtitlePla
   const marginV = placement === 'secondary'
     ? Math.round(position * 6)
     : Math.round((100 - position) * 6);
-  const borderWidth = clampStyleNumber(style?.borderWidth, 3, 0, 10);
+  const borderWidth = style?.borderEnabled === false || style?.backgroundEnabled ? 0 : clampStyleNumber(style?.borderWidth, 3, 0, 10);
 
   return [
     `Fontsize=${Math.round(fontSize)}`,
+    ...(style?.backgroundEnabled ? ['Bold=-1'] : []),
     `PrimaryColour=${assColor(style?.fontColor, '#ffffff')}`,
     `OutlineColour=${assColor(style?.borderColor, '#000000')}`,
-    `BackColour=${assColor(style?.backgroundColor, '#000000')}`,
+    `BackColour=${assColor(subtitleBackgroundColor(style || {}), '#00000000')}`,
+    `BorderStyle=${style?.backgroundEnabled ? 4 : 1}`,
     `Outline=${borderWidth}`,
-    'Shadow=0',
+    `Shadow=${style?.backgroundEnabled ? 6 : 0}`,
     `Alignment=${placement === 'secondary' ? 8 : 2}`,
     `MarginV=${marginV}`,
   ].join(',');
@@ -314,7 +319,10 @@ export function parseSubtitleStyle(value: string | null): SubtitleStyleOptions |
       fontColor: typeof parsed.fontColor === 'string' ? parsed.fontColor : '#ffffff',
       borderColor: typeof parsed.borderColor === 'string' ? parsed.borderColor : '#000000',
       borderWidth: clampStyleNumber(parsed.borderWidth, 3, 0, 10),
+      borderEnabled: parsed.borderEnabled !== false,
       backgroundColor: typeof parsed.backgroundColor === 'string' ? parsed.backgroundColor : '#000000',
+      backgroundEnabled: parsed.backgroundEnabled === true,
+      backgroundOpacity: clampStyleNumber(parsed.backgroundOpacity, DEFAULT_SUBTITLE_BACKGROUND_OPACITY, 0, 1),
     };
   } catch {
     return undefined;
