@@ -1045,6 +1045,9 @@ class LibVlcPlaybackSession {
   private readonly media: NativeHandle;
   private player: NativeHandle;
   private playerOperation: Promise<void> | null = null;
+  // Set when LibVLC's own stop or release fails. The player may still render
+  // into the drawable, so teardown must then keep the view and media alive.
+  private nativePlayerTeardownFailed = false;
   private timer: NodeJS.Timeout | null = null;
   private pollIntervalMs = 0;
   private fastPollUntil = 0;
@@ -1495,8 +1498,17 @@ class LibVlcPlaybackSession {
   }
 
   private async stopAndReleasePlayer(player: number | bigint): Promise<void> {
-    await callLibVlcAsync(this.runtime.api.playerStop, player);
-    await callLibVlcAsync(this.runtime.api.playerRelease, player);
+    await this.nativePlayerTeardown(this.runtime.api.playerStop, player);
+    await this.nativePlayerTeardown(this.runtime.api.playerRelease, player);
+  }
+
+  private async nativePlayerTeardown(binding: Parameters<typeof callLibVlcAsync>[0], player: number | bigint): Promise<void> {
+    try {
+      await callLibVlcAsync(binding, player);
+    } catch (error) {
+      this.nativePlayerTeardownFailed = true;
+      throw error;
+    }
   }
 
   private scheduleFinalViewportSync(delayMs = 140): void {
@@ -1815,9 +1827,9 @@ class LibVlcPlaybackSession {
     this.lastPauseCommand = null;
     this.startApplied = true;
     this.beginPlayerOperation(async () => {
-      await callLibVlcAsync(api.playerStop, player);
+      await this.nativePlayerTeardown(api.playerStop, player);
       if (this.stopped) {
-        await callLibVlcAsync(api.playerRelease, player);
+        await this.nativePlayerTeardown(api.playerRelease, player);
         return;
       }
       this.player = player;
@@ -2063,7 +2075,11 @@ class LibVlcPlaybackSession {
     this.player = null;
     const pending = this.playerOperation;
     void trackLibVlcTeardown(async () => {
-      await pending;
+      // A failed replay or re-arm ends the session with this release. Its
+      // rejection was already reported. Clean up unless LibVLC itself failed
+      // to stop or release a player, which may still hold the drawable.
+      await pending?.catch(() => undefined);
+      if (this.nativePlayerTeardownFailed) return;
       if (player) await this.stopAndReleasePlayer(player);
       if (this.media) await callLibVlcAsync(this.runtime.api.mediaRelease, this.media);
       await this.releaseOwnedInstance();

@@ -52,7 +52,7 @@ test('every LibVLC async teardown binding has an integer return type for Electro
   const runtime = f.playback.bindRuntime(library);
   assert.ok(runtime);
   const source = fs.readFileSync(new URL('../src/main/libvlcPlayback.ts', import.meta.url), 'utf8');
-  const bindings = new Set([...source.matchAll(/callLibVlcAsync\((?:this\.runtime\.api|api)\.(\w+),/g)]
+  const bindings = new Set([...source.matchAll(/(?:callLibVlcAsync|this\.nativePlayerTeardown)\((?:this\.runtime\.api|api)\.(\w+),/g)]
     .map((match) => match[1]));
   assert.equal(bindings.size, 4);
   for (const binding of bindings) await f.teardown.callLibVlcAsync(runtime.api[binding], 1);
@@ -477,6 +477,21 @@ test('stopping during re-arm skips recreation and keeps media and view alive unt
   await f.complete('player-release');
   assert.equal(f.events.filter((event) => event.startsWith('create:')).length, 1);
   await f.drain();
+  assert.equal(f.views.get(1), false);
+});
+
+test('a failed re-arm still stops, releases and destroys the native view', async () => {
+  const f = fixture();
+  const first = f.start();
+  f.failPlay();
+  first.session.rearmNativeVideoOutput();
+  await flush();
+  await f.complete('stop');
+  await f.complete('player-release');
+  assert.equal(f.events.filter((event) => event.startsWith('create:')).length, 2);
+  await f.drain();
+  assert.ok(f.events.some((event) => event.startsWith('media-release:queued')), 'media must be released');
+  assert.ok(f.events.some((event) => event.startsWith('instance-release:queued')), 'instance must be released');
   assert.equal(f.views.get(1), false);
 });
 
