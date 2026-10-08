@@ -22,6 +22,7 @@ import {
   type FetchedArtworkBytes,
 } from './databaseArtworkRepository.ts';
 import { createThumbnailCache, type CachedThumbnail } from './thumbnailCache.ts';
+import { backupDestinationOverlapsLiveDatabase } from './backupDestination.ts';
 import { compactDatabaseIfWasteful, trimFreePages } from './databaseCompaction.ts';
 import {
   loadLibrary as loadLibraryRecord,
@@ -1348,8 +1349,13 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
   });
   if (result.canceled || !result.filePath) return { ok: false, error: 'cancelled' };
 
-  const database = getDb();
   const destination = result.filePath;
+  const userData = app.getPath('userData');
+  if (backupDestinationOverlapsLiveDatabase(destination, [databasePath(), path.join(userData, 'loomtv-canonical.sqlite')])) {
+    return { ok: false, error: 'Choose a different file. A backup cannot replace a database LoomTV is using.' };
+  }
+
+  const database = getDb();
   const temporaryPath = `${destination}.${randomUUID()}.tmp`;
   const previousPath = `${destination}.${randomUUID()}.previous`;
   let movedExistingBackup = false;
