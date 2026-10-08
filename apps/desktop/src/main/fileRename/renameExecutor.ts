@@ -313,6 +313,24 @@ function remapStoredState(
       for (const statement of mediaIdStatements) statement.run(after, before);
     }
 
+    // Undo restores a manual marker from its history snapshot by exact
+    // revision, so the snapshots must follow the file like the live rows do.
+    const revisionMap = new Map(revisions);
+    const historyRows = database.prepare('SELECT history_id, snapshot_json FROM segment_manual_history WHERE snapshot_json IS NOT NULL')
+      .all() as Array<{ history_id: number; snapshot_json: string }>;
+    const updateHistory = database.prepare('UPDATE segment_manual_history SET snapshot_json = ? WHERE history_id = ?');
+    for (const row of historyRows) {
+      let snapshot: unknown;
+      try { snapshot = JSON.parse(row.snapshot_json); } catch { continue; }
+      if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) continue;
+      const next: Record<string, unknown> = { ...snapshot };
+      if (typeof next.fileRevision === 'string') next.fileRevision = revisionMap.get(next.fileRevision) || next.fileRevision;
+      if (typeof next.filePath === 'string') next.filePath = mapPath(next.filePath);
+      if (typeof next.mediaId === 'string') next.mediaId = aliases.get(next.mediaId) || next.mediaId;
+      const json = JSON.stringify(next);
+      if (json !== row.snapshot_json) updateHistory.run(json, row.history_id);
+    }
+
     const artwork = database.prepare('SELECT media_id, target, data_url FROM custom_artwork').all() as Array<{ media_id: string; target: string; data_url: string }>;
     const updateArtwork = database.prepare('UPDATE custom_artwork SET data_url = ? WHERE media_id = ? AND target = ?');
     for (const row of artwork) {

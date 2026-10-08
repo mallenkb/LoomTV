@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { planRenames } from '../src/main/fileRename/renamePlanner.ts';
+import { mediaFileRevision } from '../src/main/skipSegments/fileIdentity.ts';
 import type { MediaItem } from '../src/main/metadata/types.ts';
 import { createMetadataItemBuilders, type MetadataItemBuilderDependencies } from '../src/main/metadataItemBuilders.ts';
 function fixture(t: { after: (fn: () => void) => void }) {
@@ -97,6 +98,7 @@ test('rename and undo retain original names in durable history', async (t) => {
  CREATE TABLE playback_progress(file_path TEXT);
  CREATE TABLE playback_track_preferences(scope TEXT);
  CREATE TABLE custom_artwork(media_id TEXT, target TEXT, data_url TEXT);
+ CREATE TABLE segment_manual_history(history_id INTEGER PRIMARY KEY AUTOINCREMENT, candidate_id TEXT, action TEXT, snapshot_json TEXT, changed_at INTEGER);
  `);
  for (const table of ['media_segments', 'media_fingerprints', 'media_auxiliary_fingerprints', 'segment_analysis_inventory', 'segment_analysis_jobs', 'media_segment_candidates', 'segment_analysis_state']) db.exec(`CREATE TABLE ${table}(file_path TEXT, file_revision TEXT, media_id TEXT)`);
  const database = { prepare: db.prepare.bind(db), transaction: (fn: () => void) => () => { db.exec('SAVEPOINT mutation'); try { fn(); db.exec('RELEASE mutation'); } catch (error) { db.exec('ROLLBACK TO mutation; RELEASE mutation'); throw error; } } };
@@ -114,4 +116,38 @@ test('rename and undo retain original names in durable history', async (t) => {
  assert.ok(executor.history()[0].operations.some((operation) => operation.from === source));
  assert.equal(executor.history(20, 1).length, 0);
  assert.equal(executor.plan().entries.length, 0);
+});
+
+test('organizing a file keeps manual marker undo history attached to it', async (t) => {
+ const { DatabaseSync } = await import('node:sqlite');
+ const { createRenameExecutor } = await import('../src/main/fileRename/renameExecutor.ts');
+ const f = fixture(t); const source = f.file('Runner.2026.1080p.mkv');
+ const db = new DatabaseSync(path.join(f.root, 'history.sqlite')); t.after(() => db.close());
+ db.exec(`
+ CREATE TABLE media_rename_batches(id TEXT PRIMARY KEY, created_at INTEGER, undone_at INTEGER, operations_json TEXT);
+ CREATE TABLE media_rename_journal(id TEXT PRIMARY KEY, batch_id TEXT, direction TEXT, operations_json TEXT, completed INTEGER, created_at INTEGER);
+ CREATE TABLE media_rename_locks(file_path TEXT PRIMARY KEY, rejected_name TEXT, created_at INTEGER);
+ CREATE TABLE playback_progress(file_path TEXT);
+ CREATE TABLE playback_track_preferences(scope TEXT);
+ CREATE TABLE custom_artwork(media_id TEXT, target TEXT, data_url TEXT);
+ CREATE TABLE segment_manual_history(history_id INTEGER PRIMARY KEY AUTOINCREMENT, candidate_id TEXT, action TEXT, snapshot_json TEXT, changed_at INTEGER);
+ `);
+ for (const table of ['media_segments', 'media_fingerprints', 'media_auxiliary_fingerprints', 'segment_analysis_inventory', 'segment_analysis_jobs', 'media_segment_candidates', 'segment_analysis_state']) db.exec(`CREATE TABLE ${table}(file_path TEXT, file_revision TEXT, media_id TEXT)`);
+ const database = { prepare: db.prepare.bind(db), transaction: (fn: () => void) => () => { db.exec('SAVEPOINT mutation'); try { fn(); db.exec('RELEASE mutation'); } catch (error) { db.exec('ROLLBACK TO mutation; RELEASE mutation'); throw error; } } };
+ const localMetadata = { durationSeconds: 5400, fileSize: 5, modifiedAtMs: 1_700_000_000_000 };
+ let library = { movies: [f.item({ filePath: source, localMetadata })], tvShows: [], animeShows: [], libraryFolders: [f.root] } as import('../src/main/appContracts.ts').LibraryData;
+ const executor = createRenameExecutor({ getDatabase: () => database as unknown as import('better-sqlite3').Database, loadLibrary: () => library, saveLibraryMutation: (next) => { library = next; }, remapMediaIds: () => { /* No separate watch-list store in this fixture. */ }, isScanRunning: () => false, libraryRoots: () => [f.root] });
+ executor.plan({ automatic: true });
+ const plan = executor.plan();
+ const before = mediaFileRevision(source, 5_400_000, 0, localMetadata);
+ db.prepare('INSERT INTO segment_manual_history (candidate_id, action, snapshot_json, changed_at) VALUES (?, ?, ?, ?)')
+   .run('marker-1', 'update', JSON.stringify({ id: 'marker-1', mediaId: source, filePath: source, fileRevision: before, type: 'intro', source: 'manual' }), 1);
+
+ executor.apply(plan.entries.map((entry) => entry.id));
+ const moved = path.join(f.root, 'Runner (2026)/Runner (2026).mkv');
+ assert.equal(library.movies[0].filePath, moved);
+ const snapshot = JSON.parse(String((db.prepare('SELECT snapshot_json FROM segment_manual_history').get() as { snapshot_json: string }).snapshot_json));
+ assert.equal(snapshot.filePath, moved);
+ assert.equal(snapshot.fileRevision, mediaFileRevision(moved, 5_400_000, 0, localMetadata));
+ assert.notEqual(snapshot.fileRevision, before);
 });
