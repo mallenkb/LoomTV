@@ -758,6 +758,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     return [...library.movies, ...library.tvShows, ...library.animeShows].find((item) => item.id === mediaId) || null;
   }
 
+  // A provider request can outlive the item it was started for: the folder is
+  // removed, the file is organized to a new path, or app data is cleared.
+  // Saving the captured item then would recreate a row the user deleted.
+  function stillInLibrary(item: MediaItem): boolean {
+    const current = findLibraryMediaItem(loadLibrary(), item.id);
+    return Boolean(current) && current?.filePath === item.filePath;
+  }
+
   async function safeMetadataProvider<T>(request: Promise<T>, fallback: T): Promise<T> {
     try {
       return await request;
@@ -1557,6 +1565,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         );
       }
 
+      if (!stillInLibrary(target)) return false;
       const changed = JSON.stringify(target) !== before;
       if (changed) {
         saveLibraryItem(target);
@@ -1679,6 +1688,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         );
       }
 
+      if (!stillInLibrary(target)) return false;
       const changed = JSON.stringify(target) !== before;
       if (changed) {
         saveLibraryItem(target);

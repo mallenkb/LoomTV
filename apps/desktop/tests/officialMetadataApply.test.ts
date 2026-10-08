@@ -47,8 +47,12 @@ type ServiceHarness = {
   omdbById: string[];
 };
 
-function createHarness(item: MediaItem, omdbResponse: Record<string, unknown> | null = null): ServiceHarness {
-  const library: LibraryData = { movies: [], tvShows: [], animeShows: [item] } as LibraryData;
+function createHarness(
+  item: MediaItem,
+  omdbResponse: Record<string, unknown> | null = null,
+  overrides: Partial<Record<string, unknown>> = {},
+  library: LibraryData = { movies: [], tvShows: [], animeShows: [item] } as LibraryData,
+): ServiceHarness {
   const saved: MediaItem[] = [];
   const omdbById: string[] = [];
   const noop = () => undefined;
@@ -91,6 +95,7 @@ function createHarness(item: MediaItem, omdbResponse: Record<string, unknown> | 
     orderedArtworkCandidates: (...urls: Array<string | null | undefined>) => [
       ...new Set(urls.filter((url): url is string => Boolean(url))),
     ],
+    ...overrides,
   } as unknown as OfficialMetadataServiceDependencies;
 
   return { service: createOfficialMetadataService(deps), saved, omdbById };
@@ -161,3 +166,36 @@ test('applying only the poster leaves ratings untouched', async () => {
   assert.equal(result.rating, 3.4);
   assert.deepEqual(saved[0].providerRatings, { imdb: { value: 3.4, scale: 10 } });
 });
+
+for (const refresh of ['refreshDisplayMetadata', 'refreshIncompleteMetadata'] as const) {
+  test(`${refresh} does not recreate an item removed while its provider request was pending`, async () => {
+    const item = animeShow({ summary: '', trailerUrl: '', rating: 0, providerRatings: undefined, poster: '', backdrop: '' });
+    const library = { movies: [], tvShows: [], animeShows: [item] } as unknown as LibraryData;
+    const fresh = async () => {
+      // The library folder is removed while the provider is answering.
+      library.animeShows = [];
+      return { title: item.title, summary: 'Fresh summary', rating: 8.6, thumbnail: 'p.jpg', cover: 'b.jpg', genres: ['Action'] };
+    };
+    const warn = console.warn;
+    const warnings: unknown[] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    const { service, saved } = createHarness(item, null, {
+      fetchAniListAnimeMetadata: fresh,
+      fetchJikanMetadata: fresh,
+      fetchTMDBTVMetadata: fresh,
+      fetchTVMetadata: fresh,
+      fetchCinemetaMetadataCandidates: async () => [],
+      fetchCinemetaMeta: async () => null,
+      fetchFanartTVArtwork: async () => ({ posterCandidates: [], backdropCandidates: [], logoCandidates: [] }),
+      fetchTVDBMetadata: async () => null,
+    }, library);
+
+    try {
+      assert.equal(await service[refresh](item.id), false);
+    } finally {
+      console.warn = warn;
+    }
+    assert.deepEqual(warnings, []);
+    assert.deepEqual(saved, []);
+  });
+}
