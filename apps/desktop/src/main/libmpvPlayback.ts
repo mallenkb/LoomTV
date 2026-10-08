@@ -28,7 +28,11 @@ import {
 } from './nativePlaybackPower.ts';
 
 type NativePointer = bigint | number | null;
-type NativeFunction = (...args: Array<string | number | bigint | Buffer | null>) => unknown;
+type NativeArgument = string | number | bigint | Buffer | null;
+type NativeFunction = {
+  (...args: NativeArgument[]): unknown;
+  async: (...args: [...NativeArgument[], (error: Error | null, result: unknown) => void]) => void;
+};
 type BridgeApi = {
   library: KoffiLibrary;
   create: NativeFunction;
@@ -42,6 +46,11 @@ type Runtime = {
   libraryPath: string;
   api: BridgeApi;
 };
+type NativeTeardown = {
+  runtime: Runtime;
+  engine: NativePointer;
+  host: NativeViewHost | null;
+};
 type MpvMessage = {
   event?: string;
   name?: string;
@@ -53,6 +62,38 @@ type MpvMessage = {
 
 let cachedRuntime: Runtime | null | undefined;
 let cachedWarning = '';
+const pendingNativeTeardowns = new Set<Promise<void>>();
+const retainedFailedTeardowns = new Set<NativeTeardown>();
+let shutdown: Promise<void> | null = null;
+
+function scheduleNativeTeardown(runtime: Runtime, engine: NativePointer, host: NativeViewHost | null): void {
+  const teardown = { runtime, engine, host };
+  // Stop all main-thread access before the worker can consume the handle.
+  const pending = Promise.resolve().then(() => new Promise<void>((resolve, reject) => {
+    if (!teardown.engine) {
+      resolve();
+      return;
+    }
+    teardown.runtime.api.destroy.async(teardown.engine, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  })).then(() => {
+    // The worker first detaches the AppKit renderer, then shuts down mpv.
+    // Keep both the bridge library and parent host alive until it completes.
+    teardown.host?.destroy();
+  }, (error) => {
+    // An FFI error leaves handle ownership uncertain. Keep its library and
+    // parent alive until process exit rather than freeing a view still in use.
+    retainedFailedTeardowns.add(teardown);
+    throw error;
+  });
+  pendingNativeTeardowns.add(pending);
+  void pending.then(() => pendingNativeTeardowns.delete(pending), (error) => {
+    pendingNativeTeardowns.delete(pending);
+    console.warn('[playback] libmpv cleanup failed', error);
+  });
+}
 
 function runtimeRoots(): string[] {
   const roots = typeof process.resourcesPath === 'string' && process.resourcesPath
@@ -134,7 +175,7 @@ function loadRuntime(force = false): Runtime | null {
         attach: bind(library, 'loom_mpv_attach', 'int', ['void *', 'void *', 'void *', 'size_t']),
         command: bind(library, 'loom_mpv_command', 'int', ['void *', 'uint64', 'str', 'void *', 'size_t']),
         pollInto: bind(library, 'loom_mpv_poll_into', 'int', ['void *', 'void *', 'size_t']),
-        destroy: bind(library, 'loom_mpv_destroy', 'void', ['void *']),
+        destroy: bind(library, 'loom_mpv_destroy', 'int', ['void *']),
       },
     };
     return cachedRuntime;
@@ -509,6 +550,7 @@ class LibMpvSession {
   }
 
   command(command: MpvCommand): boolean {
+    if (this.stopped) return false;
     if (command.type === 'set-muted') return this.applyMute(command.muted);
     if (command.type === 'set-video-track') this.suspendedVideoTrackId = null;
     try {
@@ -572,9 +614,9 @@ class LibMpvSession {
     this.engine = null;
     this.host = null;
     for (const cleanup of [
+      () => host?.setVisible(false),
       () => releaseNativePlaybackDisplaySleep(this.id),
-      () => { if (engine) this.runtime.api.destroy(engine); },
-      () => host?.destroy(),
+      () => scheduleNativeTeardown(this.runtime, engine, host),
       () => this.onStopped(this),
     ]) {
       try { cleanup(); } catch (error) { console.warn('[playback] libmpv cleanup failed', error); }
@@ -596,6 +638,7 @@ class LibMpvSession {
 let currentSession: LibMpvSession | null = null;
 
 export function startLibMpvPlayback(owner: WebContents, source: string, options: MpvStartOptions = {}) {
+  if (shutdown) return { ok: false, error: 'libmpv is shutting down.' };
   if (disabled()) return { ok: false, error: libMpvAvailability().reason };
   const runtime = loadRuntime();
   const ownerWindow = BrowserWindow.fromWebContents(owner);
@@ -631,7 +674,32 @@ export function setLibMpvPlaybackViewport(owner: WebContents, viewport: Playback
 export function setLibMpvPlaybackFullscreenTransition(owner: WebContents, transitioning: boolean): boolean {
   return currentSession?.setFullscreenTransition(owner, transitioning) ?? false;
 }
-export function stopAllLibMpvPlayback(): void {
+export function stopAllLibMpvPlayback(timeoutMs = 4_000): Promise<void> {
+  if (shutdown) return shutdown;
   stopLibMpvPlayback();
   cachedRuntime = undefined;
+  // Stopped and failed-construction sessions leave currentSession before
+  // their workers finish. Drain those jobs as well as the current session.
+  const drained = (async () => {
+    while (pendingNativeTeardowns.size > 0) {
+      await Promise.allSettled([...pendingNativeTeardowns]);
+    }
+  })();
+  // A stalled mpv_terminate_destroy must not keep the app from quitting.
+  // LibVLC uses the same bound.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`[playback] libmpv cleanup did not finish within ${timeoutMs} ms; continuing.`);
+      resolve();
+    }, timeoutMs);
+  });
+  // Clear the latch once draining ends. An update install that fails and
+  // recovers keeps the app running, and libmpv must be able to start again.
+  const current = Promise.race([drained, timedOut]).finally(() => {
+    if (timer) clearTimeout(timer);
+    if (shutdown === current) shutdown = null;
+  });
+  shutdown = current;
+  return current;
 }

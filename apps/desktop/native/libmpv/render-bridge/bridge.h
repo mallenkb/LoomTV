@@ -19,8 +19,9 @@ char *loom_mpv_poll(void *engine);
 void loom_mpv_free(void *allocation);
 /* Copies one JSON event batch into output and returns its byte length. */
 int loom_mpv_poll_into(void *engine, char *output, size_t capacity);
-/* Frees the renderer before the core; consumes the engine handle exactly once. */
-void loom_mpv_destroy(void *engine);
+/* Frees the renderer before the core; consumes the engine handle exactly once.
+   Call on a worker. Always returns 0; the int return keeps koffi's .async safe. */
+int loom_mpv_destroy(void *engine);
 #ifdef __cplusplus
 }
 #endif

@@ -109,6 +109,7 @@ test('migration retry does not replace a changed pairing file', () => {
 
 function mpvFixture() {
   let failure = '';
+  let syncDestroyCalls = 0;
   let engines = 0;
   let hosts = 0;
   let allocated = 0;
@@ -144,7 +145,26 @@ function mpvFixture() {
       if (failure === 'destroy') throw new Error('destroy failed');
     },
   };
-  const koffi = { load: () => ({ func: (name: keyof typeof native) => native[name] }) };
+  // koffi binds each export as a sync call plus .async, which runs on a worker
+  // and reports through a Node-style callback.
+  const bound = (name: keyof typeof native) => {
+    const fn = native[name] as (...args: unknown[]) => unknown;
+    return Object.assign((...args: unknown[]) => {
+      if (name === 'loom_mpv_destroy') syncDestroyCalls++;
+      return fn(...args);
+    }, {
+      async: (...args: unknown[]) => {
+        const callback = args.pop() as (error: Error | null, result?: unknown) => void;
+        if (name === 'loom_mpv_destroy' && failure === 'hang') return;
+        setImmediate(() => {
+          let result: unknown;
+          try { result = fn(...args); } catch (error) { callback(error as Error); return; }
+          callback(null, result);
+        });
+      },
+    });
+  };
+  const koffi = { load: () => ({ func: (name: keyof typeof native) => bound(name) }) };
   const api = loadModule('libmpvPlayback', {
     electron: { BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false }) } },
     'node:fs': { existsSync: () => true },
@@ -169,35 +189,39 @@ function mpvFixture() {
     console: { warn: () => undefined },
     setInterval: (callback: () => void) => { timers.add(callback); return callback; },
     clearInterval: (callback: () => void) => { timers.delete(callback); },
+    setTimeout, clearTimeout,
   }) as typeof import('../src/main/libmpvPlayback.ts');
   const start = () => api.startLibMpvPlayback(owner as never, 'toy.mkv');
-  const empty = () => {
+  // Native teardown runs on a worker; wait for it before checking ownership.
+  const empty = async () => {
+    await api.stopAllLibMpvPlayback();
     assert.equal(engines, 0); assert.equal(hosts, 0); assert.equal(timers.size, 0);
     assert.equal(powers.size, 0); assert.equal(owner.listenerCount('destroyed'), 0);
     assert.equal(allocated, destroyed);
   };
-  return { api, owner, start, empty, states, timers, sent, setFailure: (value: string) => { failure = value; } };
+  return { api, owner, start, empty, states, timers, sent, setFailure: (value: string) => { failure = value; },
+    counts: () => ({ engines, hosts, allocated, destroyed }), syncDestroyCalls: () => syncDestroyCalls };
 }
 
 for (const failure of ['create', 'host', 'attach', 'loadfile', 'emit']) {
-  test(`libmpv transaction releases every allocation on ${failure} failure`, () => {
+  test(`libmpv transaction releases every allocation on ${failure} failure`, async () => {
     const f = mpvFixture();
     for (let index = 0; index < 20; index++) {
-      f.setFailure(failure); assert.equal(f.start().ok, false); f.empty();
+      f.setFailure(failure); assert.equal(f.start().ok, false); await f.empty();
       f.setFailure(''); assert.equal(f.start().ok, true);
-      assert.equal(f.api.stopLibMpvPlayback(), true); f.empty();
+      assert.equal(f.api.stopLibMpvPlayback(), true); await f.empty();
     }
   });
 }
 
-test('libmpv repeated stop, replacement, owner destruction and native failures release ownership', () => {
+test('libmpv repeated stop, replacement, owner destruction and native failures release ownership', async () => {
   const f = mpvFixture();
   for (let index = 0; index < 30; index++) {
     const first = f.start(); assert.equal(first.ok, true);
     const second = f.start(); assert.equal(second.ok, true);
     assert.equal(f.owner.listenerCount('destroyed'), 1);
     assert.equal(f.api.stopLibMpvPlayback(first.sessionId), false);
-    f.owner.emit('destroyed'); f.empty();
+    f.owner.emit('destroyed'); await f.empty();
     assert.equal(f.api.stopLibMpvPlayback(), false);
   }
   for (const failure of ['poll', 'command', 'destroy']) {
@@ -207,11 +231,16 @@ test('libmpv repeated stop, replacement, owner destruction and native failures r
     if (failure === 'poll') for (const poll of f.timers) poll();
     else if (failure === 'command') f.api.commandLibMpvPlayback(started.sessionId, { type: 'set-paused', paused: true });
     else f.api.stopLibMpvPlayback();
-    f.empty();
+    if (failure === 'destroy') {
+      // A failed native destroy leaves handle ownership uncertain, so the
+      // parent view stays alive instead of being freed under mpv.
+      await f.api.stopAllLibMpvPlayback();
+      assert.deepEqual(f.counts(), { engines: 0, hosts: 1, allocated: f.counts().allocated, destroyed: f.counts().allocated });
+    } else await f.empty();
   }
 });
 
-test('a rejected libmpv display preference keeps the session playing', () => {
+test('a rejected libmpv display preference keeps the session playing', async () => {
   const f = mpvFixture();
   const started = f.start();
   assert.ok(started.sessionId);
@@ -220,9 +249,9 @@ test('a rejected libmpv display preference keeps the session playing', () => {
   assert.ok(!f.states.includes('error'));
   f.setFailure('');
   assert.equal(f.api.stopLibMpvPlayback(started.sessionId), true);
-  f.empty();
+  await f.empty();
 });
-test('libmpv mutes at the audio output so M takes effect without buffered delay', () => {
+test('libmpv mutes at the audio output so M takes effect without buffered delay', async () => {
   const f = mpvFixture();
   const started = f.start();
   assert.ok(started.sessionId);
@@ -242,5 +271,36 @@ test('libmpv mutes at the audio output so M takes effect without buffered delay'
   assert.ok(!f.states.includes('error'));
   f.setFailure('');
   assert.equal(f.api.stopLibMpvPlayback(started.sessionId), true);
-  f.empty();
+  await f.empty();
+});
+
+test('libmpv destroy is bound with an int return and only ever runs on a worker', async () => {
+  const source = fs.readFileSync(new URL('../src/main/libmpvPlayback.ts', import.meta.url), 'utf8');
+  // koffi .async on a void-returning binding crashes Electron 43's main process.
+  assert.match(source, /bind\(library, 'loom_mpv_destroy', 'int', \['void \*'\]\)/);
+  const bridge = fs.readFileSync(new URL('../native/libmpv/render-bridge/bridge.m', import.meta.url), 'utf8');
+  assert.match(bridge, /LM_EXPORT int loom_mpv_destroy\(void \*opaque\)/);
+
+  const f = mpvFixture();
+  for (let index = 0; index < 5; index++) {
+    assert.equal(f.start().ok, true);
+    assert.equal(f.api.stopLibMpvPlayback(), true);
+  }
+  await f.empty();
+  assert.equal(f.syncDestroyCalls(), 0);
+});
+
+test('a hung libmpv destroy cannot hold quit past its timeout, and libmpv starts again afterwards', async () => {
+  const f = mpvFixture();
+  assert.equal(f.start().ok, true);
+  f.setFailure('hang');
+  const startedAt = Date.now();
+  await f.api.stopAllLibMpvPlayback(50);
+  assert.ok(Date.now() - startedAt < 2_000);
+  assert.equal(f.counts().hosts, 1, 'the view stays alive while mpv may still use it');
+
+  f.setFailure('');
+  const restarted = f.start();
+  assert.equal(restarted.ok, true, 'a finished shutdown drain must not disable libmpv');
+  assert.equal(f.api.stopLibMpvPlayback(), true);
 });

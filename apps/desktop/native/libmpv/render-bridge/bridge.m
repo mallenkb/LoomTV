@@ -383,8 +383,10 @@ LM_EXPORT int loom_mpv_poll_into(void *opaque, char *output, size_t capacity) {
 
 // Call on a worker. AppKit detaches and frees the render context before the
 // blocking core shutdown. A queued render callback owns only a weak view.
-LM_EXPORT void loom_mpv_destroy(void *opaque) {
-    if (!opaque) return;
+// Returns int, not void: koffi's .async on a void-returning function crashes
+// Electron 43's main process, and this function is always called through it.
+LM_EXPORT int loom_mpv_destroy(void *opaque) {
+    if (!opaque) return 0;
     @autoreleasepool {
         LMEngine *engine = (__bridge_transfer LMEngine *)opaque;
         mainSync(^{
@@ -402,4 +404,5 @@ LM_EXPORT void loom_mpv_destroy(void *opaque) {
         });
         // LMEngine dealloc now owns the only core and dlopen references.
     }
+    return 0;
 }

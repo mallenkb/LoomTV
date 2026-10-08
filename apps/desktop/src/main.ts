@@ -2978,9 +2978,8 @@ async function startBackgroundServices(): Promise<void> {
   console.log(mpvRuntimeSummary());
   initAutoUpdater({
     getMainWindow,
-    stopNativePlayback: () => {
-      stopAllMpvPlayback();
-      return stopAllLibVlcPlayback();
+    stopNativePlayback: async () => {
+      await Promise.all([stopAllMpvPlayback(), stopAllLibVlcPlayback()]);
     },
     closeMediaServer: async () => {
       for (const scan of activeScans) scan.abort();
@@ -3176,17 +3175,17 @@ app.on('activate', () => {
 });
 
 let scannerQuitPending = false;
-let libVlcQuitPending = false;
-let libVlcQuitReady = false;
+let nativePlaybackQuitPending = false;
+let nativePlaybackQuitReady = false;
 app.on('before-quit', (event) => {
   for (const scan of activeScans) scan.abort();
-  if (!libVlcQuitReady) {
+  if (!nativePlaybackQuitReady) {
     event.preventDefault();
     isAppShuttingDown = true;
-    if (!libVlcQuitPending) {
-      libVlcQuitPending = true;
-      void stopAllLibVlcPlayback().finally(() => {
-        libVlcQuitReady = true;
+    if (!nativePlaybackQuitPending) {
+      nativePlaybackQuitPending = true;
+      void Promise.all([stopAllMpvPlayback(), stopAllLibVlcPlayback()]).finally(() => {
+        nativePlaybackQuitReady = true;
         app.quit();
       });
     }
@@ -3208,7 +3207,6 @@ app.on('before-quit', (event) => {
   clearUpdateQuitFallback();
   destroyServerTray();
   destroyLanDiscovery();
-  stopAllMpvPlayback();
   void stopUnifiedDesktopServer().catch((error) => {
     console.error('[unified desktop] Canonical server shutdown failed:', error);
   });
