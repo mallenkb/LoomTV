@@ -17,6 +17,7 @@ import { findFFmpeg, findFFprobe } from './mediaBinaries.ts';
 import { getLocalNetworkAddresses } from './networkInfo.ts';
 import { loadOrCreateLanTlsIdentity, type LanTlsIdentity } from './lanTlsIdentity.ts';
 import { decryptLocalSecret, encryptLocalSecret, localSecretStorage } from './localSecretStorage.ts';
+import { createNativeOwnerSession } from './nativeOwnerSession.ts';
 
 type ProtectedSecret = { version: 1; encrypted: string };
 type ApiEnvelope<T> = { ok?: boolean; data?: T; error?: { message?: string } };
@@ -36,9 +37,16 @@ let identity: LanTlsIdentity | null = null;
 let origin = '';
 let bootstrapSecret: string | null = null;
 let desktopSetupToken = '';
-let adminToken: string | null = null;
-let adminTokenExpiresAt = 0;
-let adminTokenRefresh: Promise<string> | null = null;
+// The in-process host issues a normal expiring session. Neither the owner
+// password nor a bearer credential needs to be saved on disk.
+const nativeOwner = createNativeOwnerSession({
+  issue: () => {
+    if (!host || !identity || !origin || restoredAdminOnly) {
+      return Promise.reject(new Error('The unified desktop host is not available for native access.'));
+    }
+    return host.createDesktopOwnerSession();
+  },
+});
 let certificatePinInstalled = false;
 let setupRequired = false;
 let restoredAdminOnly = false;
@@ -194,57 +202,13 @@ function requestJson<T>(pathname: string, requestIdentity: LanTlsIdentity, optio
   });
 }
 
-async function ensureNativeOwnerSession(): Promise<string> {
-  const currentHost = host;
-  const currentIdentity = identity;
-  if (!currentHost || !currentIdentity || !origin || restoredAdminOnly) {
-    throw new Error('The unified desktop host is not available for native access.');
-  }
-  if (adminToken && adminTokenExpiresAt > Date.now() + 30_000) return adminToken;
-  if (adminTokenRefresh) return adminTokenRefresh;
-  // The in-process host issues a normal expiring session. Neither the owner
-  // password nor a bearer credential needs to be saved on disk.
-  const pending = currentHost.createDesktopOwnerSession().then((session) => {
-    if (host !== currentHost || identity !== currentIdentity || restoredAdminOnly) {
-      throw new Error('The unified desktop host changed during authentication.');
-    }
-    if (!session.adminToken || !Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
-      throw new Error('The unified desktop host returned an expired native session.');
-    }
-    adminToken = session.adminToken;
-    adminTokenExpiresAt = session.expiresAt;
-    return session.adminToken;
-  });
-  adminTokenRefresh = pending;
-  try {
-    return await pending;
-  } finally {
-    if (adminTokenRefresh === pending) adminTokenRefresh = null;
-  }
-}
-
 async function requestNativeJson<T>(pathname: string, options: Pick<LocalRequestOptions, 'method' | 'body'> = {}): Promise<T> {
   const requestIdentity = identity;
-  const requestHost = host;
-  if (!requestIdentity || !requestHost) throw new Error('The unified desktop host is not running.');
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const token = await ensureNativeOwnerSession();
-    if (identity !== requestIdentity || host !== requestHost) {
-      throw new Error('The unified desktop host changed before the request.');
-    }
-    try {
-      return await requestJson<T>(pathname, requestIdentity, { ...options, token });
-    } catch (error) {
-      // Authentication is checked before a root mutation, so one retry after
-      // an expired/revoked credential cannot duplicate an accepted mutation.
-      if (attempt || (error as { status?: number } | null)?.status !== 401) throw error;
-      if (adminToken === token) {
-        adminToken = null;
-        adminTokenExpiresAt = 0;
-      }
-    }
-  }
-  throw new Error('The unified desktop request could not be authenticated.');
+  if (!requestIdentity || !host) throw new Error('The unified desktop host is not running.');
+  return nativeOwner.send((token) => {
+    if (identity !== requestIdentity) throw new Error('The unified desktop host changed before the request.');
+    return requestJson<T>(pathname, requestIdentity, { ...options, token });
+  });
 }
 
 function installCanonicalCertificatePin(): void {
@@ -359,10 +323,7 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
       },
       setupHooks: restoredAdminOnly ? undefined : {
         ...setupHooks,
-        ownerCreated: ({ adminToken: createdToken, expiresAt }) => {
-          adminToken = createdToken;
-          adminTokenExpiresAt = expiresAt;
-        },
+        ownerCreated: (session) => { nativeOwner.set(session); },
       },
       adminHtmlPath: packagedAsset('admin.html', path.join(desktopAssets, 'admin.html')),
       adminIconsPath: packagedAsset('lucide-icons.svg', path.join(desktopAssets, 'lucide-icons.svg')),
@@ -400,7 +361,7 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
     });
     setupRequired = setup.required;
     if (setup.ownerConfigured) removeBootstrapSecret(dataDir);
-    if (setup.ownerConfigured && !restoredAdminOnly) await ensureNativeOwnerSession();
+    if (setup.ownerConfigured && !restoredAdminOnly) await nativeOwner.token();
     state = {
       enabled: true,
       ready: true,
@@ -438,8 +399,7 @@ export async function configureUnifiedDesktopOwner(input: { name: string; passwo
     trustedSetup: true,
     body: { name, password, serverName: `${name}'s LoomTV`, language: 'en', sessionMode: 'bearer' },
   });
-  adminToken = created.adminToken;
-  adminTokenExpiresAt = created.expiresAt;
+  nativeOwner.set(created);
   const dataDir = configuredDataDir();
   if (dataDir) removeBootstrapSecret(dataDir);
   state = { ...state, ownerConfigured: true };
@@ -506,9 +466,7 @@ export async function stopUnifiedDesktopServer(): Promise<void> {
   host = null;
   origin = '';
   identity = null;
-  adminToken = null;
-  adminTokenExpiresAt = 0;
-  adminTokenRefresh = null;
+  nativeOwner.reset();
   desktopSetupToken = '';
   setupRequired = false;
   state = { ...state, ready: false };
