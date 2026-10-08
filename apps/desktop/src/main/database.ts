@@ -1460,8 +1460,18 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM media_items;
     DELETE FROM library_folders;
     DELETE FROM scan_cache;
+    DELETE FROM iptv_recent;
+    DELETE FROM iptv_favorites;
+    DELETE FROM iptv_programmes;
+    DELETE FROM iptv_channels;
+    DELETE FROM iptv_stream_health;
+    DELETE FROM iptv_sources;
     DELETE FROM app_settings;
+    INSERT OR IGNORE INTO plugin_secret_revisions (id, revision) VALUES (1, 0);
   `))();
+  // The cached signer holds the MAC key that was just deleted. Drop it so the
+  // next plugin write creates and persists a fresh key.
+  pluginSecretStore = null;
 
   thumbnailRepository?.clear();
   for (const cacheDirectory of [artworkCacheDirectory(), pluginArtworkCacheDirectory(), thumbnailCacheDirectory()]) {

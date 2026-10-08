@@ -620,6 +620,7 @@ async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
 
 function clearAppData(): LibraryData {
   const owner = clearDatabase();
+  stremioPluginService.discardCachedState();
   selectDeviceProfile(DESKTOP_DEVICE_ID, owner.id);
   broadcastProfilesChanged();
   broadcastActiveProfileChanged(DESKTOP_DEVICE_ID);

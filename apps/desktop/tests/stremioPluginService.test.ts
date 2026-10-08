@@ -61,7 +61,7 @@ function fixture(providerFetch?: StremioFetchImplementation) {
     authorizeManagement: () => owner,
     fetchImpl: providerFetch ?? fetchImpl,
   });
-  return { service, standard, kid };
+  return { service, standard, kid, clearPersistedState: () => { state = null; } };
 }
 
 test('official review pins the expected manifest identity and rolls back a mismatch', async () => {
@@ -130,4 +130,15 @@ test('standard profiles require an explicit grant while Kids profiles remain den
     () => service.fetchCatalog(kid.id, addonId, { type: 'movie', catalogId: 'popular' }),
     (error) => error instanceof StremioPluginServiceError && error.code === 'STREMIO_PLUGIN_PROFILE_NOT_ALLOWED',
   );
+});
+
+test('a cleared app reloads add-on state instead of keeping the cached registry', async () => {
+  const { service, clearPersistedState } = fixture();
+  const review = await service.reviewManifestUrl('https://catalog.example/manifest.json', addonId);
+  await service.approve(addonId, review.reviewToken);
+  assert.equal(service.listManaged().length, 1);
+
+  clearPersistedState();
+  service.discardCachedState();
+  assert.deepEqual(service.listManaged(), []);
 });

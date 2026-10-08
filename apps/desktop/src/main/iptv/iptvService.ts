@@ -386,6 +386,9 @@ export function createIptvService(deps: IptvServiceDependencies) {
               : 'That playlist contains no channels.',
           );
         }
+        // The source can be removed, or the app reset, while the playlist
+        // downloads. Writing now would leave channels with no source.
+        if (!getIptvSource(database, sourceId)) throw new IptvSourceError('That live TV source no longer exists.');
         replaceIptvChannels(database, sourceId, playlist.channels);
 
         // An explicit guide URL wins; otherwise use the one the playlist
@@ -402,6 +405,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
           try {
             const guideText = await fetchText(guideUrl, GUIDE_MAX_BYTES, 'iptv.guide', 'guide');
             const guide = parseXmltvGuide(guideText, knownChannelIds);
+            if (!getIptvSource(database, sourceId)) throw new IptvSourceError('That live TV source no longer exists.');
             replaceIptvProgrammes(database, sourceId, guide.programmes);
             programmeCount = guide.programmes.length;
           } catch (guideError) {
@@ -413,6 +417,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
           replaceIptvProgrammes(database, sourceId, []);
         }
 
+        if (!getIptvSource(database, sourceId)) throw new IptvSourceError('That live TV source no longer exists.');
         const refreshed = recordIptvRefresh(database, sourceId, {
           channelCount: playlist.channels.length,
           programmeCount,

@@ -328,6 +328,18 @@ export class StremioPluginService {
     });
   }
 
+  /**
+   * Forget the in-memory registry after its persisted state was cleared, such
+   * as by a full app reset. In-flight provider requests are aborted so a late
+   * result cannot write the old registry back.
+   */
+  discardCachedState(): void {
+    for (const controller of this.latestProviderRequests.values()) controller.abort();
+    this.latestProviderRequests.clear();
+    this.registry = null;
+    this.initializationError = null;
+  }
+
   listManaged(): readonly StremioInstallRecord[] {
     this.deps.authorizeManagement();
     return this.getRegistry().list();
