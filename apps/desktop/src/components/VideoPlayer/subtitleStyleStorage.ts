@@ -4,7 +4,7 @@ import {
 } from './constants.ts';
 import type { SubtitleStyleSettings } from './types.ts';
 import { MIN_SUBTITLE_BACKGROUND_BLUR_PERCENT } from '../../shared/subtitleBackground.ts';
-import { MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY } from './subtitleStylePresets';
+import { MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY } from './subtitleStylePresets.ts';
 
 function clampStyleNumber(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
