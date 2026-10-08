@@ -596,6 +596,8 @@ export function createHeadlessMediaService({
       const principal = await remotePolicy?.resolveInvitationPrincipal?.(profile.invitationSessionId);
       return principal?.id === principalId && matchesInvitationBinding(principal, profile) ? principal : null;
     }
+    if (adminService.resolvePlaybackPrincipal) return adminService.resolvePlaybackPrincipal(principalId, profile);
+    if (profile?.authenticationDeviceId) return null;
     if (profile?.authenticationSessionId
       && !await adminService.isSessionActive?.(profile.authenticationSessionId, principalId)) return null;
     return adminService.getPrincipalById?.(principalId);
@@ -850,6 +852,7 @@ export function createHeadlessMediaService({
         deviceId: profileContext.deviceId,
         selectionRevision: profileContext.selectionRevision,
         ...(profileContext.authenticationSessionId ? { authenticationSessionId: profileContext.authenticationSessionId } : {}),
+        ...(profileContext.authenticationDeviceId ? { authenticationDeviceId: profileContext.authenticationDeviceId } : {}),
         ...(profileContext.invitationSessionId ? { invitationSessionId: profileContext.invitationSessionId } : {}),
         remoteAccess: profileContext.remoteAccess === true,
         ...(profileContext.sourceId ? { sourceId: profileContext.sourceId } : {}),
@@ -1122,6 +1125,9 @@ export function createHeadlessMediaService({
           authenticationSessionId: requestedProfile.profileContext?.authenticationSessionId || principal.sessionId,
         };
       }
+      if (principal.deviceId && principal.authentication !== 'invitation-session') {
+        requestedProfile.profileContext = { ...requestedProfile.profileContext, authenticationDeviceId: principal.deviceId };
+      }
       const authExpiresAt = await authenticationExpiry(principal.id, requestedProfile.profileContext);
       const registrySession = playbackRegistry.create({
         absoluteExpiresAt: Math.min(now() + HLS_ABSOLUTE_TIMEOUT_MS, authExpiresAt),
@@ -1136,6 +1142,8 @@ export function createHeadlessMediaService({
           selectionRevision: requestedProfile.profileContext.selectionRevision,
           ...(requestedProfile.profileContext.authenticationSessionId
             ? { authenticationSessionId: requestedProfile.profileContext.authenticationSessionId } : {}),
+          ...(requestedProfile.profileContext.authenticationDeviceId
+            ? { authenticationDeviceId: requestedProfile.profileContext.authenticationDeviceId } : {}),
           ...(requestedProfile.profileContext.invitationSessionId
             ? { invitationSessionId: requestedProfile.profileContext.invitationSessionId } : {}),
           remoteAccess: requestedProfile.profileContext.remoteAccess === true,
@@ -1633,7 +1641,7 @@ export function createHeadlessMediaService({
     }
     const directMatch = pathname.match(/^\/api\/media\/items\/([^/]+)$/i);
     if (directMatch && (req.method === 'GET' || req.method === 'HEAD')) {
-      const authorization = await authorizedFor(req, url, 'stream', res.__loomtvPublicApi === true);
+      const authorization = await authorizedFor(req, url, 'stream', true);
       if (!authorization.ok) return json(res, authorization.status, { ok: false, error: authorization.status === 403 ? 'permission_denied' : 'admin_auth_required' });
       const principal = authorization.principal;
       try {
@@ -1674,7 +1682,9 @@ export function createHeadlessMediaService({
       }, now());
       if (!current) return null;
       if (playbackRegistry.isSessionIdentifier?.(identifier) && !principal) return null;
-      const resolvedPrincipal = principal || await resolveBoundPrincipal(current.principalId, current.profile);
+      if (principal && principal.id !== current.principalId) return null;
+      if (principal && !matchesInvitationBinding(principal, current.profile)) return null;
+      const resolvedPrincipal = await resolveBoundPrincipal(current.principalId, current.profile);
       if (!resolvedPrincipal) return null;
       if (!matchesInvitationBinding(resolvedPrincipal, current.profile)) return null;
       try { remotePolicy?.assertPrincipal?.(req, resolvedPrincipal, 'media'); } catch { return null; }

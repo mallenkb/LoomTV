@@ -134,3 +134,25 @@ test('normalizeDeviceIds caps the allow-list length and trims entries', () => {
   assert.equal(normalizeDeviceIds(null), null);
   assert.equal(normalizeDeviceIds(undefined), null);
 });
+
+test('device listing and revocation respect target-account scope and preserve self revocation', async () => {
+  const manager = { id: 'manager', type: 'user', role: 'user', permissions: ['devices.manage', 'users.manage', 'stream'], rootIds: ['root-1'] };
+  const accounts = [
+    { id: 'owner', type: 'owner', role: 'owner', permissions: ['*'], rootIds: null },
+    { id: 'outside', type: 'user', role: 'viewer', permissions: ['stream'], rootIds: ['root-2'] },
+    { id: 'inside', type: 'user', role: 'viewer', permissions: ['stream'], rootIds: ['root-1'] },
+  ];
+  const devices = accounts.map((account) => ({ id: `device-${account.id}`, accountId: account.id, permissions: ['stream'] }));
+  const revoked = [];
+  const service = createPairingService({
+    getAccount: async (id) => accounts.find((account) => account.id === id),
+    store: { listDevices: () => devices, revokeDevice: (id) => { revoked.push(id); return { revoked: true }; } },
+  });
+  assert.deepEqual((await service.list(manager)).map((device) => device.id), ['device-inside']);
+  for (const id of ['device-owner', 'device-outside']) await assert.rejects(service.revoke(id, manager), { status: 403 });
+  assert.deepEqual(revoked, []);
+  await service.revoke('device-inside', manager);
+  await service.revokeSelf('device-outside', { ...accounts[1], deviceId: 'device-outside' });
+  assert.deepEqual(revoked, ['device-inside', 'device-outside']);
+  assert.equal((await service.list(accounts[0])).length, 3);
+});

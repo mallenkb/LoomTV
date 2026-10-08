@@ -227,3 +227,80 @@ test('bulk media source lookup matches the per-item lookup', async (t) => {
   for (const item of catalog) assert.deepEqual(grouped.get(item.id), store.listMediaSources(item.id));
   assert.equal(grouped.get('movie-2')[0].state, 'offline');
 });
+
+test('backups reconcile deleted invitation scopes and restore with enabled profile managers', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir }); await store.start(); t.after(() => store.stop());
+  const user = { id: 'user-1', name: 'User', salt: 'user-salt', hash: 'user-hash', role: 'user', permissions: ['library.read', 'stream'], rootIds: null, deviceIds: null, maxSessions: null, disabled: false, createdAt: 123, updatedAt: 123 };
+  const root = { id: 'root-1', path: path.join(dataDir, 'fixture-media'), kind: 'movies', createdAt: 123 };
+  store.replaceAllState({ adminState: { owner, users: [user], roots: [root] },
+    catalogItems: [{ id: 'media-1', kind: 'movie', title: 'Movie', createdAt: 123, updatedAt: 123 }],
+    mediaSources: [{ id: 'source-1', mediaId: 'media-1', rootId: root.id, relativePath: 'movie.mp4', locator: path.join(root.path, 'movie.mp4'), state: 'online', indexedAt: 123 }] });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Owner profile' }, owner.id);
+  const removed = await client.createProfile({ name: 'Removed profile' }, owner.id);
+  const managed = await client.createProfile({ name: 'User profile' }, user.id);
+  const now = Date.now();
+  for (const [id, profileId] of [['media-invite', profile.id], ['profile-invite', removed.id], ['historical-invite', profile.id]]) {
+    store.createInvitation({ id, issuerAccountId: owner.id, secretHash: `${id}-hash`, scope: { profileId, rootIds: [root.id], mediaIds: ['media-1'], permissions: ['library.read', 'stream'], downloadQuotaBytes: 1024 }, createdAt: now, expiresAt: now + 60_000 });
+  }
+  store.revokeInvitation('historical-invite', owner.id);
+  await client.removeProfile(removed.id, owner.id);
+  assert.equal(store.readInvitation('profile-invite'), null);
+  store.deleteMediaSource('media-1', 'source-1');
+  for (const id of ['media-invite', 'historical-invite']) {
+    assert.deepEqual(store.readInvitation(id).scope.mediaIds, []);
+    assert.equal(store.readInvitation(id).state, 'revoked');
+  }
+  const state = store.readAdminState();
+  assert.throws(() => store.replaceAdminState({ ...state, users: [{ ...user, disabled: true }] }), { code: 'profile_manager_required' });
+  store.mutateClientState((state) => state.assignments.push({ profileId: managed.id, accountId: owner.id, access: 'manage', createdAt: now }));
+  store.replaceAdminState({ ...store.readAdminState(), users: [{ ...user, disabled: true }] });
+  const snapshot = store.exportCanonicalSnapshot();
+  const copyDir = await temporaryDirectory(t);
+  const copy = createCanonicalStateStore({ dataDir: copyDir }); await copy.start(); t.after(() => copy.stop());
+  copy.replaceAdminState({ owner });
+  await copy.restoreCanonicalSnapshot(snapshot);
+  assert.equal(copy.readAdminState().users[0].disabled, true);
+  assert.deepEqual(copy.readClientState().profiles, store.readClientState().profiles);
+  assert.equal(copy.readInvitation('media-invite').state, 'revoked');
+  assert.deepEqual(copy.readInvitation('media-invite').scope.mediaIds, []);
+});
+
+test('backup export rejects state that restore would reject', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir }); await store.start(); t.after(() => store.stop());
+  store.replaceAdminState({ owner });
+  const client = createHeadlessClientState({ store });
+  const profile = await client.createProfile({ name: 'Viewer' }, owner.id);
+  store.mutateClientState((state) => state.profilePreferences.push({ profileId: profile.id, preferences: { themeMode: 'invalid' }, updatedAt: Date.now() }));
+  assert.throws(() => store.exportCanonicalSnapshot(), { code: 'canonical_backup_invalid' });
+});
+
+test('operational logs keep newest-first order, ties, and retention across replacement and restart', async (t) => {
+  const dataDir = await temporaryDirectory(t);
+  const store = createCanonicalStateStore({ dataDir }); await store.start(); t.after(() => store.stop());
+  store.replaceAdminState({ owner });
+  const now = Date.now();
+  store.appendOperationalLog({ timestamp: now, message: 'first' }, now);
+  store.appendOperationalLog({ timestamp: now, message: 'second' }, now);
+  store.appendOperationalLog({ timestamp: now + 1, message: 'newest' }, now + 1);
+  const expected = ['newest', 'second', 'first'];
+  assert.deepEqual(store.readAdminState().logs.map((entry) => entry.message), expected);
+  store.replaceAdminState(store.readAdminState());
+  await store.stop(); await store.start();
+  assert.deepEqual(store.readAdminState().logs.map((entry) => entry.message), expected);
+  for (let index = 0; index < 260; index += 1) store.appendOperationalLog({ timestamp: now + 2 + index, message: `log-${index}` }, now + 2 + index);
+  const logs = store.readAdminState().logs;
+  assert.equal(logs.length, 250);
+  assert.equal(logs[0].message, 'log-259');
+  assert.equal(logs.at(-1).message, 'log-10');
+  store.replaceAdminState({ ...store.readAdminState(), logs });
+  await store.stop(); await store.start();
+  assert.deepEqual(store.readAdminState().logs, logs);
+  store.replaceAdminState({ ...store.readAdminState(), logs: Array.from({ length: 300 }, (_, index) => ({ timestamp: now + 1000 + index, message: `replacement-${index}` })) });
+  const replacement = store.readAdminState().logs;
+  assert.equal(replacement.length, 250);
+  assert.equal(replacement[0].message, 'replacement-299');
+  assert.equal(replacement.at(-1).message, 'replacement-50');
+});

@@ -359,7 +359,7 @@ test('compatible overlapping headless and desktop media merge with explicit reco
   }
 });
 
-test('desktop settings devices retain only live credentials and allowed permissions', async () => {
+test('desktop settings devices retain allowed permissions and explicitly require pairing', async () => {
   const install = await buildDesktopInstall({ libraryAccess: [] });
   const dataDir = await scratch('settings-devices');
   const settingsPath = path.join(install.root, 'settings.json');
@@ -371,13 +371,14 @@ test('desktop settings devices retain only live credentials and allowed permissi
     ],
   }));
 
-  await runCanonicalMigration(migrationOptions(install, dataDir, { desktopSettingsPath: settingsPath }));
+  const result = await runCanonicalMigration(migrationOptions(install, dataDir, { desktopSettingsPath: settingsPath }));
+  assert.ok(result.report.warnings.some((entry) => entry.code === 'legacy_device_credentials_require_pairing'));
   const database = new DatabaseSync(canonicalStatePath(dataDir), { readOnly: true });
   try {
     const active = database.prepare('SELECT disabled,permissions_json FROM devices WHERE id=?').get('active-device');
-    assert.equal(active.disabled, 0);
+    assert.equal(active.disabled, 1);
     assert.deepEqual(JSON.parse(active.permissions_json), ['stream']);
-    assert.equal(database.prepare('SELECT COUNT(*) count FROM device_credentials WHERE device_id=?').get('active-device').count, 1);
+    assert.equal(database.prepare('SELECT COUNT(*) count FROM device_credentials WHERE device_id=?').get('active-device').count, 0);
     for (const deviceId of ['expired-device', 'missing-expiry']) {
       assert.equal(database.prepare('SELECT disabled FROM devices WHERE id=?').get(deviceId).disabled, 1);
       assert.equal(database.prepare('SELECT COUNT(*) count FROM device_credentials WHERE device_id=?').get(deviceId).count, 0);
@@ -638,4 +639,29 @@ test('the public package surface exposes no plan state or credential material', 
   assert.equal(serialized.includes('pin-hash'), false, 'no PIN material may reach a public result');
   assert.equal(serialized.includes('pin-salt'), false);
   assert.equal(serialized.includes(OWNER.password), false);
+});
+
+test('real desktop device scopes map to canonical grants without importing incompatible refresh credentials', async () => {
+  const install = await buildDesktopInstall({ libraryAccess: [] });
+  const dataDir = await scratch('real-device-scopes');
+  const settingsPath = path.join(install.root, 'settings.json');
+  await fs.writeFile(settingsPath, JSON.stringify({ localNetworkPairedDevices: [
+    { id: 'real-device', name: 'Desktop client', scopes: ['catalog:read', 'media:stream', 'playback:write'],
+      refreshTokenHash: 'a'.repeat(64), refreshTokenExpiresAt: 1_800_000_000_000 },
+    { id: 'write-only', scopes: ['playback:write'], refreshTokenHash: 'b'.repeat(64), refreshTokenExpiresAt: 1_800_000_000_000 },
+    { id: 'stream-only', scopes: ['media:stream'], refreshTokenHash: 'c'.repeat(64), refreshTokenExpiresAt: 1_800_000_000_000 },
+  ] }));
+  const result = await runCanonicalMigration(migrationOptions(install, dataDir, { desktopSettingsPath: settingsPath }));
+  const database = new DatabaseSync(canonicalStatePath(dataDir), { readOnly: true });
+  try {
+    const device = database.prepare('SELECT disabled,permissions_json FROM devices WHERE id=?').get('real-device');
+    assert.deepEqual(JSON.parse(device.permissions_json), ['library.read', 'stream', 'transcode']);
+    assert.equal(device.disabled, 1);
+    assert.deepEqual(JSON.parse(database.prepare('SELECT permissions_json FROM devices WHERE id=?').get('write-only').permissions_json), []);
+    assert.deepEqual(JSON.parse(database.prepare('SELECT permissions_json FROM devices WHERE id=?').get('stream-only').permissions_json), ['stream', 'transcode']);
+    assert.equal(database.prepare('SELECT COUNT(*) count FROM device_credentials').get().count, 0);
+    const warning = result.report.warnings.find((entry) => entry.code === 'legacy_device_credentials_require_pairing');
+    assert.equal(warning.count, 3);
+    assert.match(warning.detail, /must pair again/);
+  } finally { database.close(); }
 });

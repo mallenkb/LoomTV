@@ -99,6 +99,13 @@ function publicDevice(device) {
 
 /** @param {import('./server-admin-types.js').PairingOptions} options */
 export function createPairingService({ store, getAccount, getCertificateFingerprint = () => undefined, clock = Date.now }) {
+  /** @param {import('./server-admin-types.js').PolicyPrincipal | null} principal @param {string | null} accountId */
+  async function canManageDeviceAccount(principal, accountId) {
+    if (isOwnerPrincipal(principal)) return true;
+    if (!accountId || !hasPermission(principal, 'users.manage')) return false;
+    const account = await getAccount?.(accountId);
+    return Boolean(account && !isOwnerPrincipal(account) && canResetCredentials(principal, account));
+  }
   if (!store) throw new Error('Pairing service requires canonical state.');
   const requestBuckets = new Map();
   const statusFailureBuckets = new Map();
@@ -319,7 +326,11 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
     /** @param {import('./server-admin-types.js').PolicyPrincipal | null} principal */
     async list(principal) {
       if (!hasPermission(principal, 'devices.manage')) throw pairingError(403, 'permission_denied', 'Device management permission is required.');
-      return store.listDevices().map(publicDevice);
+      const visible = [];
+      for (const device of store.listDevices()) {
+        if (await canManageDeviceAccount(principal, device.accountId)) visible.push(publicDevice(device));
+      }
+      return visible;
     },
 
     /** @param {string} deviceId @param {import('./server-admin-types.js').PolicyPrincipal | null} principal */
@@ -327,6 +338,9 @@ export function createPairingService({ store, getAccount, getCertificateFingerpr
       if (!hasPermission(principal, 'devices.manage')) throw pairingError(403, 'permission_denied', 'Device management permission is required.');
       const device = store.listDevices().find((entry) => entry.id === deviceId);
       if (!device) throw pairingError(404, 'not_found', 'Device was not found.');
+      if (!await canManageDeviceAccount(principal, device.accountId)) {
+        throw pairingError(403, 'permission_denied', 'You cannot manage the target account.');
+      }
       const revoked = store.revokeDevice(deviceId, reason, clock());
       return { ...revoked, device: publicDevice(store.listDevices().find((entry) => entry.id === deviceId) || device) };
     },

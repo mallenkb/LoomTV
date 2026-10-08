@@ -408,6 +408,16 @@ function upsertAccount(database, account, accountType) {
 
 /** @param {DatabaseSync} database @param {Partial<import('./server-state-types.js').AdminState>} state */
 function replaceAdminState(database, state) {
+  const previousSources = state.scan?.state === 'completed'
+    ? /** @type {Array<{sourceId: string; rootId: string | null}>} */ (database.prepare(`SELECT s.id sourceId,s.root_id rootId FROM media_sources s
+      WHERE s.id=(SELECT s2.id FROM media_sources s2 WHERE s2.media_id=s.media_id ORDER BY s2.state='online' DESC,s2.indexed_at DESC LIMIT 1)`).all()) : [];
+  const names = new Set();
+  for (const account of [state.owner, ...(state.users || [])]) {
+    if (!account) continue;
+    const identity = String(account.name || '').trim().toLocaleLowerCase();
+    if (names.has(identity)) throw codedError('account_name_conflict', 'A user with that name already exists.', { status: 409 });
+    names.add(identity);
+  }
   const currentOwnerId = /** @type {(import('./server-state-types.js').SqlRows['owner_account']) | undefined} */ (database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get())?.account_id;
   if (currentOwnerId && state.owner?.id && currentOwnerId !== state.owner.id) {
     throw codedError('owner_identity_change_forbidden', 'A restore cannot replace the configured owner identity.');
@@ -421,8 +431,19 @@ function replaceAdminState(database, state) {
     throw codedError('owner_required', 'A configured owner account cannot be removed.');
   }
   for (const user of state.users || []) { upsertAccount(database, user, 'user'); desiredAccounts.add(user.id); }
+  for (const { id } of /** @type {Array<{id: string}>} */ (database.prepare('SELECT id FROM profiles').all())) {
+    const managers = /** @type {Array<{account_id: string}>} */ (database.prepare(
+      "SELECT a.account_id FROM profile_assignments a JOIN accounts account ON account.id=a.account_id WHERE a.profile_id=? AND a.access='manage' AND account.disabled=0",
+    ).all(id));
+    if (!managers.some((manager) => desiredAccounts.has(manager.account_id))) {
+      throw codedError('profile_manager_required', 'Every profile must retain an enabled manager.', { status: 409 });
+    }
+  }
   for (const { id, account_type: type } of /** @type {Array<import('./server-state-types.js').SqlRows['accounts']>} */ (database.prepare('SELECT id,account_type FROM accounts').all())) {
-    if (!desiredAccounts.has(id) && type !== 'owner') database.prepare('DELETE FROM accounts WHERE id=?').run(id);
+    if (!desiredAccounts.has(id) && type !== 'owner') {
+      database.prepare('DELETE FROM pairing_requests WHERE account_id=?').run(id);
+      database.prepare('DELETE FROM accounts WHERE id=?').run(id);
+    }
   }
 
   database.exec('DELETE FROM account_sessions; DELETE FROM login_attempts;');
@@ -468,7 +489,9 @@ function replaceAdminState(database, state) {
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET media_id=excluded.media_id,root_id=excluded.root_id,
     relative_path=excluded.relative_path,locator=excluded.locator,state=excluded.state,file_extension=excluded.file_extension,
     size_bytes=excluded.size_bytes,modified_at_ms=excluded.modified_at_ms,indexed_at=excluded.indexed_at,
-    last_seen_at=excluded.last_seen_at,probe_json=COALESCE(excluded.probe_json,media_sources.probe_json),extension_json=excluded.extension_json`);
+    last_seen_at=excluded.last_seen_at,probe_json=CASE
+      WHEN excluded.size_bytes=media_sources.size_bytes AND excluded.modified_at_ms=media_sources.modified_at_ms
+      THEN COALESCE(excluded.probe_json,media_sources.probe_json) ELSE excluded.probe_json END,extension_json=excluded.extension_json`);
   for (const item of state.catalog || []) {
     if (!desiredRoots.has(item.rootId)) continue;
     const now = Number(item.indexedAt) || Date.now();
@@ -483,11 +506,29 @@ function replaceAdminState(database, state) {
   }
   // Scans carry one projected source per catalog item. Secondary canonical
   // sources are not absent merely because that legacy projection omitted them.
+  if (state.scan?.state === 'completed') {
+    const presentSources = new Set((state.catalog || []).map((item) => item.sourceId || `${item.id}:primary`));
+    for (const item of previousSources) {
+      if (!item.rootId || !item.sourceId || !desiredRoots.has(item.rootId) || (state.scan.rootId && item.rootId !== state.scan.rootId)
+        || state.scan.offlineRoots?.includes(item.rootId) || presentSources.has(item.sourceId)) continue;
+      database.prepare("UPDATE media_sources SET state='missing' WHERE id=?").run(item.sourceId);
+    }
+  }
+  reconcileInvitationScopes(database);
   database.prepare('INSERT OR REPLACE INTO scan_state(singleton,payload_json) VALUES(1,?)').run(json(state.scan || { state: 'idle' }));
   database.prepare('INSERT OR REPLACE INTO backup_state(singleton,payload_json) VALUES(1,?)').run(json(state.backup || { state: 'never' }));
   database.exec('DELETE FROM operational_logs');
   const insertLog = database.prepare('INSERT INTO operational_logs(timestamp,payload_json) VALUES(?,?)');
-  for (const entry of state.logs || []) insertLog.run(Number(entry.timestamp) || Date.now(), json(entry));
+  for (const entry of [...(state.logs || [])].reverse()) insertLog.run(Number(entry.timestamp) || Date.now(), json(entry));
+  pruneOperationalLogs(database);
+}
+
+/** @param {DatabaseSync} database @param {number} [currentTime] */
+function pruneOperationalLogs(database, currentTime = Date.now()) {
+  database.prepare('DELETE FROM operational_logs WHERE timestamp<?').run(currentTime - 30 * 24 * 60 * 60 * 1000);
+  database.prepare(`DELETE FROM operational_logs WHERE sequence IN (
+    SELECT sequence FROM operational_logs ORDER BY timestamp DESC,sequence DESC LIMIT -1 OFFSET 250
+  )`).run();
 }
 
 /** @param {import('./server-state-types.js').SqlRows['accounts'] & import('./server-state-types.js').SqlRows['account_credentials'] | undefined} row @returns {import('./server-state-types.js').StoredAccount} */
@@ -552,13 +593,14 @@ function readAdminState(database) {
     catalog, profiles: [], watchState: {},
     scan: parseOptionalRowJson(/** @type {(import('./server-state-types.js').SqlRows['scan_state']) | undefined} */ (database.prepare('SELECT payload_json FROM scan_state WHERE singleton=1').get()), { state: 'idle' }, 'scan state'),
     backup: parseOptionalRowJson(/** @type {(import('./server-state-types.js').SqlRows['backup_state']) | undefined} */ (database.prepare('SELECT payload_json FROM backup_state WHERE singleton=1').get()), { state: 'never' }, 'backup state'),
-    logs: /** @type {Array<import('./server-state-types.js').SqlRows['operational_logs']>} */ (database.prepare('SELECT payload_json FROM operational_logs ORDER BY sequence').all()).map((row) => parseRequiredJson(row.payload_json, 'operational log')),
+    logs: /** @type {Array<import('./server-state-types.js').SqlRows['operational_logs']>} */ (database.prepare('SELECT payload_json FROM operational_logs ORDER BY timestamp DESC,sequence DESC').all()).map((row) => parseRequiredJson(row.payload_json, 'operational log')),
   };
 }
 
 /** @param {DatabaseSync} database @param {Partial<import('./server-state-types.js').ClientState>} state */
 function replaceClientState(database, state) {
-  const managedProfiles = new Set((state.assignments || []).filter((item) => item.access === 'manage').map((item) => item.profileId));
+  const enabledAccounts = new Set(/** @type {Array<{id: string}>} */ (database.prepare('SELECT id FROM accounts WHERE disabled=0').all()).map((account) => account.id));
+  const managedProfiles = new Set((state.assignments || []).filter((item) => item.access === 'manage' && enabledAccounts.has(item.accountId)).map((item) => item.profileId));
   const unmanaged = (state.profiles || []).find((profile) => !managedProfiles.has(profile.id));
   if (unmanaged) throw codedError('profile_manager_required', 'Every profile must retain at least one manage assignment.');
   const desired = new Set();
@@ -601,6 +643,7 @@ function replaceClientState(database, state) {
     const { profileId, scope, updatedAt, preferences, ...canonicalPreferences } = item;
     tracks.run(profileId, scope, json(preferences || canonicalPreferences), updatedAt);
   }
+  reconcileInvitationScopes(database);
 }
 
 /** @param {DatabaseSync} database @returns {import('./server-state-types.js').ClientState} */
@@ -794,6 +837,8 @@ function exportCanonicalSnapshot(database, createdAt = Date.now()) {
   const tables = {};
   database.exec('BEGIN');
   try {
+    reconcileInvitationScopes(database);
+    validateCanonicalJsonState(database);
     for (const table of CANONICAL_BACKUP_TABLES) {
       tables[table] = /** @type {Array<Record<string, string | number | null>>} */ (database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     }
@@ -853,7 +898,36 @@ function validateCanonicalSnapshot(snapshot, database) {
 }
 
 /** @param {DatabaseSync} database */
+function reconcileInvitationScopes(database) {
+  const profiles = new Set(/** @type {Array<{id: string}>} */ (database.prepare('SELECT id FROM profiles').all()).map((row) => row.id));
+  const roots = new Set(/** @type {Array<{id: string}>} */ (database.prepare("SELECT id FROM library_roots WHERE state!='removed'").all()).map((row) => row.id));
+  const media = new Set(/** @type {Array<{id: string}>} */ (database.prepare('SELECT id FROM catalog_items').all()).map((row) => row.id));
+  for (const row of /** @type {Array<{id: string; scope_json: string}>} */ (database.prepare('SELECT id,scope_json FROM invitations').all())) {
+    const scope = /** @type {import('@loom-media-server/video-contracts').InvitationScope} */ (parseRequiredJson(row.scope_json, 'invitation scope'));
+    if (!profiles.has(scope.profileId)) {
+      database.prepare('DELETE FROM invitations WHERE id=?').run(row.id);
+      continue;
+    }
+    const rootIds = scope.rootIds.filter((id) => roots.has(id));
+    const mediaIds = scope.mediaIds === null ? null : scope.mediaIds.filter((id) => media.has(id));
+    if (rootIds.length !== scope.rootIds.length || mediaIds?.length !== scope.mediaIds?.length) {
+      const now = Date.now();
+      database.prepare("UPDATE invitations SET scope_json=?,state='revoked',revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,'scope_removed') WHERE id=?")
+        .run(json({ ...scope, rootIds, mediaIds }), now, row.id);
+      database.prepare("UPDATE invitation_sessions SET revoked_at=COALESCE(revoked_at,?),revoked_reason=COALESCE(revoked_reason,'scope_removed') WHERE invitation_id=?")
+        .run(now, row.id);
+    }
+  }
+}
+
+/** @param {DatabaseSync} database */
 function validateCanonicalJsonState(database) {
+  const names = new Set();
+  for (const row of /** @type {Array<{name: string}>} */ (database.prepare('SELECT name FROM accounts').all())) {
+    const identity = row.name.trim().toLocaleLowerCase();
+    if (names.has(identity)) throw codedError('canonical_backup_invalid', 'Canonical account names must be unique.');
+    names.add(identity);
+  }
   /** @type {Set<string>} */
   const permissionSet = new Set(ACCOUNT_PERMISSIONS);
   const rootIds = new Set(/** @type {Array<import('./server-state-types.js').SqlRows['library_roots']>} */ (database.prepare('SELECT id FROM library_roots').all()).map((row) => row.id));
@@ -1227,10 +1301,7 @@ export function createCanonicalStateStore({ dataDir }) {
         const active = requireDatabase();
         active.prepare('INSERT INTO operational_logs(timestamp,payload_json) VALUES(?,?)')
           .run(Number(entry.timestamp) || currentTime, json(entry));
-        active.prepare('DELETE FROM operational_logs WHERE timestamp<?').run(currentTime - 30 * 24 * 60 * 60 * 1000);
-        active.prepare(`DELETE FROM operational_logs WHERE sequence IN (
-          SELECT sequence FROM operational_logs ORDER BY timestamp DESC,sequence DESC LIMIT -1 OFFSET 250
-        )`).run();
+        pruneOperationalLogs(active, currentTime);
         return true;
       });
     },
@@ -1592,6 +1663,7 @@ export function createCanonicalStateStore({ dataDir }) {
         const active = requireDatabase();
         active.prepare('DELETE FROM media_sources WHERE media_id=? AND id=?').run(mediaId, sourceId);
         active.prepare("DELETE FROM catalog_items WHERE id=? AND media_kind!='series' AND NOT EXISTS (SELECT 1 FROM media_sources WHERE media_id=?)").run(mediaId, mediaId);
+        reconcileInvitationScopes(active);
       });
     },
     /** @param {string} mediaId @param {string} [sourceId] */

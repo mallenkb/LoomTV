@@ -115,3 +115,25 @@ test('HLS requires AAC only when the selected output has audio', () => {
   assert.equal(playbackPlanForMedia(silent, { audioCodecs: [] }).outputAudioCodec, undefined);
   assert.equal(playbackPlanForMedia(probe({ format_name: 'webm' }, 'vp9', 'opus'), { audioCodecs: ['opus'] }).mode, 'direct');
 });
+
+test('embedded track changes are applied through remux or subtitle burn-in', () => {
+  const media = { container: 'mp4', videoCodec: 'h264', audioCodec: 'aac', tracks: [
+    { id: 'video', index: 0, kind: 'video', codec: 'h264', default: true },
+    { id: 'audio-1', index: 1, kind: 'audio', codec: 'aac', default: true },
+    { id: 'audio-2', index: 2, kind: 'audio', codec: 'aac' },
+    { id: 'sub', index: 3, kind: 'subtitle', codec: 'mov_text' },
+  ] };
+  assert.equal(playbackPlanForMedia(media).mode, 'direct');
+  const audio = playbackPlanForMedia(media, {}, { audioTrackId: 'audio-2' });
+  assert.equal(audio.mode, 'remux');
+  assert.equal(audio.selectedAudioTrackIndex, 2);
+  assert.equal(audio.copyAudio, true);
+  assert.equal(playbackPlanForMedia(media, {}, { audioTrackId: null }).mode, 'remux');
+  for (const selection of [{ subtitleTrackId: 'sub' }, { audioTrackId: 'audio-2', subtitleTrackId: 'sub' }]) {
+    const plan = playbackPlanForMedia(media, {}, selection);
+    assert.equal(plan.mode, 'transcode');
+    assert.equal(plan.burnSubtitles, true);
+    assert.equal(plan.selectedSubtitleTrackIndex, 3);
+  }
+  assert.throws(() => playbackPlanForMedia(media, { subtitleModes: ['text'] }, { subtitleTrackId: 'sub' }), { code: 'subtitle_mode_unsupported' });
+});

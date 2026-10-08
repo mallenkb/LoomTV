@@ -52,3 +52,29 @@ test('legacy pairing reports an unavailable approval without reading missing cre
   });
   assert.equal(result.status, 409);
 });
+
+test('legacy signed streams recheck live device authority for credential and session URLs', async () => {
+  for (const authenticationSessionId of [null, 'session-1']) {
+    const account = { id: 'user-1', type: 'user', permissions: ['stream'], deviceIds: ['other-device'] };
+    let streams = 0;
+    const query = new URLSearchParams({ deviceId: 'device-1', mediaId: 'media-1', profileId: 'profile-1', selectionRevision: '0', sourceId: 'source-1', fileVersion: 'version', expiresAt: '1000', signature: 'signed' });
+    if (authenticationSessionId) query.set('authenticationSessionId', authenticationSessionId);
+    const req = { method: 'HEAD', url: `/stream?${query}`, headers: { host: 'loomtv.local' }, socket: { remoteAddress: '127.0.0.1' } };
+    let status;
+    const res = { writeHead(value) { status = value; }, end() {} };
+    await createLegacyV2CompatibilityHandler()(req, res, {
+      pairingService: { authorizeLegacyStreamCapability: () => ({ accountId: account.id, deviceId: 'device-1', permissions: ['stream'] }) },
+      adminService: { getPrincipalById: async () => account, isSessionActive: async () => true,
+        resolvePlaybackPrincipal: async (id, binding) => {
+          assert.equal(id, account.id);
+          assert.equal(binding.authenticationDeviceId, 'device-1');
+          assert.equal(binding.authenticationSessionId, authenticationSessionId);
+          return null;
+        }, getLibraryItem: async () => ({ id: 'media-1' }) },
+      clientState: { requireActivePlaybackProfile: async () => ({ profileId: 'profile-1', selectionRevision: 0 }) },
+      mediaService: { serveDirectCapability: async () => { streams += 1; res.writeHead(200); } },
+    });
+    assert.equal(status, 403);
+    assert.equal(streams, 0);
+  }
+});
