@@ -121,7 +121,8 @@ test('a failed automatic analysis job requeues after its retry delay, and a manu
     repository.enqueueSegmentAnalysisJob(job('auto', 'incremental', 1_000));
     repository.updateSegmentAnalysisJob('auto', 'running');
     repository.updateSegmentAnalysisJob('auto', 'error', 'Drive unavailable');
-    const failedAt = repository.getSegmentAnalysisJobs().find((entry) => entry.jobKey === 'auto')!.updatedAt;
+    const failedAt = repository.getSegmentAnalysisJobs().find((entry) => entry.jobKey === 'auto')?.updatedAt ?? 0;
+    assert.ok(failedAt > 0);
 
     repository.enqueueSegmentAnalysisJob(job('auto', 'incremental', failedAt + 1_000));
     assert.equal(stateOf('auto'), 'error');
