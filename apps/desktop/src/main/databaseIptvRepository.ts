@@ -359,6 +359,8 @@ export function listIptvChannels(
   const nowMs = Number.isFinite(request.nowMs) ? Number(request.nowMs) : Date.now();
   const orderBy = request.collection === 'recent'
     ? '(SELECT r.watched_at FROM iptv_recent r WHERE r.source_id = c.source_id AND r.channel_id = c.channel_id) DESC'
+    : request.sort === 'name-asc'
+    ? 'c.name COLLATE NOCASE ASC, c.position ASC'
     : request.sort === 'name-desc'
     ? 'c.name COLLATE NOCASE DESC, c.position ASC'
     : request.sort === 'category'

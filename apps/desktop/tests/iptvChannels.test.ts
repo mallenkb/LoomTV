@@ -127,6 +127,21 @@ test('channel pages are stable and report the full match count', () => {
   database.close();
 });
 
+test('A-Z and Z-A sort by name across pages while an omitted sort keeps playlist order', () => {
+  const database = createDatabase();
+  const sourceId = seed(database);
+  const names = (request: Partial<Parameters<typeof listIptvChannels>[1]>) => [
+    ...listIptvChannels(database, { sourceId, limit: 3, offset: 0, ...request }),
+    ...listIptvChannels(database, { sourceId, limit: 3, offset: 3, ...request }),
+  ].map((row) => row.name);
+  const alphabetical = ['BBC One HD', 'Canal+ Décalé', 'Sky News', 'Sky Sports F1', 'Sky Sports Main Event'];
+
+  assert.deepEqual(names({ sort: 'name-asc' }), alphabetical);
+  assert.deepEqual(names({ sort: 'name-desc' }), [...alphabetical].reverse());
+  assert.deepEqual(names({}), ['Sky Sports Main Event', 'Sky Sports F1', 'Sky News', 'BBC One HD', 'Canal+ Décalé']);
+  database.close();
+});
+
 test('channels carry the now and next programme for their guide id', () => {
   const database = createDatabase();
   const sourceId = seed(database);
