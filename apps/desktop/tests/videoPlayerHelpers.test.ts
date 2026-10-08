@@ -129,6 +129,8 @@ test('subtitle style persists visual settings and resets timing between player s
   assert.deepEqual(loadSubtitleStyle(), {
     ...style,
     delaySeconds: 0,
+    backgroundOpacity: 0.7,
+    backgroundMode: 'soft',
   });
 });
 

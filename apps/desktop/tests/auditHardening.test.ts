@@ -126,7 +126,8 @@ function mpvFixture() {
     },
   });
   const native = {
-    loom_mpv_bridge_version: () => 1,
+    loom_mpv_bridge_version: () => 2,
+    loom_mpv_set_subtitle_blur: () => 0,
     loom_mpv_create: () => {
       if (failure === 'create') return null;
       engines++; allocated++; return allocated;

@@ -36,7 +36,7 @@ function normalizeSubtitleStyle(value: unknown): SubtitleStyleSettings {
     backgroundOpacity: clampStyleNumber(style.backgroundOpacity, DEFAULT_SUBTITLE_STYLE.backgroundOpacity,
       softBox ? MIN_SOFT_BOX_OPACITY : 0, softBox ? MAX_SOFT_BOX_OPACITY : 1),
     backgroundBlurPercent: clampStyleNumber(style.backgroundBlurPercent, DEFAULT_SUBTITLE_STYLE.backgroundBlurPercent, MIN_SUBTITLE_BACKGROUND_BLUR_PERCENT, 100),
-    backgroundMode,
+    ...(style.backgroundEnabled === true ? { backgroundMode } : {}),
   };
 }
 
