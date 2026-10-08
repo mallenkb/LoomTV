@@ -158,3 +158,28 @@ test('checkpoint artwork normalization reuses durable records while snapshots re
   assert.equal(reused.movies, dirty.movies);
   assert.deepEqual(stripInlineArtworkFromLibrary(library(), true), stripInlineArtworkFromLibrary(library()));
 });
+
+test('a reachable folder whose last scan failed stays degraded in every projection', () => {
+  const input = {
+    ...library(),
+    libraryFolderStatuses: [{
+      path: '/library',
+      kind: 'tvShows' as const,
+      state: 'degraded' as const,
+      isNetworkLike: false,
+      checkedAt: 1,
+      message: 'The folder remained available, but its scan could not finish.',
+    }],
+  };
+  const projection = projections();
+  const statuses = [
+    projection.libraryForRenderer(input).libraryFolderStatuses,
+    projection.libraryForLocalNetwork(input, 'https://host').libraryFolderStatuses,
+    projection.libraryIndexForRenderer(input, 1).libraryFolderStatuses,
+  ];
+  for (const status of statuses) {
+    assert.equal(status?.[0]?.state, 'degraded');
+    assert.match(status?.[0]?.message || '', /scan could not finish/);
+  }
+  assert.equal(projection.libraryForRenderer(library()).libraryFolderStatuses?.[0]?.state, 'available');
+});

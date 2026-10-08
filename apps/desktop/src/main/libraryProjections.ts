@@ -1,5 +1,6 @@
 import type { LibraryData, LibraryFolderGroups, LibraryFolderStatus } from './appContracts.ts';
 import { durableArtworkSource, durableArtworkSources } from './artworkSources.ts';
+import { mergeLibraryFolderStatuses } from './libraryFolders.ts';
 import type { MediaItem } from './metadata/types.ts';
 import type {
   LibraryCard,
@@ -187,7 +188,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       ...data,
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       libraryFolderGroups,
-      libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
+      libraryFolderStatuses: mergeLibraryFolderStatuses(libraryFolderStatusesFor(libraryFolderGroups), data.libraryFolderStatuses),
       movies: (data.movies || []).map(itemWithArtworkDeliveryUrls),
       tvShows: (data.tvShows || []).map(itemWithArtworkDeliveryUrls),
       animeShows: (data.animeShows || []).map(itemWithArtworkDeliveryUrls),
@@ -323,7 +324,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       revision,
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       libraryFolderGroups,
-      libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
+      libraryFolderStatuses: mergeLibraryFolderStatuses(libraryFolderStatusesFor(libraryFolderGroups), data.libraryFolderStatuses),
       movies: itemsOutsideOtherFolders(data.movies || [], libraryFolderGroups).map(cardForRenderer),
       tvShows: itemsOutsideOtherFolders(data.tvShows || [], libraryFolderGroups).map(cardForRenderer),
       animeShows: itemsOutsideOtherFolders(data.animeShows || [], libraryFolderGroups).map(cardForRenderer),
@@ -417,7 +418,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       ...data,
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       libraryFolderGroups,
-      libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
+      libraryFolderStatuses: mergeLibraryFolderStatuses(libraryFolderStatusesFor(libraryFolderGroups), data.libraryFolderStatuses),
       movies: (data.movies || []).map((item) => itemForLocalNetwork(item, base, identity)),
       tvShows: (data.tvShows || []).map((item) => itemForLocalNetwork(item, base, identity)),
       animeShows: (data.animeShows || []).map((item) => itemForLocalNetwork(item, base, identity)),

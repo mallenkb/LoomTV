@@ -105,6 +105,25 @@ export function getLibraryFolderStatus(folderPath: string, kind: LibraryFolderKi
   }
 }
 
+/**
+ * Live connectivity plus the outcome of the last scan. A folder that is
+ * reachable now but whose last scan failed stays degraded, with the scan's
+ * explanation, instead of reading as available.
+ */
+export function mergeLibraryFolderStatuses(
+  live: LibraryFolderStatus[],
+  recorded: readonly LibraryFolderStatus[] | undefined,
+): LibraryFolderStatus[] {
+  if (!recorded?.length) return live;
+  const degraded = new Map(recorded
+    .filter((status) => status.state === 'degraded')
+    .map((status) => [`${status.kind}\0${status.path}`, status]));
+  return live.map((status) => {
+    const scan = status.state === 'available' ? degraded.get(`${status.kind}\0${status.path}`) : undefined;
+    return scan ? { ...status, state: 'degraded', message: scan.message } : status;
+  });
+}
+
 export function libraryFolderStatusesFor(groups: LibraryFolderGroups): LibraryFolderStatus[] {
   return [
     ...groups.movies.map((folder) => getLibraryFolderStatus(folder, 'movies')),
