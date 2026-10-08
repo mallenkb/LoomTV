@@ -47,6 +47,10 @@
     nav.tabs{display:flex;gap:.5rem;flex-wrap:wrap}
     .profile-list{display:grid;gap:.5rem}
     .profile-list button{text-align:left;width:100%}
+    .profile-row{display:flex;gap:.5rem;align-items:stretch}
+    .profile-row button[data-limits]{width:auto;flex:none}
+    .check{display:flex;gap:.5rem;align-items:center}
+    .check input{width:auto;min-height:0}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr));gap:.875rem;list-style:none;padding:0;margin:0}
     .media{overflow:hidden;padding:0;display:flex;flex-direction:column}
     .poster{aspect-ratio:2/3;background:linear-gradient(145deg,#2b2b2b,#0b0b0b);display:grid;place-items:center;color:#8b8b8b;font-size:2rem}
@@ -120,8 +124,40 @@
       <label>PIN for <span id="pinProfileName"></span><input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></label>
       <div class="actions"><button class="primary" type="submit">Unlock</button><button id="pinCancel" class="ghost" type="button">Cancel</button></div>
     </form>
+    <form id="restrictionsForm" class="form hidden" aria-labelledby="restrictionsTitle">
+      <h2 id="restrictionsTitle">Limits for <span id="restrictionsProfileName"></span></h2>
+      <label for="restrictionsAge">Highest age rating
+        <select id="restrictionsAge">
+          <option value="0">All ages only</option>
+          <option value="6">6 and under</option>
+          <option value="7">7 and under</option>
+          <option value="9">9 and under</option>
+          <option value="12">12 and under</option>
+          <option value="13">13 and under</option>
+          <option value="15">15 and under</option>
+          <option value="16">16 and under</option>
+          <option value="18">18 and under</option>
+        </select>
+      </label>
+      <label for="restrictionsCountry">Rating system
+        <select id="restrictionsCountry">
+          <option value="US">United States</option>
+          <option value="GB">United Kingdom</option>
+          <option value="CA">Canada</option>
+          <option value="AU">Australia</option>
+        </select>
+      </label>
+      <label class="check"><input id="restrictionsUnrated" type="checkbox"> Allow titles with no rating</label>
+      <div class="actions"><button class="primary" type="submit">Save limits</button><button id="restrictionsCancel" class="ghost" type="button">Cancel</button></div>
+    </form>
     <form id="profileForm" class="form">
       <label>New profile<input id="profileName" placeholder="Name" maxlength="80" required></label>
+      <label for="profileKind">Profile type
+        <select id="profileKind">
+          <option value="adult">Adult</option>
+          <option value="child">Child (limited to age 12 until you change it)</option>
+        </select>
+      </label>
       <button class="primary" type="submit">Add profile</button>
     </form>
     <div id="profileStatus" class="status"></div>
@@ -548,15 +584,51 @@
           return;
         }
         container.innerHTML = profiles.map((profile) => `
-          <button type="button" data-profile="${escapeHtml(profile.id)}" data-pin="${profile.hasPin ? '1' : ''}"
-            class="${profile.id === selectedProfile ? 'active' : ''}"
-            aria-describedby="profileKind-${escapeHtml(profile.id)}">
-            ${escapeHtml(profile.name)}
-            <span class="muted" id="profileKind-${escapeHtml(profile.id)}">${escapeHtml(profile.kind || 'adult')}${profile.hasPin ? ', PIN required' : ''}</span>
-          </button>`).join('');
+          <div class="profile-row">
+            <button type="button" data-profile="${escapeHtml(profile.id)}" data-pin="${profile.hasPin ? '1' : ''}"
+              class="${profile.id === selectedProfile ? 'active' : ''}"
+              aria-describedby="profileKind-${escapeHtml(profile.id)}">
+              ${escapeHtml(profile.name)}
+              <span class="muted" id="profileKind-${escapeHtml(profile.id)}">${escapeHtml(profile.kind || 'adult')}${profile.hasPin ? ', PIN required' : ''}</span>
+            </button>
+            ${profile.kind === 'child' ? `<button type="button" class="ghost" data-limits="${escapeHtml(profile.id)}"
+              aria-label="Limits for ${escapeHtml(profile.name)}">Limits</button>` : ''}
+          </div>`).join('');
         for (const button of container.querySelectorAll('[data-profile]')) {
           button.onclick = () => selectProfile(button.dataset.profile, button.dataset.pin === '1');
         }
+        for (const button of container.querySelectorAll('[data-limits]')) {
+          button.onclick = () => openRestrictions(button.dataset.limits);
+        }
+      }
+
+      let restrictionsProfileId = '';
+
+      async function openRestrictions(profileId) {
+        const profile = profiles.find((item) => item.id === profileId);
+        if (!profile) return;
+        setBusy('profileStatus', 'Loading limits…');
+        try {
+          const { restrictions } = await api(`/api/v1/profiles/${encodeURIComponent(profileId)}/restrictions`);
+          restrictionsProfileId = profileId;
+          $('restrictionsProfileName').textContent = profile.name;
+          const age = String(restrictions?.maximumAge ?? 12);
+          $('restrictionsAge').value = [...$('restrictionsAge').options].some((option) => option.value === age) ? age : '12';
+          $('restrictionsCountry').value = restrictions?.country || 'US';
+          $('restrictionsUnrated').checked = restrictions?.allowUnrated === true;
+          $('restrictionsForm').classList.remove('hidden');
+          $('profileForm').classList.add('hidden');
+          setStatus('profileStatus', '');
+          $('restrictionsAge').focus();
+        } catch (error) {
+          handleFailure('profileStatus', error);
+        }
+      }
+
+      function closeRestrictions() {
+        restrictionsProfileId = '';
+        $('restrictionsForm').classList.add('hidden');
+        $('profileForm').classList.remove('hidden');
       }
 
       async function selectProfile(profileId, requiresPin) {
@@ -1435,8 +1507,9 @@
         event.preventDefault();
         setBusy('profileStatus', 'Creating profile…');
         try {
-          await api('/api/v1/profiles', { method: 'POST', body: JSON.stringify({ name: $('profileName').value, kind: 'adult' }) });
+          await api('/api/v1/profiles', { method: 'POST', body: JSON.stringify({ name: $('profileName').value, kind: $('profileKind').value === 'child' ? 'child' : 'adult' }) });
           $('profileName').value = '';
+          $('profileKind').value = 'adult';
           await refreshProfiles();
           renderProfileChoices();
           setStatus('profileStatus', 'Profile created.');
@@ -1444,6 +1517,27 @@
           handleFailure('profileStatus', error);
         }
       };
+
+      $('restrictionsForm').onsubmit = async (event) => {
+        event.preventDefault();
+        if (!restrictionsProfileId) return;
+        setBusy('profileStatus', 'Saving limits…');
+        try {
+          await api(`/api/v1/profiles/${encodeURIComponent(restrictionsProfileId)}/restrictions`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              maximumAge: Number($('restrictionsAge').value),
+              country: $('restrictionsCountry').value,
+              allowUnrated: $('restrictionsUnrated').checked,
+            }),
+          });
+          closeRestrictions();
+          setStatus('profileStatus', 'Limits saved.');
+        } catch (error) {
+          handleFailure('profileStatus', error);
+        }
+      };
+      $('restrictionsCancel').onclick = () => { closeRestrictions(); setStatus('profileStatus', ''); };
 
       $('switchProfile').onclick = async () => {
         if (currentMedia) await stopPlayback();
