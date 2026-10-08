@@ -22,3 +22,13 @@ test('error decoder rejects hostile oversized values through an explicit limit',
   const oversized = 'x'.repeat(20_001);
   assert.equal(mobileErrorPayloadSchema.safeParse({ error: oversized }).success, false);
 });
+
+test('saved fixed credentials reject expiry dates fabricated by the former refresh adapter', () => {
+  const credential = {
+    baseUrl: 'https://server', deviceId: 'phone', hostDeviceId: 'host', hostDeviceName: 'Server', clientDeviceName: 'Phone',
+    deviceToken: 'id.secret', refreshToken: 'id.secret', certFingerprint: 'ab'.repeat(32),
+    accessTokenExpiresAt: 1000000, refreshTokenExpiresAt: 1000000,
+  };
+  assert.equal(savedConnectionSchema.safeParse(credential).success, true);
+  assert.equal(savedConnectionSchema.safeParse({ ...credential, refreshTokenExpiresAt: 2000000 }).success, false);
+});

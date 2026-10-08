@@ -29,6 +29,7 @@ import {
 import { reportNonFatal } from '../mobileDiagnostics';
 import { recoveryActionFor, type PlaybackFailure } from '../playbackRecovery';
 import { useMobilePlayerGestures } from '../useMobilePlayerGestures';
+import { mobileAbsoluteMediaSeconds } from '../playbackClock';
 import { useMobilePlayerSession } from '../useMobilePlayerSession';
 import { playerDisplayLabels, playbackPreferenceScope, localTrackLabel, nativeTrackKey, nativeTrackLabel, sidecarSubtitleLabel, audioPreference, subtitlePreference, preferredAudioKey, preferredSubtitleKey, formatClock, mobileSeekAccessibilityText, type PlayerAudioOption, type PlayerSubtitleOption } from '../mobilePlaybackPresentation';
 import { captureMobileFocus, useMobileModalLayer } from '../mobileModalStack';
@@ -98,6 +99,7 @@ export function PlayerModal({
   onRetry,
   onStreamOptionsChange,
   playbackUrl,
+  sourceOffset = 0,
   player,
 }: {
   baseUrl: string;
@@ -110,6 +112,7 @@ export function PlayerModal({
   onRetry: () => void;
   onStreamOptionsChange: (options: StreamOptions) => void;
   playbackUrl: string | null;
+  sourceOffset?: number;
   player: ReturnType<typeof useVideoPlayer>;
 }) {
   if (!target) return null;
@@ -127,6 +130,7 @@ export function PlayerModal({
       onRetry={onRetry}
       onStreamOptionsChange={onStreamOptionsChange}
       playbackUrl={playbackUrl}
+      sourceOffset={sourceOffset}
       player={player}
     />
   );
@@ -229,6 +233,7 @@ function PlayerContent({
   onRetry,
   onStreamOptionsChange,
   playbackUrl,
+  sourceOffset = 0,
   player,
 }: {
   baseUrl: string;
@@ -241,6 +246,7 @@ function PlayerContent({
   onRetry: () => void;
   onStreamOptionsChange: (options: StreamOptions) => void;
   playbackUrl: string | null;
+  sourceOffset?: number;
   player: ReturnType<typeof useVideoPlayer>;
 }) {
   const { colors: { accent }, styles } = useMobileTheme();
@@ -270,7 +276,14 @@ function PlayerContent({
     skipBy,
     toggleControls,
     togglePlay,
-  } = useMobilePlayerSession({ menuOpen: playerMenuOpen, playbackUrl, player });
+  } = useMobilePlayerSession({
+    menuOpen: playerMenuOpen, playbackUrl, player, sourceOffset,
+    originalDuration: target.localMetadata?.durationSeconds,
+    onSeekBeforeSource: (startSeconds) => onStreamOptionsChange({
+      ...streamOptionsForSelection(activeAudioKey || audioOptions[0]?.key || '', activeSubtitleKey, startSeconds),
+      forceTranscode: true, startSeconds,
+    }),
+  });
   const { gestureLevel, panHandlers } = useMobilePlayerGestures({
     closeMenu: () => setMenu('none'),
     markInteraction,
@@ -501,7 +514,7 @@ function PlayerContent({
   }, [audioOptions, subtitleFontSize, subtitleOptions, target.transcode]);
 
   const requestSelectionStream = (audioKey: string, subtitleKey: string) => {
-    const startSeconds = Number(player.currentTime || position || 0);
+    const startSeconds = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset) || position;
     onStreamOptionsChange(streamOptionsForSelection(audioKey, subtitleKey, startSeconds) || {});
   };
 
@@ -513,7 +526,7 @@ function PlayerContent({
 
     const subtitleOption = subtitleOptions.find((option) => option.key === activeSubtitleKey);
     if (!subtitleOption?.localTrack && !subtitleOption?.sidecar) return;
-    const startSeconds = Number(player.currentTime || position || 0);
+    const startSeconds = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset) || position;
     const nextOptions = streamOptionsForSelection(
       activeAudioKey || audioOptions[0]?.key || '',
       activeSubtitleKey,
@@ -580,7 +593,7 @@ function PlayerContent({
     if (nextAudioKey && nextAudioKey !== activeAudioKey) setActiveAudioKey(nextAudioKey);
     if (nextSubtitleKey !== activeSubtitleKey) setActiveSubtitleKey(nextSubtitleKey);
 
-    const startSeconds = Number(player.currentTime || position || 0);
+    const startSeconds = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset) || position;
     onStreamOptionsChange(streamOptionsForSelection(nextAudioKey, nextSubtitleKey, startSeconds) || {});
     applyNativeTrackSelection(nextAudioKey, nextSubtitleKey);
     // Track application intentionally runs once per resolved option set; the
@@ -596,6 +609,7 @@ function PlayerContent({
     player,
     position,
     preferenceScope,
+    sourceOffset,
     streamOptionsForSelection,
     subtitleOptions,
     subtitleFontSize,

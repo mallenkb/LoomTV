@@ -1,6 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { createDownloadResumable } from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
+import { serializeMobileDatabaseMutation } from './mobileDatabaseMutations';
 
 export type MobileDownloadCapability = {
   id: string;
@@ -33,6 +34,14 @@ type DownloadRow = {
 const DATABASE_NAME = 'loomtv-mobile-cache.db';
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let attemptSequence = 0;
+let publications: Promise<unknown> = Promise.resolve();
+const activeDirectories = new Set<string>();
+
+function serializeDownloadPublication<T>(operation: () => Promise<T>): Promise<T> {
+  const pending = publications.catch(() => undefined).then(operation);
+  publications = pending;
+  return pending;
+}
 const mutations = new Map<string, Promise<unknown>>();
 const hostGenerations = new Map<string, number>();
 const activeTransfers = new Map<string, Set<AbortController>>();
@@ -74,7 +83,7 @@ function fromRow(row: DownloadRow): MobileDownload {
 
 async function database(): Promise<SQLite.SQLiteDatabase> {
   if (!databasePromise) {
-    databasePromise = SQLite.openDatabaseAsync(DATABASE_NAME).then(async (next) => {
+    databasePromise = SQLite.openDatabaseAsync(DATABASE_NAME, { useNewConnection: true }).then((next) => serializeMobileDatabaseMutation(async () => {
       await next.execAsync(`
         CREATE TABLE IF NOT EXISTS mobile_downloads (
           host_device_id TEXT NOT NULL,
@@ -89,7 +98,7 @@ async function database(): Promise<SQLite.SQLiteDatabase> {
         CREATE INDEX IF NOT EXISTS mobile_downloads_created_at ON mobile_downloads(created_at);
       `);
       return next;
-    }).catch((error) => {
+    })).catch((error) => {
       databasePromise = null;
       throw error;
     });
@@ -97,8 +106,38 @@ async function database(): Promise<SQLite.SQLiteDatabase> {
   return databasePromise;
 }
 
+function runDownloadMutation(db: SQLite.SQLiteDatabase, sql: string, ...args: (string | number)[]) {
+  return serializeMobileDatabaseMutation(() => db.runAsync(sql, ...args));
+}
+
+export function reconcileMobileDownloadDirectories(): Promise<void> {
+  return serializeDownloadPublication(async () => {
+    const db = await database();
+    const rows = await db.getAllAsync<DownloadRow>('SELECT * FROM mobile_downloads');
+    const retained = new Set(rows.map((row) => row.uri));
+    const root = new Directory(Paths.document, 'loomtv-downloads');
+    if (!root.exists) return;
+    // Only this app-owned tree is inspected. Active attempts are retained even
+    // before their metadata is published. Empty ancestors are harmless.
+    const visit = (directory: Directory, depth: number) => {
+      for (const child of directory.list()) {
+        if (!(child instanceof Directory)) continue;
+        if (depth < 3) visit(child, depth + 1);
+        else {
+          const prefix = `${child.uri.replace(/\/$/, '')}/`;
+          const owned = activeDirectories.has(child.uri)
+            || [...retained].some((uri) => uri.startsWith(prefix));
+          if (!owned) child.delete();
+        }
+      }
+    };
+    visit(root, 0);
+  });
+}
+
 export async function listMobileDownloads(hostDeviceId: string, profileId: string): Promise<MobileDownload[]> {
   if (!hostDeviceId || !profileId) return [];
+  await reconcileMobileDownloadDirectories();
   const db = await database();
   const rows = await db.getAllAsync<DownloadRow>(
     `SELECT host_device_id,profile_id,media_id,title,uri,size_bytes,created_at
@@ -110,7 +149,7 @@ export async function listMobileDownloads(hostDeviceId: string, profileId: strin
   for (const row of rows) {
     const file = new File(row.uri);
     if (file.exists) available.push(fromRow(row));
-    else await db.runAsync(
+    else await runDownloadMutation(db,
       'DELETE FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
       hostDeviceId,
       profileId,
@@ -174,8 +213,9 @@ export function clearMobileDownloads(hostDeviceId: string): Promise<void> {
     for (const row of rows) {
       const file = new File(row.uri);
       if (file.exists) file.delete();
-      await db.runAsync('DELETE FROM mobile_downloads WHERE host_device_id=? AND uri=?', hostDeviceId, row.uri);
+      await runDownloadMutation(db, 'DELETE FROM mobile_downloads WHERE host_device_id=? AND uri=?', hostDeviceId, row.uri);
     }
+    await reconcileMobileDownloadDirectories();
   });
 }
 
@@ -199,6 +239,7 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
     `attempt-${Date.now()}-${++attemptSequence}`,
   );
   directory.create({ idempotent: true, intermediates: true });
+  activeDirectories.add(directory.uri);
   const file = new File(directory, 'media');
   let cancelTransfer: Promise<void> | undefined;
   let transferring = true;
@@ -229,54 +270,57 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
     const destination = new File(directory, mobileDownloadFileName(result.headers, input.contentUrl));
     if (destination.uri !== file.uri) file.move(destination);
     assertCurrent();
-    const createdAt = Date.now();
-    const sizeBytes = Number(file.size || input.capability.sizeBytes || 0);
-    await db.runAsync(
-      `INSERT INTO mobile_downloads (host_device_id,profile_id,media_id,title,uri,size_bytes,created_at)
-       VALUES (?,?,?,?,?,?,?)
-       ON CONFLICT(host_device_id,profile_id,media_id) DO UPDATE SET
-         title=excluded.title,uri=excluded.uri,size_bytes=excluded.size_bytes,created_at=excluded.created_at`,
-      input.hostDeviceId,
-      input.profileId,
-      input.capability.mediaId,
-      input.title,
-      file.uri,
-      sizeBytes,
-      createdAt,
-    );
-    directoryCommitted = true;
-    // A scope change can happen while the asynchronous database write finishes.
-    // Restore the preceding copy before cleaning this attempt's file.
-    if (input.signal?.aborted || input.isCurrent?.() === false) {
-      if (previous) {
-        await db.runAsync(
-          'UPDATE mobile_downloads SET title=?,uri=?,size_bytes=?,created_at=? WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
-          previous.title, previous.uri, previous.size_bytes, previous.created_at,
-          input.hostDeviceId, input.profileId, input.capability.mediaId, file.uri,
-        );
-      } else {
-        await db.runAsync('DELETE FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
-          input.hostDeviceId, input.profileId, input.capability.mediaId, file.uri);
+    return await serializeDownloadPublication(async () => {
+      assertCurrent();
+      const createdAt = Date.now();
+      const sizeBytes = Number(file.size || input.capability.sizeBytes || 0);
+      await runDownloadMutation(db,
+        `INSERT INTO mobile_downloads (host_device_id,profile_id,media_id,title,uri,size_bytes,created_at)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(host_device_id,profile_id,media_id) DO UPDATE SET
+           title=excluded.title,uri=excluded.uri,size_bytes=excluded.size_bytes,created_at=excluded.created_at`,
+        input.hostDeviceId,
+        input.profileId,
+        input.capability.mediaId,
+        input.title,
+        file.uri,
+        sizeBytes,
+        createdAt,
+      );
+      directoryCommitted = true;
+      // A scope change can happen while the asynchronous database write finishes.
+      // Restore the preceding copy before cleaning this attempt's file.
+      if (input.signal?.aborted || input.isCurrent?.() === false) {
+        if (previous) {
+          await runDownloadMutation(db,
+            'UPDATE mobile_downloads SET title=?,uri=?,size_bytes=?,created_at=? WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
+            previous.title, previous.uri, previous.size_bytes, previous.created_at,
+            input.hostDeviceId, input.profileId, input.capability.mediaId, file.uri,
+          );
+        } else {
+          await runDownloadMutation(db, 'DELETE FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
+            input.hostDeviceId, input.profileId, input.capability.mediaId, file.uri);
+        }
+        directoryCommitted = false;
+        throw cancelledDownload();
       }
-      directoryCommitted = false;
-      throw cancelledDownload();
-    }
-    // Commit the new file before removing the previous copy.
-    if (previous?.uri && previous.uri !== file.uri) {
-      try {
-        const oldFile = new File(previous.uri);
-        if (oldFile.exists) oldFile.delete();
-      } catch { /* Recoverable orphan; the new copy is committed. */ }
-    }
-    return {
-      hostDeviceId: input.hostDeviceId,
-      profileId: input.profileId,
-      mediaId: input.capability.mediaId,
-      title: input.title,
-      uri: file.uri,
-      sizeBytes,
-      createdAt,
-    };
+      // Commit the new file before removing the previous copy.
+      if (previous?.uri && previous.uri !== file.uri) {
+        try {
+          const oldFile = new File(previous.uri);
+          if (oldFile.exists) oldFile.delete();
+        } catch { /* Recoverable orphan; the new copy is committed. */ }
+      }
+      return {
+        hostDeviceId: input.hostDeviceId,
+        profileId: input.profileId,
+        mediaId: input.capability.mediaId,
+        title: input.title,
+        uri: file.uri,
+        sizeBytes,
+        createdAt,
+      };
+    });
   } catch (error) {
     // Wait for native cancellation, rather than the original transfer, before
     // deleting files the native task may still be writing.
@@ -286,6 +330,7 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
     try { if (!directoryCommitted && directory.exists) directory.delete(); } catch { /* Preserve the original failure. */ }
     throw error;
   } finally {
+    activeDirectories.delete(directory.uri);
     input.signal?.removeEventListener('abort', abort);
   }
 }
@@ -296,7 +341,7 @@ export async function removeMobileDownload(download: MobileDownload): Promise<vo
     // A stale remove must not delete metadata for a replacement download.
     const file = new File(download.uri);
     if (file.exists) file.delete();
-    await db.runAsync(
+    await runDownloadMutation(db,
       'DELETE FROM mobile_downloads WHERE host_device_id=? AND profile_id=? AND media_id=? AND uri=?',
       download.hostDeviceId, download.profileId, download.mediaId, download.uri,
     );

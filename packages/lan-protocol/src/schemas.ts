@@ -113,6 +113,7 @@ export const lanEpisodeMetaSchema = z.object({
 });
 
 export const lanEpisodeFileSchema = z.object({
+  mediaId: nonEmptyString.optional(),
   season: finiteNumber,
   episode: finiteNumber,
   filePath: z.string(),

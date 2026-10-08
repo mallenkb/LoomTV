@@ -117,7 +117,7 @@ export function episodePlayTarget(
     localMetadata: episodeFile.localMetadata,
     subtitles: episodeFile.subtitles || item.subtitles,
     startPosition: state?.inProgress ? state.position : 0,
-    mediaId: (episodeFile as EpisodeFile & { mediaId?: string }).mediaId || item.id,
+    mediaId: episodeFile.mediaId || filePathFromUrl(episodeFile.filePath),
     mediaType: item.type,
     season: episodeFile.season,
     episode: episodeFile.episode,

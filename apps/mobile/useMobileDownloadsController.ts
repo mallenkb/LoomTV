@@ -1,10 +1,11 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { Connection, MobileProfile, PlayTarget } from './mobileDomain';
 import { filePathFromUrl } from './mobileLibrary';
 import {
   clearMobileDownloads,
   listMobileDownloads,
+  reconcileMobileDownloadDirectories,
   removeMobileDownload,
   saveMobileDownload,
   type MobileDownload,
@@ -61,6 +62,10 @@ export function useMobileDownloadsController({ activeProfile, client, connection
   const cancelDownloads = useCallback(() => {
     for (const operation of activeOperations.current.values()) void operation.cancel();
     activeOperations.current.clear();
+  }, []);
+
+  useEffect(() => {
+    void reconcileMobileDownloadDirectories().catch((error) => reportNonFatal('downloads.reconcile', error));
   }, []);
 
   useLayoutEffect(() => {

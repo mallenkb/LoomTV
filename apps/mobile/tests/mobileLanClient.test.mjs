@@ -34,12 +34,28 @@ for (const fallback of [false, true]) {
     assert.equal(index.movies.length, 1);
     assert.equal(index.movies[0].year, undefined);
     assert.equal(index.tvShows[0].year, 2024);
+    const { mobileLibraryFromIndex } = await import('../mobileDomain.ts');
+    const { episodePlayTarget } = await import('../mobileLibrary.ts');
+    const compactShow = mobileLibraryFromIndex(index).tvShows[0];
+    const target = episodePlayTarget(compactShow, compactShow.episodeFiles[0]);
+    assert.equal(target.mediaId, episode.id);
+    const { client: actions, requests: actionRequests } = recordingClient();
+    await actions.startHls(baseUrl, 'token', target.mediaId, {});
+    await actions.createOfflineDownload(baseUrl, 'token', target.mediaId);
+    assert.equal(actionRequests[0].input, `${baseUrl}/api/v1/media/${episode.id}/playback-plan`);
+    assert.equal(JSON.parse(actionRequests[1].init.body).mediaId, episode.id);
+    await actions.saveProgress(baseUrl, 'token', { profileId: 'profile-1', mediaId: target.mediaId, position: 25, duration: 100 });
+    assert.equal(actionRequests[2].input, `${baseUrl}/api/v1/profiles/profile-1/progress/${episode.id}`);
     for (const item of [movie, series]) {
       const detail = await readJsonResponse(await client.getLibraryItem(baseUrl, 'token', item.id), mobileLibraryItemDetailsSchema, 'Details');
       assert.equal(detail.item.id, item.id);
       assert.equal(detail.item.year, item.year);
       assert.deepEqual(detail.item.cast, []);
-      if (item === series) assert.equal(detail.item.episodeFiles[0].filePath, episode.id);
+      if (item === series) {
+        assert.equal(detail.item.episodeFiles[0].filePath, episode.id);
+        const { episodePlayTarget } = await import('../mobileLibrary.ts');
+        assert.equal(episodePlayTarget(detail.item, detail.item.episodeFiles[0]).mediaId, episode.id);
+      }
     }
     const library = await readJsonResponse(await client.getLibrary(baseUrl, 'token'), mobileLibrarySchema, 'Legacy library');
     assert.equal(library.movies[0].id, movie.id);
@@ -146,6 +162,7 @@ test('playback preparation uses a canonical playback plan and device credential'
       supportsHdr: true,
       supportsTextSubtitles: false,
       subtitleModes: ['burn-in'],
+      forceTranscode: true,
     },
     startSeconds: 125,
     audioTrackId: '2',
@@ -215,4 +232,54 @@ test('client lifecycle cancellation aborts every active operation', async () => 
   client.cancelActiveRequests();
   await Promise.all(pending.map((request) => assert.rejects(request, { name: 'AbortError' })));
   assert.equal(signals.every((signal) => signal.aborted), true);
+});
+
+for (const hostDeviceId of [undefined, 'desktop-instance']) {
+  test(`approved pairing decodes the plain discovery document (${hostDeviceId || 'manual'})`, async () => {
+    const { mobilePairResponseSchema, readJsonResponse } = await import('../mobileDecoders.ts');
+    const fingerprint = 'ab'.repeat(32);
+    const client = createMobileLanClient(async (url) => url.endsWith('/discovery')
+      ? Response.json({ certificateFingerprint: fingerprint })
+      : Response.json({ ok: true, data: { status: 'approved', deviceId: 'phone', credential: { id: 'id', secret: 'secret' }, credentialExpiresAt: 123456 } }));
+    const payload = await readJsonResponse(await client.pairingApprovalStatus('https://desktop:3848', {
+      requestId: 'approval', requestSecret: 'secret',
+    }, hostDeviceId), mobilePairResponseSchema, 'Pairing');
+    assert.equal(payload.certFingerprint, fingerprint);
+    assert.equal(payload.hostDeviceId, hostDeviceId || `manual:${fingerprint}`);
+    assert.notEqual(payload.hostDeviceId, fingerprint);
+    assert.equal(payload.accessTokenExpiresAt, 123456);
+    const { validatePairIdentity } = await import('../mobileHostIdentity.ts');
+    assert.equal(validatePairIdentity(payload, fingerprint, hostDeviceId ? { deviceId: hostDeviceId, certFingerprint: fingerprint } : undefined), fingerprint);
+    assert.throws(() => validatePairIdentity(payload, 'cd'.repeat(32)), /TLS identity changed/);
+  });
+}
+
+test('credential validation keeps the server-issued expiry without extending it', async () => {
+  const { client, requests } = recordingClient();
+  const expiry = { accessTokenExpiresAt: Date.now() + 1000, refreshTokenExpiresAt: Date.now() + 1000 };
+  const response = await client.refreshCredentials('https://desktop', 'id.secret', 'Phone', expiry);
+  assert.deepEqual(await response.json(), { accessToken: 'id.secret', refreshToken: 'id.secret', ...expiry });
+  assert.equal(requests[0].input, 'https://desktop/api/v1/auth/me');
+});
+
+test('playback adapters retain lease metadata and send owned renew and stop requests', async () => {
+  const requests = [];
+  const client = createMobileLanClient(async (url, init) => {
+    requests.push({ url, init });
+    if (url.endsWith('/playback-plan')) return Response.json({ ok: true, data: { transcodeUrl: '/start' } });
+    return Response.json({ ok: true, data: { playlistUrl: '/index.m3u8?token=capability', sessionId: 'session', renewUrl: '/renew', expiresAt: 300000, absoluteExpiresAt: 900000 } });
+  });
+  const { hlsSessionResultSchema, readJsonResponse } = await import('../mobileDecoders.ts');
+  const started = await readJsonResponse(await client.startHls('https://server', 'device', 'episode', {}), hlsSessionResultSchema, 'Session');
+  assert.equal(started.data.sessionId, 'session');
+  assert.equal(started.data.renewUrl, '/renew');
+  assert.equal(started.data.expiresAt, 300000);
+  assert.equal(started.data.absoluteExpiresAt, 900000);
+  await client.renewPlayback('https://server', 'device', 'episode', started.data.sessionId, started.data.action);
+  await client.stopPlayback('https://server', 'device', 'episode', started.data.sessionId);
+  assert.equal(requests[2].url, 'https://server/api/v1/media/episode/playback-session/renew');
+  assert.equal(requests[3].url, 'https://server/api/v1/media/episode/playback-session');
+  assert.deepEqual(JSON.parse(requests[2].init.body), { sessionId: 'session', action: 'hls' });
+  assert.deepEqual(JSON.parse(requests[3].init.body), { sessionId: 'session' });
+  assert.equal(requests[3].init.headers.Authorization, 'LoomDevice device');
 });

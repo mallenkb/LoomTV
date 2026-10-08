@@ -45,6 +45,7 @@ test('series playback selects the first not-watched episode and preserves resume
   });
 
   assert.equal(target.streamPath, secondId);
+  assert.equal(target.mediaId, secondId);
   assert.equal(target.startPosition, 120);
   assert.equal(target.subtitle, 'S01E02 · Example Show');
 });

@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { serializeMobileDatabaseMutation } from './mobileDatabaseMutations';
 
 import type {
   LibraryPayload,
@@ -112,7 +113,7 @@ export function canRestoreMobileOfflineSnapshot(snapshot: MobileOfflineSnapshot)
 
 async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (!databasePromise) {
-    databasePromise = SQLite.openDatabaseAsync(MOBILE_OFFLINE_DATABASE_NAME).then(async (database) => {
+    databasePromise = SQLite.openDatabaseAsync(MOBILE_OFFLINE_DATABASE_NAME, { useNewConnection: true }).then((database) => serializeMobileDatabaseMutation(async () => {
       await database.execAsync(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS mobile_offline_snapshots (
@@ -122,6 +123,14 @@ async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
         );
         CREATE INDEX IF NOT EXISTS mobile_offline_snapshots_saved_at
           ON mobile_offline_snapshots(saved_at);
+        CREATE TABLE IF NOT EXISTS mobile_pending_progress (
+          host_device_id TEXT NOT NULL,
+          profile_id TEXT NOT NULL,
+          media_id TEXT NOT NULL,
+          media_path TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          PRIMARY KEY (host_device_id, profile_id, media_id)
+        );
         CREATE TABLE IF NOT EXISTS mobile_offline_progress (
           host_device_id TEXT NOT NULL,
           media_path TEXT NOT NULL,
@@ -139,7 +148,7 @@ async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
         await database.execAsync('UPDATE mobile_offline_progress SET last_seen_at = saved_at WHERE last_seen_at = 0;');
       }
       return database;
-    }).catch((error) => {
+    })).catch((error) => {
       databasePromise = null;
       throw error;
     });
@@ -180,7 +189,7 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
   const activeProgressPaths = activeMobileProgressPaths(snapshot.library);
   const previousProgress = encodedProgressByHost.get(snapshot.hostDeviceId) || new Map<string, string>();
 
-  await database.withTransactionAsync(async () => {
+  await serializeMobileDatabaseMutation(() => database.withTransactionAsync(async () => {
     if (metadataChanged) {
       const payload: MobileOfflineSnapshot = { ...snapshot, progress: {}, version: MOBILE_OFFLINE_CACHE_VERSION, savedAt };
       const encoded = JSON.stringify(payload);
@@ -230,7 +239,7 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
     }
     await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE saved_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
     await database.runAsync('DELETE FROM mobile_offline_progress WHERE last_seen_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
-  });
+  }));
 
   snapshotIdentityByHost.set(snapshot.hostDeviceId, nextIdentity);
   encodedProgressByHost.set(snapshot.hostDeviceId, nextProgress);
@@ -245,12 +254,15 @@ export function saveMobileOfflineSnapshot(snapshot: PersistedSnapshotInput, gene
 
 export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<MobileOfflineSnapshot | null> {
   if (!hostDeviceId) return null;
+  const generation = mobileOfflineCacheGeneration(hostDeviceId);
+  const isCurrent = () => generation === mobileOfflineCacheGeneration(hostDeviceId);
   try {
     const database = await openMobileOfflineDatabase();
     const row = await database.getFirstAsync<MobileOfflineSnapshotRow>(
       'SELECT payload, saved_at FROM mobile_offline_snapshots WHERE host_device_id = ?',
       hostDeviceId,
     );
+    if (!isCurrent()) return null;
     if (!row?.payload || row.payload.length > MOBILE_OFFLINE_CACHE_MAX_PAYLOAD_BYTES) return null;
     const parsed = JSON.parse(row.payload) as Record<string, unknown>;
     const snapshot = normalizeMobileOfflineSnapshot({ ...parsed, savedAt: row.saved_at }, hostDeviceId);
@@ -263,6 +275,7 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
       hostDeviceId,
       Date.now() - MOBILE_OFFLINE_CACHE_MAX_AGE_MS,
     );
+    if (!isCurrent()) return null;
     const progress = { ...snapshot.progress };
     const encodedProgress = new Map<string, string>();
     for (const row of rows) {
@@ -295,10 +308,57 @@ export function clearMobileOfflineSnapshot(hostDeviceId: string): Promise<void> 
     snapshotIdentityByHost.delete(hostDeviceId);
     encodedProgressByHost.delete(hostDeviceId);
     const database = await openMobileOfflineDatabase();
-    await database.withTransactionAsync(async () => {
+    await serializeMobileDatabaseMutation(() => database.withTransactionAsync(async () => {
       await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE host_device_id = ?', hostDeviceId);
       await database.runAsync('DELETE FROM mobile_offline_progress WHERE host_device_id = ?', hostDeviceId);
-    });
+    }));
   });
   return saveQueue.catch((error) => reportNonFatal('offline-cache.clear', error));
+}
+
+export type MobilePendingProgress = { mediaId: string; mediaPath: string; progress: StoredProgress };
+
+export function saveMobilePendingProgress(hostDeviceId: string, profileId: string, entry: MobilePendingProgress): Promise<void> {
+  saveQueue = saveQueue.catch(() => undefined).then(async () => {
+    const database = await openMobileOfflineDatabase();
+    await serializeMobileDatabaseMutation(() => database.runAsync(`INSERT INTO mobile_pending_progress (host_device_id, profile_id, media_id, media_path, payload)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(host_device_id, profile_id, media_id) DO UPDATE SET
+      media_path = excluded.media_path, payload = excluded.payload`,
+    hostDeviceId, profileId, entry.mediaId, entry.mediaPath, JSON.stringify(entry.progress)));
+  });
+  return saveQueue;
+}
+
+export async function loadMobilePendingProgress(hostDeviceId: string, profileId: string): Promise<MobilePendingProgress[]> {
+  await saveQueue.catch(() => undefined);
+  const database = await openMobileOfflineDatabase();
+  const rows = await database.getAllAsync<{ media_id: string; media_path: string; payload: string }>(
+    'SELECT media_id, media_path, payload FROM mobile_pending_progress WHERE host_device_id = ? AND profile_id = ?', hostDeviceId, profileId);
+  return rows.flatMap((row) => {
+    try {
+      const progress = JSON.parse(row.payload);
+      if (!isRecord(progress) || finiteOptionalNumber(progress.position) === undefined
+        || finiteOptionalNumber(progress.duration) === undefined || finiteOptionalNumber(progress.updatedAt) === undefined
+        || typeof progress.watched !== 'boolean') return [];
+      return [{ mediaId: row.media_id, mediaPath: row.media_path, progress: progress as StoredProgress }];
+    } catch { return []; }
+  });
+}
+
+export function removeMobilePendingProgress(hostDeviceId: string, profileId: string, entry: MobilePendingProgress): Promise<void> {
+  saveQueue = saveQueue.catch(() => undefined).then(async () => {
+    const database = await openMobileOfflineDatabase();
+    // A newer playback update may have been queued while the server was saving.
+    await serializeMobileDatabaseMutation(() => database.runAsync('DELETE FROM mobile_pending_progress WHERE host_device_id = ? AND profile_id = ? AND media_id = ? AND payload = ?',
+      hostDeviceId, profileId, entry.mediaId, JSON.stringify(entry.progress)));
+  });
+  return saveQueue;
+}
+
+export function clearMobilePendingProgress(hostDeviceId: string): Promise<void> {
+  saveQueue = saveQueue.catch(() => undefined).then(async () => {
+    const database = await openMobileOfflineDatabase();
+    await serializeMobileDatabaseMutation(() => database.runAsync('DELETE FROM mobile_pending_progress WHERE host_device_id = ?', hostDeviceId));
+  });
+  return saveQueue;
 }
