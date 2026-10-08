@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { desktopApi } from '@/lib/desktopApi';
 import {
   LIBRARY_TYPE_DEFINITIONS,
+  VISIBLE_LIBRARY_TYPE_DEFINITIONS,
   LibraryTypeIcon,
   type LibraryKind,
 } from './librarySettingsModel';
@@ -198,7 +199,7 @@ export default function AddLibraryWizard({
                     disabled={busy || folders.length > 0}
                     className="h-10 w-full appearance-none rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 py-2 pr-9 text-sm text-[var(--loom-text)] outline-none focus:border-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {LIBRARY_TYPE_DEFINITIONS.map((definition) => (
+                    {VISIBLE_LIBRARY_TYPE_DEFINITIONS.map((definition) => (
                       <option key={definition.kind} value={definition.kind}>{definition.label}</option>
                     ))}
                   </select>

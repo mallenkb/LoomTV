@@ -22,7 +22,7 @@ export default function ShowUpdatesPanel({ show }: { show?: LibraryShowUpdates }
       : daysUntil > 1 ? String(daysUntil) : null;
 
   return (
-    <div className="mb-3 flex items-center gap-3 rounded-xl bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-surface))] pl-[8.8px] pr-5 py-[8.8px]">
+    <div className="mb-3 flex items-center gap-3 rounded-xl bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-surface))] pl-[8.8px] pr-5 py-[8.8px] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--loom-accent)_12%,var(--loom-surface))] motion-reduce:transition-none">
       <time
         dateTime={next.airDate}
         aria-label={airDate.toLocaleDateString([], { dateStyle: 'full' })}

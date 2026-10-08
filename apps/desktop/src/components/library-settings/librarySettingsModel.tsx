@@ -83,6 +83,12 @@ export const LIBRARY_TYPE_DEFINITIONS: readonly LibraryTypeDefinition[] = [
   { kind: 'others', label: 'Other folders', description: 'Folders with automatic type detection', custom: true, icons: iconPairs.others },
 ];
 
+// Temporarily show only video libraries and custom folders in settings and creation.
+// Keep every definition above so existing libraries retain their metadata.
+export const VISIBLE_LIBRARY_TYPE_DEFINITIONS = LIBRARY_TYPE_DEFINITIONS.filter(
+  ({ kind }) => kind === 'movies' || kind === 'tvShows' || kind === 'anime' || kind === 'others',
+);
+
 export function libraryTypeDefinition(kind: LibraryKind): LibraryTypeDefinition {
   return LIBRARY_TYPE_DEFINITIONS.find((definition) => definition.kind === kind) || LIBRARY_TYPE_DEFINITIONS[0];
 }

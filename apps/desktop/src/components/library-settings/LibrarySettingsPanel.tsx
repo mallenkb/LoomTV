@@ -34,7 +34,7 @@ import OriginalImportsSection from './OriginalImportsSection';
 import LibraryCleanupSection from './LibraryCleanupSection';
 import LibraryHealthCard from './LibraryHealthCard';
 import {
-  LIBRARY_TYPE_DEFINITIONS,
+  VISIBLE_LIBRARY_TYPE_DEFINITIONS,
   LibraryTypeIcon,
   type LibraryKind,
 } from './librarySettingsModel';
@@ -293,7 +293,7 @@ export default function LibrarySettingsPanel({
 
   const libraries = useMemo<UnifiedLibrary[]>(() => {
     const sidebarPositions = new Map(sidebarOrderItems.map((item, index) => [item.id, index]));
-    return LIBRARY_TYPE_DEFINITIONS.map((definition) => {
+    return VISIBLE_LIBRARY_TYPE_DEFINITIONS.map((definition) => {
       const legacySection = folderSections.find((section) => section.key === definition.kind);
       let folders: UnifiedFolder[] = [];
       let itemCount: number | null;
