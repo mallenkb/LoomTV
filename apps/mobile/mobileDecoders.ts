@@ -52,7 +52,9 @@ export const savedConnectionSchema = z.object({
   hostDeviceId: z.string().min(1),
   hostDeviceName: z.string(),
   clientDeviceName: z.string(),
-});
+}).refine((value) => value.deviceToken !== value.refreshToken
+  || value.accessTokenExpiresAt === value.refreshTokenExpiresAt,
+{ message: 'A fixed device credential must retain one server-issued expiry.' });
 
 export const refreshedCredentialsSchema = z.object({
   accessToken: z.string().min(1),
@@ -89,7 +91,14 @@ export const officialMetadataCandidatesSchema = z.array(officialMetadataCandidat
 
 export const hlsSessionResultSchema = z.object({
   ok: z.boolean(),
-  data: z.object({ playlistUrl: z.string() }).optional(),
+  data: z.object({
+    playlistUrl: z.string(),
+    sessionId: z.string().min(1).optional(),
+    renewUrl: z.string().optional(),
+    expiresAt: finiteTimestamp.optional(),
+    absoluteExpiresAt: finiteTimestamp.optional(),
+    action: z.enum(['direct', 'hls']).optional(),
+  }).optional(),
   code: z.string().optional(),
   error: z.string().optional(),
   retryable: z.boolean().optional(),
@@ -137,3 +146,8 @@ export async function readErrorResponse(response: Response, context: string) {
   if (!text.trim()) return {};
   return parseJsonResponse(text, mobileErrorPayloadSchema, context);
 }
+
+export const mobilePlaybackRenewalSchema = z.object({
+  playlistUrl: z.string().optional(), directUrl: z.string().optional(),
+  expiresAt: finiteTimestamp, absoluteExpiresAt: finiteTimestamp.optional(),
+}).refine((value) => Boolean(value.playlistUrl || value.directUrl), { message: 'A renewed playback URL is required.' });

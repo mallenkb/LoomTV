@@ -27,6 +27,13 @@ const MAX_PROGRESS = 20_000 * MAX_PROFILES;
 const PROFILE_LIST_KINDS = new Set(['watchlist', 'favorite', 'watched']);
 const DEFAULT_DEVICE_PERMISSIONS = Object.freeze(['library.read', 'stream', 'transcode', 'downloads']);
 const LEGACY_DEVICE_PERMISSIONS = new Set([...DEFAULT_DEVICE_PERMISSIONS, 'remote.access']);
+const LEGACY_DEVICE_SCOPE_PERMISSIONS = Object.freeze({
+  'catalog:read': ['library.read'],
+  'media:stream': ['stream', 'transcode'],
+  // Canonical progress uses the selected profile assignment and library.read
+  // from catalog:read. There is no separate account playback-write grant.
+  'playback:write': [],
+});
 
 /** Same construction as `rootIdFor` in the canonical server's admin service, so root IDs stay stable. */
 export function rootIdFor(rootPath) {
@@ -519,7 +526,9 @@ export function projectDesktopState({ inventory, identity, ownerAccount, session
     const requestedPermissions = Array.isArray(device.permissions)
       ? device.permissions
       : Array.isArray(device.scopes) ? device.scopes : DEFAULT_DEVICE_PERMISSIONS;
-    const permissions = [...new Set(requestedPermissions.filter((permission) => LEGACY_DEVICE_PERMISSIONS.has(permission)))];
+    const permissions = [...new Set(requestedPermissions
+      .flatMap((permission) => LEGACY_DEVICE_SCOPE_PERMISSIONS[permission] || [permission])
+      .filter((permission) => LEGACY_DEVICE_PERMISSIONS.has(permission)))];
     if (expired) expiredDevices += 1;
     deviceIds.add(device.id);
     devices.push({
@@ -527,22 +536,12 @@ export function projectDesktopState({ inventory, identity, ownerAccount, session
       accountId: ownerAccount.id,
       name: String(device.name || 'Paired device').slice(0, 120),
       kind: 'lan-client',
-      disabled: expired,
+      disabled: true,
       permissions,
       createdAt: Number(device.createdAt) || now,
       updatedAt: Number(device.lastSeenAt) || Number(device.createdAt) || now,
       lastSeenAt: Number(device.lastSeenAt) || null,
     });
-    if (credentialValid) {
-      deviceCredentials.push({
-        deviceId: device.id,
-        secretHash,
-        algorithm: 'sha256',
-        createdAt: Number(device.createdAt) || now,
-        expiresAt,
-        updatedAt: Number(device.lastSeenAt) || Number(device.createdAt) || now,
-      });
-    }
   }
   if (expiredDevices) {
     note(decisions, {
@@ -550,6 +549,14 @@ export function projectDesktopState({ inventory, identity, ownerAccount, session
       value: 'credential-dropped-pairing-required',
       count: expiredDevices,
       detail: 'Paired devices whose refresh window had already closed are imported disabled and without a credential, so they must pair again.',
+    });
+  }
+  if (devices.length > expiredDevices) {
+    note(warnings, {
+      code: 'legacy_device_credentials_require_pairing',
+      category: 'devices',
+      count: devices.length - expiredDevices,
+      detail: 'Desktop refresh secrets use a token format that canonical credentials cannot authenticate. Imported devices are disabled without credentials and must pair again. Their approved permissions are retained for review.',
     });
   }
 

@@ -20,6 +20,10 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { Image as ExpoImage } from 'expo-image';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SecureStore from 'expo-secure-store';
+import { serializeMobileCredentialMutation } from './mobileCredentialPersistence';
+import { ownMobilePlaybackLease } from './mobilePlaybackLease';
+import { mobileAbsoluteMediaSeconds, mobileMediaDurationSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
+import { reconcileMobileProgress } from './mobileProgressSync';
 import { type PlayerError, type VideoPlayerStatus } from 'expo-video';
 import type { LanPairApprovalRequest } from '@loom-media-server/lan-protocol';
 import { FilterIcon, LoomLogo, SearchIcon } from './components/LoomIcons';
@@ -35,7 +39,7 @@ import { useMobileConnectionSessionController, type MobileProfilePickerMode } fr
 import { useMobileNavigationController } from './useMobileNavigationController';
 import { useMobilePlaybackController } from './useMobilePlaybackController';
 import { createStyles, type MobileThemeColors } from './mobileStyles';
-import { isHlsPlaybackUrl, videoSourceFor, playbackUrlWithAnchor, hasStreamOptions } from './mobilePlaybackPresentation';
+import { isHlsPlaybackUrl, videoSourceFor, hasStreamOptions } from './mobilePlaybackPresentation';
 import { fetchMobileCatalog, synchronizeMobileCatalog } from './mobileCatalog';
 import { captureMobileFocus, clearCapturedMobileFocus, topMobileModalLayer } from './mobileModalStack';
 import { replaceMobilePlayerSource } from './mobileLifecycle';
@@ -63,7 +67,12 @@ import { reconcileSavedHost } from './mobileHostIdentity';
 import {
   canRestoreMobileOfflineSnapshot,
   clearMobileOfflineSnapshot,
+  clearMobilePendingProgress,
   loadMobileOfflineSnapshot,
+  loadMobilePendingProgress,
+  mobileOfflineCacheGeneration,
+  removeMobilePendingProgress,
+  saveMobilePendingProgress,
 } from './mobileOfflineCache';
 import { mediaIdForPlayTarget, useMobileDownloadsController } from './useMobileDownloadsController';
 import { MobileReducedMotionProvider } from './mobileReducedMotion';
@@ -99,10 +108,12 @@ import type {
   OfficialMetadataCandidate,
   PosterCandidateSheetState,
   SavedConnection,
+  StoredProgress,
   StreamOptions,
 } from './mobileDomain';
 import {
   hlsSessionResultSchema,
+  mobilePlaybackRenewalSchema,
   mobileActiveProfileSchema,
   mobileLibraryItemDetailsSchema,
   mobileLibrarySchema,
@@ -197,6 +208,7 @@ function wait(ms: number): Promise<void> {
 async function waitForPairingApproval(
   baseUrl: string,
   request: LanPairApprovalRequest,
+  hostDeviceId?: string,
 ): Promise<Response> {
   if (
     !request.requestId
@@ -213,7 +225,7 @@ async function waitForPairingApproval(
     const response = await mobileLanClient.pairingApprovalStatus(baseUrl, {
       requestId: request.requestId,
       requestSecret: request.requestSecret,
-    });
+    }, hostDeviceId);
     if (response.status !== 202) return response;
   }
   throw new Error('The server approval request expired. Tap Connect to try again.');
@@ -390,6 +402,8 @@ function AppRoot() {
     miniPlayerTarget,
     orientationLockQueueRef,
     pendingSeekRef,
+    sourceOffset,
+    setSourceOffset,
     playbackFailure,
     playbackUrl,
     player,
@@ -408,6 +422,7 @@ function AppRoot() {
     userPausedRef,
     windowSizeRef,
   } = useMobilePlaybackController({ appState, height, width });
+  const playbackReleaseRef = useRef<Promise<unknown>>(Promise.resolve());
   const detailItemCacheRef = useRef(new Map<string, MediaItem>());
   const detailItemRequestsRef = useRef(new Map<string, Promise<MediaItem>>());
   const activeCatalogIdentityRef = useRef('profile:none:-1');
@@ -528,7 +543,7 @@ function AppRoot() {
         const certFingerprint = normalizeCertFingerprint(saved.certFingerprint);
         if (!certFingerprint || !saved.hostDeviceId) {
           invalidateCredentialRefresh();
-          void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+          void serializeMobileCredentialMutation(() => SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY));
           if (saved.hostDeviceId) void clearMobileOfflineSnapshot(saved.hostDeviceId);
           setBaseUrl(saved.baseUrl);
           setError('This saved connection predates secure host identity. Select the server and approve pairing again.');
@@ -565,7 +580,7 @@ function AppRoot() {
       invalidateCredentialRefresh();
       setSavedConnection(updated);
       setBaseUrl(updated.baseUrl);
-      void SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+      void serializeMobileCredentialMutation(() => SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated)));
       void reconnectSavedConnectionHandlerRef.current(updated);
     }
     // Keep the reconnect cadence tied to saved-session state, not callback identity.
@@ -896,47 +911,55 @@ function AppRoot() {
     let position: number;
     let duration: number;
     try {
-      position = Number(player.currentTime || 0);
-      duration = Number(player.duration || 0);
+      position = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset);
+      duration = mobileMediaDurationSeconds(Number(player.duration || 0), sourceOffset, target.localMetadata?.durationSeconds);
     } catch {
       return;
     }
     if (!Number.isFinite(position) || position <= 0) return;
 
+    const isCurrent = captureSession();
+    const hostDeviceId = connection?.hostDeviceId;
+    const profileId = activeProfile?.id;
+    if (!hostDeviceId || !profileId) return;
+    const mediaPath = filePathFromUrl(target.streamPath);
+    const playedAt = Date.now();
+    const local: StoredProgress = {
+      position, duration, updatedAt: playedAt,
+      watched: Boolean(progress[mediaPath]?.watched || (duration > 0 && position / duration >= 0.9)),
+    };
+    setProgress((current) => ({ ...current, [mediaPath]: local }));
+    setConnection((current) => current ? { ...current, library: libraryWithPlayedItem(current.library, target.streamPath, playedAt) } : current);
+    const entry = { mediaId: mediaIdForPlayTarget(target), mediaPath, progress: local };
     try {
+      await saveMobilePendingProgress(hostDeviceId, profileId, entry);
+      if (!isCurrent() || isServerOffline) return;
       const response = await mobileLanClient.saveProgress(connectionBaseUrl, connectionDeviceToken, {
-        mediaId: mediaIdForPlayTarget(target),
-        position,
-        duration: Number.isFinite(duration) ? duration : 0,
+        mediaId: entry.mediaId, position, duration, profileId,
         selectionRevision: connectionSelectionRevision,
       });
-      if (!response.ok) return;
-
+      if (!response.ok || !isCurrent()) return;
       const stored = await readJsonResponse(response, mobileStoredProgressSchema, 'Playback progress');
-      const playedAt = Date.now();
-      setProgress((current) => ({
-        ...current,
-        [filePathFromUrl(target.streamPath)]: stored,
-      }));
-      setConnection((current) => current
-        ? { ...current, library: libraryWithPlayedItem(current.library, target.streamPath, playedAt) }
-        : current);
+      if (!isCurrent()) return;
+      await removeMobilePendingProgress(hostDeviceId, profileId, entry);
+      if (!isCurrent()) return;
+      setProgress((current) => current[mediaPath]?.updatedAt === playedAt
+        ? { ...current, [mediaPath]: stored } : current);
     } catch (error) {
-      // Progress sync should never interrupt playback.
       reportNonFatal('progress.local-sync', error);
     }
-  }, [connectionBaseUrl, connectionDeviceToken, connectionSelectionRevision, playTarget, player, setConnection, setProgress]);
+  }, [activeProfile?.id, captureSession, connection?.hostDeviceId, isServerOffline, progress, sourceOffset, connectionBaseUrl, connectionDeviceToken, connectionSelectionRevision, playTarget, player, setConnection, setProgress]);
 
   useEffect(() => {
     if (playbackUrl) {
       shouldAutoplayRef.current = true;
       userPausedRef.current = false;
-      pendingSeekRef.current = streamOptions.startSeconds ?? playTarget?.startPosition ?? 0;
+      pendingSeekRef.current = mobilePlayerSecondsForAbsolute(streamOptions.startSeconds ?? playTarget?.startPosition ?? 0, sourceOffset);
     } else {
       shouldAutoplayRef.current = false;
       pendingSeekRef.current = 0;
     }
-  }, [pendingSeekRef, playbackUrl, playTarget?.startPosition, shouldAutoplayRef, streamOptions.startSeconds, userPausedRef]);
+  }, [sourceOffset, pendingSeekRef, playbackUrl, playTarget?.startPosition, shouldAutoplayRef, streamOptions.startSeconds, userPausedRef]);
 
   useEffect(() => {
     const currentFilePath = playTarget ? filePathFromUrl(playTarget.streamPath) : null;
@@ -1044,7 +1067,8 @@ function AppRoot() {
       if (currentFilePath && autoAdvancedEpisodeRef.current === currentFilePath) return;
 
       const currentItem = endedTarget?.mediaId
-        ? allItems(connection?.library || {}).find((item) => item.id === endedTarget.mediaId)
+        ? allItems(connection?.library || {}).find((item) => item.id === endedTarget.mediaId
+          || item.episodeFiles?.some((episode) => episode.filePath === endedTarget.streamPath))
         : undefined;
       if (currentItem && currentItem.type !== 'movie' && endedTarget?.season !== undefined && endedTarget.episode !== undefined) {
         const episodeFiles = sortedEpisodes(currentItem);
@@ -1096,6 +1120,7 @@ function AppRoot() {
   useEffect(() => {
     let cancelled = false;
     const requestController = new AbortController();
+    let lease: ReturnType<typeof ownMobilePlaybackLease> | undefined;
 
     async function prepareStream() {
       if (!playTarget) {
@@ -1106,6 +1131,7 @@ function AppRoot() {
       if (playTarget.offlineUri) {
         setPlaybackFailure(null);
         setIsPreparingStream(false);
+        setSourceOffset(0);
         setPlaybackUrl(playTarget.offlineUri);
         return;
       }
@@ -1118,6 +1144,8 @@ function AppRoot() {
       setPlaybackFailure(null);
       setIsPreparingStream(true);
       try {
+        await playbackReleaseRef.current.catch(() => undefined);
+        if (cancelled) return;
         const startSeconds = streamOptions.startSeconds ?? playTarget.startPosition ?? 0;
         const options: StreamOptions = {
           ...streamOptions,
@@ -1140,7 +1168,45 @@ function AppRoot() {
           }
           return;
         }
-        if (!cancelled) setPlaybackUrl(playbackUrlWithAnchor(result.data.playlistUrl, options.startSeconds));
+        const sessionId = result.data.sessionId;
+        if (sessionId) {
+          const stop = () => mobileLanClient.stopPlayback(connection.baseUrl, connection.deviceToken, mediaIdForPlayTarget(playTarget), sessionId);
+          if (cancelled) { await stop(); return; }
+          lease = ownMobilePlaybackLease({
+            expiresAt: result.data.expiresAt || Date.now() + 60_000,
+            absoluteExpiresAt: result.data.absoluteExpiresAt,
+            stop,
+            renew: async () => {
+              const renewed = await mobileLanClient.renewPlayback(connection.baseUrl, connection.deviceToken,
+                mediaIdForPlayTarget(playTarget), sessionId, result.data?.action || 'hls');
+              if (!renewed.ok) throw new Error('Playback authorization expired.');
+              return readJsonResponse(renewed, mobilePlaybackRenewalSchema, 'Playback renewal');
+            },
+            onRenewed: async (renewed, isCurrent) => {
+              const url = renewed.playlistUrl || renewed.directUrl;
+              if (!url || cancelled || !isCurrent()) return;
+              const position = player.currentTime;
+              const wasPlaying = player.playing;
+              shouldAutoplayRef.current = false;
+              userPausedRef.current = !wasPlaying;
+              await player.replaceAsync(videoSourceFor(new URL(url, connection.baseUrl).toString(), playTarget, connection.deviceToken));
+              if (cancelled || !isCurrent()) return;
+              player.currentTime = position;
+              if (wasPlaying) player.play();
+              else player.pause();
+            },
+            onFailure: () => {
+              if (cancelled) return;
+              void lease?.close().catch((error) => reportNonFatal('playback.stop', error));
+              setPlaybackUrl(null);
+              setPlaybackFailure(playbackLoadFailure());
+            },
+          });
+        }
+        if (!cancelled) {
+          setSourceOffset(isHlsPlaybackUrl(result.data.playlistUrl) ? options.startSeconds || 0 : 0);
+          setPlaybackUrl(result.data.playlistUrl);
+        }
       } catch (nextError) {
         if (!cancelled) {
           setPlaybackUrl(null);
@@ -1151,18 +1217,21 @@ function AppRoot() {
       }
     }
 
-    void prepareStream();
+    const preparation = prepareStream();
     return () => {
       cancelled = true;
       requestController.abort();
+      playbackReleaseRef.current = preparation.then(() => lease?.close()).catch((error) => reportNonFatal('playback.stop', error));
     };
-  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, setIsPreparingStream, setPlaybackFailure, setPlaybackUrl, streamOptions, streamRetryNonce]);
+  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, setIsPreparingStream, setPlaybackFailure, setPlaybackUrl, setSourceOffset, streamOptions, streamRetryNonce, player, shouldAutoplayRef, userPausedRef]);
 
   const retryPlayback = useCallback(() => {
+    const position = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset);
+    setStreamOptions((current) => ({ ...current, startSeconds: position }));
     setPlaybackFailure(null);
     setPlaybackUrl(null);
     setStreamRetryNonce((current) => current + 1);
-  }, [setPlaybackFailure, setPlaybackUrl, setStreamRetryNonce]);
+  }, [player, sourceOffset, setStreamOptions, setPlaybackFailure, setPlaybackUrl, setStreamRetryNonce]);
 
   const closePlayer = useCallback(async () => {
     if (closingPlayerRef.current) return;
@@ -1173,7 +1242,7 @@ function AppRoot() {
     // prevents the library from being revealed in a stale landscape layout.
     let resumePosition = 0;
     try {
-      resumePosition = Number(player.currentTime || 0);
+      resumePosition = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset);
       player.pause();
     } catch (error) {
       // ignore — player may already be torn down
@@ -1228,7 +1297,7 @@ function AppRoot() {
     } finally {
       closingPlayerRef.current = false;
     }
-  }, [captureSession, activeKind, appliedOrientationLockRef, catalogCacheKeyFor, closingPlayerRef, desiredOrientationLockRef, detailItem?.id, itemsById, lastDetailByKindRef, orientationLockQueueRef, playerReturnItemRef, playTarget, playbackFailure, player, setDetailItem, setMiniPlayerTarget, setPlayTarget, setPlaybackFailure, setPlaybackUrl, setStreamOptions, syncPlaybackProgress, windowSizeRef]);
+  }, [sourceOffset, captureSession, activeKind, appliedOrientationLockRef, catalogCacheKeyFor, closingPlayerRef, desiredOrientationLockRef, detailItem?.id, itemsById, lastDetailByKindRef, orientationLockQueueRef, playerReturnItemRef, playTarget, playbackFailure, player, setDetailItem, setMiniPlayerTarget, setPlayTarget, setPlaybackFailure, setPlaybackUrl, setStreamOptions, syncPlaybackProgress, windowSizeRef]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -1268,12 +1337,32 @@ function AppRoot() {
     credentialRefreshPromiseRef.current = null;
   }
 
+  async function reconcileProfileProgress(nextConnection: Connection, profileId: string, remote: Record<string, StoredProgress>, isCurrent: () => boolean) {
+    const pending = await loadMobilePendingProgress(nextConnection.hostDeviceId, profileId);
+    return reconcileMobileProgress({
+      remote, pending, isCurrent,
+      save: async (entry) => {
+        const latest = (await loadMobilePendingProgress(nextConnection.hostDeviceId, profileId))
+          .find((value) => value.mediaId === entry.mediaId);
+        if (!isCurrent() || !latest || JSON.stringify(latest.progress) !== JSON.stringify(entry.progress)) return null;
+        const response = await mobileLanClient.saveProgress(nextConnection.baseUrl, nextConnection.deviceToken, {
+          mediaId: entry.mediaId, position: entry.progress.position, duration: entry.progress.duration, profileId,
+        });
+        return response.ok ? readJsonResponse(response, mobileStoredProgressSchema, 'Playback progress') : null;
+      },
+      remove: (entry) => removeMobilePendingProgress(nextConnection.hostDeviceId, profileId, entry),
+    });
+  }
+
   async function hydrateProgress(nextConnection = connection) {
-    if (!nextConnection) return;
+    if (!nextConnection || !activeProfile) return;
+    const isCurrent = captureSession();
     try {
       const response = await mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken);
       if (!response.ok) return;
-      setProgress(await readJsonResponse(response, mobileProgressMapSchema, 'Playback progress'));
+      const remote = await readJsonResponse(response, mobileProgressMapSchema, 'Playback progress');
+      const merged = await reconcileProfileProgress(nextConnection, activeProfile.id, remote, isCurrent);
+      if (isCurrent()) setProgress((current) => ({ ...merged, ...Object.fromEntries(Object.entries(current).filter(([key, value]) => value.updatedAt > (merged[key]?.updatedAt || 0))) }));
     } catch (error) {
       // Progress is additive UI state; pairing and browsing should still work without it.
       reportNonFatal('progress.remote-load', error);
@@ -1287,9 +1376,10 @@ function AppRoot() {
     }
     credentialRefreshKeyRef.current = refreshKey;
 
+    const isCurrent = captureSession();
     const refresh = (async () => {
       const currentDeviceName = mobileDeviceName();
-      const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken, currentDeviceName);
+      const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken, currentDeviceName, saved);
       if (!response.ok) throw new MobileCredentialRefreshError(response.status);
       const payload = await readJsonResponse(response, refreshedCredentialsSchema, 'Credential refresh');
       const updated: SavedConnection = {
@@ -1300,10 +1390,16 @@ function AppRoot() {
         refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
         clientDeviceName: currentDeviceName,
       };
-      if (credentialRefreshKeyRef.current !== refreshKey) {
+      if (!isCurrent() || credentialRefreshKeyRef.current !== refreshKey) {
         throw new Error('Credential refresh was superseded by another connection.');
       }
-      await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+      await serializeMobileCredentialMutation(async () => {
+        if (!isCurrent() || credentialRefreshKeyRef.current !== refreshKey) return;
+        await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+      });
+      if (!isCurrent() || credentialRefreshKeyRef.current !== refreshKey) {
+        throw new Error('Credential refresh was superseded by another connection.');
+      }
       setSavedConnection(updated);
       setConnection((current) => current && current.deviceId === updated.deviceId
         ? { ...current, ...updated }
@@ -1342,7 +1438,7 @@ function AppRoot() {
       mobileLanClient.getProfilePreferences(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfileLists(nextConnection.baseUrl, nextConnection.deviceToken),
     ]);
-    const nextProgress = progressResponse.ok
+    let nextProgress = progressResponse.ok
       ? await readJsonResponse(progressResponse, mobileProgressMapSchema, 'Playback progress')
       : {};
     const nextPreferences = preferencesResponse.ok
@@ -1351,6 +1447,8 @@ function AppRoot() {
     const nextLists = listsResponse.ok
       ? await readJsonResponse(listsResponse, mobileProfileListSchema, 'Profile lists')
       : [];
+    if (generation !== profileHydrationGenerationRef.current) return false;
+    nextProgress = await reconcileProfileProgress(nextConnection, profile.id, nextProgress, () => generation === profileHydrationGenerationRef.current);
     if (generation !== profileHydrationGenerationRef.current) return false;
     if (catalog.status !== 'ok') {
       if (catalog.status === 'profile-required') {
@@ -1380,7 +1478,9 @@ function AppRoot() {
     setProfilePinTarget(null);
     setProfilePin('');
     setProfileError('');
-    setProgress(nextProgress);
+    setProgress((current) => activeProfile?.id === profile.id
+      ? { ...nextProgress, ...Object.fromEntries(Object.entries(current).filter(([key, value]) => value.updatedAt > (nextProgress[key]?.updatedAt || 0))) }
+      : nextProgress);
     if (nextPreferences) {
       const preferences = nextPreferences;
       if (preferences.appThemeMode) setMobileThemeMode(preferences.appThemeMode);
@@ -1449,12 +1549,18 @@ function AppRoot() {
   }
 
   async function restoreOfflineConnection(saved: SavedConnection): Promise<boolean> {
-    if (saved.refreshTokenExpiresAt <= Date.now()) {
+    const isCurrent = captureSession();
+    const cacheGeneration = mobileOfflineCacheGeneration(saved.hostDeviceId);
+    const refreshKey = credentialRefreshKeyRef.current;
+    if (saved.accessTokenExpiresAt <= Date.now() || saved.refreshTokenExpiresAt <= Date.now()
+      || (saved.deviceToken && saved.deviceToken === saved.refreshToken && saved.accessTokenExpiresAt !== saved.refreshTokenExpiresAt)) {
       await clearMobileOfflineSnapshot(saved.hostDeviceId);
       return false;
     }
     const snapshot = await loadMobileOfflineSnapshot(saved.hostDeviceId);
-    if (!snapshot) return false;
+    const pendingProgress = snapshot?.activeProfile ? await loadMobilePendingProgress(saved.hostDeviceId, snapshot.activeProfile.id) : [];
+    if (!snapshot || !isCurrent() || refreshKey !== credentialRefreshKeyRef.current
+      || cacheGeneration !== mobileOfflineCacheGeneration(saved.hostDeviceId)) return false;
     if (!canRestoreMobileOfflineSnapshot(snapshot)) {
       await clearMobileOfflineSnapshot(saved.hostDeviceId);
       return false;
@@ -1472,7 +1578,7 @@ function AppRoot() {
     setActiveProfile(snapshot.activeProfile);
     setAutomaticProfileSignIn(snapshot.automaticProfileSignIn);
     setProfileLists(snapshot.profileLists);
-    setProgress(snapshot.progress);
+    setProgress({ ...snapshot.progress, ...Object.fromEntries(pendingProgress.map((entry) => [entry.mediaPath, entry.progress])) });
     setProfilePickerMode(null);
     setIsOnboarding(false);
     setBaseUrl(saved.baseUrl);
@@ -1600,7 +1706,7 @@ function AppRoot() {
           mobilePairApprovalRequestSchema,
           'Pairing approval',
         );
-        response = await waitForPairingApproval(nextBaseUrl, approval);
+        response = await waitForPairingApproval(nextBaseUrl, approval, (host || discoveredHosts.find((candidate) => candidate.baseUrl === nextBaseUrl))?.deviceId);
       }
       if (!response.ok) {
         const failure = await readErrorResponse(response, 'Pairing');
@@ -1653,7 +1759,7 @@ function AppRoot() {
       } satisfies SavedConnection;
       credentialRefreshPromiseRef.current = null;
       credentialRefreshKeyRef.current = `${nextSavedConnection.hostDeviceId}:${nextSavedConnection.deviceId}:${nextSavedConnection.baseUrl}:${nextSavedConnection.refreshToken}`;
-      await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection));
+      await serializeMobileCredentialMutation(() => SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection)));
       setSavedConnection(nextSavedConnection);
       setShareCode('');
       setIsOnboarding(false);
@@ -1899,7 +2005,7 @@ function AppRoot() {
       invalidateCredentialRefresh();
       setSavedConnection(updated);
       setBaseUrl(updated.baseUrl);
-      await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+      await serializeMobileCredentialMutation(() => SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated)));
     }
     setIsRestoringConnection(true);
     await reconnectSavedConnection(updated);
@@ -1931,8 +2037,9 @@ function AppRoot() {
     setOfflineSnapshotSavedAt(null);
     setIsServerOffline(false);
     void stopSecureLanTransport().catch((error) => reportNonFatal('transport.stop', error));
-    void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY).catch((error) => reportNonFatal('connection.clear', error));
+    void serializeMobileCredentialMutation(() => SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY)).catch((error) => reportNonFatal('connection.clear', error));
     void clearMobileOfflineSnapshot(hostDeviceId);
+    void clearMobilePendingProgress(hostDeviceId).catch((error) => reportNonFatal('progress.clear', error));
     void clearHostDownloads(hostDeviceId).catch((error) => reportNonFatal('downloads.clear', error));
   }
   function disconnectFromDesktop(): void {
@@ -2482,6 +2589,7 @@ function AppRoot() {
         target={playTarget}
         failure={playbackFailure}
         playbackUrl={playbackUrl}
+        sourceOffset={sourceOffset}
         player={player}
         onClose={() => { void closePlayer(); }}
         onRetry={retryPlayback}

@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { createHeadlessMediaService } from '../src/media-service.js';
 import { createPlaybackSessionRegistry } from '../src/playback-session-registry.js';
+import { playbackPlanForMedia } from '@loom-media-server/media-core';
 
 function response() {
   return Object.assign(new EventEmitter(), {
@@ -218,4 +219,59 @@ test('direct media rejects malformed file identity bindings before opening the s
     new URL(`http://localhost/api/media/items/media-1?token=${lease.token}`));
   assert.equal(res.statusCode, 409);
   assert.equal(JSON.parse(res.body).error, 'source_unavailable');
+});
+
+test('legacy and canonical direct routes require capabilities and recheck missing, locked, and restricted profiles', async (t) => {
+  let denied = false;
+  const { service } = await fixture(t, {}, { clientState: { requireActivePlaybackProfile: async () => {
+    if (denied) throw Object.assign(new Error(denied), { status: 403 });
+    return { profileId: 'profile-1', selectionRevision: 0 };
+  } } });
+  const lease = await service.issuePlaybackToken('media-1', 'owner-1', 'direct', { profileId: 'profile-1', selectionRevision: 0 });
+  for (const canonical of [false, true]) {
+    const raw = response();
+    raw.__loomtvPublicApi = canonical;
+    await service.handle({ method: 'HEAD', headers: { authorization: 'Bearer account-token' } }, raw, new URL('http://localhost/api/media/items/media-1'));
+    assert.equal(raw.statusCode, 401);
+    for (const policy of [false, 'profile_required', 'profile_locked', 'permission_denied']) {
+      denied = policy;
+      const res = response();
+      res.__loomtvPublicApi = canonical;
+      await service.handle({ method: 'HEAD', headers: {} }, res, new URL(`http://localhost/api/media/items/media-1?token=${lease.token}`));
+      assert.equal(res.statusCode, policy ? 401 : 200);
+    }
+  }
+});
+
+test('compatible embedded track selections reach the HLS audio map and subtitle filter', async (t) => {
+  const spawned = [];
+  const { service } = await fixture(t, {}, {
+    transcoder: { path: 'fixture-ffmpeg', getHealth: () => ({ softwareCodecs: { h264: true } }) },
+    spawnProcess: (_command, args) => {
+      spawned.push(args);
+      const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter(), exitCode: null });
+      child.kill = () => { child.exitCode = 0; child.emit('exit', 0); };
+      void fs.writeFile(args.at(-1), '#EXTM3U\n#EXTINF:2,\nsegment-00000.ts\n')
+        .then(() => { child.exitCode = 0; child.emit('exit', 0); }).catch((error) => child.emit('error', error));
+      return child;
+    },
+  });
+  const probe = { sourceId: 'source-1', container: 'mp4', videoCodec: 'h264', audioCodec: 'aac', tracks: [
+    { id: 'video', kind: 'video', index: 0, codec: 'h264', default: true },
+    { id: 'audio-1', kind: 'audio', index: 1, codec: 'aac', default: true },
+    { id: 'audio-2', kind: 'audio', index: 2, codec: 'aac' },
+    { id: 'subtitle', kind: 'subtitle', index: 3, codec: 'mov_text' },
+  ] };
+  for (const subtitleTrackId of [undefined, 'subtitle']) {
+    const plan = playbackPlanForMedia(probe, {}, { audioTrackId: 'audio-2', subtitleTrackId });
+    assert.equal(plan.mode, subtitleTrackId ? 'transcode' : 'remux');
+    const issued = service.issueTranscodePlan('media-1', 'owner-1', plan, probe, {}, null);
+    await service.startTranscodePlan('media-1', issued.token, { id: 'owner-1', type: 'owner' });
+    const args = spawned.at(-1);
+    assert.ok(args.some((arg, index) => arg === '-map' && args[index + 1] === '0:2'));
+    if (subtitleTrackId) {
+      assert.ok(args.some((arg, index) => arg === '-vf' && /subtitles=.*:si=0/.test(args[index + 1])));
+      assert.ok(args.some((arg, index) => arg === '-c:v' && args[index + 1] === 'libx264'));
+    } else assert.ok(args.some((arg, index) => arg === '-c:a' && args[index + 1] === 'copy'));
+  }
 });

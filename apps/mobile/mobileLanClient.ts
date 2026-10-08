@@ -343,6 +343,7 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
             containers: options.forceTranscode ? ['mp4'] : ['mp4', 'mov', 'webm'], videoCodecs: ['h264', 'hevc'],
             audioCodecs: ['aac', 'mp3'], supportsHls: true, supportsHdr: options.toneMap !== true,
             supportsTextSubtitles: false, subtitleModes: ['burn-in'],
+            ...(options.forceTranscode ? { forceTranscode: true } : {}),
             ...(options.maxWidth ? { maxWidth: options.maxWidth } : {}), ...(options.maxHeight ? { maxHeight: options.maxHeight } : {}),
           },
           startSeconds: options.startSeconds || 0,
@@ -356,7 +357,10 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       const relative = planData.directUrl || planData.transcodeUrl;
       if (typeof relative !== 'string' || !relative) return jsonResponse({ ok: false, error: 'playback_not_supported' }, 409, planResponse);
       const playbackUrl = new URL(relative, baseUrl).toString();
-      if (planData.directUrl) return jsonResponse({ ok: true, data: { playlistUrl: playbackUrl } }, 200, planResponse);
+      if (planData.directUrl) return jsonResponse({ ok: true, data: {
+        playlistUrl: playbackUrl, sessionId: planData.directSessionId,
+        renewUrl: planData.directRenewUrl, expiresAt: planData.directExpiresAt, action: 'direct',
+      } }, 200, planResponse);
       const started = await request(playbackUrl, { method: 'POST', headers: deviceHeaders(token), signal });
       const startedPayload = await canonicalPayload(started);
       if (!started.ok || startedPayload.ok === false) return legacyResponse(jsonResponse(startedPayload, started.status, started));
@@ -365,7 +369,23 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
         ? startedData.playlistUrl
         : typeof startedPayload.playlistUrl === 'string' ? startedPayload.playlistUrl : '';
       if (!playlistUrl) return jsonResponse({ ok: false, error: 'playback_not_supported' }, 409, started);
-      return jsonResponse({ ok: true, data: { playlistUrl: new URL(playlistUrl, baseUrl).toString() } }, 200, started);
+      return jsonResponse({ ok: true, data: {
+        playlistUrl: new URL(playlistUrl, baseUrl).toString(), sessionId: startedData.sessionId,
+        renewUrl: startedData.renewUrl, expiresAt: startedData.expiresAt,
+        absoluteExpiresAt: startedData.absoluteExpiresAt, action: 'hls',
+      } }, 200, started);
+    },
+    async renewPlayback(baseUrl: string, token: string, mediaId: string, sessionId: string, action: 'direct' | 'hls') {
+      return legacyResponse(await request(`${baseUrl}/api/v1/media/${encodeURIComponent(mediaId)}/playback-session/renew`, {
+        method: 'POST', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ sessionId, action }),
+      }), (data) => data);
+    },
+    async stopPlayback(baseUrl: string, token: string, mediaId: string, sessionId: string) {
+      return request(`${baseUrl}/api/v1/media/${encodeURIComponent(mediaId)}/playback-session`, {
+        method: 'DELETE', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ sessionId }),
+      });
     },
     async getPlaybackPlan(baseUrl: string, token: string, mediaId: string, capabilities: LanPlaybackCapabilities, _selectionRevision?: number) {
       return legacyResponse(await request(`${baseUrl}/api/v1/media/${encodeURIComponent(mediaId)}/playback-plan`, {
@@ -396,20 +416,19 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
           }];
         })));
     },
-    async saveProgress(baseUrl: string, token: string, body: { mediaId: string; position: number; duration: number; selectionRevision?: number }) {
-      const profileId = await selectedProfileId(baseUrl, token);
+    async saveProgress(baseUrl: string, token: string, body: { mediaId: string; position: number; duration: number; selectionRevision?: number; profileId?: string }) {
+      const profileId = body.profileId || await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/progress/${encodeURIComponent(body.mediaId)}`, {
         method: 'PUT', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }), body: JSON.stringify({
           position: body.position, duration: body.duration,
         }),
       }), (data) => asRecord(data).progress || {});
     },
-    async refreshCredentials(baseUrl: string, refreshToken: string, _deviceName?: string) {
+    async refreshCredentials(baseUrl: string, refreshToken: string, _deviceName: string | undefined, expiry: { accessTokenExpiresAt: number; refreshTokenExpiresAt: number }) {
       const response = await request(`${baseUrl}/api/v1/auth/me`, { headers: deviceHeaders(refreshToken) });
       if (!response.ok) return legacyResponse(response);
-      const now = Date.now();
-      return jsonResponse({ accessToken: refreshToken, accessTokenExpiresAt: now + 24 * 60 * 60 * 1000,
-        refreshToken, refreshTokenExpiresAt: now + 365 * 24 * 60 * 60 * 1000 }, 200, response);
+      return jsonResponse({ accessToken: refreshToken, accessTokenExpiresAt: expiry.accessTokenExpiresAt,
+        refreshToken, refreshTokenExpiresAt: expiry.refreshTokenExpiresAt }, 200, response);
     },
     async getLibrary(baseUrl: string, token: string, etag?: string) {
       const { response, payload, items } = await getCanonicalItems(baseUrl, token, etag);
@@ -443,7 +462,7 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
         }),
       }), (data) => data);
     },
-    async pairingApprovalStatus(baseUrl: string, approvalRequest: Pick<LanPairApprovalRequest, 'requestId' | 'requestSecret'>) {
+    async pairingApprovalStatus(baseUrl: string, approvalRequest: Pick<LanPairApprovalRequest, 'requestId' | 'requestSecret'>, hostDeviceId?: string) {
       const response = await request(`${baseUrl}/api/v1/pairing/requests/${encodeURIComponent(approvalRequest.requestId)}`, {
         headers: { Authorization: `LoomPairing ${approvalRequest.requestSecret}` },
       });
@@ -454,13 +473,15 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       const credentialData = asRecord(pairingData.credential);
       const credential = `${credentialData.id}.${credentialData.secret}`;
       const discovery = await canonicalPayload(await request(`${baseUrl}/api/v1/discovery`));
-      const discoveryData = asRecord(discovery.data);
+      const discoveryData = asRecord(discovery);
       const fingerprint = String(pairingData.certificateFingerprint || discoveryData.certificateFingerprint || '').replaceAll(':', '').toLowerCase();
-      const expiresAt = finiteNumber(pairingData.credentialExpiresAt, Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const expiresAt = finiteNumber(pairingData.credentialExpiresAt);
+      // Canonical discovery currently omits the Bonjour instance ID. A manual
+      // connection uses a certificate-scoped key until it is paired via discovery.
       return jsonResponse({
         deviceId: pairingData.deviceId, accessToken: credential, accessTokenExpiresAt: expiresAt,
         refreshToken: credential, refreshTokenExpiresAt: expiresAt, certFingerprint: fingerprint,
-        hostDeviceId: fingerprint, hostDeviceName: 'LoomTV server', library: {}, libraryEtag: '',
+        hostDeviceId: String(discoveryData.instanceId || hostDeviceId || `manual:${fingerprint}`), hostDeviceName: 'LoomTV server', library: {}, libraryEtag: '',
       }, 200, response);
     },
     async getOfficialArtworkCandidates(_baseUrl: string, _token: string, _mediaId: string, _selectionRevision?: number) {

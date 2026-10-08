@@ -168,9 +168,10 @@ export function createLegacyV2CompatibilityHandler({ authorizeLegacyPairing, get
         });
         if (!credential) return response(res, 401, { error: 'stream_token_invalid' });
         if (!credential.accountId) return response(res, 401, { error: 'stream_token_invalid' });
-        const account = await adminService.getPrincipalById(credential.accountId);
-        const streamPrincipal = account ? { ...account, authentication: 'legacy-stream-capability',
-          deviceId: credential.deviceId, devicePermissions: [...credential.permissions] } : null;
+        const streamPrincipal = await adminService.resolvePlaybackPrincipal(credential.accountId, {
+          authenticationDeviceId: credential.deviceId,
+          authenticationSessionId: url.searchParams.get('authenticationSessionId'),
+        });
         if (!streamPrincipal || !hasPermission(streamPrincipal, 'stream')) return response(res, 403, { error: 'permission_denied' });
         const address = typeof clientAddress === 'function' ? clientAddress(req) : req.socket?.remoteAddress;
         if (!isLocalNetworkAddress(address) && !hasPermission(streamPrincipal, 'remote.access')) {

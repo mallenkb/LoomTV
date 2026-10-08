@@ -15,6 +15,7 @@ export function useMobilePlaybackController({ appState, height, width }: {
   const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
   const [miniPlayerTarget, setMiniPlayerTarget] = useState<PlayTarget | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  const [sourceOffset, setSourceOffset] = useState(0);
   const [streamOptions, setStreamOptions] = useState<StreamOptions>({});
   const [isPreparingStream, setIsPreparingStream] = useState(false);
   const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null);
@@ -67,6 +68,8 @@ export function useMobilePlaybackController({ appState, height, width }: {
   };
 
   return {
+    sourceOffset,
+    setSourceOffset,
     appliedOrientationLockRef,
     autoAdvancedEpisodeRef,
     closingPlayerRef,

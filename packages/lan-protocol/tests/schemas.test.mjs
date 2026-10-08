@@ -89,3 +89,10 @@ test('desktop decoders default older host responses to ordinary playback', () =>
   } });
   assert.equal(response.data.capabilities.forceTranscode, false);
 });
+
+test('episode decoding preserves its canonical media ID', async () => {
+  const { lanEpisodeFileSchema } = await import('../src/schemas.ts');
+  const episode = { season: 1, episode: 2, filePath: 'episode-2', mediaId: 'episode-2' };
+  assert.deepEqual(lanEpisodeFileSchema.parse(episode), episode);
+  assert.equal(lanEpisodeFileSchema.safeParse({ ...episode, mediaId: '' }).success, false);
+});

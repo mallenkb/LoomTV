@@ -466,7 +466,12 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
         invitationMediaIds: liveScope.mediaIds, invitationProfileId: liveScope.profileId,
         invitationScope: liveScope };
     } else {
-      principal = await getAccount(lease.accountId || '');
+      const accountId = lease.accountId || '';
+      const deviceId = lease.deviceId === `account:${accountId}` ? undefined : lease.deviceId;
+      const admin = getAdminService();
+      principal = admin.resolvePlaybackPrincipal
+        ? await admin.resolvePlaybackPrincipal(accountId, { ...(deviceId ? { authenticationDeviceId: deviceId } : {}) })
+        : deviceId ? null : await getAccount(accountId);
       if (!principal || !hasPermission(principal, 'downloads')) throw remoteError(403, 'download_not_allowed', 'Download authority was revoked.');
     }
     assertPrincipal(req, principal, 'download');

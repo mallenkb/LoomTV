@@ -1,17 +1,20 @@
 import type { AudioTrack, SubtitleTrack, useVideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated } from 'react-native';
-import { mobileAbsoluteMediaSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
+import { mobileAbsoluteMediaSeconds, mobileMediaDurationSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
 
 type MobileVideoPlayer = ReturnType<typeof useVideoPlayer>;
 
 type MobilePlayerSessionInput = {
+  sourceOffset?: number;
+  originalDuration?: number;
+  onSeekBeforeSource?: (seconds: number) => void;
   menuOpen: boolean;
   playbackUrl: string | null;
   player: MobileVideoPlayer;
 };
 
-export function useMobilePlayerSession({ menuOpen, playbackUrl, player }: MobilePlayerSessionInput) {
+export function useMobilePlayerSession({ menuOpen, playbackUrl, player, sourceOffset = 0, originalDuration = 0, onSeekBeforeSource }: MobilePlayerSessionInput) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isPlaying, setIsPlaying] = useState(() => Boolean(player.playing));
   const [position, setPosition] = useState(0);
@@ -32,7 +35,7 @@ export function useMobilePlayerSession({ menuOpen, playbackUrl, player }: Mobile
       try {
         setNativeAudioTracks(payload?.availableAudioTracks || player.availableAudioTracks || []);
         setNativeSubtitleTracks(payload?.availableSubtitleTracks || player.availableSubtitleTracks || []);
-        const nextDuration = Number(payload?.duration || player.duration || 0);
+        const nextDuration = mobileMediaDurationSeconds(Number(payload?.duration || player.duration || 0), sourceOffset, originalDuration);
         if (Number.isFinite(nextDuration) && nextDuration > 0) setDuration(nextDuration);
       } catch {
         // Track APIs can reject while the native player is still loading.
@@ -40,8 +43,8 @@ export function useMobilePlayerSession({ menuOpen, playbackUrl, player }: Mobile
     };
 
     const timeSubscription = player.addListener?.('timeUpdate', (event: { currentTime: number }) => {
-      setPosition(mobileAbsoluteMediaSeconds(Number(event.currentTime) || 0));
-      const nextDuration = Number(player.duration || 0);
+      setPosition(mobileAbsoluteMediaSeconds(Number(event.currentTime) || 0, sourceOffset));
+      const nextDuration = mobileMediaDurationSeconds(Number(player.duration || 0), sourceOffset, originalDuration);
       if (Number.isFinite(nextDuration) && nextDuration > 0) setDuration(nextDuration);
     });
     const playingSubscription = player.addListener?.('playingChange', (event: { isPlaying: boolean }) => {
@@ -65,7 +68,7 @@ export function useMobilePlayerSession({ menuOpen, playbackUrl, player }: Mobile
       sourceLoadSubscription?.remove?.();
       trackSubscriptions.forEach((subscription) => subscription?.remove?.());
     };
-  }, [playbackUrl, player]);
+  }, [playbackUrl, player, sourceOffset, originalDuration]);
 
   useEffect(() => {
     if (!controlsVisible || !isPlaying || menuOpen) return;
@@ -108,19 +111,23 @@ export function useMobilePlayerSession({ menuOpen, playbackUrl, player }: Mobile
   const seekToSeconds = useCallback((seconds: number) => {
     showControls();
     const absoluteTime = Math.max(0, duration > 0 ? Math.min(duration, seconds) : seconds);
-    const nextTime = mobilePlayerSecondsForAbsolute(absoluteTime);
-    setPosition(nextTime);
+    const nextTime = mobilePlayerSecondsForAbsolute(absoluteTime, sourceOffset);
+    setPosition(absoluteTime);
+    if (absoluteTime < sourceOffset && onSeekBeforeSource) {
+      onSeekBeforeSource(absoluteTime);
+      return;
+    }
     try {
       player.currentTime = nextTime;
     } catch {
       // Seeking before the stream is ready is a no-op.
     }
-  }, [duration, player, showControls]);
+  }, [duration, player, showControls, sourceOffset, onSeekBeforeSource]);
 
   const skipBy = useCallback((delta: number) => {
-    const currentTime = Number(player.currentTime || position || 0);
+    const currentTime = mobileAbsoluteMediaSeconds(Number(player.currentTime || 0), sourceOffset) || position;
     seekToSeconds(currentTime + delta);
-  }, [player, position, seekToSeconds]);
+  }, [player, position, seekToSeconds, sourceOffset]);
 
   const seekToFraction = useCallback((fraction: number) => {
     if (duration <= 0) return;

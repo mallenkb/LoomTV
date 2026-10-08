@@ -16,6 +16,7 @@ import { createPlaybackSessionRegistry } from '../src/playback-session-registry.
 import { createCanonicalStateStore } from '../src/canonical-state-store.js';
 import { createHeadlessClientState } from '../src/client-state.js';
 import { createMediaItemId } from '@loom-media-server/media-core';
+import { hasPermission } from '../src/auth-policy.js';
 
 const OWNER_PASSWORD = 'correct-horse-battery';
 const BOOTSTRAP_SECRET = 'test-bootstrap-secret-32-bytes-minimum';
@@ -946,4 +947,231 @@ test('password reset invalidates a sign-in whose verification already succeeded'
   await service.changePassword({ currentPassword: OWNER_PASSWORD, newPassword: 'replacement-owner-password' }, principal);
   resume();
   assert.equal((await attempt).code, 'credentials_changed');
+});
+
+test('delegated managers cannot demote, disable, remove, or reset broader accounts', async (t) => {
+  const { service, dataDir, principal: owner } = await onboardedService();
+  t.after(async () => { await service.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const manager = await service.createUser({ name: 'Delegate', password: 'delegate-password', role: 'user',
+    permissions: ['users.manage', 'account.password'], rootIds: null }, owner);
+  const actor = await service.getPrincipalById(manager.id);
+  for (const grants of [
+    { role: 'admin', permissions: ['account.password'] },
+    { role: 'user', permissions: ['account.password', 'stream'] },
+  ]) {
+    const target = await service.createUser({ name: `Target ${grants.role}`, password: 'target-password', rootIds: null, ...grants }, owner);
+    await assert.rejects(service.updateUser(target.id, { role: 'user', permissions: ['account.password'] }, actor), { status: 403 });
+    await assert.rejects(service.updateUser(target.id, { disabled: true, permissions: ['account.password'] }, actor), { status: 403 });
+    await assert.rejects(service.removeUser(target.id, actor), { status: 403 });
+    await assert.rejects(service.changePassword({ userId: target.id, newPassword: 'replacement-password' }, actor), { status: 403 });
+    assert.deepEqual((await service.getPrincipalById(target.id)).permissions, grants.permissions);
+    await service.updateUser(target.id, { name: `${target.name} renamed` }, owner);
+  }
+});
+
+test('device capabilities retain live grants for remote reads and renewal', async (t) => {
+  let permissions = ['library.read', 'stream'];
+  const device = { id: 'credential-1', deviceId: 'device-1', accountId: null };
+  const pairingService = {
+    authenticate: async (header) => header === 'LoomDevice test' ? { ...device, permissions } : null,
+    resolveSessionDevice: async (accountId, deviceId) => accountId === device.accountId && deviceId === device.deviceId ? { ...device, permissions } : null,
+  };
+  const { service, dataDir, principal: owner } = await onboardedService({ options: { pairingService } });
+  t.after(async () => { await service.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const user = await service.createUser({ name: 'Device user', password: 'device-user-password', role: 'user', permissions: ['library.read', 'stream', 'remote.access'] }, owner);
+  device.accountId = user.id;
+  const principal = await service.authenticateRequest({ headers: { authorization: 'LoomDevice test' }, socket: { remoteAddress: '127.0.0.1' } });
+  assert.deepEqual(principal.devicePermissions, permissions);
+  const mediaPath = path.join(dataDir, 'video.mp4');
+  await fs.writeFile(mediaPath, 'video');
+  const fileId = await fs.stat(mediaPath);
+  const media = createHeadlessMediaService({
+    cacheDir: dataDir, cacheQuotaOptions: { minFreeBytes: 0, sweepIntervalMs: 0 }, transcoder: { path: null, getHealth: () => ({}) }, authorize: async () => true,
+    adminService: { ...service, resolveMediaPath: async () => ({ id: 'media-1', sourceId: 'source-1', rootPath: dataDir, path: mediaPath, fileId }) },
+    remotePolicy: { assertPrincipal: (req, actor) => {
+      if (req?.remote && !hasPermission(actor, 'remote.access')) throw new Error('remote denied');
+    } },
+  });
+  t.after(() => media.stop());
+  const lease = await media.issuePlaybackToken('media-1', user.id, 'direct', { authenticationDeviceId: device.deviceId, deviceId: device.deviceId, remoteAccess: false });
+  async function read(remote) {
+    const res = { writeHead(status) { this.status = status; }, end() {} };
+    await media.handle({ method: 'HEAD', headers: {}, remote }, res, new URL(`http://localhost/api/media/items/media-1?token=${lease.token}`));
+    return res.status;
+  }
+  assert.equal(await read(false), 200);
+  assert.equal(await read(true), 401);
+  assert.equal(await media.renewPlaybackSession(lease.token, null, 'media-1', undefined, { remote: true }), null);
+  permissions = ['library.read'];
+  assert.equal(await read(false), 401);
+  assert.equal(await media.renewPlaybackSession(lease.sessionId, await service.getPrincipalById(user.id), 'media-1'), null);
+});
+
+test('account device allow-lists deny existing credentials, sessions, and playback bindings', async (t) => {
+  const device = { id: 'credential-1', deviceId: 'device-1', accountId: null, permissions: ['stream'] };
+  const revocations = [];
+  const { service, dataDir, principal: owner } = await onboardedService({ options: {
+    pairingService: { authenticate: async (header) => header === 'LoomDevice test' ? device : null, resolveSessionDevice: async () => device },
+    onPlaybackSessionsRevoked: async (id, reason) => revocations.push([id, reason]),
+  } });
+  t.after(async () => { await service.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const user = await service.createUser({ name: 'Allowed device', password: 'allowed-device-password', role: 'user', deviceIds: ['device-1'] }, owner);
+  device.accountId = user.id;
+  const req = { headers: { authorization: 'LoomDevice test' }, socket: { remoteAddress: '127.0.0.1' } };
+  assert.ok(await service.authenticateRequest(req));
+  const session = await service.issueDeviceSession(device);
+  const principal = await service.authenticateRequest(bearer(session.adminToken));
+  const binding = { authenticationSessionId: principal.sessionId, authenticationDeviceId: device.deviceId };
+  assert.ok(await service.resolvePlaybackPrincipal(user.id, binding));
+  await service.updateUser(user.id, { deviceIds: ['device-2'] }, owner);
+  assert.equal(await service.authenticateRequest(req), null);
+  assert.equal(await service.authenticateRequest(bearer(session.adminToken)), null);
+  assert.equal(await service.resolvePlaybackPrincipal(user.id, binding), null);
+  assert.equal(await service.resolvePlaybackPrincipal(user.id, { authenticationDeviceId: device.deviceId }), null);
+  assert.deepEqual(revocations.at(-1), [user.id, 'permissions_changed']);
+});
+
+async function canonicalService(t, options = {}) {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-audit-server-'));
+  const store = createCanonicalStateStore({ dataDir });
+  await store.start();
+  const { service, principal } = await onboardedService({ dataDir, options: { stateStore: store, ...options } });
+  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  return { dataDir, store, service, principal };
+}
+
+test('sole profile managers cannot be removed or disabled and unrelated profile writes remain usable', async (t) => {
+  const { store, service, principal } = await canonicalService(t);
+  const user = await service.createUser({ name: 'Sole manager', password: 'sole-manager-password' }, principal);
+  const client = createHeadlessClientState({ store });
+  const mine = await client.createProfile({ name: 'Owner profile' }, principal.id);
+  const theirs = await client.createProfile({ name: 'User profile' }, user.id);
+  const before = store.readAdminState();
+  for (const mutation of [() => service.removeUser(user.id, principal), () => service.updateUser(user.id, { disabled: true }, principal)]) {
+    await assert.rejects(mutation(), { code: 'profile_manager_required', status: 409 });
+    assert.ok(await service.getPrincipalById(user.id));
+    assert.deepEqual(store.readAdminState().users, before.users);
+    await client.updateProfile(mine.id, { name: 'Still editable' }, principal.id);
+    await client.saveProfilePreferences(mine.id, { themeMode: 'light' }, principal.id);
+    await client.selectProfile(mine.id, principal.id);
+  }
+  store.mutateClientState((state) => state.assignments.push({ profileId: theirs.id, accountId: principal.id, access: 'manage', createdAt: Date.now() }));
+  await service.removeUser(user.id, principal);
+  await store.stop(); await store.start();
+  await client.updateProfile(mine.id, { name: 'After restart' }, principal.id);
+  assert.equal(store.readAdminState().users.length, 0);
+});
+
+test('account removal retires approved unconsumed pairing requests and publishes state only after persistence', async (t) => {
+  const { store, service, principal } = await canonicalService(t);
+  const user = await service.createUser({ name: 'Pairing user', password: 'pairing-user-password' }, principal);
+  const now = Date.now();
+  store.createPairingRequest({ id: 'pending-1', requestSecretHash: 'request-hash', credentialId: 'credential-1', credentialSecretHash: 'credential-hash', credentialCiphertext: null, credentialIv: null, credentialTag: null,
+    deviceId: 'device-1', name: 'TV', kind: 'tv', permissions: ['stream'], createdAt: now, expiresAt: now + 60_000 });
+  store.approvePairingRequest({ requestId: 'pending-1', accountId: user.id, permissions: ['stream'], approvedAt: now, credentialExpiresAt: now + 60_000 });
+  assert.equal(store.readPairingRequest('pending-1').state, 'approved');
+  await service.removeUser(user.id, principal);
+  assert.equal(await service.getPrincipalById(user.id), null);
+  assert.equal(store.readPairingRequest('pending-1'), null);
+  assert.equal(store.readDeviceCredential('credential-1'), null);
+  await store.stop(); await store.start();
+  assert.equal(store.readAdminState().users.length, 0);
+  assert.equal(store.readPairingRequest('pending-1'), null);
+});
+
+test('failed account removal leaves cached credentials and sessions intact', async (t) => {
+  let rejectWrite = false;
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-removal-rollback-'));
+  const store = createCanonicalStateStore({ dataDir });
+  await store.start();
+  const { service, principal } = await onboardedService({ dataDir, options: { stateStore: { ...store, replaceAdminState(state) {
+    if (rejectWrite) throw new Error('forced persistence failure');
+    return store.replaceAdminState(state);
+  } } } });
+  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const user = await service.createUser({ name: 'Rollback user', password: 'rollback-user-password' }, principal);
+  const session = await service.createSession({ username: user.name, password: 'rollback-user-password', address: '127.0.0.1' });
+  rejectWrite = true;
+  await assert.rejects(service.removeUser(user.id, principal), /forced persistence failure/);
+  assert.ok(await service.getPrincipalById(user.id));
+  assert.ok(await service.authenticateRequest(bearer(session.adminToken)));
+  assert.equal(store.readAdminState().users[0].id, user.id);
+  rejectWrite = false;
+  await store.stop(); await store.start();
+  assert.equal(store.readAdminState().users[0].id, user.id);
+});
+
+test('concurrent creates and create-rename collisions commit only one normalized login identity', async (t) => {
+  const { store, service, principal } = await canonicalService(t);
+  const creates = await Promise.allSettled(['Same', ' same '].map((name) => service.createUser({ name, password: 'same-user-password' }, principal)));
+  assert.equal(creates.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(creates.find((result) => result.status === 'rejected').reason.status, 409);
+  const target = await service.createUser({ name: 'Rename target', password: 'rename-user-password' }, principal);
+  const collision = await Promise.allSettled([
+    service.createUser({ name: 'Collision', password: 'collision-user-password' }, principal),
+    service.updateUser(target.id, { name: ' COLLISION ' }, principal),
+  ]);
+  assert.equal(collision.filter((result) => result.status === 'fulfilled').length, 1);
+  const users = store.readAdminState().users;
+  const duplicateSnapshot = store.exportCanonicalSnapshot();
+  const accounts = duplicateSnapshot.tables.accounts.filter((account) => account.account_type === 'user');
+  accounts[1].name = accounts[0].name.toUpperCase();
+  await assert.rejects(store.restoreCanonicalSnapshot(duplicateSnapshot), { code: 'canonical_backup_invalid' });
+  assert.equal(new Set(users.map((user) => user.name.trim().toLocaleLowerCase())).size, users.length);
+  const state = store.readAdminState();
+  assert.throws(() => store.replaceAdminState({ ...state, users: [...state.users, { ...state.users[0], id: 'duplicate-id', name: state.users[0].name.toUpperCase() }] }), { code: 'account_name_conflict' });
+  await store.stop(); await store.start();
+  assert.equal(store.readAdminState().users.length, users.length);
+});
+
+test('changed canonical sources clear failed probes and retry analysis after restart', async (t) => {
+  let calls = 0;
+  let fail = false;
+  const { store, service, dataDir, principal } = await canonicalService(t, { probeMedia: async (_path, { sourceId }) => {
+    calls += 1;
+    if (fail) throw new Error('forced probe failure');
+    return { sourceId, container: 'mp4', tracks: [{ id: 'video', index: 0, kind: 'video', codec: calls === 1 ? 'h264' : 'hevc' }], chapters: [], hdr: false, probedAt: Date.now(), adapterGaps: [] };
+  } });
+  const rootPath = path.join(dataDir, 'media'); await fs.mkdir(rootPath);
+  const file = path.join(rootPath, 'movie.mp4'); await fs.writeFile(file, 'first');
+  await service.addLibraryRoot({ path: rootPath }, principal);
+  await service.startLibraryScan({ mode: 'quick' }, principal); await waitForScan(service, principal);
+  assert.equal(calls, 1);
+  await service.startLibraryScan({ mode: 'quick' }, principal); await waitForScan(service, principal);
+  assert.equal(calls, 1, 'unchanged sources retain their probe');
+  await fs.writeFile(file, 'replacement with different statistics'); fail = true;
+  await service.startLibraryScan({ mode: 'quick' }, principal); await waitForScan(service, principal);
+  assert.equal(calls, 2);
+  assert.equal(store.readAdminState().catalog[0].localMetadata, undefined);
+  await store.stop(); await store.start();
+  assert.equal(store.readAdminState().catalog[0].localMetadata, undefined);
+  fail = false;
+  await service.startLibraryScan({ mode: 'quick' }, principal); await waitForScan(service, principal);
+  assert.equal(calls, 3);
+  assert.equal(store.readAdminState().catalog[0].localMetadata.tracks[0].codec, 'hevc');
+});
+
+test('completed full and quick scans persist missing sources while retaining offline roots and secondary sources', async (t) => {
+  for (const mode of ['full', 'quick']) await t.test(mode, async (t) => {
+    const { store, service, dataDir, principal } = await canonicalService(t);
+    const rootPath = path.join(dataDir, 'readable'); const offlinePath = path.join(dataDir, 'offline');
+    await fs.mkdir(rootPath); await fs.mkdir(offlinePath);
+    const removed = path.join(rootPath, 'removed.mp4'); await fs.writeFile(removed, 'removed');
+    await fs.writeFile(path.join(offlinePath, 'keep.mp4'), 'keep');
+    const root = await service.addLibraryRoot({ path: rootPath }, principal);
+    const offline = await service.addLibraryRoot({ path: offlinePath }, principal);
+    await service.startLibraryScan({ mode }, principal); await waitForScan(service, principal);
+    const initial = store.readAdminState();
+    const missing = initial.catalog.find((item) => item.rootId === root.id);
+    const retained = initial.catalog.find((item) => item.rootId === offline.id);
+    store.replaceAllState({ adminState: initial, mediaSources: [{ id: 'secondary', mediaId: missing.id, rootId: offline.id, relativePath: 'secondary.mp4',
+      locator: path.join(offlinePath, 'secondary.mp4'), state: 'offline', fileExtension: '.mp4', indexedAt: 1 }] });
+    await fs.unlink(removed); await fs.rename(offlinePath, `${offlinePath}-disconnected`);
+    await service.startLibraryScan({ mode }, principal); assert.equal((await waitForScan(service, principal)).state, 'completed');
+    await store.stop(); await store.start();
+    assert.equal(store.readMediaSource(missing.id, missing.sourceId).state, 'missing');
+    assert.equal(store.readMediaSource(missing.id, 'secondary').state, 'offline');
+    assert.equal(store.readMediaSource(retained.id, retained.sourceId).state, 'offline');
+    assert.equal(store.readAdminState().catalog.find((item) => item.id === missing.id).available, false);
+  });
 });

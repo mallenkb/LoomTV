@@ -716,6 +716,7 @@ function normalizeState(raw) {
     const cutoff = Date.now() - LOG_RETENTION_MS;
     state.logs = records(raw.logs).map((entry) => ({ ...entry, timestamp: entry.timestamp }))
       .filter((entry) => entry && Number(entry.timestamp) > cutoff)
+      .sort((left, right) => Number(right.timestamp) - Number(left.timestamp))
       .slice(0, MAX_LOGS);
   }
   return state;
@@ -763,6 +764,13 @@ export function createHeadlessAdminService(options) {
   /** @type {Promise<AdminState> | undefined} */
   let statePromise;
   let writeQueue = Promise.resolve();
+  let accountMutationQueue = Promise.resolve();
+  /** @template T @param {() => Promise<T>} mutation */
+  function mutateAccounts(mutation) {
+    const result = accountMutationQueue.catch(() => undefined).then(mutation);
+    accountMutationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
   /** @type {ReturnType<typeof issueToken> | null} */
   let ownerCreationPromise = null;
   /** @type {Promise<BackupStatus> | null} */
@@ -1103,8 +1111,8 @@ export function createHeadlessAdminService(options) {
 
   /** @param {Principal | null | undefined} principal @param {User} user */
   function ensureUserScope(principal, user) {
-    if (!principalCanManageUser(principal, user)) {
-      throw permissionDenied('You cannot manage an account outside your library roots.');
+    if (!principalCanManageUser(principal, user) || !canResetCredentials(principal, publicUserPrincipal(user))) {
+      throw permissionDenied('You cannot manage an account outside your privilege scope.');
     }
   }
 
@@ -1260,6 +1268,12 @@ export function createHeadlessAdminService(options) {
     }
   }
 
+  /** @param {Principal} principal @param {string | null | undefined} deviceId */
+  function deviceAllowed(principal, deviceId) {
+    return isOwnerPrincipal(principal) || principal.deviceIds === null
+      || principal.deviceIds.includes(deviceId || '');
+  }
+
   /** @param {AdminState} state @param {Principal} principal @param {string | null} [deviceId] */
   async function issueToken(state, principal, deviceId = null) {
     enforceSessionPolicy(state, principal, deviceId);
@@ -1294,6 +1308,7 @@ export function createHeadlessAdminService(options) {
       const state = await loadState();
       const account = principalForUserId(state, deviceCredential.accountId);
       if (!account) return null;
+      if (!deviceAllowed(account, deviceCredential.deviceId)) return null;
       const principal = {
         ...account,
         authentication: 'device-credential',
@@ -1325,6 +1340,7 @@ export function createHeadlessAdminService(options) {
     if (!session) return null;
     const principal = principalForUserId(state, session.userId);
     if (!principal) return null;
+    if (!deviceAllowed(principal, session.deviceId)) return null;
     if (session.deviceId) {
       const device = await options.pairingService?.resolveSessionDevice(principal.id, session.deviceId);
       if (!device) {
@@ -1369,6 +1385,27 @@ export function createHeadlessAdminService(options) {
     /** @param {string | undefined} userId */
     async getPrincipalById(userId) {
       return principalForUserId(await loadState(), userId);
+    },
+
+    /** @param {string} accountId @param {import('./server-media-types.js').ProfileBinding | null} [binding] */
+    async resolvePlaybackPrincipal(accountId, binding = null) {
+      const state = await loadState();
+      const account = principalForUserId(state, accountId);
+      if (!account) return null;
+      const session = binding?.authenticationSessionId ? state.sessions.find((entry) => (
+        entry.id === binding.authenticationSessionId && entry.userId === accountId
+        && !entry.revokedAt && entry.expiresAt > Date.now()
+      )) : null;
+      if (binding?.authenticationSessionId && !session) return null;
+      const deviceId = session?.deviceId || binding?.authenticationDeviceId;
+      if (session && binding?.authenticationDeviceId && session.deviceId !== binding.authenticationDeviceId) return null;
+      if (!deviceAllowed(account, deviceId)) return null;
+      if (!deviceId) return account;
+      const device = await options.pairingService?.resolveSessionDevice(accountId, deviceId);
+      if (!device) return null;
+      return { ...account, authentication: 'device-session', deviceId,
+        deviceCredentialId: device.id, devicePermissions: [...device.permissions],
+        ...(session ? { sessionId: session.id } : {}) };
     },
 
     async getOwnerPrincipal() {
@@ -1631,123 +1668,132 @@ export function createHeadlessAdminService(options) {
 
     /** @param {Record<string, unknown>} input @param {Principal | null | undefined} [principal] */
     async createUser(input, principal) {
-      ensurePrincipalPermission(principal, 'users.manage');
-      const state = await loadState();
-      const name = String(input.name || '').trim();
-      if (!name || name.length > 80) throw Object.assign(new Error('User name must be between 1 and 80 characters.'), { status: 400 });
-      if (normalizedIdentity(name) === 'owner' || (state.owner && normalizedIdentity(state.owner.name) === normalizedIdentity(name))) {
-        throw Object.assign(new Error('That name is reserved for the owner account.'), { status: 409 });
-      }
-      if (state.users.some((user) => normalizedIdentity(user.name) === normalizedIdentity(name))) {
-        throw Object.assign(new Error('A user with that name already exists.'), { status: 409 });
-      }
-      if (state.users.length >= MAX_USERS) throw Object.assign(new Error('The server has reached its user limit.'), { status: 400 });
-      const role = typeof input.role === 'string' && USER_ROLES.includes(input.role) ? input.role : 'viewer';
-      if (!isOwnerPrincipal(principal) && role === 'admin') throw permissionDenied('Only the owner can create an administrator.');
-      const permissions = permissionsInput(input.permissions, role);
-      if (!isOwnerPrincipal(principal) && permissions.some((permission) => !hasPermission(principal, permission))) {
-        throw permissionDenied('You cannot grant permissions you do not have yourself.');
-      }
-      const rootIds = rootIdsInput(input.rootIds);
-      const knownRootIds = new Set(state.roots.map((root) => root.id));
-      if (rootIds && rootIds.some((rootId) => !knownRootIds.has(rootId))) {
-        throw Object.assign(new Error('One or more library roots are invalid.'), { status: 400 });
-      }
-      if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
-        if (rootIds === null) throw permissionDenied('You cannot grant access to every library root.');
-        if (rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
-      }
-      if (typeof input.password !== 'string' || input.password.length < 8 || input.password.length > 256) {
-        throw Object.assign(new Error('User passwords must be between 8 and 256 characters.'), { status: 400 });
-      }
-      const credentials = await hashPassword(input.password);
-      const user = {
-        id: randomUUID(),
-        name,
-        ...credentials,
-        role,
-        permissions,
-        rootIds,
-        deviceIds: deviceIdsInput(input.deviceIds),
-        maxSessions: maxSessionsInput(input.maxSessions),
-        disabled: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      state.users.push(user);
-      await saveState(state);
-      await appendLog('info', `User account created: ${name}`, { userId: user.id, role });
-      return userView(user);
+      return mutateAccounts(async () => {
+        ensurePrincipalPermission(principal, 'users.manage');
+        const state = await loadState();
+        const name = String(input.name || '').trim();
+        if (!name || name.length > 80) throw Object.assign(new Error('User name must be between 1 and 80 characters.'), { status: 400 });
+        if (normalizedIdentity(name) === 'owner' || (state.owner && normalizedIdentity(state.owner.name) === normalizedIdentity(name))) {
+          throw Object.assign(new Error('That name is reserved for the owner account.'), { status: 409 });
+        }
+        if (state.users.some((user) => normalizedIdentity(user.name) === normalizedIdentity(name))) {
+          throw Object.assign(new Error('A user with that name already exists.'), { status: 409 });
+        }
+        if (state.users.length >= MAX_USERS) throw Object.assign(new Error('The server has reached its user limit.'), { status: 400 });
+        const role = typeof input.role === 'string' && USER_ROLES.includes(input.role) ? input.role : 'viewer';
+        if (!isOwnerPrincipal(principal) && role === 'admin') throw permissionDenied('Only the owner can create an administrator.');
+        const permissions = permissionsInput(input.permissions, role);
+        if (!isOwnerPrincipal(principal) && permissions.some((permission) => !hasPermission(principal, permission))) {
+          throw permissionDenied('You cannot grant permissions you do not have yourself.');
+        }
+        const rootIds = rootIdsInput(input.rootIds);
+        const knownRootIds = new Set(state.roots.map((root) => root.id));
+        if (rootIds && rootIds.some((rootId) => !knownRootIds.has(rootId))) {
+          throw Object.assign(new Error('One or more library roots are invalid.'), { status: 400 });
+        }
+        if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
+          if (rootIds === null) throw permissionDenied('You cannot grant access to every library root.');
+          if (rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
+        }
+        if (typeof input.password !== 'string' || input.password.length < 8 || input.password.length > 256) {
+          throw Object.assign(new Error('User passwords must be between 8 and 256 characters.'), { status: 400 });
+        }
+        const credentials = await hashPassword(input.password);
+        const user = {
+          id: randomUUID(),
+          name,
+          ...credentials,
+          role,
+          permissions,
+          rootIds,
+          deviceIds: deviceIdsInput(input.deviceIds),
+          maxSessions: maxSessionsInput(input.maxSessions),
+          disabled: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        const users = [...state.users, user];
+        await saveState({ ...state, users });
+        state.users = users;
+        await appendLog('info', `User account created: ${name}`, { userId: user.id, role });
+        return userView(user);
+      });
     },
 
     /** @param {string | undefined} userId @param {Record<string, unknown>} input @param {Principal | null | undefined} [principal] */
     async updateUser(userId, input, principal) {
-      ensurePrincipalPermission(principal, 'users.manage');
-      const state = await loadState();
-      const user = state.users.find((entry) => entry.id === userId);
-      if (!user) throw Object.assign(new Error('User account was not found.'), { status: 404 });
-      ensureUserScope(principal, user);
-      const candidate = { ...user };
-      if (input.name !== undefined) {
-        const name = String(input.name || '').trim();
-        if (!name || name.length > 80) throw Object.assign(new Error('User name must be between 1 and 80 characters.'), { status: 400 });
-        if (normalizedIdentity(name) === 'owner'
-          || (state.owner && normalizedIdentity(state.owner.name) === normalizedIdentity(name))
-          || state.users.some((entry) => entry.id !== user.id && normalizedIdentity(entry.name) === normalizedIdentity(name))) {
-          throw Object.assign(new Error('A user with that name already exists.'), { status: 409 });
+      return mutateAccounts(async () => {
+        ensurePrincipalPermission(principal, 'users.manage');
+        const state = await loadState();
+        const user = state.users.find((entry) => entry.id === userId);
+        if (!user) throw Object.assign(new Error('User account was not found.'), { status: 404 });
+        ensureUserScope(principal, user);
+        const candidate = { ...user };
+        if (input.name !== undefined) {
+          const name = String(input.name || '').trim();
+          if (!name || name.length > 80) throw Object.assign(new Error('User name must be between 1 and 80 characters.'), { status: 400 });
+          if (normalizedIdentity(name) === 'owner'
+            || (state.owner && normalizedIdentity(state.owner.name) === normalizedIdentity(name))
+            || state.users.some((entry) => entry.id !== user.id && normalizedIdentity(entry.name) === normalizedIdentity(name))) {
+            throw Object.assign(new Error('A user with that name already exists.'), { status: 409 });
+          }
+          candidate.name = name;
         }
-        candidate.name = name;
-      }
-      const role = input.role === undefined ? user.role : input.role;
-      if (typeof role !== 'string' || !USER_ROLES.includes(role)) throw Object.assign(new Error('User role is invalid.'), { status: 400 });
-      if (!isOwnerPrincipal(principal) && role === 'admin') throw permissionDenied('Only the owner can grant administrator access.');
-      const roleChanged = role !== user.role;
-      const permissions = input.permissions === undefined
-        ? (roleChanged ? permissionsForRole(role) : user.permissions)
-        : permissionsInput(input.permissions, role);
-      if (!isOwnerPrincipal(principal) && permissions.some((permission) => !hasPermission(principal, permission))) {
-        throw permissionDenied('You cannot grant permissions you do not have yourself.');
-      }
-      const rootIds = input.rootIds === undefined ? user.rootIds : rootIdsInput(input.rootIds);
-      const deviceIds = input.deviceIds === undefined ? user.deviceIds : deviceIdsInput(input.deviceIds);
-      const maxSessions = input.maxSessions === undefined ? user.maxSessions : maxSessionsInput(input.maxSessions);
-      const knownRootIds = new Set(state.roots.map((root) => root.id));
-      if (rootIds && rootIds.some((rootId) => !knownRootIds.has(rootId))) {
-        throw Object.assign(new Error('One or more library roots are invalid.'), { status: 400 });
-      }
-      if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
-        if (rootIds === null || rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
-      }
-      candidate.role = role;
-      candidate.permissions = [...permissions];
-      candidate.rootIds = rootIds === null ? null : [...rootIds];
-      candidate.deviceIds = deviceIds === null ? null : [...deviceIds];
-      candidate.maxSessions = maxSessions;
-      if (input.disabled !== undefined) candidate.disabled = input.disabled === true;
-      candidate.updatedAt = Date.now();
-      Object.assign(user, candidate);
-      if (user.disabled) state.sessions = state.sessions.filter((session) => session.userId !== user.id);
-      await saveState(state);
-      await appendLog('info', `User account updated: ${user.name}`, { userId: user.id });
-      if (user.disabled) await notifyPlaybackSessionsRevoked(user.id, 'principal_disabled');
-      else if (roleChanged || input.permissions !== undefined || input.rootIds !== undefined) {
-        await notifyPlaybackSessionsRevoked(user.id, 'permissions_changed');
-      }
-      return userView(user);
+        const role = input.role === undefined ? user.role : input.role;
+        if (typeof role !== 'string' || !USER_ROLES.includes(role)) throw Object.assign(new Error('User role is invalid.'), { status: 400 });
+        if (!isOwnerPrincipal(principal) && role === 'admin') throw permissionDenied('Only the owner can grant administrator access.');
+        const roleChanged = role !== user.role;
+        const permissions = input.permissions === undefined
+          ? (roleChanged ? permissionsForRole(role) : user.permissions)
+          : permissionsInput(input.permissions, role);
+        if (!isOwnerPrincipal(principal) && permissions.some((permission) => !hasPermission(principal, permission))) {
+          throw permissionDenied('You cannot grant permissions you do not have yourself.');
+        }
+        const rootIds = input.rootIds === undefined ? user.rootIds : rootIdsInput(input.rootIds);
+        const deviceIds = input.deviceIds === undefined ? user.deviceIds : deviceIdsInput(input.deviceIds);
+        const maxSessions = input.maxSessions === undefined ? user.maxSessions : maxSessionsInput(input.maxSessions);
+        const knownRootIds = new Set(state.roots.map((root) => root.id));
+        if (rootIds && rootIds.some((rootId) => !knownRootIds.has(rootId))) {
+          throw Object.assign(new Error('One or more library roots are invalid.'), { status: 400 });
+        }
+        if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
+          if (rootIds === null || rootIds.some((rootId) => !principal.rootIds?.includes(rootId) === true)) throw permissionDenied('You cannot grant access outside your own library roots.');
+        }
+        candidate.role = role;
+        candidate.permissions = [...permissions];
+        candidate.rootIds = rootIds === null ? null : [...rootIds];
+        candidate.deviceIds = deviceIds === null ? null : [...deviceIds];
+        candidate.maxSessions = maxSessions;
+        if (input.disabled !== undefined) candidate.disabled = input.disabled === true;
+        candidate.updatedAt = Date.now();
+        const sessions = candidate.disabled ? state.sessions.filter((session) => session.userId !== user.id) : state.sessions;
+        await saveState({ ...state, users: state.users.map((entry) => entry.id === user.id ? candidate : entry), sessions });
+        Object.assign(user, candidate);
+        state.sessions = sessions;
+        await appendLog('info', `User account updated: ${user.name}`, { userId: user.id });
+        if (user.disabled) await notifyPlaybackSessionsRevoked(user.id, 'principal_disabled');
+        else if (roleChanged || input.permissions !== undefined || input.rootIds !== undefined || input.deviceIds !== undefined) {
+          await notifyPlaybackSessionsRevoked(user.id, 'permissions_changed');
+        }
+        return userView(user);
+      });
     },
 
     /** @param {string} userId @param {Principal | null | undefined} [principal] */
     async removeUser(userId, principal) {
-      ensurePrincipalPermission(principal, 'users.manage');
-      const state = await loadState();
-      const user = state.users.find((entry) => entry.id === userId);
-      if (!user) throw Object.assign(new Error('User account was not found.'), { status: 404 });
-      ensureUserScope(principal, user);
-      state.users = state.users.filter((entry) => entry.id !== userId);
-      state.sessions = state.sessions.filter((session) => session.userId !== userId);
-      await saveState(state);
-      await appendLog('info', `User account removed: ${user.name}`, { userId });
-      await notifyPlaybackSessionsRevoked(userId, 'principal_removed');
+      return mutateAccounts(async () => {
+        ensurePrincipalPermission(principal, 'users.manage');
+        const state = await loadState();
+        const user = state.users.find((entry) => entry.id === userId);
+        if (!user) throw Object.assign(new Error('User account was not found.'), { status: 404 });
+        ensureUserScope(principal, user);
+        const users = state.users.filter((entry) => entry.id !== userId);
+        const sessions = state.sessions.filter((session) => session.userId !== userId);
+        await saveState({ ...state, users, sessions });
+        Object.assign(state, { users, sessions });
+        await appendLog('info', `User account removed: ${user.name}`, { userId });
+        await notifyPlaybackSessionsRevoked(userId, 'principal_removed');
+      });
     },
 
     /** @param {Record<string, unknown>} input @param {Principal | null | undefined} [principal] */

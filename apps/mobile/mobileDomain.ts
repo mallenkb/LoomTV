@@ -61,6 +61,7 @@ export function mobileLibraryFromIndex(index: MobileLibraryIndexPayload): Librar
         season,
         episode,
         filePath: reference.progressKey,
+        mediaId: reference.progressKey,
         title: `Episode ${episode}`,
         ...(reference.durationSeconds ? { localMetadata: { durationSeconds: reference.durationSeconds } } : {}),
       }];

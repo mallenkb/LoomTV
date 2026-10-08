@@ -186,3 +186,34 @@ test('invitation HLS requires stream permission, a plan, and scoped media', asyn
   assert.equal(service.supportedInvitationPermissions.includes('transcode'), false);
   assert.equal(calls.length, 1, 'scope failures do not reach the profile store');
 });
+
+test('offline download capabilities retain device remote grants and lose access when excluded', async () => {
+  let address = '127.0.0.1';
+  let allowed = true;
+  let devicePermissions = ['downloads'];
+  const account = { id: 'user-1', type: 'user', permissions: ['downloads', 'remote.access'], rootIds: null };
+  const principal = { ...account, authentication: 'device-credential', deviceId: 'device-1', devicePermissions };
+  const source = { id: 'media-1', sourceId: 'source-1', rootId: 'root-1', sizeBytes: 10, modifiedAtMs: 1, fileId: { dev: 1, ino: 2 } };
+  let lease;
+  const service = createRemotePolicyService({
+    store: { readRemotePolicy: () => ({ enabled: true, downloadQuotaBytes: 1024, downloadLeaseTtlMs: 60_000 }),
+      appendAuditEvent() {}, createDownloadLease: (input) => { lease = input; return input; }, readDownloadLease: () => lease },
+    proxyPolicy: { clientAddress: () => address, isSecureRequest: () => true },
+    getAccount: async () => account,
+    getAdminService: () => ({ resolveMediaPath: async () => source, resolvePlaybackPrincipal: async (id, binding) => {
+      assert.equal(id, account.id); assert.equal(binding.authenticationDeviceId, 'device-1');
+      return allowed ? { ...principal, devicePermissions } : null;
+    } }),
+    getClientState: () => ({ requireActivePlaybackProfile: async () => ({ profileId: 'profile-1', selectionRevision: 0 }) }),
+    clock: () => 1000,
+  });
+  const download = await service.createDownload({ headers: {} }, principal, { mediaId: source.id });
+  const req = () => ({ headers: { authorization: `LoomDownload ${download.credential.id}.${download.credential.secret}` } });
+  assert.ok(await service.authorizeDownload(req(), download.credential.id));
+  address = '198.51.100.10';
+  await assert.rejects(service.authorizeDownload(req(), download.credential.id), { status: 403, code: 'remote_access_disabled' });
+  address = '127.0.0.1'; allowed = false;
+  await assert.rejects(service.authorizeDownload(req(), download.credential.id), { status: 403, code: 'download_not_allowed' });
+  allowed = true; devicePermissions = [];
+  await assert.rejects(service.authorizeDownload(req(), download.credential.id), { status: 403, code: 'download_not_allowed' });
+});

@@ -247,8 +247,14 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
   const subtitleSupported = !subtitle || capabilities.subtitleModes.includes(selectedSubtitleKind)
     || (selectedSubtitleKind === 'text' && capabilities.subtitleModes.includes('external'));
   const httpSupported = capabilities.streamingProtocols.includes('http');
+  // Direct delivery serves the original file. The web player cannot select
+  // embedded tracks, so non-default A/V and embedded subtitles need HLS.
+  const nativeVideo = trackFor(facts, 'video');
+  const nativeAudio = trackFor(facts, 'audio', undefined, { allowNone: true });
+  const requiresTrackSelection = video.id !== nativeVideo?.id || audio?.id !== nativeAudio?.id
+    || Boolean(subtitle && !subtitle.external);
   const sourceDirectCompatible = httpSupported && containerSupported && videoSupported && audioSupported
-    && sizeSupported && bitrateSupported && hdrSupported && subtitleSupported;
+    && sizeSupported && bitrateSupported && hdrSupported && subtitleSupported && !requiresTrackSelection;
   // The canonical HLS writer currently emits one multiplexed A/V rendition.
   // A selected subtitle therefore has to be burned whenever delivery is not
   // direct, even when the client could render that subtitle from another URL.
@@ -267,6 +273,7 @@ export function playbackPlanForMedia(media = {}, input = {}, request = {}) {
   if (!sizeSupported) reasons.push('client dimensions');
   if (!bitrateSupported) reasons.push('client bitrate');
   if (!hdrSupported) reasons.push('HDR tone mapping');
+  if (requiresTrackSelection) reasons.push('selected embedded tracks');
   if (burnSubtitles) reasons.push('subtitle burn-in');
   const direct = !capabilities.forceTranscode && sourceDirectCompatible && !burnSubtitles;
   const remux = !capabilities.forceTranscode && !direct && selectedVideoCodec === 'h264' && videoSupported

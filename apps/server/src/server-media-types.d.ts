@@ -28,6 +28,7 @@ export interface ProfileBinding {
   deviceId?: string;
   selectionRevision?: number;
   authenticationSessionId?: string | null;
+  authenticationDeviceId?: string | null;
   invitationSessionId?: string | null;
   remoteAccess?: boolean;
   sourceId?: string;
@@ -57,6 +58,7 @@ export interface MediaAdmin {
   authenticateRequest(req: MediaRequest): Promise<Principal | null>;
   authorizePrincipal?(principal: Principal, permission: string): boolean | Promise<boolean>;
   getPrincipalById?(id: string): Principal | null | Promise<Principal | null>;
+  resolvePlaybackPrincipal?(id: string, binding?: ProfileBinding | null): Promise<Principal | null>;
   resolveMediaPath(itemId: string, principal: Principal, sourceId?: string): Promise<MediaSource>;
   getLibraryItem?(itemId: string, principal: Principal): Promise<LibraryItem | null>;
   listLibraryItems(principal: Principal): Promise<LibraryItem[]>;
@@ -180,7 +182,7 @@ export interface RemoteServiceOptions {
   store: RemoteStore;
   proxyPolicy: { clientAddress(req?: AuthRequest): string; isSecureRequest(req?: AuthRequest): boolean };
   getAccount(id: string): Principal | null | Promise<Principal | null>;
-  getAdminService(): Pick<MediaAdmin, 'resolveMediaPath'> & { listLibraryRoots(principal: Principal): Promise<{ id: string }[]>; getLibraryItem(id: string, principal: Principal): Promise<LibraryItem | null> };
+  getAdminService(): Pick<MediaAdmin, 'resolveMediaPath' | 'resolvePlaybackPrincipal'> & { listLibraryRoots(principal: Principal): Promise<{ id: string }[]>; getLibraryItem(id: string, principal: Principal): Promise<LibraryItem | null> };
   getClientState(): MediaClientState;
   clock?: () => number;
 }
