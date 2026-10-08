@@ -25,6 +25,7 @@ import {
 } from './canonical-client.ts';
 import { discoveredTvServer, type DiscoveredTvServer } from './discovery.ts';
 import { createPlaybackRecoveryGate } from './playback-recovery.ts';
+import { resumeStartSeconds } from './resume-position.ts';
 import {
   backDestination,
   preferredFocusableId,
@@ -536,7 +537,7 @@ function TvApp() {
     try {
       const progress = await client.progress(item.id).catch(() => ({ progress: null }));
       const record = progress.progress;
-      const startSeconds = Math.max(0, Number(record?.positionSeconds ?? record?.position ?? 0));
+      const startSeconds = resumeStartSeconds(record);
       if (!playbackRecovery.current.isCurrent(generation)) return;
       const plan = await client.planPlayback(item.id, startSeconds, tracks);
       if (plan.directUrl) {
