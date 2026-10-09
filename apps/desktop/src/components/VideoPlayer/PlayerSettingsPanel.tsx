@@ -137,6 +137,8 @@ interface PlayerSettingsPanelProps {
   selectedSecondarySubtitleTrackIndex: number;
   selectSecondarySubtitleTrack: (trackIndex: number) => void;
   subtitleStyle: SubtitleStyleSettings;
+  /** Episode still or title backdrop shown behind the subtitle preview. */
+  subtitlePreviewImage?: string;
   subtitleStyleCompatibilityMessage?: string;
   updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string | boolean) => void;
   applySubtitlePreset: (preset: SubtitleStylePreset) => void;
@@ -185,6 +187,7 @@ export default function PlayerSettingsPanel({
   selectedSecondarySubtitleTrackIndex,
   selectSecondarySubtitleTrack,
   subtitleStyle,
+  subtitlePreviewImage,
   subtitleStyleCompatibilityMessage,
   updateSubtitleStyle,
   applySubtitlePreset,
@@ -568,6 +571,7 @@ export default function PlayerSettingsPanel({
                   style={subtitleStyle}
                   updateStyle={updateSubtitleStyle}
                   applyPreset={applySubtitlePreset}
+                  previewImage={subtitlePreviewImage}
                 />
               )}
 

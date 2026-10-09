@@ -4426,6 +4426,7 @@ export default function VideoPlayer({
             selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
             selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
             subtitleStyle={subtitleStyle}
+            subtitlePreviewImage={currentEpisodeMeta?.still || artwork?.backdrop || artwork?.backdropCandidates?.[0]}
             subtitleStyleCompatibilityMessage={subtitleStyleCompatibilityMessage}
             updateSubtitleStyle={updateSubtitleStyle}
             applySubtitlePreset={applySubtitlePreset}
