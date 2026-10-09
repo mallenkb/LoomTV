@@ -41,44 +41,43 @@ const ROTATION_OPTIONS: { value: RotationMode; label: string }[] = [
 ];
 
 const DISPLAY_SLEEP_OPTIONS = [
-  { value: 0, label: 'Never while playing' },
-  { value: 15, label: 'After 15 minutes' },
-  { value: 30, label: 'After 30 minutes' },
-  { value: 45, label: 'After 45 minutes' },
-  { value: 60, label: 'After 1 hour' },
-  { value: 90, label: 'After 1.5 hours' },
-  { value: 120, label: 'After 2 hours' },
+  { value: 0, label: 'Never' },
+  { value: 15, label: '15m' },
+  { value: 30, label: '30m' },
+  { value: 45, label: '45m' },
+  { value: 60, label: '1h' },
+  { value: 90, label: '1.5h' },
+  { value: 120, label: '2h' },
 ] as const;
 
 function SegmentedSetting<T extends string | number>({
   options,
   value,
   onChange,
+  label,
   disabled = false,
 }: {
-  options: { value: T; label: string }[];
+  label: string;
+  options: readonly { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
   disabled?: boolean;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl bg-white/10">
-      <div className="flex min-w-max">
-        {options.map((option, index) => (
-          <div key={String(option.value)} className="flex items-center">
-            {index > 0 && <span className="h-6 w-px shrink-0 bg-white/20" aria-hidden="true" />}
-            <button
-              type="button"
-              onClick={() => onChange(option.value)}
-              disabled={disabled}
-              className={`min-h-10 whitespace-nowrap px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${value === option.value ? 'rounded-xl bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'text-white/75 hover:text-white'}`}
-              aria-pressed={value === option.value}
-            >
-              {option.label}
-            </button>
-          </div>
-        ))}
-      </div>
+    <div role="group" aria-label={label}
+      className="grid grid-cols-[repeat(auto-fit,minmax(3.25rem,1fr))] gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5">
+      {options.map((option) => (
+        <button
+          key={String(option.value)}
+          type="button"
+          onClick={() => onChange(option.value)}
+          disabled={disabled}
+          aria-pressed={value === option.value}
+          className={`whitespace-nowrap rounded-[6px] px-2 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${value === option.value ? 'bg-white/20 text-white' : 'text-white/70 enabled:hover:text-white'}`}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -280,136 +279,129 @@ export default function PlayerSettingsPanel({
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <p className="mb-2 text-xs font-semibold text-white">Aspect ratio</p>
-                  <SegmentedSetting options={ASPECT_OPTIONS} value={aspectMode} onChange={setAspectMode} />
+              <section aria-labelledby="picture-heading">
+                <p id="picture-heading" className="mb-2 text-xs font-semibold text-white">Picture</p>
+                <div className="space-y-3 rounded-lg bg-white/10 p-3">
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-white/80">Aspect ratio</p>
+                    <SegmentedSetting label="Aspect ratio" options={ASPECT_OPTIONS} value={aspectMode} onChange={setAspectMode} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-white/80">Crop</p>
+                    <SegmentedSetting label="Crop" options={CROP_OPTIONS} value={cropMode} onChange={setCropMode} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="text-xs text-white/80">Rotation</p>
+                      {!rotationAvailable && <p className="text-[10px] text-white/55">Not available with LibVLC</p>}
+                    </div>
+                    <SegmentedSetting
+                      label="Rotation"
+                      options={ROTATION_OPTIONS}
+                      value={rotation}
+                      onChange={setRotation}
+                      disabled={!rotationAvailable}
+                    />
+                  </div>
                 </div>
+              </section>
 
-                <div>
-                  <p className="mb-2 text-xs font-semibold text-white">Crop</p>
-                  <SegmentedSetting options={CROP_OPTIONS} value={cropMode} onChange={setCropMode} />
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-semibold text-white">Rotation</p>
-                  <SegmentedSetting
-                    options={ROTATION_OPTIONS}
-                    value={rotation}
-                    onChange={setRotation}
-                    disabled={!rotationAvailable}
-                  />
-                  {!rotationAvailable && (
-                    <p className="mt-2 text-[11px] leading-relaxed text-white/55">
-                      Live rotation is unavailable in LibVLC. Playback stays on the current engine.
-                    </p>
+              <section aria-labelledby="speed-heading">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p id="speed-heading" className="text-xs font-semibold text-white">Speed</p>
+                  {playbackRate !== 1 && (
+                    <button type="button" onClick={() => setPlaybackRate(1)}
+                      className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
                   )}
                 </div>
-              </div>
-
-              <div>
-                <div className="mb-2 flex items-center justify-between text-xs font-semibold text-white">
-                  <span>Speed</span>
-                  <span className="text-[var(--loom-accent)]">{playbackRate.toFixed(2)}x</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.25}
-                  max={4}
-                  step={0.05}
-                  value={playbackRate}
-                  onChange={(event) => setPlaybackRate(Number(event.target.value))}
-                  aria-label="Playback speed"
-                  aria-valuemin={0.25}
-                  aria-valuemax={4}
-                  aria-valuenow={playbackRate}
-                  aria-valuetext={`${playbackRate.toFixed(2)} times speed`}
-                  className="w-full accent-[var(--loom-accent)]"
-                />
-                <div className="mt-1 flex justify-between text-[10px] text-white/70">
-                  <span>0.25x</span>
-                  <span>1x</span>
-                  <span>4x</span>
-                </div>
-              </div>
-
-              {displaySleepSettingsAvailable && <section className="rounded-lg border border-white/10 bg-white/[0.04] p-3" aria-labelledby="display-sleep-heading">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 id="display-sleep-heading" className="text-xs font-semibold text-white">Display sleep timer</h3>
-                    <p className="mt-1 text-[10px] text-white/70">Pausing resets the countdown.</p>
+                <div className="rounded-lg bg-white/10 p-3">
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="text-white/80">Playback rate</span>
+                    <span className="tabular-nums font-medium text-white">{playbackRate.toFixed(2)}x</span>
                   </div>
-                  <span className="shrink-0 rounded-md bg-white/10 px-2 py-1 font-mono text-xs text-[var(--loom-accent)]" aria-live="polite">
+                  <input
+                    type="range"
+                    min={0.25}
+                    max={4}
+                    step={0.05}
+                    value={playbackRate}
+                    onChange={(event) => setPlaybackRate(Number(event.target.value))}
+                    aria-label="Playback speed"
+                    aria-valuemin={0.25}
+                    aria-valuemax={4}
+                    aria-valuenow={playbackRate}
+                    aria-valuetext={`${playbackRate.toFixed(2)} times speed`}
+                    className="w-full accent-[var(--loom-accent)]"
+                  />
+                  <div className="mt-1 flex justify-between text-[10px] text-white/60">
+                    <span>0.25x</span>
+                    <span>1x</span>
+                    <span>4x</span>
+                  </div>
+                </div>
+              </section>
+
+              {displaySleepSettingsAvailable && <section aria-labelledby="display-sleep-heading">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h3 id="display-sleep-heading" className="text-xs font-semibold text-white">Display sleep</h3>
+                  <p className="text-[10px] uppercase tracking-wide tabular-nums text-white/70" aria-live="polite">
                     {displaySleepTimeoutMinutes === 0
-                      ? 'Never'
+                      ? 'Off'
                       : playbackPaused
                         ? 'Paused'
                         : `${String(Math.floor((displaySleepTimerRemainingSeconds || 0) / 60)).padStart(2, '0')}:${String((displaySleepTimerRemainingSeconds || 0) % 60).padStart(2, '0')}`}
-                  </span>
+                  </p>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {DISPLAY_SLEEP_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setDisplaySleepTimeoutMinutes(option.value)}
-                      aria-pressed={displaySleepTimeoutMinutes === option.value}
-                      className={`rounded-md border px-2 py-2 text-xs transition-colors ${displaySleepTimeoutMinutes === option.value ? 'border-[var(--loom-accent)]/55 bg-[var(--loom-accent)]/10 text-white ring-1 ring-inset ring-[var(--loom-accent)]/15' : 'border-white/10 bg-white/[0.06] text-white/65 hover:border-white/20 hover:bg-white/10 hover:text-white'}`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+                <div className="space-y-2 rounded-lg bg-white/10 p-3">
+                  <SegmentedSetting label="Display sleep" options={DISPLAY_SLEEP_OPTIONS} value={displaySleepTimeoutMinutes}
+                    onChange={setDisplaySleepTimeoutMinutes} />
+                  <p className={`text-[11px] leading-relaxed ${displaySleepTimeoutError ? 'text-red-300' : 'text-white/60'}`} role={displaySleepTimeoutError ? 'alert' : undefined}>
+                    {displaySleepTimeoutError || (displaySleepTimeoutMinutes === 0
+                      ? 'The display stays awake while a video plays.'
+                      : 'Lets the display sleep after this long. Pausing resets the countdown.')}
+                  </p>
                 </div>
-                <p className={`mt-2 text-[10px] ${displaySleepTimeoutError ? 'text-red-300' : 'text-white/70'}`} role={displaySleepTimeoutError ? 'alert' : undefined}>
-                  {displaySleepTimeoutError || (displaySleepTimeoutMinutes === 0 ? 'The display stays awake until playback stops or pauses.' : 'The display may sleep when the countdown reaches zero.')}
-                </p>
               </section>}
 
-              <section
-                className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2"
-                aria-labelledby="advanced-settings-heading"
-              >
-                <h3 id="advanced-settings-heading" className="text-xs font-semibold text-white/75">Advanced</h3>
-                <button
-                  type="button"
-                  onClick={onCorrectSkipTiming}
-                  className="mt-3 w-full rounded-md bg-white/10 px-3 py-2 text-left text-xs text-white/75 transition-colors hover:bg-white/15 hover:text-white"
-                >
-                  Correct automatic skip timing
-                </button>
+              <section aria-labelledby="advanced-settings-heading">
+                <h3 id="advanced-settings-heading" className="mb-2 text-xs font-semibold text-white">Advanced</h3>
+                <div className="rounded-lg bg-white/10 p-3">
+                  <button
+                    type="button"
+                    onClick={onCorrectSkipTiming}
+                    className="w-full rounded-[8px] bg-white/[0.08] px-3 py-2 text-left text-xs font-medium text-white transition-colors hover:bg-white/15"
+                  >
+                    Correct automatic skip timing
+                  </button>
 
-                <section className="mt-4 border-t border-white/10 pt-4" aria-labelledby="playback-information-heading">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 id="playback-information-heading" className="text-xs font-semibold text-white">Playback Information</h3>
-                      <p className="mt-1 text-[10px] text-white/70">Current engine and stream details</p>
-                    </div>
-                  </div>
-                  <dl className="mt-3 space-y-2 text-xs">
-                    {[
-                      ['Engine', playbackInformation.engine],
-                      ['Mode', playbackInformation.mode],
-                      ['Video', selectedTrackLabel(videoTracks, selectedVideoTrackIndex, 'Not selected')],
-                      ...(videoOnly ? [] : [
-                        ['Audio', selectedTrackLabel(audioTracks, selectedAudioTrackIndex, 'Not selected')],
-                        ['Subtitles', selectedTrackLabel(subtitleTracks, selectedSubtitleTrackIndex, 'Off')],
-                      ]),
-                      ['Hardware decode', playbackInformation.hardwareDecode],
-                      ['Encode backend', playbackInformation.encodeBackend],
-                      ...(playbackInformation.originalFile ? [['Original file', playbackInformation.originalFile]] : []),
-                    ].map(([label, value]) => (
-                      <div key={label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-                        <dt className="text-white/70">{label}</dt>
-                        <dd className="min-w-0 break-words text-right text-white/85">{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  {playbackInformation.note && (
-                    <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-white/70">
-                      {playbackInformation.note}
-                    </p>
-                  )}
-                </section>
+                  <section className="mt-3 border-t border-white/10 pt-3" aria-labelledby="playback-information-heading">
+                    <h4 id="playback-information-heading" className="text-xs font-semibold text-white">Playback information</h4>
+                    <dl className="mt-3 space-y-2 text-xs">
+                      {[
+                        ['Engine', playbackInformation.engine],
+                        ['Mode', playbackInformation.mode],
+                        ['Video', selectedTrackLabel(videoTracks, selectedVideoTrackIndex, 'Not selected')],
+                        ...(videoOnly ? [] : [
+                          ['Audio', selectedTrackLabel(audioTracks, selectedAudioTrackIndex, 'Not selected')],
+                          ['Subtitles', selectedTrackLabel(subtitleTracks, selectedSubtitleTrackIndex, 'Off')],
+                        ]),
+                        ['Hardware decode', playbackInformation.hardwareDecode],
+                        ['Encode backend', playbackInformation.encodeBackend],
+                        ...(playbackInformation.originalFile ? [['Original file', playbackInformation.originalFile]] : []),
+                      ].map(([label, value]) => (
+                        <div key={label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+                          <dt className="text-white/70">{label}</dt>
+                          <dd className="min-w-0 break-words text-right text-white/85">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {playbackInformation.note && (
+                      <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-white/70">
+                        {playbackInformation.note}
+                      </p>
+                    )}
+                  </section>
+                </div>
               </section>
             </div>
           )}
