@@ -170,6 +170,13 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
             </span>
           </span>
         )}
+        {isCurrent && (
+          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-black/30">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--loom-accent)] shadow-lg">
+              <Play className="ml-0.5 h-3.5 w-3.5 fill-white text-white" aria-hidden="true" />
+            </span>
+          </span>
+        )}
         {watched && !isCurrent && (
           <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-black/35">
             <WatchedSolidIcon
@@ -195,12 +202,6 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       </span>
 
       <span className="min-w-0 flex-1">
-        {isCurrent && (
-          <span className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">
-            <Play className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
-            Now playing
-          </span>
-        )}
         <span className="flex items-center justify-between gap-2">
           <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
             {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}
