@@ -74,9 +74,9 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
         <button type="button" onClick={reset} className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
       </div>
       <div className="rounded-lg bg-white/[0.04] p-3">
-        <div className={`flex h-24 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2 transition-[padding] ${nearestStep(SUBTITLE_POSITION_STEPS, style.position).label === 'Raised' ? 'pb-8' : 'pb-3'}`}
+        <div className={`flex h-28 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2 transition-[padding] ${nearestStep(SUBTITLE_POSITION_STEPS, style.position).label === 'Raised' ? 'pb-8' : 'pb-3'}`}
           aria-label="Subtitle appearance preview">
-          <StyledSubtitleText text="This is a subtitle preview." style={previewStyle} fontSize={previewFontSize} />
+          <StyledSubtitleText text={'This is a subtitle preview.\nA second line of dialogue.'} style={previewStyle} fontSize={previewFontSize} />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Subtitle style preset">
           {PRESETS.map(preset => (
