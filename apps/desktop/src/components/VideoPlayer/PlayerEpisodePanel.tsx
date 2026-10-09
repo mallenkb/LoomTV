@@ -354,6 +354,9 @@ export default function PlayerEpisodePanel({
                     ${isActive ? 'bg-white text-neutral-950' : 'bg-white/[0.06] text-white/70 hover:bg-white/10 hover:text-white'}
                   `}
                 >
+                  {isCurrentSeason && (
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? 'bg-neutral-950' : 'bg-white'}`} />
+                  )}
                   <span>{seasonCode(season)}</span>
                   <span className={`text-[10px] font-medium tabular-nums ${isActive ? 'text-neutral-950/60' : 'text-white/45'}`}>
                     {seasonEpisodeCount}
