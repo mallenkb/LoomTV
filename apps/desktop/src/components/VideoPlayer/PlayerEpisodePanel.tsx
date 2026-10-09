@@ -351,14 +351,14 @@ export default function PlayerEpisodePanel({
                   aria-pressed={isActive}
                   aria-label={`${seasonCode(season)}, ${seasonEpisodeCount} episodes${isCurrentSeason ? ', now playing' : ''}`}
                   className={`relative z-10 flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]
-                    ${isActive ? 'bg-white/15 text-white' : 'bg-white/[0.06] text-white/70 hover:bg-white/10 hover:text-white'}
+                    ${isActive ? 'bg-white text-neutral-950' : 'bg-white/[0.06] text-white/70 hover:bg-white/10 hover:text-white'}
                   `}
                 >
                   {isCurrentSeason && (
-                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--loom-active-text)]" />
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? 'bg-neutral-950/70' : 'bg-white'}`} />
                   )}
                   <span>{seasonCode(season)}</span>
-                  <span className={`text-[10px] font-medium tabular-nums ${isActive ? 'text-white/70' : 'text-white/45'}`}>
+                  <span className={`text-[10px] font-medium tabular-nums ${isActive ? 'text-neutral-950/60' : 'text-white/45'}`}>
                     {seasonEpisodeCount}
                   </span>
                 </button>
