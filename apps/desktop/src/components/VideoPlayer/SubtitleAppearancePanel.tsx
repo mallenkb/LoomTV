@@ -5,8 +5,8 @@ import { MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY, selectedSubtitleStylePreset
 import StyledSubtitleText from './StyledSubtitleText';
 import { DEFAULT_SUBTITLE_STYLE } from './constants';
 
-// Nested corners: 6px controls sit in 8px tiles (2px inset), which sit in a
-// 20px card (12px padding). Each outer radius is the inner one plus its gap.
+// Corners: the card matches the track list (rounded-lg, 12px in this theme);
+// tiles and toggle tracks are 8px, and controls inside them 6px.
 const PRESETS: { value: SubtitleStylePreset; label: string; sample: string }[] = [
   { value: 'plain', label: 'Outline', sample: '[text-shadow:0_0_2px_#000,0_0_2px_#000]' },
   { value: 'soft', label: 'Soft box', sample: 'rounded bg-black/60 px-1.5' },
@@ -68,7 +68,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
     updateStyle('position', DEFAULT_SUBTITLE_STYLE.position);
   };
   return (
-    <section className="rounded-[20px] bg-white/[0.04] p-3" aria-label="Subtitle appearance">
+    <section className="rounded-lg bg-white/[0.04] p-3" aria-label="Subtitle appearance">
       <h3 className="text-[15px] font-semibold text-white">Subtitles</h3>
       <div className="mt-3 flex h-14 items-center justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2"
         aria-label="Subtitle appearance preview">
