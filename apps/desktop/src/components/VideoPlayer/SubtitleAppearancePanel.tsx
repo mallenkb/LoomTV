@@ -102,7 +102,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
           </button>
           </div>
         {moreOpen && (
-          <div className="mt-3 grid gap-3">
+          <div className="mt-2 grid gap-3 rounded-[8px] bg-black/25 p-3">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-white/90">Colors</span>
               <div className="flex gap-3">
