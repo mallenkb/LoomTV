@@ -355,7 +355,7 @@ export default function PlayerEpisodePanel({
                   `}
                 >
                   {isCurrentSeason && (
-                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--loom-accent)]" />
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--loom-active-text)]" />
                   )}
                   <span>{seasonCode(season)}</span>
                   <span className={`text-[10px] font-medium tabular-nums ${isActive ? 'text-white/70' : 'text-white/45'}`}>
