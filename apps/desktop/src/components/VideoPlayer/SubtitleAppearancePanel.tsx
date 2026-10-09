@@ -17,10 +17,16 @@ const PRESETS: { value: SubtitleStylePreset; label: string; sample: string }[] =
 export const SUBTITLE_SIZE_STEPS = [
   { label: 'S', value: 24 }, { label: 'M', value: 32 }, { label: 'L', value: 40 }, { label: 'XL', value: 48 },
 ] as const;
-// Position is the distance from the top in percent; Raised clears burned-in captions.
+// Position is the distance from the top in percent. Raised clears burned-in
+// captions; High clears a lower-third or on-screen graphics.
 export const SUBTITLE_POSITION_STEPS = [
-  { label: 'Bottom', value: DEFAULT_SUBTITLE_STYLE.position }, { label: 'Raised', value: 85 },
+  { label: 'Bottom', value: DEFAULT_SUBTITLE_STYLE.position }, { label: 'Raised', value: 88 }, { label: 'High', value: 78 },
 ] as const;
+
+// How far the preview lifts its text for each position step.
+const PREVIEW_POSITION_PADDING: Record<(typeof SUBTITLE_POSITION_STEPS)[number]['label'], string> = {
+  Bottom: 'pb-3', Raised: 'pb-7', High: 'pb-11',
+};
 
 /** The step closest to a stored value, so in-between values from older versions still show a selection. */
 export function nearestStep<T extends { value: number }>(steps: readonly T[], value: number): T {
@@ -76,7 +82,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
         <button type="button" onClick={reset} className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
       </div>
       <div className="rounded-lg bg-white/[0.04] p-3">
-        <div className={`flex h-28 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 bg-cover bg-center px-2 transition-[padding] ${nearestStep(SUBTITLE_POSITION_STEPS, style.position).label === 'Raised' ? 'pb-8' : 'pb-3'}`}
+        <div className={`flex h-28 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 bg-cover bg-center px-2 transition-[padding] ${PREVIEW_POSITION_PADDING[nearestStep(SUBTITLE_POSITION_STEPS, style.position).label]}`}
           style={previewImage ? { backgroundImage: `url(${JSON.stringify(previewImage)})` } : undefined}
           aria-label="Subtitle appearance preview">
           <div className="text-center">
