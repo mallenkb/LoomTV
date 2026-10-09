@@ -57,10 +57,7 @@ export function useEpisodeUpdates(enabled = true): LibraryEpisodeUpdates {
   return updates;
 }
 
-/** "S01E07" for an episode reference. */
-export function episodeCode(season: number, episode: number): string {
-  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-}
+export { episodeCode } from './episodeCode.ts';
 
 /** "Airs Sun, Sep 27" for an ISO air date; "Airs today" when it is today. */
 export function airsLabel(airDate: string, now = new Date()): string {
