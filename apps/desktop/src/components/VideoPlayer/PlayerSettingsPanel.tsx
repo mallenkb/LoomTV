@@ -63,9 +63,12 @@ function SegmentedSetting<T extends string | number>({
   value,
   onChange,
   label,
+  columns,
   disabled = false,
 }: {
   label: string;
+  /** Grid columns; container-query variants keep rows even at narrow widths. */
+  columns: string;
   options: readonly { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
@@ -73,7 +76,7 @@ function SegmentedSetting<T extends string | number>({
 }) {
   return (
     <div role="group" aria-label={label}
-      className="grid grid-cols-[repeat(auto-fit,minmax(3.25rem,1fr))] gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5">
+      className={`grid ${columns} gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5`}>
       {options.map((option) => (
         <button
           key={String(option.value)}
@@ -81,7 +84,7 @@ function SegmentedSetting<T extends string | number>({
           onClick={() => onChange(option.value)}
           disabled={disabled}
           aria-pressed={value === option.value}
-          className={`whitespace-nowrap rounded-[6px] px-2 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${value === option.value ? 'bg-white/20 text-white' : 'text-white/70 enabled:hover:text-white'}`}
+          className={`whitespace-nowrap rounded-[6px] px-1 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${value === option.value ? 'bg-white/20 text-white' : 'text-white/70 enabled:hover:text-white'}`}
         >
           {option.label}
         </button>
@@ -265,7 +268,7 @@ export default function PlayerSettingsPanel({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-5 text-sm text-white/85">
+        <div className="@container p-5 text-sm text-white/85">
           {activeTab === 'video' && (
             <div className="space-y-5">
               <div>
@@ -292,12 +295,12 @@ export default function PlayerSettingsPanel({
                 <div className="space-y-3 rounded-lg bg-white/10 p-3">
                   <div className="space-y-1.5">
                     <p className="text-xs text-white/80">Aspect ratio</p>
-                    <SegmentedSetting label="Aspect ratio" options={ASPECT_OPTIONS} value={aspectMode} onChange={setAspectMode} />
+                    <SegmentedSetting label="Aspect ratio" columns="grid-cols-3 @[19rem]:grid-cols-6" options={ASPECT_OPTIONS} value={aspectMode} onChange={setAspectMode} />
                   </div>
                   <div className="space-y-1.5">
                     <p className="text-xs text-white/80">Crop</p>
                     {/* 'custom' was never implemented and crops nothing, so it shows as None. */}
-                    <SegmentedSetting label="Crop" options={CROP_OPTIONS} value={cropMode === 'custom' ? 'none' : cropMode} onChange={setCropMode} />
+                    <SegmentedSetting label="Crop" columns="grid-cols-3 @[19rem]:grid-cols-6" options={CROP_OPTIONS} value={cropMode === 'custom' ? 'none' : cropMode} onChange={setCropMode} />
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-baseline justify-between gap-3">
@@ -306,6 +309,7 @@ export default function PlayerSettingsPanel({
                     </div>
                     <SegmentedSetting
                       label="Rotation"
+                      columns="grid-cols-4"
                       options={ROTATION_OPTIONS}
                       value={rotation}
                       onChange={setRotation}
@@ -329,7 +333,7 @@ export default function PlayerSettingsPanel({
                   </div>
                 </div>
                 <div className="rounded-lg bg-white/10 p-3">
-                  <SegmentedSetting label="Playback speed" options={SPEED_OPTIONS} value={playbackRate} onChange={setPlaybackRate} />
+                  <SegmentedSetting label="Playback speed" columns="grid-cols-3 @[19rem]:grid-cols-6" options={SPEED_OPTIONS} value={playbackRate} onChange={setPlaybackRate} />
                 </div>
               </section>
 
@@ -345,7 +349,7 @@ export default function PlayerSettingsPanel({
                   </p>
                 </div>
                 <div className="space-y-2 rounded-lg bg-white/10 p-3">
-                  <SegmentedSetting label="Display sleep" options={DISPLAY_SLEEP_OPTIONS} value={displaySleepTimeoutMinutes}
+                  <SegmentedSetting label="Display sleep" columns="grid-cols-4 @[23rem]:grid-cols-7" options={DISPLAY_SLEEP_OPTIONS} value={displaySleepTimeoutMinutes}
                     onChange={setDisplaySleepTimeoutMinutes} />
                   <p className={`text-[11px] leading-relaxed ${displaySleepTimeoutError ? 'text-red-300' : 'text-white/60'}`} role={displaySleepTimeoutError ? 'alert' : undefined}>
                     {displaySleepTimeoutError || (displaySleepTimeoutMinutes === 0
@@ -381,10 +385,17 @@ export default function PlayerSettingsPanel({
                         ['Encode backend', playbackInformation.encodeBackend],
                         ...(playbackInformation.originalFile ? [['Original file', playbackInformation.originalFile]] : []),
                       ].map(([label, value]) => (
-                        <div key={label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-                          <dt className="text-white/70">{label}</dt>
-                          <dd className="min-w-0 break-words text-right text-white/85">{value}</dd>
-                        </div>
+                        String(value).length > 24 ? (
+                          <div key={label} className="space-y-0.5">
+                            <dt className="text-white/70">{label}</dt>
+                            <dd className="break-words text-white/85">{value}</dd>
+                          </div>
+                        ) : (
+                          <div key={label} className="flex justify-between gap-3">
+                            <dt className="text-white/70">{label}</dt>
+                            <dd className="text-right text-white/85">{value}</dd>
+                          </div>
+                        )
                       ))}
                     </dl>
                     {playbackInformation.note && (
