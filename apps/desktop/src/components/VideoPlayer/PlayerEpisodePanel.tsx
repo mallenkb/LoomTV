@@ -300,7 +300,7 @@ export default function PlayerEpisodePanel({
   return (
     <aside
       aria-label={`${title} ${sourceMode ? 'sources' : 'episodes'}`}
-      className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col bg-neutral-950 shadow-2xl"
+      className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col border-l border-white/10 bg-[#111] shadow-2xl"
       style={{ width: clampSidePanelWidth(episodePanelWidth), maxWidth: '40vw' }}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -378,7 +378,7 @@ export default function PlayerEpisodePanel({
                 sectionRefs.current[season] = node;
               }}
             >
-              <div className="sticky top-0 z-20 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
+              <div className="sticky top-0 z-20 flex items-baseline justify-between border-b border-white/[0.07] bg-[#111]/90 px-5 py-2.5 backdrop-blur-md">
                 <span className="text-xs font-semibold text-white">
                   {sourceMode ? 'Sources' : season === 0 ? 'Specials' : `Season ${season}`}
                 </span>
