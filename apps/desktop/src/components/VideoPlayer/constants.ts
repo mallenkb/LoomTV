@@ -14,9 +14,9 @@ export const HLS_TRANSCODE_RESTART_ATTEMPTS = 2;
 // How many times a track-list snapshot may report an audio track other than the
 // requested one before the player stops re-asking and shows what is playing.
 export const MAX_AUDIO_REAPPLY_ATTEMPTS = 3;
-export const DEFAULT_EPISODE_PANEL_WIDTH = 320;
+export const DEFAULT_EPISODE_PANEL_WIDTH = 360;
 export const DEFAULT_MEDIA_PANEL_WIDTH = 360;
-export const MIN_SIDE_PANEL_WIDTH = 260;
+export const MIN_SIDE_PANEL_WIDTH = 360;
 export const MAX_SIDE_PANEL_RATIO = 0.4;
 export const DEFAULT_SKIP_BACK_SECONDS = 10;
 export const DEFAULT_SKIP_FORWARD_SECONDS = 15;
