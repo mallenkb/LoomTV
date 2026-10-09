@@ -1,8 +1,9 @@
 import { episodeCode } from './episodeCode.ts';
 import type { LibraryEpisodeRef } from '../shared/desktopProtocol.ts';
 
-// Titles such as "Episode 3" only repeat the code, so they are not shown.
-const GENERIC_TITLE = /^episode\s*\d+$/i;
+// Titles such as "Episode 3" only repeat the code, and "TBA" or "Untitled"
+// stand in for a title that is not known yet. None of these are shown.
+const PLACEHOLDER_TITLE = /^(episode\s*\d+|tba|tbd|tbc|untitled|unknown|n\/a|none|-+)$/i;
 const MS_PER_DAY = 86_400_000;
 
 export type NextEpisodeStrip = {
@@ -36,7 +37,7 @@ export function nextEpisodeStripModel(next: LibraryEpisodeRef | null | undefined
   if (!next) return null;
   const code = episodeCode(next.season, next.episode);
   const rawTitle = next.title?.trim() ?? '';
-  const title = rawTitle && !GENERIC_TITLE.test(rawTitle) ? rawTitle : '';
+  const title = rawTitle && !PLACEHOLDER_TITLE.test(rawTitle) ? rawTitle : '';
   const airDate = parseAirDate(next.airDate);
   const daysUntil = airDate ? calendarDaysBetween(now, airDate) : null;
   const countdown = daysUntil === null ? null

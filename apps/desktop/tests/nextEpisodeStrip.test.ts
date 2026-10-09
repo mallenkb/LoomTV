@@ -31,6 +31,12 @@ test('a generic title that only repeats the number is not shown', () => {
   assert.equal(nextEpisodeStripModel(episode({ title: 'episode 12' }), now)?.line, 'S02E01');
 });
 
+test('placeholder titles such as TBA are not shown as the episode name', () => {
+  for (const title of ['TBA', 'tbd', 'TBC', 'Untitled', 'unknown', 'N/A', '-']) {
+    assert.equal(nextEpisodeStripModel(episode({ title }), now)?.line, 'S02E01', `title ${title}`);
+  }
+});
+
 test('a missing or invalid air date keeps the strip with no count', () => {
   for (const airDate of [undefined, '', 'TBA', '2026-13-45']) {
     const model = nextEpisodeStripModel(episode({ airDate }), now);
