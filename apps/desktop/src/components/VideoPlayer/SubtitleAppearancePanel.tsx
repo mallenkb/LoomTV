@@ -94,42 +94,43 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
           <Segmented label="Size" steps={SUBTITLE_SIZE_STEPS} value={style.fontSize} onChange={value => updateStyle('fontSize', value)} />
           <Segmented label="Position" steps={SUBTITLE_POSITION_STEPS} value={style.position} onChange={value => updateStyle('position', value)} />
         </div>
-        <div className="mt-3 flex items-center justify-between">
-          <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}
-            className="flex items-center gap-1 text-[13px] text-white/70 hover:text-white">
-            <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
-            More
+        <div className="mt-3 overflow-hidden rounded-[8px] bg-white/[0.06]">
+          <button type="button" aria-expanded={moreOpen} aria-controls="subtitle-appearance-more"
+            onClick={() => setMoreOpen(open => !open)}
+            className="flex w-full items-center justify-between px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/[0.06]">
+            More options
+            <ChevronDown aria-hidden="true" className={`h-4 w-4 text-white/70 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
           </button>
-          </div>
-        {moreOpen && (
-          <div className="mt-2 grid gap-3 rounded-[8px] bg-black/25 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-white/90">Colors</span>
-              <div className="flex gap-3">
-                {([['fontColor', 'Text'], ['backgroundColor', 'Box']] as const)
-                  .filter(([key]) => key !== 'backgroundColor' || style.backgroundEnabled)
-                  .map(([key, label]) => (
-                    <label key={key} className="flex items-center gap-1.5 text-sm text-white/90">
-                      <input type="color" value={/^#[0-9a-f]{6}$/i.test(style[key]) ? style[key] : '#000000'}
-                        onChange={event => updateStyle(key, event.target.value)}
-                        className="h-8 w-8 cursor-pointer rounded-[6px] border border-white/40 bg-transparent p-0.5" />
-                      {label}
-                    </label>
-                  ))}
+          {moreOpen && (
+            <div id="subtitle-appearance-more" className="grid gap-3 border-t border-white/10 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-white/90">Colors</span>
+                <div className="flex gap-3">
+                  {([['fontColor', 'Text'], ['backgroundColor', 'Box']] as const)
+                    .filter(([key]) => key !== 'backgroundColor' || style.backgroundEnabled)
+                    .map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-1.5 text-sm text-white/90">
+                        <input type="color" value={/^#[0-9a-f]{6}$/i.test(style[key]) ? style[key] : '#000000'}
+                          onChange={event => updateStyle(key, event.target.value)}
+                          className="h-8 w-8 cursor-pointer rounded-[6px] border border-white/40 bg-transparent p-0.5" />
+                        {label}
+                      </label>
+                    ))}
+                </div>
               </div>
+              {selected === 'soft' && (
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-white/90">Box opacity</span>
+                  <input type="range" min={MIN_SOFT_BOX_OPACITY * 100} max={MAX_SOFT_BOX_OPACITY * 100} step={5}
+                    value={Math.round(style.backgroundOpacity * 100)}
+                    onChange={event => updateStyle('backgroundOpacity', Number(event.target.value) / 100)}
+                    aria-valuetext={`${Math.round(style.backgroundOpacity * 100)}%`}
+                    className="w-36 accent-[var(--loom-accent)]" />
+                </label>
+              )}
             </div>
-            {selected === 'soft' && (
-              <label className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-white/90">Box opacity</span>
-                <input type="range" min={MIN_SOFT_BOX_OPACITY * 100} max={MAX_SOFT_BOX_OPACITY * 100} step={5}
-                  value={Math.round(style.backgroundOpacity * 100)}
-                  onChange={event => updateStyle('backgroundOpacity', Number(event.target.value) / 100)}
-                  aria-valuetext={`${Math.round(style.backgroundOpacity * 100)}%`}
-                  className="w-36 accent-[var(--loom-accent)]" />
-              </label>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </section>
   );
