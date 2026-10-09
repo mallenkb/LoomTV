@@ -42,7 +42,7 @@ export default function ShowUpdatesPanel({ show }: { show?: LibraryShowUpdates }
 
       {countdown && (
         <div className="shrink-0 text-right">
-          <p className="text-[15px] font-medium leading-none text-[var(--loom-text)]">{countdown}</p>
+          <p className="text-[26px] font-medium leading-none tracking-tight text-[var(--loom-text)]">{countdown}</p>
           {daysUntil !== null && daysUntil > 1 && <p className="mt-1 text-[10px] leading-3 text-[var(--loom-muted)]">days to go</p>}
         </div>
       )}
