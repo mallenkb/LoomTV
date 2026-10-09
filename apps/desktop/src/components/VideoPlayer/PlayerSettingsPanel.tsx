@@ -40,6 +40,15 @@ const ROTATION_OPTIONS: { value: RotationMode; label: string }[] = [
   { value: 270, label: '270°' },
 ];
 
+const SPEED_OPTIONS = [
+  { value: 0.5, label: '0.5x' },
+  { value: 0.75, label: '0.75x' },
+  { value: 1, label: '1x' },
+  { value: 1.25, label: '1.25x' },
+  { value: 1.5, label: '1.5x' },
+  { value: 2, label: '2x' },
+] as const;
+
 const DISPLAY_SLEEP_OPTIONS = [
   { value: 0, label: 'Never' },
   { value: 15, label: '15m' },
@@ -309,35 +318,18 @@ export default function PlayerSettingsPanel({
               <section aria-labelledby="speed-heading">
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <p id="speed-heading" className="text-xs font-semibold text-white">Speed</p>
-                  {playbackRate !== 1 && (
-                    <button type="button" onClick={() => setPlaybackRate(1)}
-                      className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {!SPEED_OPTIONS.some((option) => option.value === playbackRate) && (
+                      <p className="text-[10px] tabular-nums text-white/70">{playbackRate.toFixed(2)}x</p>
+                    )}
+                    {playbackRate !== 1 && (
+                      <button type="button" onClick={() => setPlaybackRate(1)}
+                        className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
+                    )}
+                  </div>
                 </div>
                 <div className="rounded-lg bg-white/10 p-3">
-                  <div className="mb-1 flex items-center justify-between text-xs">
-                    <span className="text-white/80">Playback rate</span>
-                    <span className="tabular-nums font-medium text-white">{playbackRate.toFixed(2)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.25}
-                    max={4}
-                    step={0.05}
-                    value={playbackRate}
-                    onChange={(event) => setPlaybackRate(Number(event.target.value))}
-                    aria-label="Playback speed"
-                    aria-valuemin={0.25}
-                    aria-valuemax={4}
-                    aria-valuenow={playbackRate}
-                    aria-valuetext={`${playbackRate.toFixed(2)} times speed`}
-                    className="w-full accent-[var(--loom-accent)]"
-                  />
-                  <div className="mt-1 flex justify-between text-[10px] text-white/60">
-                    <span>0.25x</span>
-                    <span>1x</span>
-                    <span>4x</span>
-                  </div>
+                  <SegmentedSetting label="Playback speed" options={SPEED_OPTIONS} value={playbackRate} onChange={setPlaybackRate} />
                 </div>
               </section>
 
