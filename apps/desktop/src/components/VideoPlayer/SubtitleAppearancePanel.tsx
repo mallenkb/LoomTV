@@ -60,7 +60,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const selected = selectedSubtitleStylePreset(style);
-  const previewFontSize = 16 * style.fontSize * style.scale / 32;
+  const previewFontSize = 14 * style.fontSize * style.scale / 32;
   const previewStyle = { ...style, borderWidth: style.borderWidth * previewFontSize / (style.fontSize * style.scale) };
   const reset = () => {
     applyPreset('soft');
@@ -77,7 +77,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
         <div className={`flex h-28 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2 transition-[padding] ${nearestStep(SUBTITLE_POSITION_STEPS, style.position).label === 'Raised' ? 'pb-8' : 'pb-3'}`}
           aria-label="Subtitle appearance preview">
           <div className="text-center">
-            <StyledSubtitleText text={'This is a subtitle preview.\nA second line of dialogue.'} style={previewStyle} fontSize={previewFontSize} />
+            <StyledSubtitleText text="This is how your subtitles will look while you watch something." style={previewStyle} fontSize={previewFontSize} />
           </div>
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Subtitle style preset">
