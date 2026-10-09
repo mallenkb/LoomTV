@@ -333,10 +333,7 @@ export default function PlayerEpisodePanel({
 
       {!sourceMode && hasMultipleSeasons && (
         <div className="border-b border-white/[0.07] px-4 pb-3">
-          <SharedListHighlight
-            activeId={String(activeSeason)}
-            className="loom-shared-highlight-season-pills -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
-          >
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
             {sortedSeasons.map((season) => {
               const isActive = season === activeSeason;
               const isCurrentSeason = season === currentSeason;
@@ -352,8 +349,6 @@ export default function PlayerEpisodePanel({
                   onClick={() => jumpToSeason(season)}
                   title={isCurrentSeason ? `${seasonCode(season)} · now playing` : undefined}
                   aria-pressed={isActive}
-                  data-shared-highlight-item
-                  data-shared-highlight-id={String(season)}
                   aria-label={`${seasonCode(season)}, ${seasonEpisodeCount} episodes${isCurrentSeason ? ', now playing' : ''}`}
                   className={`relative z-10 flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]
                     ${isActive ? 'bg-white/15 text-white' : 'bg-white/[0.06] text-white/70 hover:bg-white/10 hover:text-white'}
@@ -369,7 +364,7 @@ export default function PlayerEpisodePanel({
                 </button>
               );
             })}
-          </SharedListHighlight>
+          </div>
         </div>
       )}
 
