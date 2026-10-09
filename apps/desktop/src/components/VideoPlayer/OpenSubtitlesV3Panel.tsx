@@ -1,15 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Search, SlidersHorizontal } from 'lucide-react';
 import {
   compareSubtitleLanguages, downloadOnlineSubtitle, findOnlineSubtitles, subtitleLanguageLabel, subtitleSearchMatches,
   type OnlineSubtitle, type SubtitleVideo,
 } from '../../lib/openSubtitlesV3';
 
-export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelect }: {
+/** Shift applied to the selected online subtitle, in seconds; negative shows it earlier. */
+export type OnlineSubtitleTiming = { delay: number; setDelay: (seconds: number) => void };
+
+function TimingControls({ delay, setDelay }: OnlineSubtitleTiming) {
+  return (
+    <div className="space-y-1.5 rounded-[8px] bg-black/25 p-3">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <label htmlFor="online-subtitle-sync" className="text-white/90">Timing</label>
+        <span className="tabular-nums text-white/90" aria-live="polite">{delay > 0 ? '+' : ''}{delay.toFixed(2)}s</span>
+      </div>
+      <input id="online-subtitle-sync" type="range" min={-10} max={10} step={0.25} value={delay}
+        onChange={event => setDelay(Number(event.target.value))}
+        onKeyDown={event => event.stopPropagation()}
+        aria-valuetext={`${Math.abs(delay).toFixed(2)} seconds ${delay < 0 ? 'earlier' : delay > 0 ? 'later' : 'offset'}`}
+        className="w-full accent-[var(--loom-accent)]" />
+      <div className="flex items-center justify-between gap-2 text-[11px] text-white/60">
+        <span>Earlier</span>
+        <button type="button" onClick={() => setDelay(0)} className="text-white/80 hover:text-white">Reset</button>
+        <span>Later</span>
+      </div>
+    </div>
+  );
+}
+
+export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelect, timing }: {
   resolveVideo: (signal: AbortSignal) => Promise<SubtitleVideo>;
   selectedId?: string;
   onSelect: (subtitle: OnlineSubtitle, text: string, signal: AbortSignal) => Promise<void>;
+  /** Present while an online subtitle is showing; adds the timing button. */
+  timing?: OnlineSubtitleTiming;
 }) {
+  const [timingOpen, setTimingOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<OnlineSubtitle[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -87,10 +114,23 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     <section aria-labelledby="online-subtitles-heading">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 id="online-subtitles-heading" className="text-xs font-semibold text-white">Online subtitles</h3>
-        <p className="text-[10px] uppercase tracking-wide text-white/70">OpenSubtitles v3</p>
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] uppercase tracking-wide text-white/70">OpenSubtitles v3</p>
+          {timing && (
+            <button type="button" onClick={() => setTimingOpen(open => !open)}
+              aria-expanded={timingOpen || timing.delay !== 0} aria-controls="online-subtitle-timing"
+              aria-label="Online subtitle timing" title="Timing"
+              className={`-my-1 rounded-[6px] p-1 transition-colors hover:bg-white/10 hover:text-white ${timingOpen || timing.delay !== 0 ? 'text-[var(--loom-accent)]' : 'text-white/70'}`}>
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
       <div className="overflow-hidden rounded-lg bg-white/10">
         <div className="space-y-2 p-3">
+          {timing && (timingOpen || timing.delay !== 0) && (
+            <div id="online-subtitle-timing"><TimingControls {...timing} /></div>
+          )}
           <div className="flex items-center gap-2">
             <label className="flex min-w-0 flex-1 items-center gap-2 rounded-[8px] bg-black/25 px-3 py-2 transition-colors focus-within:bg-black/40">
               <Search className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />
