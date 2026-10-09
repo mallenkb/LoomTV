@@ -34,14 +34,15 @@ function Segmented<T extends { label: string; value: number }>({ label, steps, v
   const selected = nearestStep(steps, value);
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm font-medium text-white/90">{label}</span>
-      <div role="group" aria-label={`Subtitle ${label.toLowerCase()}`} className="flex gap-0.5 rounded-lg bg-white/10 p-0.5">
+      <span className="text-sm text-white/80">{label}</span>
+      <div role="group" aria-label={`Subtitle ${label.toLowerCase()}`}
+        className="grid w-48 auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-white/[0.08] p-0.5">
         {steps.map(step => (
           <button key={step.label} type="button" aria-pressed={selected === step}
             onClick={() => onChange(step.value)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${selected === step
-              ? 'bg-[var(--loom-accent)] text-white'
-              : 'text-white/90 hover:bg-white/10'}`}>
+            className={`rounded-md py-1 text-[13px] font-medium transition-colors ${selected === step
+              ? 'bg-white/20 text-white'
+              : 'text-white/70 hover:text-white'}`}>
             {step.label}
           </button>
         ))}
@@ -57,7 +58,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const selected = selectedSubtitleStylePreset(style);
-  const previewFontSize = 15 * style.fontSize * style.scale / 32;
+  const previewFontSize = 16 * style.fontSize * style.scale / 32;
   const previewStyle = { ...style, borderWidth: style.borderWidth * previewFontSize / (style.fontSize * style.scale) };
   const reset = () => {
     applyPreset('soft');
@@ -65,12 +66,9 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
     updateStyle('position', DEFAULT_SUBTITLE_STYLE.position);
   };
   return (
-    <section className="rounded-xl bg-white/[0.06] p-3.5" aria-label="Subtitle appearance">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[15px] font-semibold text-white">Subtitles</h3>
-        <span className="text-xs text-white/75">Applies live</span>
-      </div>
-      <div className="mt-3 flex h-[72px] items-end justify-center overflow-hidden rounded-lg bg-slate-600/70 px-2 pb-2"
+    <section className="rounded-xl bg-white/[0.04] p-3.5" aria-label="Subtitle appearance">
+      <h3 className="text-[15px] font-semibold text-white">Subtitles</h3>
+      <div className="mt-3 flex h-14 items-center justify-center overflow-hidden rounded-lg bg-slate-500/40 px-2"
         aria-label="Subtitle appearance preview">
         <StyledSubtitleText text="This is a subtitle preview." style={previewStyle} fontSize={previewFontSize} />
       </div>
@@ -78,25 +76,25 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
         {PRESETS.map(preset => (
           <button key={preset.value} type="button" aria-pressed={selected === preset.value}
             onClick={() => applyPreset(preset.value)}
-            className={`flex min-w-0 flex-col items-center gap-1.5 rounded-lg border-[1.5px] px-1 py-2 text-sm font-medium transition-colors ${selected === preset.value
-              ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/25 text-white'
-              : 'border-white/30 bg-white/[0.05] text-white/90 hover:bg-white/10'}`}>
-            <span aria-hidden="true" className={`text-xl font-semibold leading-snug text-white ${preset.sample}`}>Aa</span>
+            className={`flex min-w-0 flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[13px] font-medium transition-colors ${selected === preset.value
+              ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/15 text-white'
+              : 'border-transparent bg-white/[0.06] text-white/80 hover:bg-white/10 hover:text-white'}`}>
+            <span aria-hidden="true" className={`text-base font-semibold leading-snug text-white ${preset.sample}`}>Aa</span>
             {preset.label}
           </button>
         ))}
       </div>
-      <div className="mt-4 grid gap-3">
+      <div className="mt-3 grid gap-2.5">
         <Segmented label="Size" steps={SUBTITLE_SIZE_STEPS} value={style.fontSize} onChange={value => updateStyle('fontSize', value)} />
         <Segmented label="Position" steps={SUBTITLE_POSITION_STEPS} value={style.position} onChange={value => updateStyle('position', value)} />
       </div>
-      <div className="mt-4 flex items-center justify-between border-t border-white/15 pt-3">
+      <div className="mt-3 flex items-center justify-between">
         <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}
-          className="flex items-center gap-1.5 text-sm font-medium text-white/90 hover:text-white">
+          className="flex items-center gap-1 text-[13px] text-white/70 hover:text-white">
           <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
           More
         </button>
-        <button type="button" onClick={reset} className="text-sm font-medium text-white/90 hover:text-white">Reset</button>
+        <button type="button" onClick={reset} className="text-[13px] text-white/70 hover:text-white">Reset</button>
       </div>
       {moreOpen && (
         <div className="mt-3 grid gap-3">
