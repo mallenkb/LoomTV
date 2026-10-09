@@ -50,13 +50,11 @@ function EpisodeThumbnail({
   episode,
   file,
   title,
-  isCurrent,
 }: {
   code: string;
   episode: EpisodeMeta;
   file?: EpisodeFile;
   title: string;
-  isCurrent: boolean;
 }) {
   const [generatedThumbnail, setGeneratedThumbnail] = useState('');
   const filePath = file?.filePath || '';
@@ -94,7 +92,7 @@ function EpisodeThumbnail({
     <SafeArtwork
       src={sources}
       alt={`${title} thumbnail`}
-      className={`aspect-video w-full rounded-lg border ${isCurrent ? 'border-[var(--loom-accent)]/60' : 'border-white/10'}`}
+      className="aspect-video w-full rounded-[8px] bg-white/[0.04]"
       imgClassName="object-cover"
       fallback={(
         <div className="absolute inset-0 grid place-items-center bg-white/[0.03]">
@@ -158,31 +156,26 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       className={`group relative z-10 flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
         ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
     >
-      {isCurrent && (
-        <span className="pointer-events-none absolute inset-y-2 right-1 w-0.5 rounded-l-full bg-[var(--loom-accent)]" />
-      )}
-
-      <span className="relative block w-32 shrink-0 overflow-hidden rounded-lg">
+      <span className="relative block w-32 shrink-0 overflow-hidden rounded-[8px]">
         <EpisodeThumbnail
           code={code}
           episode={episode}
           file={file}
           title={episodeTitle}
-          isCurrent={isCurrent}
         />
         {file && !isCurrent && !watched && (
-          <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
               <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" />
             </span>
           </span>
         )}
         {watched && !isCurrent && (
-          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-lg bg-black/55">
+          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-black/35">
             <WatchedSolidIcon
               role="img"
               aria-label="Watched"
-              className="h-[29px] w-[29px] text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
+              className="h-6 w-6 text-emerald-500 drop-shadow-[0_1px_4px_rgba(0,0,0,0.6)]"
             />
           </span>
         )}
@@ -192,7 +185,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           </span>
         )}
         {!watched && (inProgress || isCurrent) && progFrac > 0 && (
-          <span className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden rounded-b-lg bg-white/20">
+          <span className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden bg-white/20">
             <span
               className="block h-full bg-[var(--loom-accent)]"
               style={{ width: `${Math.min(100, progFrac * 100)}%` }}
@@ -203,7 +196,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
 
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
+          <span className="truncate text-[13px] font-medium text-white">
             {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}
           </span>
           {episodeRating > 0 && (
@@ -354,23 +347,16 @@ export default function PlayerEpisodePanel({
                   aria-pressed={isActive}
                   data-shared-highlight-item
                   data-shared-highlight-id={String(season)}
-                  className={`relative z-10 flex shrink-0 items-center gap-2 rounded-full border py-1.5 pl-3 pr-2 text-[11px] font-semibold tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]
-                    ${isActive
-                      ? 'border-[var(--loom-accent)]/70 text-[var(--loom-accent)]'
-                      : 'border-white/10 text-white/70 hover:border-white/25 hover:text-white'}
+                  aria-label={`${seasonCode(season)}, ${seasonEpisodeCount} episodes${isCurrentSeason ? ', now playing' : ''}`}
+                  className={`relative z-10 flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]
+                    ${isActive ? 'bg-white/15 text-white' : 'bg-white/[0.06] text-white/70 hover:bg-white/10 hover:text-white'}
                   `}
                 >
                   {isCurrentSeason && (
-                    <span
-                      aria-hidden="true"
-                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.20)]"
-                    />
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--loom-accent)]" />
                   )}
                   <span>{seasonCode(season)}</span>
-                  <span
-                    className={`inline-flex min-w-[19px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none tabular-nums
-                      ${isActive ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/70'}`}
-                  >
+                  <span className={`text-[10px] font-medium tabular-nums ${isActive ? 'text-white/70' : 'text-white/45'}`}>
                     {seasonEpisodeCount}
                   </span>
                 </button>
@@ -393,13 +379,8 @@ export default function PlayerEpisodePanel({
               }}
             >
               <div className="sticky top-0 z-20 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
-                <span className="flex items-center gap-2 text-xs font-semibold text-white">
-                  {sourceMode ? 'Sources' : seasonCode(season)}
-                  {season === currentSeason && (
-                    <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">
-                      Now playing
-                    </span>
-                  )}
+                <span className="text-xs font-semibold text-white">
+                  {sourceMode ? 'Sources' : season === 0 ? 'Specials' : `Season ${season}`}
                 </span>
                 <span className="text-[10px] font-medium text-[var(--loom-muted)]">
                   {(groupedEpisodes[season] || []).length} {sourceMode ? 'sources' : 'episodes'}
