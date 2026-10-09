@@ -207,7 +207,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
             {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}
           </span>
           {episodeRating > 0 && (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[var(--loom-rating)]">
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--loom-rating)_15%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-[var(--loom-rating)]">
               <Star className="h-2.5 w-2.5 fill-current" />
               {episodeRating.toFixed(1)}
             </span>
