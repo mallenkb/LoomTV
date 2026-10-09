@@ -5,6 +5,8 @@ import { MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY, selectedSubtitleStylePreset
 import StyledSubtitleText from './StyledSubtitleText';
 import { DEFAULT_SUBTITLE_STYLE } from './constants';
 
+// Nested corners: 6px controls sit in 8px tiles (2px inset), which sit in a
+// 20px card (12px padding). Each outer radius is the inner one plus its gap.
 const PRESETS: { value: SubtitleStylePreset; label: string; sample: string }[] = [
   { value: 'plain', label: 'Outline', sample: '[text-shadow:0_0_2px_#000,0_0_2px_#000]' },
   { value: 'soft', label: 'Soft box', sample: 'rounded bg-black/60 px-1.5' },
@@ -36,11 +38,11 @@ function Segmented<T extends { label: string; value: number }>({ label, steps, v
     <div className="flex items-center justify-between gap-3">
       <span className="text-sm text-white/80">{label}</span>
       <div role="group" aria-label={`Subtitle ${label.toLowerCase()}`}
-        className="grid w-48 auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-white/[0.08] p-0.5">
+        className="grid w-48 auto-cols-fr grid-flow-col gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5">
         {steps.map(step => (
           <button key={step.label} type="button" aria-pressed={selected === step}
             onClick={() => onChange(step.value)}
-            className={`rounded-md py-1 text-[13px] font-medium transition-colors ${selected === step
+            className={`rounded-[6px] py-1 text-[13px] font-medium transition-colors ${selected === step
               ? 'bg-white/20 text-white'
               : 'text-white/70 hover:text-white'}`}>
             {step.label}
@@ -66,9 +68,9 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
     updateStyle('position', DEFAULT_SUBTITLE_STYLE.position);
   };
   return (
-    <section className="rounded-xl bg-white/[0.04] p-3.5" aria-label="Subtitle appearance">
+    <section className="rounded-[20px] bg-white/[0.04] p-3" aria-label="Subtitle appearance">
       <h3 className="text-[15px] font-semibold text-white">Subtitles</h3>
-      <div className="mt-3 flex h-14 items-center justify-center overflow-hidden rounded-lg bg-slate-500/40 px-2"
+      <div className="mt-3 flex h-14 items-center justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2"
         aria-label="Subtitle appearance preview">
         <StyledSubtitleText text="This is a subtitle preview." style={previewStyle} fontSize={previewFontSize} />
       </div>
@@ -76,7 +78,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
         {PRESETS.map(preset => (
           <button key={preset.value} type="button" aria-pressed={selected === preset.value}
             onClick={() => applyPreset(preset.value)}
-            className={`flex min-w-0 flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[13px] font-medium transition-colors ${selected === preset.value
+            className={`flex min-w-0 flex-col items-center gap-1 rounded-[8px] border px-1 py-2 text-[13px] font-medium transition-colors ${selected === preset.value
               ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/15 text-white'
               : 'border-transparent bg-white/[0.06] text-white/80 hover:bg-white/10 hover:text-white'}`}>
             <span aria-hidden="true" className={`text-base font-semibold leading-snug text-white ${preset.sample}`}>Aa</span>
@@ -107,7 +109,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
                   <label key={key} className="flex items-center gap-1.5 text-sm text-white/90">
                     <input type="color" value={/^#[0-9a-f]{6}$/i.test(style[key]) ? style[key] : '#000000'}
                       onChange={event => updateStyle(key, event.target.value)}
-                      className="h-8 w-8 cursor-pointer rounded-md border border-white/40 bg-transparent p-0.5" />
+                      className="h-8 w-8 cursor-pointer rounded-[6px] border border-white/40 bg-transparent p-0.5" />
                     {label}
                   </label>
                 ))}
