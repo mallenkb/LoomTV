@@ -310,7 +310,7 @@ export default function PlayerEpisodePanel({
         onMouseDown={(event) => startSidePanelResize(event, episodePanelWidth, setEpisodePanelWidth)}
         title="Drag to resize"
       >
-        <span className="h-12 w-1 rounded-full bg-white/10 transition-colors group-hover:bg-[var(--loom-accent)]/70" />
+        <span className="h-12 w-1 rounded-full bg-[var(--loom-accent)]/70 opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
 
       <div className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">

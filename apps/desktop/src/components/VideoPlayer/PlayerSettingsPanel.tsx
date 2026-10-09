@@ -232,7 +232,7 @@ export default function PlayerSettingsPanel({
         onMouseDown={(event) => startSidePanelResize(event, mediaPanelWidth, setMediaPanelWidth)}
         title="Drag to resize"
       >
-        <span className="h-12 w-1 rounded-full bg-white/10 transition-colors group-hover:bg-[var(--loom-accent)]/70" />
+        <span className="h-12 w-1 rounded-full bg-[var(--loom-accent)]/70 opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
 
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
