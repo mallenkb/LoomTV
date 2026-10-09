@@ -68,65 +68,67 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
     updateStyle('position', DEFAULT_SUBTITLE_STYLE.position);
   };
   return (
-    <section className="rounded-lg bg-white/[0.04] p-3" aria-label="Subtitle appearance">
-      <h3 className="text-[15px] font-semibold text-white">Subtitles</h3>
-      <div className="mt-3 flex h-14 items-center justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2"
-        aria-label="Subtitle appearance preview">
-        <StyledSubtitleText text="This is a subtitle preview." style={previewStyle} fontSize={previewFontSize} />
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Subtitle style preset">
-        {PRESETS.map(preset => (
-          <button key={preset.value} type="button" aria-pressed={selected === preset.value}
-            onClick={() => applyPreset(preset.value)}
-            className={`flex min-w-0 flex-col items-center gap-1 rounded-[8px] border px-1 py-2 text-[13px] font-medium transition-colors ${selected === preset.value
-              ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/15 text-white'
-              : 'border-transparent bg-white/[0.06] text-white/80 hover:bg-white/10 hover:text-white'}`}>
-            <span aria-hidden="true" className={`text-base font-semibold leading-snug text-white ${preset.sample}`}>Aa</span>
-            {preset.label}
-          </button>
-        ))}
-      </div>
-      <div className="mt-3 grid gap-2.5">
-        <Segmented label="Size" steps={SUBTITLE_SIZE_STEPS} value={style.fontSize} onChange={value => updateStyle('fontSize', value)} />
-        <Segmented label="Position" steps={SUBTITLE_POSITION_STEPS} value={style.position} onChange={value => updateStyle('position', value)} />
-      </div>
-      <div className="mt-3 flex items-center justify-between">
-        <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}
-          className="flex items-center gap-1 text-[13px] text-white/70 hover:text-white">
-          <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
-          More
-        </button>
-        <button type="button" onClick={reset} className="text-[13px] text-white/70 hover:text-white">Reset</button>
-      </div>
-      {moreOpen && (
-        <div className="mt-3 grid gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-white/90">Colors</span>
-            <div className="flex gap-3">
-              {([['fontColor', 'Text'], ['backgroundColor', 'Box']] as const)
-                .filter(([key]) => key !== 'backgroundColor' || style.backgroundEnabled)
-                .map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-1.5 text-sm text-white/90">
-                    <input type="color" value={/^#[0-9a-f]{6}$/i.test(style[key]) ? style[key] : '#000000'}
-                      onChange={event => updateStyle(key, event.target.value)}
-                      className="h-8 w-8 cursor-pointer rounded-[6px] border border-white/40 bg-transparent p-0.5" />
-                    {label}
-                  </label>
-                ))}
-            </div>
-          </div>
-          {selected === 'soft' && (
-            <label className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-white/90">Box opacity</span>
-              <input type="range" min={MIN_SOFT_BOX_OPACITY * 100} max={MAX_SOFT_BOX_OPACITY * 100} step={5}
-                value={Math.round(style.backgroundOpacity * 100)}
-                onChange={event => updateStyle('backgroundOpacity', Number(event.target.value) / 100)}
-                aria-valuetext={`${Math.round(style.backgroundOpacity * 100)}%`}
-                className="w-36 accent-[var(--loom-accent)]" />
-            </label>
-          )}
+    <section aria-labelledby="subtitle-appearance-heading">
+      <h3 id="subtitle-appearance-heading" className="mb-2 text-xs font-semibold text-white">Appearance</h3>
+      <div className="rounded-lg bg-white/[0.04] p-3">
+        <div className="flex h-14 items-center justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2"
+          aria-label="Subtitle appearance preview">
+          <StyledSubtitleText text="This is a subtitle preview." style={previewStyle} fontSize={previewFontSize} />
         </div>
-      )}
+        <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Subtitle style preset">
+          {PRESETS.map(preset => (
+            <button key={preset.value} type="button" aria-pressed={selected === preset.value}
+              onClick={() => applyPreset(preset.value)}
+              className={`flex min-w-0 flex-col items-center gap-1 rounded-[8px] border px-1 py-2 text-[13px] font-medium transition-colors ${selected === preset.value
+                ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/15 text-white'
+                : 'border-transparent bg-white/[0.06] text-white/80 hover:bg-white/10 hover:text-white'}`}>
+              <span aria-hidden="true" className={`text-base font-semibold leading-snug text-white ${preset.sample}`}>Aa</span>
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-3 grid gap-2.5">
+          <Segmented label="Size" steps={SUBTITLE_SIZE_STEPS} value={style.fontSize} onChange={value => updateStyle('fontSize', value)} />
+          <Segmented label="Position" steps={SUBTITLE_POSITION_STEPS} value={style.position} onChange={value => updateStyle('position', value)} />
+        </div>
+        <div className="mt-3 flex items-center justify-between">
+          <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}
+            className="flex items-center gap-1 text-[13px] text-white/70 hover:text-white">
+            <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
+            More
+          </button>
+          <button type="button" onClick={reset} className="text-[13px] text-white/70 hover:text-white">Reset</button>
+        </div>
+        {moreOpen && (
+          <div className="mt-3 grid gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-white/90">Colors</span>
+              <div className="flex gap-3">
+                {([['fontColor', 'Text'], ['backgroundColor', 'Box']] as const)
+                  .filter(([key]) => key !== 'backgroundColor' || style.backgroundEnabled)
+                  .map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-1.5 text-sm text-white/90">
+                      <input type="color" value={/^#[0-9a-f]{6}$/i.test(style[key]) ? style[key] : '#000000'}
+                        onChange={event => updateStyle(key, event.target.value)}
+                        className="h-8 w-8 cursor-pointer rounded-[6px] border border-white/40 bg-transparent p-0.5" />
+                      {label}
+                    </label>
+                  ))}
+              </div>
+            </div>
+            {selected === 'soft' && (
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-white/90">Box opacity</span>
+                <input type="range" min={MIN_SOFT_BOX_OPACITY * 100} max={MAX_SOFT_BOX_OPACITY * 100} step={5}
+                  value={Math.round(style.backgroundOpacity * 100)}
+                  onChange={event => updateStyle('backgroundOpacity', Number(event.target.value) / 100)}
+                  aria-valuetext={`${Math.round(style.backgroundOpacity * 100)}%`}
+                  className="w-36 accent-[var(--loom-accent)]" />
+              </label>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

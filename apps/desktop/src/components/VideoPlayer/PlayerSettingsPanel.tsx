@@ -483,7 +483,7 @@ export default function PlayerSettingsPanel({
             <div className="space-y-5">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold text-white">Subtitle</p>
+                  <p className="text-xs font-semibold text-white">Subtitle track</p>
                   <p className="text-[10px] uppercase tracking-wide text-white/70">
                     Default {subtitlesDefaultEnabled ? 'on' : 'off'}
                   </p>

@@ -81,9 +81,9 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     setError('');
   };
   return (
-    <section className="space-y-2" aria-label="OpenSubtitles v3">
+    <section className="space-y-2" aria-labelledby="online-subtitles-heading">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold text-white">OpenSubtitles v3</h3>
+        <h3 id="online-subtitles-heading" className="text-xs font-semibold text-white">Online subtitles</h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => void search()} disabled={loading || downloading !== null}
             className="rounded-md bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20 disabled:opacity-50">
