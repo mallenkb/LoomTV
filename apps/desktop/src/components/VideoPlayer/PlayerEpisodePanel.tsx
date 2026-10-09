@@ -172,8 +172,8 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
         )}
         {isCurrent && (
           <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-black/30">
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--loom-accent)] shadow-lg">
-              <Play className="ml-0.5 h-3.5 w-3.5 fill-white text-white" aria-hidden="true" />
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
+              <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" aria-hidden="true" />
             </span>
           </span>
         )}
@@ -203,11 +203,11 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
 
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
+          <span className={`truncate text-[13px] font-medium ${isCurrent ? 'font-semibold text-[var(--loom-active-text)]' : 'text-white'}`}>
             {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}
           </span>
           {episodeRating > 0 && (
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--loom-rating)_15%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-[var(--loom-rating)]">
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--loom-rating-surface)] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-[var(--loom-rating)]">
               <Star className="h-2.5 w-2.5 fill-current" />
               {episodeRating.toFixed(1)}
             </span>
