@@ -30,7 +30,6 @@ const CROP_OPTIONS: { value: CropMode; label: string }[] = [
   { value: '16 / 10', label: '16:10' },
   { value: '21 / 9', label: '21:9' },
   { value: '5 / 4', label: '5:4' },
-  { value: 'custom', label: 'Custom…' },
 ];
 
 const ROTATION_OPTIONS: { value: RotationMode; label: string }[] = [
@@ -297,7 +296,8 @@ export default function PlayerSettingsPanel({
                   </div>
                   <div className="space-y-1.5">
                     <p className="text-xs text-white/80">Crop</p>
-                    <SegmentedSetting label="Crop" options={CROP_OPTIONS} value={cropMode} onChange={setCropMode} />
+                    {/* 'custom' was never implemented and crops nothing, so it shows as None. */}
+                    <SegmentedSetting label="Crop" options={CROP_OPTIONS} value={cropMode === 'custom' ? 'none' : cropMode} onChange={setCropMode} />
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-baseline justify-between gap-3">
