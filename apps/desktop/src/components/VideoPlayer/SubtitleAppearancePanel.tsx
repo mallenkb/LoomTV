@@ -69,7 +69,10 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
   };
   return (
     <section aria-labelledby="subtitle-appearance-heading">
-      <h3 id="subtitle-appearance-heading" className="mb-2 text-xs font-semibold text-white">Appearance</h3>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 id="subtitle-appearance-heading" className="text-xs font-semibold text-white">Appearance</h3>
+        <button type="button" onClick={reset} className="text-[11px] text-white/70 hover:text-white">Reset</button>
+      </div>
       <div className="rounded-lg bg-white/[0.04] p-3">
         <div className={`flex h-24 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 px-2 transition-[padding] ${nearestStep(SUBTITLE_POSITION_STEPS, style.position).label === 'Raised' ? 'pb-8' : 'pb-3'}`}
           aria-label="Subtitle appearance preview">
@@ -97,8 +100,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
             <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
             More
           </button>
-          <button type="button" onClick={reset} className="text-[13px] text-white/70 hover:text-white">Reset</button>
-        </div>
+          </div>
         {moreOpen && (
           <div className="mt-3 grid gap-3">
             <div className="flex items-center justify-between gap-3">
