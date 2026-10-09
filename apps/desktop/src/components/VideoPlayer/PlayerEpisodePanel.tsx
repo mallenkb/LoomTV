@@ -376,6 +376,7 @@ export default function PlayerEpisodePanel({
       <ScrollArea className="flex-1" ref={viewportRef} onScroll={handleScroll}>
         <SharedListHighlight
           activeId={`${currentSeason}-${currentEpisode}`}
+          preserveActiveOnHover
           className="loom-shared-highlight-player-episodes"
         >
           {tick >= 0 && sortedSeasons.map((season) => (

@@ -566,7 +566,9 @@ body.platform-darwin .loom-photo-viewer-header {
 }
 
 .loom-shared-highlight-player-episodes {
-  --loom-shared-highlight-background: rgb(255 255 255 / 0.06);
+  /* The playing episode keeps an accent tint while hover moves separately. */
+  --loom-shared-highlight-background: color-mix(in srgb, var(--loom-accent) 18%, transparent);
+  --loom-shared-highlight-hover-background: rgb(255 255 255 / 0.06);
 }
 
 .loom-shared-highlight-menu,
