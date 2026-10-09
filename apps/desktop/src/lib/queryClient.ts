@@ -142,7 +142,7 @@ async function scheduledRead<T>(read: () => Promise<T>, signal: AbortSignal): Pr
 
 export async function cachedDesktopRead<T>(family: string, args: readonly unknown[], read: () => Promise<T>, staleTime = 60_000): Promise<T> {
   const expensive = family === 'getThumbnail' || family === 'requestMetadataProvider' || family === 'getMediaSegments';
-  const recoverCancellation = family === 'requestMetadataProvider' || family.startsWith('discover-');
+  const recoverCancellation = family === 'requestMetadataProvider' || family === 'addon-browse' || family.startsWith('discover-');
   const scope = queryScope();
   const identity = JSON.stringify(scope);
   const options = {
