@@ -235,35 +235,35 @@ export default function PlayerSettingsPanel({
         <span className="h-12 w-1 rounded-full bg-[var(--loom-accent)]/70 opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
 
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-white truncate">Playback Settings</p>
-          <p className="text-[10px] uppercase tracking-widest text-[var(--loom-accent)]/75">{videoOnly ? 'Video' : 'Subtitles, Audio, Video'}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-[var(--loom-muted)] hover:text-white ml-2 shrink-0"
-          aria-label="Close playback settings"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {!videoOnly && <div className="grid grid-cols-3 border-b border-white/10 text-xs font-bold uppercase tracking-wide text-white/75" role="tablist" aria-label="Playback settings sections">
-        {(['subtitles', 'audio', 'video'] as ControlTab[]).map((tab) => (
+      <div className="space-y-3 border-b border-white/10 px-5 pb-4 pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="truncate text-base font-semibold tracking-tight text-white">{videoOnly ? 'Video settings' : 'Playback settings'}</p>
           <button
-            key={tab}
             type="button"
-            onClick={() => setMediaPanelTab(tab)}
-            role="tab"
-            aria-selected={activeTab === tab}
-            className={`px-3 py-4 transition-colors ${activeTab === tab ? 'bg-white/5 text-white' : 'hover:bg-white/5 hover:text-white/80'}`}
+            onClick={onClose}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--loom-muted)] transition-colors hover:bg-white/10 hover:text-white"
+            aria-label="Close playback settings"
           >
-            {tab}
+            <X className="h-4 w-4" />
           </button>
-        ))}
-      </div>}
+        </div>
+        {!videoOnly && (
+          <div className="grid grid-cols-3 gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5" role="tablist" aria-label="Playback settings sections">
+            {(['subtitles', 'audio', 'video'] as ControlTab[]).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setMediaPanelTab(tab)}
+                role="tab"
+                aria-selected={activeTab === tab}
+                className={`rounded-[6px] py-1.5 text-[13px] font-medium capitalize transition-colors ${activeTab === tab ? 'bg-white text-neutral-950' : 'text-white/70 hover:text-white'}`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <ScrollArea className="flex-1">
         <div className="p-5 text-sm text-white/85">
