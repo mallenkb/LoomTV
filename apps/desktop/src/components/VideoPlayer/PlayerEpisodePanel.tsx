@@ -180,7 +180,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           </span>
         )}
         {runtime && (
-          <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1 py-0.5 text-[9px] font-medium leading-none text-white/90">
+          <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-1 text-[11px] font-medium leading-none tabular-nums text-white">
             {runtime}
           </span>
         )}
