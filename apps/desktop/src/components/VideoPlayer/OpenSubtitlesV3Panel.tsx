@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Search } from 'lucide-react';
+import { ChevronDown, Search } from 'lucide-react';
 import {
   compareSubtitleLanguages, downloadOnlineSubtitle, findOnlineSubtitles, subtitleLanguageLabel, subtitleSearchMatches,
   type OnlineSubtitle, type SubtitleVideo,
@@ -80,55 +80,67 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     setDownloading(null);
     setError('');
   };
+  const busy = loading || downloading !== null;
+  const status = downloading ? 'Downloading subtitle...' : results?.length === 0 ? 'No subtitles found for this title.'
+    : results && !groups.length ? 'No subtitles match your search.' : '';
   return (
-    <section className="space-y-2" aria-labelledby="online-subtitles-heading">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <section aria-labelledby="online-subtitles-heading">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <h3 id="online-subtitles-heading" className="text-xs font-semibold text-white">Online subtitles</h3>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => void search()} disabled={loading || downloading !== null}
-            className="rounded-md bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20 disabled:opacity-50">
-            {loading ? 'Searching...' : results ? 'Refresh results' : 'Find online subtitles'}
-          </button>
-          {(loading || downloading !== null) && (
-            <button type="button" onClick={cancel} aria-label={loading ? 'Cancel subtitle search' : 'Cancel subtitle download'}
-              className="rounded-md border border-white/20 px-3 py-2 text-xs text-white/80 hover:bg-white/10">
-              Cancel
-            </button>
-          )}
-        </div>
+        <p className="text-[10px] uppercase tracking-wide text-white/70">OpenSubtitles v3</p>
       </div>
-      <label className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 transition-colors focus-within:bg-white/10">
-        <Search className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />
-        <input type="search" value={query} onChange={event => setQuery(event.target.value)}
-          onKeyDown={event => event.stopPropagation()} aria-label="Search OpenSubtitles languages or names"
-          placeholder="Search languages or subtitles"
-          style={{ border: 'none', boxShadow: 'none', outline: 'none', appearance: 'none', WebkitAppearance: 'none' }}
-          className="min-w-0 flex-1 !border-0 !bg-transparent !p-0 text-xs text-white !shadow-none !outline-none !ring-0 placeholder:text-white/50" />
-      </label>
-      {results === null && <p className="text-xs text-white/60">Finds the matching title on IMDb, then searches OpenSubtitles v3 for this video. Downloads only the subtitle you select.</p>}
-      {error && <p role="alert" className="text-xs text-amber-200">{error}</p>}
-      <div role="status" className="text-xs text-white/60">
-        {downloading ? 'Downloading subtitle...' : results?.length === 0 ? 'No subtitles found for this title.'
-          : results && !groups.length ? 'No subtitles match your search.' : ''}
-      </div>
-      <div className="h-auto overflow-hidden rounded-lg bg-white/5">
-        {groups.map(([language, rows]) => (
-          <details key={language} open={Boolean(query.trim()) || rows.some(subtitle => subtitle.id === selectedId) || undefined} className="border-b border-white/10 last:border-0">
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-white">{language} <span className="font-normal text-white/50">{rows.length}</span></summary>
-            {rows.map(subtitle => (
-              <button type="button" key={subtitle.id} disabled={downloading !== null || loading} aria-pressed={selectedId === subtitle.id}
-                onClick={() => void select(subtitle)}
-                className={`flex w-full items-center gap-3 px-3 py-2 text-left text-xs disabled:opacity-50 ${selectedId === subtitle.id ? 'bg-[var(--loom-accent)]/25' : 'hover:bg-white/10'}`}>
-                <span className="min-w-0 flex-1">
-                  <span className="block break-words text-white">{subtitle.name}</span>
-                  <span className="mt-1 block text-[10px] text-white/60">{subtitle.source}</span>
-                </span>
-                {selectedId === subtitle.id && <Check className="h-4 w-4 shrink-0 text-white" aria-hidden="true" />}
+      <div className="overflow-hidden rounded-lg bg-white/10">
+        <div className="space-y-2 p-3">
+          <div className="flex items-center gap-2">
+            <label className="flex min-w-0 flex-1 items-center gap-2 rounded-[8px] bg-black/25 px-3 py-2 transition-colors focus-within:bg-black/40">
+              <Search className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />
+              <input type="search" value={query} onChange={event => setQuery(event.target.value)}
+                onKeyDown={event => event.stopPropagation()} aria-label="Search OpenSubtitles languages or names"
+                placeholder={results ? 'Filter by language or name' : 'Language or name'}
+                style={{ border: 'none', boxShadow: 'none', outline: 'none', appearance: 'none', WebkitAppearance: 'none' }}
+                className="min-w-0 flex-1 !border-0 !bg-transparent !p-0 text-xs text-white !shadow-none !outline-none !ring-0 placeholder:text-white/50" />
+            </label>
+            {busy ? (
+              <button type="button" onClick={cancel} aria-label={loading ? 'Cancel subtitle search' : 'Cancel subtitle download'}
+                className="shrink-0 rounded-[8px] bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20">
+                Cancel
               </button>
-            ))}
-          </details>
-        ))}
+            ) : (
+              <button type="button" onClick={() => void search()}
+                aria-label={results ? 'Refresh online subtitles' : 'Find online subtitles'}
+                className="shrink-0 rounded-[8px] bg-white/15 px-3 py-2 text-xs font-medium text-white hover:bg-white/25">
+                {results ? 'Refresh' : 'Search'}
+              </button>
+            )}
+          </div>
+          {results === null && !loading && <p className="text-[11px] leading-relaxed text-white/60">Matches this video on IMDb and lists subtitles from OpenSubtitles v3. Only the one you pick is downloaded.</p>}
+          {error && <p role="alert" className="text-xs text-amber-200">{error}</p>}
+          {(status || loading) && <p className="text-xs text-white/60">{loading ? 'Searching...' : status}</p>}
+        </div>
+        {groups.length > 0 && <div className="max-h-80 overflow-y-auto border-t border-white/10">
+          {groups.map(([language, rows]) => (
+            <details key={language} open={Boolean(query.trim()) || rows.some(subtitle => subtitle.id === selectedId) || undefined}
+              className="group border-t border-white/10 first:border-t-0">
+              <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-[10px] leading-none font-semibold uppercase tracking-wider text-white/70 [&::-webkit-details-marker]:hidden">
+                <span>{language} <span className="font-normal text-white/50">{rows.length}</span></span>
+                <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              {rows.map(subtitle => (
+                <button type="button" key={subtitle.id} disabled={busy} aria-pressed={selectedId === subtitle.id}
+                  onClick={() => void select(subtitle)} title={subtitle.name}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors disabled:opacity-50 ${selectedId === subtitle.id ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}>
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedId === subtitle.id ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-white">{subtitle.name}</span>
+                    <span className="mt-0.5 block text-[10px] text-white/50">{subtitle.source}</span>
+                  </span>
+                </button>
+              ))}
+            </details>
+          ))}
+        </div>}
       </div>
+      <div role="status" className="sr-only">{loading ? 'Searching...' : status}</div>
     </section>
   );
 }
