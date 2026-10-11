@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { decodeXmlText, parseXmltvGuide, parseXmltvTimestamp } from '../src/main/iptv/xmltvGuide.ts';
+import { decodeXmlText, parseXmltvGuide, parseXmltvGuideChunks, parseXmltvTimestamp } from '../src/main/iptv/xmltvGuide.ts';
 
 test('xmltv timestamps resolve through their declared offset', () => {
   assert.equal(parseXmltvTimestamp('20240115120000 +0000'), Date.UTC(2024, 0, 15, 12, 0, 0));
@@ -65,4 +65,28 @@ test('xmltv guide drops entries with no title or an unusable time range', () => 
 
   assert.deepEqual(result.programmes.map((programme) => programme.title), ['Good']);
   assert.equal(result.skipped, 3);
+});
+
+test('xmltv guide read in chunks matches a single read at every split size', async () => {
+  const xml = [
+    '<?xml version="1.0"?><tv>',
+    '<channel id="news.us@HD"><display-name>News</display-name></channel>',
+    '<PROGRAMME start="20240115120000 +0000" stop="20240115130000 +0000" channel="news.us@HD">',
+    '<title lang="en">Noon &amp; Later</title><desc>Caf&#233; talk</desc></PROGRAMME>',
+    '<programme start="20240115130000 +0000" stop="20240115123000 +0000" channel="news.us"><title>Backwards</title></programme>',
+    '<programme start="20240115130000 +0000" stop="20240115140000 +0000" channel="other.us"><title>Elsewhere</title></programme>',
+    '<programme start="20240115140000 +0000" channel="news.us"><title>Unclosed',
+    '<programme start="20240115150000 +0000" stop="20240115160000 +0000" channel="news.us"><title>Three</title></programme>',
+    '<programme start="20240115160000 +0000" stop="20240115170000 +0000" channel="news.us"><title>Four <i>live</i></title></programme>',
+    '</tv>',
+  ].join('\n');
+  const known = new Set(['news.us']);
+  const expected = parseXmltvGuide(xml, known);
+  assert.deepEqual(expected.programmes.map((entry) => entry.title), ['Noon & Later', 'Four live']);
+  for (const size of [1, 2, 7, 13, 64, xml.length]) {
+    async function* chunks() {
+      for (let offset = 0; offset < xml.length; offset += size) yield xml.slice(offset, offset + size);
+    }
+    assert.deepEqual(await parseXmltvGuideChunks(chunks(), known), expected, `chunk size ${size}`);
+  }
 });

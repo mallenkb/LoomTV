@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
+import { Readable } from 'node:stream';
+import { createGunzip, gunzipSync } from 'node:zlib';
 import { safeFetch } from '../safeFetch.ts';
 import {
   countIptvChannelHealth,
@@ -40,7 +41,7 @@ import {
   type StreamCheckResult,
   type StreamLiveMarker,
 } from './iptvStreamHealth.ts';
-import { guideChannelKey, parseXmltvGuide } from './xmltvGuide.ts';
+import { guideChannelKey, parseXmltvGuideChunks } from './xmltvGuide.ts';
 import { parseIptvPlaybackReference } from '../../shared/iptvPlayback.ts';
 import type {
   IptvChannelPage,
@@ -126,6 +127,51 @@ async function fetchText(url: string, maxBytes: number, operation: string, label
   // pinned transport does not decompress on its own.
   const isGzip = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
   return (isGzip ? gunzipSync(bytes) : bytes).toString('utf8');
+}
+
+/** Decompressed guide text read before the refresh gives up on the guide. */
+const GUIDE_MAX_TEXT_BYTES = 1024 * 1024 * 1024;
+const GUIDE_TEXT_CHUNK_BYTES = 256 * 1024;
+
+/**
+ * Guide text in chunks, for `parseXmltvGuideChunks`. Decompression runs on
+ * the libuv thread pool instead of in one blocking call, and the full
+ * decompressed document never exists in memory at once.
+ */
+async function* guideTextChunks(bytes: Buffer): AsyncGenerator<string> {
+  const decoder = new TextDecoder('utf-8');
+  const isGzip = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  if (!isGzip) {
+    for (let offset = 0; offset < bytes.length; offset += GUIDE_TEXT_CHUNK_BYTES) {
+      yield decoder.decode(bytes.subarray(offset, offset + GUIDE_TEXT_CHUNK_BYTES), { stream: true });
+    }
+    yield decoder.decode();
+    return;
+  }
+  const gunzip = Readable.from([bytes]).pipe(createGunzip({ chunkSize: GUIDE_TEXT_CHUNK_BYTES }));
+  let total = 0;
+  try {
+    for await (const chunk of gunzip as AsyncIterable<Buffer>) {
+      total += chunk.length;
+      if (total > GUIDE_MAX_TEXT_BYTES) throw new IptvSourceError('The guide is too large to read.');
+      yield decoder.decode(chunk, { stream: true });
+    }
+    yield decoder.decode();
+  } finally {
+    gunzip.destroy();
+  }
+}
+
+async function fetchGuideBytes(url: string): Promise<Buffer> {
+  const response = await safeFetch(url, {}, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: GUIDE_MAX_BYTES,
+    retries: 1,
+    maxRedirects: 2,
+    operation: 'iptv.guide',
+  });
+  if (!response.ok) throw new IptvSourceError(`The guide server answered ${response.status}.`);
+  return Buffer.from(await response.arrayBuffer());
 }
 
 function toSummary(record: ReturnType<typeof getIptvSource>, health: IptvSourceHealth): IptvSourceSummary {
@@ -403,8 +449,8 @@ export function createIptvService(deps: IptvServiceDependencies) {
           // The guide only annotates channels. A guide host that is down must
           // not hold back the channel list; keep the last listings and say so.
           try {
-            const guideText = await fetchText(guideUrl, GUIDE_MAX_BYTES, 'iptv.guide', 'guide');
-            const guide = parseXmltvGuide(guideText, knownChannelIds);
+            const guideBytes = await fetchGuideBytes(guideUrl);
+            const guide = await parseXmltvGuideChunks(guideTextChunks(guideBytes), knownChannelIds);
             if (!getIptvSource(database, sourceId)) throw new IptvSourceError('That live TV source no longer exists.');
             replaceIptvProgrammes(database, sourceId, guide.programmes);
             programmeCount = guide.programmes.length;

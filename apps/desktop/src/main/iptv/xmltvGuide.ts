@@ -104,6 +104,37 @@ export function guideChannelKey(id: string): string {
   return id.replace(/@[^@]*$/, '');
 }
 
+const PROGRAMME_PATTERN = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/gi;
+
+/** Add one `<programme>` element to the result, or count it as skipped. */
+function collectProgramme(
+  result: ParsedIptvGuide,
+  attributes: string,
+  body: string,
+  knownChannelIds: ReadonlySet<string> | undefined,
+): void {
+  const tvgId = guideChannelKey(readAttribute(attributes, 'channel'));
+  if (!tvgId || (knownChannelIds && !knownChannelIds.has(tvgId))) {
+    result.skipped += 1;
+    return;
+  }
+  const startMs = parseXmltvTimestamp(readAttribute(attributes, 'start'));
+  const stopMs = parseXmltvTimestamp(readAttribute(attributes, 'stop'));
+  const title = readChildText(body, 'title').slice(0, MAX_TITLE_LENGTH);
+  if (startMs === null || stopMs === null || stopMs <= startMs || !title) {
+    result.skipped += 1;
+    return;
+  }
+
+  result.programmes.push({
+    tvgId,
+    startMs,
+    endMs: stopMs,
+    title,
+    description: readChildText(body, 'desc').slice(0, MAX_DESCRIPTION_LENGTH),
+  });
+}
+
 /**
  * Collect the guide entries for the channels a playlist actually carries.
  * `knownChannelIds` keeps a national guide covering thousands of channels from
@@ -114,7 +145,7 @@ export function parseXmltvGuide(
   knownChannelIds?: ReadonlySet<string>,
 ): ParsedIptvGuide {
   const result: ParsedIptvGuide = { programmes: [], skipped: 0, truncated: false };
-  const pattern = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/gi;
+  const pattern = new RegExp(PROGRAMME_PATTERN);
   let match = pattern.exec(text);
 
   while (match) {
@@ -124,27 +155,61 @@ export function parseXmltvGuide(
     }
     const [, attributes, body] = match;
     match = pattern.exec(text);
+    collectProgramme(result, attributes, body, knownChannelIds);
+  }
 
-    const tvgId = guideChannelKey(readAttribute(attributes, 'channel'));
-    if (!tvgId || (knownChannelIds && !knownChannelIds.has(tvgId))) {
-      result.skipped += 1;
-      continue;
-    }
-    const startMs = parseXmltvTimestamp(readAttribute(attributes, 'start'));
-    const stopMs = parseXmltvTimestamp(readAttribute(attributes, 'stop'));
-    const title = readChildText(body, 'title').slice(0, MAX_TITLE_LENGTH);
-    if (startMs === null || stopMs === null || stopMs <= startMs || !title) {
-      result.skipped += 1;
-      continue;
-    }
+  return result;
+}
 
-    result.programmes.push({
-      tvgId,
-      startMs,
-      endMs: stopMs,
-      title,
-      description: readChildText(body, 'desc').slice(0, MAX_DESCRIPTION_LENGTH),
-    });
+/** Text kept between chunks while no complete `<programme>` has arrived yet. */
+const MAX_PENDING_GUIDE_TEXT = 4 * 1024 * 1024;
+/** Main-thread time spent parsing before giving the event loop a turn. */
+const GUIDE_PARSE_SLICE_MS = 8;
+
+/**
+ * The same result as `parseXmltvGuide`, read from text chunks as they are
+ * decompressed. A 200,000-entry guide is about 80 MB of XML. Parsing it in one
+ * call held the main process for half a second and kept the whole document in
+ * memory as a buffer and a string. Here only the unfinished tail of the last
+ * chunk is kept, and the event loop runs every few milliseconds.
+ */
+export async function parseXmltvGuideChunks(
+  chunks: AsyncIterable<string>,
+  knownChannelIds?: ReadonlySet<string>,
+): Promise<ParsedIptvGuide> {
+  const result: ParsedIptvGuide = { programmes: [], skipped: 0, truncated: false };
+  const pattern = new RegExp(PROGRAMME_PATTERN);
+  let pending = '';
+  let sliceStartedAt = performance.now();
+
+  for await (const chunk of chunks) {
+    pending += chunk;
+    pattern.lastIndex = 0;
+    let consumed = 0;
+    let match = pattern.exec(pending);
+    while (match) {
+      if (result.programmes.length >= MAX_GUIDE_PROGRAMMES) {
+        result.truncated = true;
+        return result;
+      }
+      consumed = pattern.lastIndex;
+      collectProgramme(result, match[1], match[2], knownChannelIds);
+      match = pattern.exec(pending);
+    }
+    pending = pending.slice(consumed);
+    // Text before the first `<programme` can never be part of a match, so the
+    // channel list at the top of the file is not rescanned with every chunk.
+    const firstOpen = pending.search(/<programme/i);
+    pending = firstOpen >= 0 ? pending.slice(firstOpen) : pending.slice(-'<programme'.length);
+    if (pending.length > MAX_PENDING_GUIDE_TEXT) {
+      // Only an unfinished element can complete later. Keep text from its start.
+      const open = pending.toLowerCase().lastIndexOf('<programme');
+      pending = open >= 0 ? pending.slice(open) : pending.slice(-'<programme'.length);
+    }
+    if (performance.now() - sliceStartedAt >= GUIDE_PARSE_SLICE_MS) {
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      sliceStartedAt = performance.now();
+    }
   }
 
   return result;
