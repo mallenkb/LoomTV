@@ -5,6 +5,7 @@ import {
   detectMovieCreditIntervals,
   MOVIE_CREDIT_FRAME_HEIGHT,
   MOVIE_CREDIT_FRAME_WIDTH,
+  visualDecodeArgs,
 } from '../src/main/skipSegments/movieCreditsDetector.ts';
 import {
   chapterType,
@@ -319,4 +320,12 @@ test('bestFingerprintMatch outro flavor excluding a credits interval', () => {
     excludeLeft: [{ startMs: 0, endMs: 300_000 }],
   });
   assert.equal(creditsCovered, null);
+});
+
+test('visual credit extraction hardware-decodes HEVC on macOS only', () => {
+  assert.deepEqual(visualDecodeArgs('hevc', 'darwin'), ['-hwaccel', 'videotoolbox', '-threads', '1']);
+  assert.deepEqual(visualDecodeArgs('AV1', 'darwin'), ['-hwaccel', 'videotoolbox', '-threads', '1']);
+  assert.deepEqual(visualDecodeArgs('h264', 'darwin'), []);
+  assert.deepEqual(visualDecodeArgs(undefined, 'darwin'), []);
+  assert.deepEqual(visualDecodeArgs('hevc', 'win32'), []);
 });

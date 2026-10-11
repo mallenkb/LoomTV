@@ -199,3 +199,15 @@ export function detectMovieCreditIntervals(
     confidence: run.confidence,
   }));
 }
+
+// Software HEVC decode dominated analysis CPU (about 140 CPU seconds for a 15-minute 10-bit window).
+// VideoToolbox produced byte-identical frames for about 17 CPU seconds. H.264 is cheap in software
+// and slower through VideoToolbox, so it stays on the CPU. FFmpeg falls back to software if the
+// hardware decoder rejects the stream. Scaling stays on the CPU because scale_vt changes the pixels.
+const HARDWARE_DECODED_CODECS = new Set(['hevc', 'h265', 'av1', 'vp9']);
+
+export function visualDecodeArgs(videoCodec: string | undefined, platform: NodeJS.Platform = process.platform): string[] {
+  const codec = videoCodec?.toLowerCase();
+  if (platform !== 'darwin' || !codec || !HARDWARE_DECODED_CODECS.has(codec)) return [];
+  return ['-hwaccel', 'videotoolbox', '-threads', '1'];
+}

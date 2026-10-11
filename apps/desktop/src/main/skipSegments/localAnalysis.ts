@@ -30,6 +30,7 @@ import {
   detectMovieCreditIntervals,
   MOVIE_CREDIT_FRAME_HEIGHT,
   MOVIE_CREDIT_FRAME_WIDTH,
+  visualDecodeArgs,
 } from './movieCreditsDetector.ts';
 import { chapterType, segmentRevision } from './normalize.ts';
 import { selectRefinedBoundary, type BoundaryPoint } from './boundaryRefinement.ts';
@@ -313,9 +314,10 @@ async function movieCreditIntervals(context: AnalysisContext, ffmpegPath: string
   const windowStartMs = Math.max(0, context.durationMs - windowDurationMs);
   const proc = spawn(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error',
+    ...visualDecodeArgs(context.file.localMetadata?.videoCodec),
     '-ss', String(windowStartMs / 1000), '-t', String(windowDurationMs / 1000),
     '-i', context.file.filePath,
-    '-an', '-threads', '1',
+    '-an', '-filter_threads', '1',
     '-vf', `fps=1,scale=${MOVIE_CREDIT_FRAME_WIDTH}:${MOVIE_CREDIT_FRAME_HEIGHT}:flags=fast_bilinear,format=rgb24`,
     '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1',
   ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
