@@ -87,6 +87,7 @@ import {
   transcodeErrorMessage,
   type SubtitleCue,
 } from './VideoPlayer/helpers';
+import { factsVideoSpecs, mergeVideoSpecs, probeVideoSpecs, videoSpecRows, type VideoSpecs } from './VideoPlayer/videoSpecs';
 import PauseOverlay from './VideoPlayer/PauseOverlay';
 import NextEpisodePrompt from './VideoPlayer/NextEpisodePrompt';
 import StillWatchingPrompt from './VideoPlayer/StillWatchingPrompt';
@@ -356,6 +357,14 @@ export default function VideoPlayer({
   const [nativeDecoder, setNativeDecoder] = useState<{
     sessionId: string; hardware?: boolean; name?: string;
   } | null>(null);
+  // The file's video stream from this session's probe, and the frame size the
+  // engine reports decoding. Both feed Playback information.
+  const [probedVideoSpecs, setProbedVideoSpecs] = useState<VideoSpecs>({});
+  const [playingVideoSize, setPlayingVideoSize] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    setProbedVideoSpecs({});
+    setPlayingVideoSize(null);
+  }, [filePath]);
   // Set by a system stop command. It releases the media session without closing
   // the player, and clears again the moment playback resumes, which is how
   // LoomTV takes the session back after another app has held it.
@@ -1033,6 +1042,7 @@ export default function VideoPlayer({
     preferencesOverride?: PlaybackTrackPreferences,
   ) => {
     const nextDuration = probeDurationSeconds(data);
+    setProbedVideoSpecs(probeVideoSpecs(data));
     const probedTracks = [
       ...probeTracks(data).map((track) => ({ ...track, source: 'embedded' as const })),
       ...externalSubtitleTracks,
@@ -1465,6 +1475,11 @@ export default function VideoPlayer({
   const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
     if (state.sessionId) setNativeSessionId(state.sessionId);
+    if (state.videoWidth && state.videoHeight) {
+      const width = state.videoWidth;
+      const height = state.videoHeight;
+      setPlayingVideoSize((previous) => previous?.width === width && previous.height === height ? previous : { width, height });
+    }
     if (state.diagnostics) {
       const hardware = state.diagnostics.hardwareDecode;
       const name = state.diagnostics.hardwareDecoder;
@@ -2452,6 +2467,7 @@ export default function VideoPlayer({
         logPlaybackTiming('metadata_loaded');
       }
       const mediaDuration = Number.isFinite(video.duration) ? video.duration : 0;
+      if (video.videoWidth && video.videoHeight) setPlayingVideoSize({ width: video.videoWidth, height: video.videoHeight });
       updatePlaybackSnapshot(playbackPositionRef.current, probedDurationRef.current || mediaDuration, { forceReact: true });
       applyNativeTextTrackVisibilityRef.current();
       if (pendingSwap && resumeSeconds > 0 && mediaDuration) {
@@ -3683,6 +3699,10 @@ export default function VideoPlayer({
         : nativeDecoder.hardware ? `${nativeDecoder.name || 'Hardware'} decoding`
           : 'Software decoding',
     encodeBackend: streamIsTranscoded ? 'Host transcoder' : 'Not used',
+    videoSpecs: videoSpecRows(
+      mergeVideoSpecs(probedVideoSpecs, factsVideoSpecs(cachedMediaFacts)),
+      playingVideoSize ?? undefined,
+    ),
     note: streamIsTranscoded ? 'HLS backend details are reported by the host transcoder.' : undefined,
   };
   const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;

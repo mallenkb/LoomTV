@@ -130,6 +130,8 @@ interface PlayerSettingsPanelProps {
     mode: string;
     hardwareDecode: string;
     encodeBackend: string;
+    /** Label and value pairs describing the file's video stream. */
+    videoSpecs: [string, string][];
     note?: string;
   };
   audioTracks: MediaTrack[];
@@ -377,6 +379,7 @@ export default function PlayerSettingsPanel({
                         ['Engine', playbackInformation.engine],
                         ['Mode', playbackInformation.mode],
                         ['Video', selectedTrackLabel(videoTracks, selectedVideoTrackIndex, 'Not selected')],
+                        ...playbackInformation.videoSpecs,
                         ...(videoOnly ? [] : [
                           ['Audio', selectedTrackLabel(audioTracks, selectedAudioTrackIndex, 'Not selected')],
                           ['Subtitles', selectedTrackLabel(subtitleTracks, selectedSubtitleTrackIndex, 'Off')],
