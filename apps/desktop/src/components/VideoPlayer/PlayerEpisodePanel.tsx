@@ -164,21 +164,21 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           title={episodeTitle}
         />
         {file && !isCurrent && !watched && (
-          <span className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="absolute inset-0 grid place-items-center rounded-[inherit] bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
               <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" />
             </span>
           </span>
         )}
         {isCurrent && (
-          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-black/30">
+          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[inherit] bg-black/30">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
               <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" aria-hidden="true" />
             </span>
           </span>
         )}
         {watched && !isCurrent && (
-          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-black/35">
+          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[inherit] bg-black/35">
             <WatchedSolidIcon
               role="img"
               aria-label="Watched"
@@ -202,8 +202,8 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       </span>
 
       <span className="min-w-0 flex-1">
-        <span className="flex items-center justify-between gap-2">
-          <span className={`truncate text-[13px] font-medium ${isCurrent ? 'font-semibold text-[var(--loom-active-text)]' : 'text-white'}`}>
+        <span className="flex items-start justify-between gap-2">
+          <span className={`min-w-0 break-words text-[13px] font-medium leading-snug ${isCurrent ? 'font-semibold text-[var(--loom-active-text)]' : 'text-white'}`}>
             {sourceMode ? episodeTitle : `${episode.number}. ${episodeTitle}`}
           </span>
           {episodeRating > 0 && (
