@@ -45,7 +45,7 @@ import {
   type DesktopLibraryMode,
 } from './lib/remoteDesktop';
 import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
-import { ArtworkSuspensionContext } from './contexts/ArtworkSuspensionContext';
+import { ArtworkSuspensionContext, useWindowHiddenFor } from './contexts/ArtworkSuspensionContext';
 import { isIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { buildExternalPlaybackReference } from './shared/externalPlayback.ts';
 
@@ -400,6 +400,9 @@ function AppShell({
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  // Playback and a long-hidden window both release library artwork.
+  const windowHiddenLong = useWindowHiddenFor();
+  const artworkSuspended = Boolean(nowPlaying) || windowHiddenLong;
   useEffect(() => window.desktopApi?.onMemoryTrim?.(() => {
     // Keep recent details for Back and never cancel active or in-flight reads.
     trimQueryCache({ maxBytes: 4 * 1024 * 1024, maxEntries: 64 });
@@ -568,7 +571,7 @@ function AppShell({
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
       {appStartupReady && !homeReady && <StartupSplash />}
-      <ArtworkSuspensionContext.Provider value={Boolean(nowPlaying)}>
+      <ArtworkSuspensionContext.Provider value={artworkSuspended}>
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
       <Sidebar />
       <div
@@ -642,7 +645,7 @@ function AppShell({
           />
         </ErrorBoundary>
       )}
-      <ArtworkSuspensionContext.Provider value={Boolean(nowPlaying)}>
+      <ArtworkSuspensionContext.Provider value={artworkSuspended}>
       <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
         <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
       </div>
