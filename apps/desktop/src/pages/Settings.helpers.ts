@@ -16,7 +16,7 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'playback', label: 'Playback' },
   { id: 'plugins', label: 'Plugins' },
   { id: 'live-tv', label: 'Live TV' },
-  { id: 'metadata', label: 'Metadata API Keys' },
+  { id: 'metadata', label: 'Metadata' },
   { id: 'theme', label: 'Theme' },
   { id: 'about', label: 'About' },
 ];
@@ -87,6 +87,8 @@ export function isSettingsSection(value: string | null): value is SettingsSectio
   return value === 'profiles'
     || value === 'library'
     || value === 'playback'
+    || value === 'plugins'
+    || value === 'live-tv'
     || value === 'network'
     || value === 'metadata'
     || value === 'theme'

@@ -24,6 +24,8 @@ const tmdbListResultSchema = z.object({
   id: z.number().int(),
   original_language: z.string().optional(),
   title: z.string().optional(),
+  original_title: z.string().optional(),
+  adult: z.boolean().optional(),
   name: z.string().optional(),
   overview: z.string().optional(),
   poster_path: z.string().nullish(),

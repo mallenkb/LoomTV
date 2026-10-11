@@ -29,6 +29,7 @@ import type {
   StremioPluginSummary,
   StremioStreamRequest,
   StremioStreamResult,
+  StremioSubtitleListResult,
   StoredProgress,
 } from '../shared/desktopProtocol.ts';
 import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
@@ -61,7 +62,7 @@ import { parseIpcArguments, startupLibraryRenderArgsSchema } from './ipcValidati
 import { recordFirstLibraryRender } from './startupTiming.ts';
 import { metadataProviderRequestSchema } from './metadataProviderGateway.ts';
 import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
-import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
+import { isTrustedVideoPageUrl, parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
 
 const finiteNumber = z.number().finite();
 const nonEmptyString = z.string().max(8192).trim().min(1).max(8192);
@@ -481,6 +482,9 @@ export interface IpcHandlerDependencies<
   fetchStremioMeta: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
   fetchStremioMetaByItem: (request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
   fetchStremioStreams: (addonId: string, request: StremioStreamRequest) => Promise<StremioStreamResult>;
+  fetchStremioSubtitles: (addonId: string, request: StremioStreamRequest) => Promise<StremioSubtitleListResult>;
+  downloadStremioSubtitle: (token: string) => Promise<{ text: string }>;
+  issueStremioItemKey: (type: string, providerId: string) => string;
   getStremioAddonConfiguration: (addonId: string) => StremioPluginConfigurationState;
   saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginConfigurationState>;
   listStremioPluginAudit: (addonId: string, limit?: number) => readonly StremioPluginAuditEntry[];
@@ -1010,7 +1014,8 @@ export function registerIpcHandlers<
       }
       if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('External streams must use http or https.');
       const isHls = /\.m3u8?(?:$|\?)/i.test(streamUrl);
-      const isYoutube = /youtube-nocookie\.com|youtube\.com|youtu\.be/i.test(parsed.hostname);
+      // Same exact-host rule as the player's frame gate; anything else is media.
+      const isYoutube = isTrustedVideoPageUrl(streamUrl);
       return {
         url: streamUrl,
         contentType: isHls ? 'application/vnd.apple.mpegurl' : isYoutube ? 'text/html' : 'video/mp4',
@@ -1069,7 +1074,8 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:available', () => deps.listAvailableStremioPlugins(), z.tuple([]));
   handleStremio('plugins:stremio:official', () => deps.listOfficialStremioAddons(), z.tuple([]));
   handleStremio('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId), z.tuple([z.enum(['cinemeta', 'opensubtitles-v3'])]));
-  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().max(8192).url()]));
+  // The host normalizes and validates the link so an invalid paste gets a specific message.
+  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().trim().min(1).max(8192)]));
   handleStremio('plugins:stremio:review-installed', (_event, addonId) => deps.reviewInstalledStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')), z.tuple([nonEmptyString, nonEmptyString]));
   handleStremio('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
@@ -1084,6 +1090,9 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request), z.tuple([nonEmptyString, stremioMetaRequestSchema]));
   handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request), z.tuple([stremioMetaRequestSchema]));
   handleStremio('plugins:stremio:streams', (_event, addonId, request) => deps.fetchStremioStreams(String(addonId || ''), request), z.tuple([nonEmptyString, stremioStreamRequestSchema]));
+  handleStremio('plugins:stremio:subtitles', (_event, addonId, request) => deps.fetchStremioSubtitles(String(addonId || ''), request), z.tuple([nonEmptyString, stremioStreamRequestSchema]));
+  handleStremio('plugins:stremio:subtitle-download', (_event, token) => deps.downloadStremioSubtitle(String(token || '')), z.tuple([z.string().uuid()]));
+  handleStremio('plugins:stremio:item-key', (_event, type, providerId) => deps.issueStremioItemKey(String(type || ''), String(providerId || '')), z.tuple([z.enum(['movie', 'series']), z.string().max(32)]));
   handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values), z.tuple([nonEmptyString, boundedIpcRecord(z.unknown(), 128, 262_144)]));
   handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit), z.tuple([nonEmptyString, finiteNumber.int().positive().max(1_000).optional()]));

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Undo2 } from 'lucide-react';
-import { CaretDown } from '@phosphor-icons/react';
+import { Undo2 } from 'lucide-react';
+import { SettingsDisclosure, SettingsList, SettingsNote, SettingsRow, SettingsSelect } from '@/components/settings/SettingsLayout';
+import SettingsDetailItem from '@/components/settings/SettingsDetailItem';
 import { Button } from '@/components/ui/button';
 import { desktopApi } from '@/lib/desktopApi';
 import type { LibraryCleanupBatch } from '@/shared/desktopProtocol';
@@ -28,7 +29,6 @@ function dateLabel(value: number): string {
 export default function LibraryCleanupSection({ disabled }: { disabled: boolean }) {
   const [mode, setMode] = useState<CleanupMode>('auto');
   const [batches, setBatches] = useState<LibraryCleanupBatch[]>([]);
-  const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -76,66 +76,46 @@ export default function LibraryCleanupSection({ disabled }: { disabled: boolean 
   const latest = batches.find((batch) => !batch.restoredAt);
 
   return (
-    <div className="space-y-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--loom-accent)]" aria-hidden="true" />
-          <div>
-            <p className="text-sm font-semibold text-white">Clean up library folders</p>
-            <p className="mt-0.5 text-xs text-[var(--loom-muted)]">
-              Recognized download clutter and external subtitles covered by embedded tracks move to holding storage for 30 days. Unknown files, useful artwork, and subtitles with uncertain coverage stay. Failed restores keep their remaining files for retry.
-            </p>
-          </div>
-        </div>
-        <span className="relative block w-40 shrink-0">
-          <select value={mode} onChange={(event) => void changeMode(event.target.value as CleanupMode)} disabled={busy} aria-label="Clean up library folders" className="h-10 w-full appearance-none rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] py-2 pl-4 pr-10 text-sm text-[var(--loom-text)] outline-none focus:border-[var(--loom-accent)]">
-            {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <CaretDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)]" weight="regular" aria-hidden="true" />
-        </span>
-      </div>
-      <p className="border-t border-[var(--loom-control-border)] pt-3 text-sm text-[var(--loom-text)]" role="status">
-        {latest
-          ? `Last cleanup ${dateLabel(latest.createdAt)}: ${latest.items.length.toLocaleString()} ${latest.items.length === 1 ? 'file' : 'files'} removed.`
-          : 'Nothing has been cleaned up yet.'}
-      </p>
+    <>
+      <SettingsRow
+        title="Clean up download clutter"
+        description="Moves leftover junk files and duplicate subtitles aside for 30 days. Anything unrecognized stays."
+      >
+        <SettingsSelect label="Clean up library folders" value={mode} options={MODE_OPTIONS} onChange={(value) => void changeMode(value)} disabled={busy} className="w-36" />
+      </SettingsRow>
+      {status ? <SettingsNote role="status">{status}</SettingsNote> : null}
+      {error ? <SettingsNote role="alert" tone="error">{error}</SettingsNote> : null}
       {batches.length ? (
-        <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
-          {batches.map((batch) => (
-            <div key={batch.id} className="rounded-lg bg-[var(--loom-bg)] p-2.5 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-[var(--loom-text)]">
-                  {dateLabel(batch.createdAt)} · {batch.items.length.toLocaleString()} {batch.items.length === 1 ? 'file' : 'files'}
-                  <span className="text-[var(--loom-muted)]">{batch.restoredAt ? ' · put back' : batch.items.some((item) => item.error) ? ' · needs attention' : batch.expiresAt <= Date.now() ? ' · retention ended' : ` · kept until ${dateLabel(batch.expiresAt)}`} </span>
-                </p>
-                <span className="flex shrink-0 items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setOpen(open === batch.id ? null : batch.id)}>
-                    {open === batch.id ? 'Hide files' : 'Show files'}
+        <SettingsDisclosure
+          title="Cleanup history"
+          description={latest
+            ? `Last cleanup ${dateLabel(latest.createdAt)}: ${latest.items.length.toLocaleString()} ${latest.items.length === 1 ? 'file' : 'files'} moved aside.`
+            : 'Everything has been put back.'}
+          summary={batches.length}
+        >
+          <div className="max-h-[45vh] overflow-y-auto overscroll-contain">
+            {batches.map((batch) => (
+              <SettingsDisclosure
+                key={batch.id}
+                title={`${dateLabel(batch.createdAt)} · ${batch.items.length.toLocaleString()} ${batch.items.length === 1 ? 'file' : 'files'}`}
+                description={batch.restoredAt ? 'Put back' : batch.items.some((item) => item.error) ? 'Needs attention' : batch.expiresAt <= Date.now() ? 'Retention ended' : `Kept until ${dateLabel(batch.expiresAt)}`}
+                actions={!batch.restoredAt ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => void restore(batch)} disabled={disabled || busy} className="gap-1.5">
+                    <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Put back
                   </Button>
-                  {!batch.restoredAt ? (
-                    <Button type="button" variant="outline" size="sm" onClick={() => void restore(batch)} disabled={disabled || busy} className="gap-1.5">
-                      <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Put back
-                    </Button>
-                  ) : null}
-                </span>
-              </div>
-              {open === batch.id ? (
-                <ul className="mt-2 space-y-1">
+                ) : null}
+              >
+                <SettingsList label="Files in this cleanup" maxHeight="max-h-60">
                   {batch.items.map((item) => (
-                    <li key={`${item.folder}/${item.name}`} className="min-w-0">
-                      <span className="block break-all text-[var(--loom-text)]">{item.name}</span>
-                      <span className="block break-all text-[var(--loom-faint)]">{item.reason} · {item.folder}{item.state ? ` · ${item.state}` : ''}{item.error ? ` · ${item.error}` : ''}</span>
-                    </li>
+                    <SettingsDetailItem key={`${item.folder}/${item.name}`} title={item.name} detail={item.folder} reason={`${item.reason}${item.state ? ` · ${item.state}` : ''}${item.error ? ` · ${item.error}` : ''}`} />
                   ))}
-                </ul>
-              ) : null}
-            </div>
-          ))}
-        </div>
+                </SettingsList>
+              </SettingsDisclosure>
+            ))}
+          </div>
+        </SettingsDisclosure>
       ) : null}
-      {status ? <p className="text-xs text-[var(--loom-muted)]">{status}</p> : null}
-      {error ? <p role="alert" className="text-xs text-red-200">{error}</p> : null}
-    </div>
+    </>
   );
 }

@@ -85,6 +85,7 @@ import type {
   StreamUrlResult,
   StremioStreamRequest,
   StremioStreamResult,
+  StremioSubtitleListResult,
   TranscodeOptions,
   TranscodeSession,
   UnifiedDesktopServerState,
@@ -247,6 +248,9 @@ export interface IpcContract {
   'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
   'plugins:stremio:meta-item': { args: [request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
   'plugins:stremio:streams': { args: [addonId: string, request: StremioStreamRequest]; result: StremioPluginIpcResult<StremioStreamResult> };
+  'plugins:stremio:subtitles': { args: [addonId: string, request: StremioStreamRequest]; result: StremioPluginIpcResult<StremioSubtitleListResult> };
+  'plugins:stremio:subtitle-download': { args: [token: string]; result: StremioPluginIpcResult<{ text: string }> };
+  'plugins:stremio:item-key': { args: [type: 'movie' | 'series', providerId: string]; result: StremioPluginIpcResult<string> };
   'plugins:stremio:configuration': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginConfigurationState> };
   'plugins:stremio:save-configuration': { args: [addonId: string, values: Record<string, unknown>]; result: StremioPluginIpcResult<StremioPluginConfigurationState> };
   'plugins:stremio:audit': { args: [addonId: string, limit?: number]; result: StremioPluginIpcResult<readonly StremioPluginAuditEntry[]> };

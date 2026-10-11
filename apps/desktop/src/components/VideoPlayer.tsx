@@ -23,7 +23,7 @@ import {
 } from '@/lib/desktopApi';
 import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
 import { isIptvPlaybackReference } from '../shared/iptvPlayback.ts';
-import { parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
+import { isTrustedVideoPageUrl, parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
 import { cleanEpisodeTitleForDisplay, looksLikeGenericEpisodeTitle } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
@@ -101,8 +101,9 @@ import PlayerControlBar from './VideoPlayer/PlayerControlBar';
 import PlayerEpisodePanel from './VideoPlayer/PlayerEpisodePanel';
 import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
 import PlayerSettingsPanel from './VideoPlayer/PlayerSettingsPanel';
-import OpenSubtitlesV3Panel from './VideoPlayer/OpenSubtitlesV3Panel';
-import type { OnlineSubtitle, SubtitleVideo } from '../lib/openSubtitlesV3';
+import OpenSubtitlesV3Panel, { type PanelSubtitle } from './VideoPlayer/OpenSubtitlesV3Panel';
+import { findAddonSubtitles, type AddonSubtitleOption } from '../lib/addonPlayback';
+import type { SubtitleVideo } from '../lib/openSubtitlesV3';
 import { hasSubtitleImdbId, resolveOnlineSubtitleVideo } from '../lib/subtitleVideoResolver';
 import { cachedDesktopRead } from '@/lib/queryClient';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
@@ -205,6 +206,8 @@ export default function VideoPlayer({
   currentEpisode = 1,
   startPosition,
   isLiveStream = false,
+  onlineSubtitleVideo,
+  addonSubtitles,
   onPlayLiveChannel,
   onClose,
   onEpisodeChange,
@@ -496,7 +499,7 @@ export default function VideoPlayer({
   const onlinePlaybackKey = JSON.stringify([filePath, currentSeason, currentEpisode, playbackRequestId, activeProfile?.id]);
   const onlinePlaybackKeyRef = useRef(onlinePlaybackKey);
   onlinePlaybackKeyRef.current = onlinePlaybackKey;
-  const [onlineCaption, setOnlineCaption] = useState<{ key: string; subtitle: OnlineSubtitle; cues: SubtitleCue[] } | null>(null);
+  const [onlineCaption, setOnlineCaption] = useState<{ key: string; provider: 'opensubtitles' | 'addon'; subtitle: PanelSubtitle; cues: SubtitleCue[] } | null>(null);
   const [onlineSubtitleDelay, setOnlineSubtitleDelay] = useState(0);
   const [subtitleSelectionRevision, setSubtitleSelectionRevision] = useState(0);
   const subtitleSelectionRevisionRef = useRef(0);
@@ -1973,17 +1976,11 @@ export default function VideoPlayer({
 
     const externalRef = parseExternalPlaybackReference(filePath);
     if (externalRef) {
-      const isYoutube = (() => {
-        try {
-          const host = new URL(externalRef.url).hostname.toLowerCase();
-          return /youtube-nocookie\.com|youtube\.com|youtu\.be|vimeo\.com/i.test(host);
-        } catch {
-          return false;
-        }
-      })();
-      const isHls = /\.m3u8(\?|$)/i.test(externalRef.url);
-      const isDirectVideo = isHls || /\.mp4(\?|$)/i.test(externalRef.url) || /\.webm(\?|$)/i.test(externalRef.url) || /\.mov(\?|$)/i.test(externalRef.url);
-      if (isYoutube || !isDirectVideo) {
+      const isYoutube = isTrustedVideoPageUrl(externalRef.url);
+      // Only known video-site pages are framed. Every other external reference
+      // is a validated media URL; many have no file extension, so treat them as
+      // media rather than loading an arbitrary provider page in a frame.
+      if (isYoutube) {
         setExternalIframeUrl(externalRef.url);
         setNativePlaybackActive(false);
         setNativeEngineKind(null);
@@ -2020,7 +2017,8 @@ export default function VideoPlayer({
         const isIptvStream = isIptvPlaybackReference(filePath);
         const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath)
           && !isMediaProtocolUrl(filePath)
-          && !isIptvStream;
+          && !isIptvStream
+          && !externalRef;
         const preferencesPromise = trackPreferencesLoadRef.current.then((loadedPreferences) => {
           // Preserve a selection made during this player session if the saved
           // preference request finishes after playback has already started.
@@ -2051,7 +2049,11 @@ export default function VideoPlayer({
           ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
           : isIptvStream
             ? [LibVlcPlaybackEngine]
-            : [];
+            // An add-on's direct media (MKV, HEVC, …) needs the native engines;
+            // the main process revalidates the URL before either opens it.
+            : externalRef
+              ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
+              : [];
         for (const NativePlaybackEngine of nativeEngineFactories) {
           const engine = new NativePlaybackEngine(handleNativePlaybackState);
           playbackEngineRef.current = engine;
@@ -3972,6 +3974,20 @@ export default function VideoPlayer({
       setMarkerSaving(false);
     }
   };
+  // One online caption shows at a time, from OpenSubtitles or an add-on.
+  const applyOnlineCaption = async (provider: 'opensubtitles' | 'addon', subtitle: PanelSubtitle, text: string, signal: AbortSignal) => {
+    const cues = parseVttCues(text);
+    if (!cues.length) throw new Error('This subtitle has no readable timed captions. Choose another result.');
+    if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
+    const engine = playbackEngineRef.current;
+    // Only turn off a built-in track that is showing; LibVLC treats
+    // turning off subtitles that are already off as an error.
+    if (engine && selectedSubtitleTrackIndexRef.current !== -1) await engine.selectSubtitle(null);
+    if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
+    selectSubtitleTrack(-1, true);
+    setOnlineSubtitleDelay(0);
+    setOnlineCaption({ key: onlinePlaybackKey, provider, subtitle, cues });
+  };
   return (
     <div
       className={`loom-player-root fixed inset-0 z-[90] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''}`}
@@ -4403,11 +4419,37 @@ export default function VideoPlayer({
             selectSubtitleTrack={selectSubtitleTrack}
             onlineSubtitles={isLiveStream ? undefined : (
               <div className="space-y-2">
+                {addonSubtitles && (
+                  <OpenSubtitlesV3Panel<AddonSubtitleOption>
+                    key={`addon:${onlinePlaybackKey}`}
+                    provider={{
+                      title: 'Add-on subtitles',
+                      label: 'Your add-ons',
+                      intro: 'Lists subtitles from this stream and your subtitle add-ons. Only the one you pick is downloaded.',
+                      find: async (signal) => {
+                        const { subtitles, errors } = await findAddonSubtitles(addonSubtitles);
+                        signal.throwIfAborted();
+                        if (!subtitles.length && errors.length) throw new Error(errors.join(' '));
+                        return subtitles;
+                      },
+                      // The host downloads by token, rechecking profile access and the add-on's revision.
+                      download: async (subtitle, signal) => {
+                        const text = await desktopApi.downloadStremioSubtitle(subtitle.token);
+                        signal.throwIfAborted();
+                        return text;
+                      },
+                    }}
+                    selectedId={activeOnlineCaption?.provider === 'addon' ? activeOnlineCaption.subtitle.id : undefined}
+                    timing={activeOnlineCaption?.provider === 'addon' ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
+                    onSelect={(subtitle, text, signal) => applyOnlineCaption('addon', subtitle, text, signal)}
+                  />
+                )}
                 <OpenSubtitlesV3Panel
                   key={onlinePlaybackKey}
-                  selectedId={activeOnlineCaption?.subtitle.id}
-                  timing={activeOnlineCaption ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
+                  selectedId={activeOnlineCaption?.provider === 'opensubtitles' ? activeOnlineCaption.subtitle.id : undefined}
+                  timing={activeOnlineCaption?.provider === 'opensubtitles' ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
                   resolveVideo={async (signal): Promise<SubtitleVideo> => {
+                    if (onlineSubtitleVideo) return onlineSubtitleVideo;
                     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
                     let item = items.find(candidate => candidate.id === mediaId)
                       || items.find(candidate => candidate.filePath === filePath || candidate.episodeFiles?.some(episode => episode.filePath === filePath));
@@ -4426,19 +4468,7 @@ export default function VideoPlayer({
                     signal.throwIfAborted();
                     return { ...resolved, season: currentSeason, episode: currentEpisode };
                   }}
-                  onSelect={async (subtitle, text, signal) => {
-                    const cues = parseVttCues(text);
-                    if (!cues.length) throw new Error('This subtitle has no readable timed captions. Choose another result.');
-                    if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
-                    const engine = playbackEngineRef.current;
-                    // Only turn off a built-in track that is showing; LibVLC treats
-                    // turning off subtitles that are already off as an error.
-                    if (engine && selectedSubtitleTrackIndexRef.current !== -1) await engine.selectSubtitle(null);
-                    if (signal.aborted || onlinePlaybackKeyRef.current !== onlinePlaybackKey || subtitleSelectionRevisionRef.current !== subtitleSelectionRevision) return;
-                    selectSubtitleTrack(-1, true);
-                    setOnlineSubtitleDelay(0);
-                    setOnlineCaption({ key: onlinePlaybackKey, subtitle, cues });
-                  }}
+                  onSelect={(subtitle, text, signal) => applyOnlineCaption('opensubtitles', subtitle, text, signal)}
                 />
               </div>
             )}

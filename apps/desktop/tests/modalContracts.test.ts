@@ -50,7 +50,9 @@ test('settings and player dialogs expose descriptions for their accessible names
   const artwork = source('components/ArtworkEditorControls.tsx');
   const marker = source('components/VideoPlayer/PlayerMarkerEditor.tsx');
 
-  assert.match(settingsProfiles, /DialogDescription/);
+  const settingsDialog = source('components/settings/SettingsDialog.tsx');
+  assert.match(settingsDialog, /DialogDescription/);
+  assert.match(settingsProfiles, /<SettingsDialog[\s\S]*?description=/);
   assert.match(confirm, /DialogDescription/);
   assert.match(artwork, /DialogDescription/);
   assert.match(marker, /aria-describedby="loom-marker-editor-description"/);

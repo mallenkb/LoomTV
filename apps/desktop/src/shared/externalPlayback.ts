@@ -47,3 +47,21 @@ export function parseExternalPlaybackReference(value: string): ExternalPlaybackR
     return null;
   }
 }
+
+/** Video-site pages that may be framed. Matching is exact; no other host is framed. */
+const TRUSTED_VIDEO_PAGE_HOSTS = new Set([
+  'youtube.com', 'www.youtube.com', 'm.youtube.com',
+  'youtube-nocookie.com', 'www.youtube-nocookie.com', 'youtu.be',
+  'vimeo.com', 'www.vimeo.com', 'player.vimeo.com',
+]);
+
+/** True only for an HTTPS page on an exact YouTube or Vimeo host. */
+export function isTrustedVideoPageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port
+      && TRUSTED_VIDEO_PAGE_HOSTS.has(url.hostname.toLowerCase().replace(/\.$/, ''));
+  } catch {
+    return false;
+  }
+}

@@ -11,6 +11,7 @@ import { buildNetworkStatus, ffmpegAvailability } from '../src/main/ipcHandlerPo
 const normalizedSource = (relativePath: string) =>
   readFileSync(new URL(relativePath, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const settingsPageSource = () => normalizedSource('../src/pages/Settings.tsx');
+const settingsControllerSource = () => normalizedSource('../src/pages/useSettingsController.tsx');
 const settingsTabsSource = () => normalizedSource('../src/pages/SettingsTabs.tsx');
 const stylesheetSource = () => normalizedSource('../src/index.css');
 
@@ -30,7 +31,7 @@ test('settings tab selection is handled as an urgent UI update', () => {
 });
 
 test('settings page defers Electron-only status probes until their tabs are active', () => {
-  const source = settingsPageSource();
+  const source = settingsControllerSource();
   const settingsLoadIndex = source.indexOf('desktopApi.getSettings()');
   const mountEffectStart = source.lastIndexOf('useEffect', settingsLoadIndex);
   const mountEffectEnd = source.indexOf('\n\n  const analysisIsActive', settingsLoadIndex);

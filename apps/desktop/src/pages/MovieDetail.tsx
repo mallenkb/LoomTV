@@ -21,6 +21,12 @@ import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import DetailHeroActions from '@/components/DetailHeroActions';
+import AddonSourcePicker, { type AddonStreamSelection } from '@/components/AddonSourcePicker';
+import {
+  addonPlaybackOptions, addonPlaybackTarget, isSeriesLikeType, loadAddonMeta, requireUsableSource,
+  type AddonStreamPlayer, type AddonVideoTarget,
+} from '@/lib/addonPlayback';
+import { ARCHIVE_ADDON_ID, resolveArchiveStream } from '@/lib/archiveCatalog';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKey } from '@/lib/watched';
 
 type MovieDetailRouteState = {
@@ -43,6 +49,8 @@ interface MovieDetailProps {
     mediaId?: string,
     artwork?: Pick<RouteArtworkState, 'logo' | 'logoCandidates' | 'poster' | 'posterCandidates' | 'backdrop' | 'backdropCandidates'>,
   ) => void;
+  /** Plays a stream chosen from an add-on source. */
+  onPlayStream?: AddonStreamPlayer;
 }
 
 const CUSTOM_MOVIE_ARTWORK_KEY = 'loomtvCustomMovieArtwork';
@@ -99,7 +107,8 @@ function normalizeRouteYear(releaseInfo?: string, released?: string): number {
 }
 
 function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | undefined): MediaItem | null {
-  if (!item || item.type !== 'movie') return null;
+  // Add-on types without episodes (movie, tv, other, …) open here.
+  if (!item || isSeriesLikeType(item.type)) return null;
   const poster = item.artwork?.poster || item.posterUrl || '';
   const backdrop = item.artwork?.background || item.backgroundUrl || poster;
   return {
@@ -127,7 +136,7 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
     filePath: '',
     providerIds: item.tmdbId ? { tmdbId: item.tmdbId } : undefined,
     subtitles: [],
-    posterCandidates: poster ? [poster] : [],
+    posterCandidates: [poster, item.posterFallbackUrl || ''].filter(Boolean),
     backdropCandidates: backdrop ? [backdrop] : [],
     logoCandidates: item.artwork?.logo || item.logoUrl ? [item.artwork?.logo || item.logoUrl || ''] : [],
   };
@@ -147,7 +156,7 @@ function mediaBelongsToFolders(filePath: string | undefined, folders: readonly s
   });
 }
 
-export default function MovieDetail({ onPlay }: MovieDetailProps) {
+export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) {
   const { id: mediaId } = useParams({ from: '/movie/$id' });
   const location = useLocation();
   const navigate = useNavigate();
@@ -170,6 +179,10 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const metadataFetchKeyRef = useRef('');
+  const playbackRequest = useRef(0);
+  useEffect(() => () => { playbackRequest.current++; }, [mediaId]);
+  const [addonItem, setAddonItem] = useState<StremioPluginCatalogItem | null>(null);
+  const [sourceTarget, setSourceTarget] = useState<AddonVideoTarget | null>(null);
   const routeState = (location.state as MovieDetailRouteState | null) || null;
   // The Explore cache is a remote-provider detail bridge.  Never consult it
   // for an ordinary library route: local IDs are opaque and can legitimately
@@ -195,12 +208,25 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     },
     [isRemoteDetailRoute, mediaId, routeState?.stremioCatalogItem],
   );
+  // Full add-on metadata replaces the catalog summary once it loads.
   const routeFallbackMovie = useMemo(
-    () => mediaFromStremioCatalogItem(routeCatalogItem || undefined),
-    [routeCatalogItem],
+    () => mediaFromStremioCatalogItem((addonItem && addonItem.id === routeCatalogItem?.id ? addonItem : null) || routeCatalogItem || undefined),
+    [addonItem, routeCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioMovie, setIsRemoteStremioMovie] = useState(Boolean(routeState?.stremioCatalogItem));
+
+  // Selecting a title loads its metadata. Streams are requested only at Play.
+  useEffect(() => {
+    setAddonItem(routeCatalogItem);
+    setSourceTarget(null);
+    if (!routeCatalogItem?.providerId) return;
+    let cancelled = false;
+    void loadAddonMeta(routeCatalogItem).then((item) => {
+      if (!cancelled) setAddonItem(item);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [routeCatalogItem]);
 
   useEffect(() => {
     if (!isRemoteDetailRoute) return;
@@ -422,13 +448,43 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const progressCopy = progress.duration > 0
     ? `${formatShortMinutes(progress.position)} of ${formatShortMinutes(progress.duration)}`
     : null;
-  const canPlayMovie = Boolean(onPlay && movie.filePath);
+  const archiveIdentifier = routeCatalogItem?.source === 'archive.org' && routeCatalogItem.id.startsWith('archive:')
+    ? routeCatalogItem.id.slice('archive:'.length) : '';
+  const playTarget = addonPlaybackTarget(addonItem);
+  // A playable identity always gets Play, so "no sources" is explained in the picker.
+  const canPlayAddon = Boolean(onPlayStream && (playTarget || archiveIdentifier));
+  const canPlayMovie = Boolean(onPlay && movie.filePath) || canPlayAddon;
   void progressTick;
 
   const handlePlay = async () => {
-    if (canPlayMovie && onPlay) {
-      onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id, playerArtwork);
+    setLibraryActionError('');
+    if (archiveIdentifier && onPlayStream) {
+      // Archive.org lists a playable file only in the item record, so it is
+      // read at Play rather than while browsing.
+      const request = ++playbackRequest.current;
+      const scope = JSON.stringify(queryScope());
+      try {
+        await requireUsableSource(ARCHIVE_ADDON_ID);
+        const url = await resolveArchiveStream(archiveIdentifier);
+        if (request !== playbackRequest.current || scope !== JSON.stringify(queryScope())) return;
+        onPlayStream(url, movie.title, playerArtwork);
+      } catch (failure) {
+        if (request === playbackRequest.current) setLibraryActionError(failure instanceof Error ? failure.message : 'This movie could not be opened.');
+      }
+      return;
     }
+    if (playTarget && onPlayStream) {
+      setSourceTarget(playTarget);
+      return;
+    }
+    if (canPlayMovie && onPlay) {
+      onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, isRemoteContent ? undefined : movie.id, playerArtwork);
+    }
+  };
+
+  const handleSourceChosen = ({ target, url, stream, addonName }: AddonStreamSelection) => {
+    setSourceTarget(null);
+    onPlayStream?.(url, movie.title, playerArtwork, addonPlaybackOptions(target, stream, addonName));
   };
 
   const handleBack = () => {
@@ -561,6 +617,16 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
       <div className="loom-detail-body loom-frame">
       <div className="page-bottom-safe-lg p-8">
+        {archiveIdentifier && (
+          <a
+            href={`https://archive.org/details/${encodeURIComponent(archiveIdentifier)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mb-6 inline-block text-[var(--loom-accent)] underline"
+          >
+            View source and rights information
+          </a>
+        )}
         {movie.summary && (
           <section className="loom-detail-summary mb-8">
             <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
@@ -633,6 +699,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         trailerUrl={movie.trailerUrl}
         onClose={() => setTrailerOpen(false)}
       />
+      <AddonSourcePicker target={sourceTarget} onClose={() => setSourceTarget(null)} onPlay={handleSourceChosen} />
     </div>
   );
 }

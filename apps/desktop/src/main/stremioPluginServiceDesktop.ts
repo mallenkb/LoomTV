@@ -24,6 +24,7 @@ import {
   StremioPluginServiceError,
   type StremioPluginService,
 } from './stremioPluginService.ts';
+import { EMBEDDED_STREMIO_ADDON_IDS } from './stremioPluginWire.ts';
 
 const OUTER_PROVIDER_RESPONSE_LIMIT = 4 * 1024 * 1024;
 
@@ -87,6 +88,7 @@ export function createDesktopStremioPluginService(
     recordAudit: recordStremioPluginAudit,
     listAudit: listStremioPluginAudit,
     fetchImpl: options.fetchImpl || desktopSafeFetch,
+    embeddedAddonIds: EMBEDDED_STREMIO_ADDON_IDS,
     maxConcurrentProviderRequests: options.maxConcurrentProviderRequests,
     maxQueuedProviderRequests: options.maxQueuedProviderRequests,
     maxConcurrentProfileAddonRequests: options.maxConcurrentProfileAddonRequests,

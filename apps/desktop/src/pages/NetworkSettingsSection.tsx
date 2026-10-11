@@ -1,10 +1,8 @@
-import { AnimatePresence, motion } from 'motion/react';
-import { CheckCircle2, Copy, ExternalLink, Key, RefreshCw, ShieldCheck, Wifi } from 'lucide-react';
+import { Copy, ExternalLink, RefreshCw, Wifi } from 'lucide-react';
 import type React from 'react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import SharedListHighlight from '@/components/SharedListHighlight';
+import { SettingsDisclosure, SettingsGroup, SettingsNote, SettingsPageHeader, SettingsRow, SettingsSwitch } from '@/components/settings/SettingsLayout';
 import PinDigitInput from '@/components/profiles/PinDigitInput';
 import { desktopApi } from '@/lib/desktopApi';
 import { useUnifiedDesktopServer } from '@/lib/unifiedServer';
@@ -72,7 +70,6 @@ export default function NetworkSettingsSection({
   sharedLibrarySections,
   disconnectRemoteLibrary,
 }: NetworkSettingsSectionProps) {
-  const [showAdvancedSharing, setShowAdvancedSharing] = useState(false);
   const { server: unifiedServer, refresh: refreshUnifiedServer } = useUnifiedDesktopServer();
   const [isOpeningAdmin, setIsOpeningAdmin] = useState(false);
   const [adminMessage, setAdminMessage] = useState('');
@@ -93,319 +90,168 @@ export default function NetworkSettingsSection({
     }
   };
 
+  const pairedDevices = localNetworkStatus?.pairedDevices || [];
+  const copyButton = (value: string | null | undefined, label: string) => (
+    <button
+      type="button"
+      onClick={() => copyNetworkValue(value)}
+      disabled={!value}
+      className="loom-control-button grid h-9 w-9 shrink-0 place-items-center rounded-[var(--loom-control-radius)] text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:opacity-35"
+      aria-label={label}
+      title={label}
+    >
+      <Copy className="h-4 w-4" />
+    </button>
+  );
+
   return (
-    <>
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <Wifi className="h-4 w-4 text-[var(--loom-accent)]" />
-            Local Network Sharing
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Watch this library on Loom mobile over your home network. Nearby Loom devices connect automatically by default.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="settings-network-card flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4">
-            <div>
-              <p className="text-sm font-semibold text-white">
-                {isTogglingNetworkSharing ? 'Updating sharing...' : isNetworkSharingOn ? 'Sharing is on' : 'Sharing is off'}
-              </p>
-              <p className="text-xs text-[var(--loom-muted)]">
-                {isTogglingNetworkSharing
-                  ? 'Preparing automatic local connection.'
-                  : isNetworkSharingOn
-                  ? requireApproval ? 'New devices wait for your approval.' : 'Nearby Loom devices connect automatically.'
-                  : 'Turn on to connect nearby Loom devices.'}
-              </p>
-            </div>
-            <Button
-              type="button"
-              onClick={() => setLocalNetworkSharing(!isNetworkSharingOn)}
-              disabled={isTogglingNetworkSharing}
-              variant={isNetworkSharingOn ? 'outline' : 'default'}
-              className={`gap-2 ${isNetworkSharingOn ? 'settings-destructive-button border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50' : ''}`}
+    <div>
+      <SettingsPageHeader title="Devices and network" description="Share this library with phones and other computers on your network, or connect to another Loom." />
+      <SettingsGroup title="Share this library">
+        <SettingsRow
+          title="Local network sharing"
+          description={isTogglingNetworkSharing
+            ? 'Updating sharing…'
+            : isNetworkSharingOn
+              ? 'Loom on your phone, tablet, or another computer can play this library over your home network.'
+              : 'Turn on to watch this library from other Loom devices at home.'}
+        >
+          {isTogglingNetworkSharing ? <RefreshCw className="h-4 w-4 animate-spin text-[var(--loom-muted)]" aria-hidden="true" /> : null}
+          <SettingsSwitch label="Local network sharing" checked={isNetworkSharingOn} disabled={isTogglingNetworkSharing} onChange={setLocalNetworkSharing} />
+        </SettingsRow>
+
+        {isNetworkSharingOn ? (
+          <>
+            <SettingsRow title="Require approval for new devices" description={requireApproval ? 'New devices wait until you approve them.' : 'Nearby Loom devices connect automatically.'}>
+              <SettingsSwitch label="Require approval for new devices" checked={requireApproval} onChange={setRequireApproval} />
+            </SettingsRow>
+            {localNetworkStatus?.addresses?.length ? (
+              <SettingsRow title="Connect a device" description="Enter this address and PIN in Loom on the other device if it is not found automatically.">
+                <span className="flex items-center gap-1 rounded-lg bg-[var(--loom-bg)] py-1 pl-3 pr-1">
+                  <code className="max-w-56 truncate text-sm text-[var(--loom-text)]">{localNetworkStatus?.baseUrl || 'Waiting…'}</code>
+                  {copyButton(localNetworkStatus?.baseUrl, 'Copy desktop address')}
+                </span>
+                <span className="flex items-center gap-1 rounded-lg bg-[var(--loom-bg)] py-1 pl-3 pr-1">
+                  <span className="text-xs text-[var(--loom-muted)]">PIN</span>
+                  <code className="text-sm font-semibold tracking-wider text-[var(--loom-text)]">{localNetworkStatus?.token || '······'}</code>
+                  {copyButton(localNetworkStatus?.token, 'Copy pairing PIN')}
+                </span>
+              </SettingsRow>
+            ) : (
+              <SettingsNote tone="warning">Connect this computer to Wi-Fi or Ethernet so other devices can find it.</SettingsNote>
+            )}
+            {pairedDevices.length ? (
+              <SettingsDisclosure title="Connected devices" summary={pairedDevices.length.toLocaleString()}>
+                <ul className="divide-y divide-[var(--loom-settings-divider)]">
+                  {pairedDevices.map((device) => (
+                    <li key={device.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-[var(--loom-text)]">{device.name}</p>
+                        <p className="truncate text-xs text-[var(--loom-muted)]">
+                          {device.lastAddress ? `Connected · ${device.lastAddress}` : `Last seen ${new Date(device.lastSeenAt).toLocaleString()}`}
+                        </p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={() => revokePairedDevice(device.id)} className="settings-destructive-text hover:bg-red-500/10">
+                        Revoke
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </SettingsDisclosure>
+            ) : null}
+            {localNetworkStatus?.libraryUrl ? (
+              <SettingsDisclosure title="Technical details" description="Library URL and network addresses.">
+                <div className="space-y-2 text-xs text-[var(--loom-muted)]">
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate text-[var(--loom-text)]">{localNetworkStatus.libraryUrl}</code>
+                    {copyButton(localNetworkStatus.libraryUrl, 'Copy network library URL')}
+                  </div>
+                  {localNetworkStatus.addresses?.length ? <p>Network: {currentNetworkName} · Addresses: {localNetworkStatus.addresses.join(', ')}</p> : null}
+                </div>
+              </SettingsDisclosure>
+            ) : null}
+          </>
+        ) : null}
+        {networkStatusMessage ? <SettingsNote role="status">{networkStatusMessage}</SettingsNote> : null}
+      </SettingsGroup>
+
+      {unifiedServer.enabled ? (
+        <SettingsGroup title="Media server">
+          {unifiedServer.ready ? (
+            <SettingsRow
+              title={unifiedServer.ownerConfigured ? 'Server is running' : 'Server is running with no administrator yet'}
+              description="Manage accounts and libraries in your browser."
             >
-              {isTogglingNetworkSharing ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <Wifi className="h-4 w-4" />
-              )}
-              {isTogglingNetworkSharing ? 'Updating...' : isNetworkSharingOn ? 'Turn Off' : 'Turn On'}
-            </Button>
-          </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => void openServerAdmin()} disabled={isOpeningAdmin} className="gap-1.5">
+                {isOpeningAdmin ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+                {isOpeningAdmin ? 'Opening…' : 'Open admin page'}
+              </Button>
+            </SettingsRow>
+          ) : (
+            <SettingsNote role={unifiedServer.error ? 'alert' : 'status'} tone={unifiedServer.error ? 'error' : 'muted'}>
+              {unifiedServer.error ? `The Loom Media Server did not start. ${unifiedServer.error}` : 'Starting the Loom Media Server…'}
+            </SettingsNote>
+          )}
+          {adminMessage ? <SettingsNote role="alert" tone="error">{adminMessage}</SettingsNote> : null}
+        </SettingsGroup>
+      ) : null}
 
-          <AnimatePresence initial={false}>
-            {isNetworkSharingOn && (
-              <motion.div
-                className="space-y-5"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              >
-                <div className="settings-network-card flex items-center justify-between gap-4 rounded-lg bg-[var(--loom-surface-2)] p-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-white">Require approval for new devices</p>
-                    <p className="text-xs text-[var(--loom-muted)]">Optional. Off keeps local connection automatic.</p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={requireApproval}
-                    onClick={() => setRequireApproval(!requireApproval)}
-                    className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${requireApproval ? 'bg-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)]'}`}
-                  >
-                    <span className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${requireApproval ? 'translate-x-6' : 'translate-x-1'}`} />
-                    <span className="sr-only">Require approval for new devices</span>
-                  </button>
-                </div>
-
-                <div className="settings-network-card rounded-xl bg-[var(--loom-accent)]/10 p-4">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
-                    <CheckCircle2 className="h-4 w-4 text-[var(--loom-accent)]" />
-                    Connect a phone or tablet
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-[1.3fr_.7fr]">
-                    <div className="settings-network-card rounded-lg bg-[var(--loom-bg)] p-3">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Desktop address</p>
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 truncate text-base font-semibold text-white">
-                          {localNetworkStatus?.baseUrl || 'Waiting for network address'}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => copyNetworkValue(localNetworkStatus?.baseUrl)}
-                          disabled={!localNetworkStatus?.baseUrl}
-                          className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
-                          aria-label="Copy desktop address"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="settings-network-card rounded-lg bg-[var(--loom-bg)] p-3">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">One-time pairing PIN</p>
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 truncate text-sm font-bold text-white">
-                          {localNetworkStatus?.token || 'Waiting for pairing PIN'}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => copyNetworkValue(localNetworkStatus?.token)}
-                          disabled={!localNetworkStatus?.token}
-                          className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
-                          aria-label="Copy share code"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-xs text-[var(--loom-muted)]">
-                    {requireApproval
-                      ? 'New devices ask for approval. The PIN remains available as a manual fallback.'
-                      : 'Discovered Loom devices connect automatically. The PIN remains available as a manual fallback.'}
-                  </p>
-                </div>
-
-                {!localNetworkStatus?.addresses?.length && (
-                  <p className="text-xs text-[var(--loom-faint)]">
-                    Connect this device to Wi-Fi or Ethernet to make it visible to other devices.
-                  </p>
-                )}
-
-                <div className="settings-panel-soft rounded-lg p-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">
-                    {(localNetworkStatus?.pairedDevices?.length || 0) === 1 ? 'Connected Device' : 'Connected Devices'}
-                  </p>
-                  {(localNetworkStatus?.pairedDevices?.length || 0) === 0 ? (
-                    <p className="text-xs text-[var(--loom-faint)]">No connected devices.</p>
-                  ) : (
-                    <ul className="space-y-1.5">
-                      {localNetworkStatus?.pairedDevices?.map((device) => {
-                        const lastSeenLabel = new Date(device.lastSeenAt).toLocaleString();
-                        return (
-                          <li key={device.id} className="settings-network-card flex items-center justify-between rounded-md bg-[var(--loom-surface-2)] px-2 py-1.5">
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-semibold text-white">{device.name}</p>
-                              <p className="truncate text-[10px] text-[var(--loom-faint)]">
-                                {device.lastAddress ? `Connected · ${device.lastAddress}` : `Last seen ${lastSeenLabel}`}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => revokePairedDevice(device.id)}
-                              className="settings-destructive-text ml-3 shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors hover:bg-red-500/10"
-                            >
-                              Revoke
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-
+      <SettingsGroup title="Watch another library">
+        {sharedLibrarySnapshot ? (
+          <SettingsRow
+            title={`Connected to ${sharedLibrarySnapshot.hostDeviceName || sharedLibrarySnapshot.baseUrl}`}
+            description={sharedLibrarySections.map((section) => `${section.items.length.toLocaleString()} ${section.title.toLowerCase()}`).join(' · ')}
+          >
+            <Button type="button" variant="outline" size="sm" onClick={disconnectRemoteLibrary}>Disconnect</Button>
+          </SettingsRow>
+        ) : (
+          <>
+            <SettingsRow
+              title="Nearby devices"
+              description={isScanningPeers ? 'Looking for Loom devices…' : discoveredPeers.length ? `On ${currentNetworkName}. Pick one, then enter its PIN.` : `No other Loom devices found on ${currentNetworkName}. Turn on sharing on the other device.`}
+            >
+              <Button type="button" variant="outline" size="sm" onClick={scanForPeers} disabled={isScanningPeers} className="gap-1.5">
+                <RefreshCw className={`h-3.5 w-3.5 ${isScanningPeers ? 'animate-spin' : ''}`} aria-hidden="true" />
+                Rescan
+              </Button>
+            </SettingsRow>
+            {discoveredPeers.map((peer) => {
+              const peerBaseUrl = `https://${peer.host}:${peer.port}`;
+              const isSelected = remoteLibraryAddress === peerBaseUrl;
+              return (
                 <button
+                  key={peer.deviceId}
                   type="button"
-                  onClick={() => setShowAdvancedSharing((current) => !current)}
-                  className="rounded-md text-xs font-medium text-[var(--loom-accent)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-surface)]"
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    setRemoteLibraryAddress(peerBaseUrl);
+                    setRemoteLibraryFingerprint(peer.certFingerprint);
+                    setShowManualNetworkAddress(true);
+                  }}
+                  className={`settings-row settings-row-button flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-[var(--loom-surface-3)]/50 ${isSelected ? 'bg-[var(--loom-active-bg)]' : ''}`}
                 >
-                  {showAdvancedSharing ? 'Hide advanced details' : 'Advanced: library URL and addresses'}
+                  <Wifi className={`h-4 w-4 shrink-0 ${isSelected ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-muted)]'}`} aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate font-medium text-[var(--loom-text)]">{peer.deviceName}</span>
+                  <span className="shrink-0 text-xs text-[var(--loom-faint)]">{peer.host}:{peer.port}</span>
                 </button>
-
-                {showAdvancedSharing && (
-                  <div className="space-y-3">
-                    <div className="settings-panel-soft rounded-lg p-3">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Network Library URL</p>
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 truncate text-sm text-white">
-                          {localNetworkStatus?.libraryUrl || 'Turn on sharing to expose the network library'}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => copyNetworkValue(localNetworkStatus?.libraryUrl)}
-                          disabled={!localNetworkStatus?.libraryUrl}
-                          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
-                          aria-label="Copy network library URL"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                    {localNetworkStatus?.addresses?.length ? (
-                      <p className="text-xs text-[var(--loom-faint)]">
-                        Network: {currentNetworkName} · Visible addresses: {localNetworkStatus.addresses.join(', ')}
-                      </p>
-                    ) : null}
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-          {networkStatusMessage && <p className="text-sm text-[var(--loom-muted)]">{networkStatusMessage}</p>}
-        </CardContent>
-      </Card>
-
-      {unifiedServer.enabled && (
-        <Card className="settings-panel">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-white">
-              <ShieldCheck className="h-4 w-4 text-[var(--loom-accent)]" />
-              Server Administration
-            </CardTitle>
-            <CardDescription className="text-[var(--loom-muted)]">
-              Manage accounts and libraries for the Loom Media Server running on this computer. It opens as a separate page in your browser.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {unifiedServer.ready ? (
-              <div className="settings-network-card flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white">
-                    {unifiedServer.ownerConfigured ? 'Server is running' : 'Server is running · no administrator yet'}
-                  </p>
-                  <p className="truncate text-xs text-[var(--loom-muted)]">
-                    {unifiedServer.adminUrl ? `Opens ${unifiedServer.adminUrl}` : 'Opens the admin page in your browser.'}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  onClick={() => void openServerAdmin()}
-                  disabled={isOpeningAdmin}
-                  className="gap-2"
-                >
-                  {isOpeningAdmin ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-                  {isOpeningAdmin ? 'Opening...' : 'Open Admin Page'}
-                </Button>
-              </div>
-            ) : (
-              <div
-                role={unifiedServer.error ? 'alert' : 'status'}
-                className="settings-network-card rounded-lg bg-[var(--loom-surface-2)] p-4"
-              >
-                <p className={`text-sm font-semibold ${unifiedServer.error ? 'text-red-200' : 'text-white'}`}>
-                  {unifiedServer.error ? 'The Loom Media Server did not start' : 'Starting the Loom Media Server...'}
-                </p>
-                {unifiedServer.error && (
-                  <p className="mt-1 text-xs leading-5 text-[var(--loom-muted)]">{unifiedServer.error}</p>
-                )}
-              </div>
-            )}
-            {adminMessage && <p role="alert" className="text-sm text-red-200">{adminMessage}</p>}
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <Key className="h-4 w-4 text-[var(--loom-accent)]" />
-            Connect to Shared Library
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Find another Loom host on this network, enter its 6-digit pairing PIN, and browse without copying files.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="settings-network-card flex items-center gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <span className="settings-status-available grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12">
-              <Wifi className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Current Network</p>
-              <p className="truncate text-sm font-semibold text-white">{currentNetworkName}</p>
-            </div>
-          </div>
-
-          <div className="settings-network-card rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Devices on this network</p>
-              <button
-                type="button"
-                onClick={scanForPeers}
-                disabled={isScanningPeers}
-                className="text-xs font-medium text-[var(--loom-accent)] hover:underline disabled:opacity-50"
-              >
-                {isScanningPeers ? 'Scanning...' : 'Rescan'}
-              </button>
-            </div>
-            {discoveredPeers.length === 0 ? (
-              <p className="text-xs text-[var(--loom-faint)]">
-                {isScanningPeers ? 'Looking for Loom devices...' : 'No other Loom devices found. Make sure sharing is on over there.'}
-              </p>
-            ) : (
-              <SharedListHighlight activeId={remoteLibraryAddress} className="loom-shared-highlight-list space-y-1">
-                {discoveredPeers.map((peer) => {
-                  const peerBaseUrl = `https://${peer.host}:${peer.port}`;
-                  const isSelected = remoteLibraryAddress === peerBaseUrl;
-                  return (
-                    <button
-                      key={peer.deviceId}
-                      type="button"
-                      aria-pressed={isSelected}
-                      onClick={() => {
-                        setRemoteLibraryAddress(peerBaseUrl);
-                        setRemoteLibraryFingerprint(peer.certFingerprint);
-                        setShowManualNetworkAddress(true);
-                      }}
-                      data-shared-highlight-item
-                      data-shared-highlight-id={peerBaseUrl}
-                      className={`relative z-10 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-white'}`}
-                    >
-                      <span className="truncate font-medium">{peer.deviceName}</span>
-                      <span className="ml-3 shrink-0 text-[var(--loom-faint)]">{peer.host}:{peer.port}</span>
-                    </button>
-                  );
-                })}
-              </SharedListHighlight>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[var(--loom-muted)]">Pairing PIN</span>
+              );
+            })}
+            {showManualNetworkAddress ? (
+              <SettingsRow title="Address">
+                <input
+                  type="text"
+                  value={remoteLibraryAddress}
+                  onChange={(event) => {
+                    setRemoteLibraryAddress(event.target.value);
+                    setRemoteLibraryFingerprint('');
+                  }}
+                  placeholder="https://192.168.1.50:3848"
+                  aria-label="Library address"
+                  className="h-9 w-72 min-w-0 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 text-sm text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+                />
+              </SettingsRow>
+            ) : null}
+            <SettingsRow title="Pairing PIN" description="Shown in Settings › Network on the other device.">
               <PinDigitInput
                 value={remoteShareCode}
                 onChange={setRemoteShareCode}
@@ -413,87 +259,30 @@ export default function NetworkSettingsSection({
                 label="Six-digit pairing PIN"
                 digitLabel="Pairing PIN digit"
                 className="gap-1.5"
-                inputClassName="h-10 w-10 rounded-lg bg-[var(--loom-bg)] text-base"
+                inputClassName="h-9 w-9 rounded-lg bg-[var(--loom-bg)] text-base"
               />
-            </div>
-            <Button
-              type="button"
-              onClick={connectRemoteLibrary}
-              disabled={isConnectingRemoteLibrary || !/^\d{6}$/.test(remoteShareCode)}
-              className="ml-auto gap-2 px-5"
-            >
-              <Wifi className="h-4 w-4" />
-              {isConnectingRemoteLibrary ? 'Connecting...' : 'Connect'}
-            </Button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowManualNetworkAddress((current) => !current)}
-            className="rounded-md text-xs font-medium text-[var(--loom-accent)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-surface)]"
-          >
-            {showManualNetworkAddress ? 'Hide manual address' : 'Advanced: enter address manually'}
-          </button>
-
-          {showManualNetworkAddress && (
-            <input
-              type="text"
-              value={remoteLibraryAddress}
-              onChange={(event) => {
-                setRemoteLibraryAddress(event.target.value);
-                setRemoteLibraryFingerprint('');
-              }}
-              placeholder="https://192.168.1.50:3848"
-              className="h-10 w-full min-w-0 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-sm text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
-            />
-          )}
-          {remoteLibraryStatus && <p className="text-sm text-[var(--loom-muted)]">{remoteLibraryStatus}</p>}
-        </CardContent>
-      </Card>
-
-      {sharedLibrarySnapshot && (
-        <Card className="settings-panel">
-          <CardHeader>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <CardTitle className="text-white">Shared Library</CardTitle>
-                <CardDescription className="text-[var(--loom-muted)]">
-                  Connected to {sharedLibrarySnapshot.hostDeviceName || sharedLibrarySnapshot.baseUrl} · auto-refreshing
-                </CardDescription>
-              </div>
               <Button
                 type="button"
-                variant="outline"
-                onClick={disconnectRemoteLibrary}
-                className="shrink-0"
+                size="sm"
+                onClick={connectRemoteLibrary}
+                disabled={isConnectingRemoteLibrary || !/^\d{6}$/.test(remoteShareCode)}
               >
-                Disconnect
+                {isConnectingRemoteLibrary ? 'Connecting…' : 'Connect'}
               </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 md:grid-cols-3">
-              {sharedLibrarySections.map((section) => (
-                <div key={section.title} className="settings-panel-soft rounded-lg p-3">
-                  <p className="text-sm font-semibold text-white">{section.title}</p>
-                  <p className="mb-3 text-xs text-[var(--loom-muted)]">{section.items.length} item{section.items.length === 1 ? '' : 's'}</p>
-                  <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
-                    {section.items.length === 0 ? (
-                      <p className="text-xs text-[var(--loom-faint)]">Nothing shared here yet.</p>
-                    ) : (
-                      section.items.map((item, index) => (
-                        <p key={`${section.title}-${item.title || index}`} className="truncate text-xs text-[var(--loom-muted)]">
-                          {item.title || 'Untitled'}{item.year ? ` (${item.year})` : ''}
-                        </p>
-                      ))
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </>
+            </SettingsRow>
+            {!showManualNetworkAddress ? (
+              <button
+                type="button"
+                onClick={() => setShowManualNetworkAddress(true)}
+                className="settings-row settings-row-button block w-full px-4 py-2.5 text-left text-xs text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)]/40 hover:text-[var(--loom-text)]"
+              >
+                Enter an address manually
+              </button>
+            ) : null}
+          </>
+        )}
+        {remoteLibraryStatus ? <SettingsNote role="status">{remoteLibraryStatus}</SettingsNote> : null}
+      </SettingsGroup>
+    </div>
   );
 }

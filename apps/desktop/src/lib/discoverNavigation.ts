@@ -16,7 +16,7 @@ type CachedDiscoverReturnRoute = { at: number; route: string };
 function normalizeDiscoverReturnRoute(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const route = value.trim();
-  return route.startsWith('/discover') || route === '/' || route.startsWith('/?') || route.startsWith('/my-list') ? route : null;
+  return route.startsWith('/discover') || route.startsWith('/addons/stremio/') || route === '/' || route.startsWith('/?') || route.startsWith('/my-list') ? route : null;
 }
 
 export function cacheDiscoverReturnRoute(route: string): void {

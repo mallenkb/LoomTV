@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronDown, FolderOpen, Plus, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, FolderOpen, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { SETTINGS_INPUT_CLASS, SettingsDialog, SettingsDialogField, SettingsDialogMessage } from '@/components/settings/SettingsDialog';
+import { SettingsSwitch } from '@/components/settings/SettingsLayout';
 import { desktopApi } from '@/lib/desktopApi';
 import {
   LIBRARY_TYPE_DEFINITIONS,
@@ -147,148 +148,127 @@ export default function AddLibraryWizard({
 
   const closeDialog = () => onOpenChange(false);
 
+  const typedPath = folderPathInput.trim();
+
   return (
-    <Dialog
+    <SettingsDialog
       open={open}
-      onOpenChange={(nextOpen) => { if (!busy && !removingId) onOpenChange(nextOpen); }}
-      contentClassName="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg overflow-y-auto border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-4 text-[var(--loom-text)] sm:p-5"
+      onClose={closeDialog}
+      busy={busy || Boolean(removingId)}
+      title={complete ? 'Library added' : 'Add a library'}
+      description={complete ? undefined : 'Pick a library type, then add one or more folders.'}
+      footer={complete ? (
+        <>
+          <Button size="sm" type="button" variant="outline" onClick={resetForAnother}>Add another</Button>
+          <Button size="sm" type="button" onClick={closeDialog}>Done</Button>
+        </>
+      ) : (
+        <>
+          <Button size="sm" type="button" variant="outline" onClick={closeDialog} disabled={busy || Boolean(removingId)}>Cancel</Button>
+          <Button size="sm" type="button" onClick={() => void finish()} disabled={busy || folders.length === 0}>
+            {busy ? 'Adding…' : 'Add library'}
+          </Button>
+        </>
+      )}
     >
-      <DialogContent className="space-y-4">
-        <DialogHeader className="pr-8">
-          <DialogTitle className="text-lg text-[var(--loom-text)]">{complete ? 'Library added' : 'Add a library'}</DialogTitle>
-          <DialogDescription className="text-[var(--loom-muted)]">
-            {complete ? 'Your folders are ready in Libraries.' : 'Choose a type and folder.'}
-          </DialogDescription>
-        </DialogHeader>
-
-        {complete ? (
-          <div className="space-y-4">
-            <div className="flex items-start gap-3 rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-4">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" aria-hidden="true" />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[var(--loom-text)]">{selectedDefinition.label}</p>
-                <p className="mt-1 text-sm text-[var(--loom-muted)]">
-                  {videoLibrary
-                    ? 'The folders were added and scanned.'
-                    : scanAfterAdding
-                      ? 'The folders were added and scanned.'
-                      : 'The folders were added.'}
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={resetForAnother}>Add another</Button>
-              <Button type="button" onClick={closeDialog}>Done</Button>
-            </div>
+      {complete ? (
+        <div className="flex items-center gap-3 rounded-xl bg-[var(--loom-surface-2)] p-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]" aria-hidden="true">
+            <LibraryTypeIcon kind={kind} active className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-[var(--loom-text)]">{selectedDefinition.label}</p>
+            <p className="text-xs text-[var(--loom-muted)]">
+              {folders.length.toLocaleString()} {folders.length === 1 ? 'folder' : 'folders'} added{videoLibrary || scanAfterAdding ? ' and scanned' : ''}.
+            </p>
           </div>
-        ) : (
-          <>
-            <section aria-labelledby="library-type-heading" className="space-y-2.5">
-              <label id="library-type-heading" htmlFor="library-type" className="block text-sm font-medium text-[var(--loom-text)]">
-                Library type
-              </label>
-              <div className="flex items-center gap-2.5">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]" aria-hidden="true">
-                  <LibraryTypeIcon kind={kind} active className="h-5 w-5" />
-                </span>
-                <div className="relative min-w-0 flex-1">
-                  <select
-                    id="library-type"
-                    value={kind}
-                    onChange={(event) => selectKind(event.target.value as LibraryKind)}
-                    disabled={busy || folders.length > 0}
-                    className="h-10 w-full appearance-none rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 py-2 pr-9 text-sm text-[var(--loom-text)] outline-none focus:border-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {VISIBLE_LIBRARY_TYPE_DEFINITIONS.map((definition) => (
-                      <option key={definition.kind} value={definition.kind}>{definition.label}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)]" aria-hidden="true" />
-                </div>
-              </div>
-              {folders.length > 0 ? <p className="text-xs text-[var(--loom-faint)]">Remove the folder to change type.</p> : null}
-            </section>
+          <CheckCircle2 className="h-5 w-5 shrink-0 settings-status-available" aria-hidden="true" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <SettingsDialogField label="Library type" htmlFor="library-type" hint={folders.length > 0 ? 'Remove the folders to change the type.' : undefined}>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--loom-accent)]" aria-hidden="true">
+                <LibraryTypeIcon kind={kind} active className="h-4 w-4" />
+              </span>
+              <select
+                id="library-type"
+                value={kind}
+                onChange={(event) => selectKind(event.target.value as LibraryKind)}
+                disabled={busy || folders.length > 0}
+                className={`${SETTINGS_INPUT_CLASS} cursor-pointer appearance-none pl-9 pr-9`}
+              >
+                {VISIBLE_LIBRARY_TYPE_DEFINITIONS.map((definition) => (
+                  <option key={definition.kind} value={definition.kind}>{definition.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)]" aria-hidden="true" />
+            </div>
+          </SettingsDialogField>
 
-            <section aria-labelledby="library-folder-heading" className="space-y-2.5">
-              <label id="library-folder-heading" htmlFor="library-folder-path" className="block text-sm font-medium text-[var(--loom-text)]">
-                Folder
-              </label>
-              {folders.length > 0 ? (
-                <div className="space-y-1.5">
-                  {folders.map((folder) => (
-                    <div key={folder.id} className="flex items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] px-3 py-2">
-                      <FolderOpen className="h-4 w-4 shrink-0 text-[var(--loom-muted)]" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate text-sm text-[var(--loom-text)]" title={folder.path}>{folder.name || folder.path}</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => void removeFolder(folder)}
-                        disabled={busy || removingId === folder.id}
-                        aria-label={`Remove ${folder.name || folder.path}`}
-                        className="h-7 w-7 text-[var(--loom-muted)] hover:bg-red-500/15 hover:text-red-200"
-                      >
-                        {removingId === folder.id ? <span className="block h-3.5 w-3.5 animate-pulse" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <div className="flex items-center gap-2">
-                <input
-                  id="library-folder-path"
-                  value={folderPathInput}
-                  onChange={(event) => setFolderPathInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && folderPathInput.trim()) {
-                      event.preventDefault();
-                      void addFolder(folderPathInput.trim());
-                    }
-                  }}
-                  disabled={busy || !folderActionsAvailable}
-                  placeholder="/Volumes/Media"
-                  spellCheck={false}
-                  className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 font-mono text-xs text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-60"
-                />
-                <Button type="button" variant="outline" onClick={() => void browseForFolder()} disabled={busy || !folderActionsAvailable} className="h-10 shrink-0 gap-1.5">
+          <SettingsDialogField label="Folders" htmlFor="library-folder-path">
+            {folders.length > 0 ? (
+              <ul className="mb-2 divide-y divide-[color-mix(in_srgb,var(--loom-text)_8%,transparent)] overflow-hidden rounded-lg border border-[var(--loom-control-border)]">
+                {folders.map((folder) => (
+                  <li key={folder.id} className="flex h-10 items-center gap-2.5 pl-3 pr-1">
+                    <FolderOpen className="h-4 w-4 shrink-0 text-[var(--loom-muted)]" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--loom-text)]" title={folder.path}>{folder.path}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void removeFolder(folder)}
+                      disabled={busy || removingId === folder.id}
+                      aria-label={`Remove ${folder.name || folder.path}`}
+                      className="settings-destructive-hover h-8 w-8 text-[var(--loom-muted)]"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="flex items-center gap-2">
+              <input
+                id="library-folder-path"
+                value={folderPathInput}
+                onChange={(event) => setFolderPathInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && typedPath) {
+                    event.preventDefault();
+                    void addFolder(typedPath);
+                  }
+                }}
+                disabled={busy || !folderActionsAvailable}
+                placeholder={folders.length ? 'Add another folder' : '/Volumes/Media/Movies'}
+                spellCheck={false}
+                className={`${SETTINGS_INPUT_CLASS} flex-1 font-mono text-xs`}
+              />
+              {typedPath ? (
+                <Button size="sm" type="button" variant="outline" onClick={() => void addFolder(typedPath)} disabled={busy || !folderActionsAvailable} className="shrink-0 gap-1.5">
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  {busy ? 'Adding…' : 'Add'}
+                </Button>
+              ) : (
+                <Button size="sm" type="button" variant="outline" onClick={() => void browseForFolder()} disabled={busy || !folderActionsAvailable} className="shrink-0 gap-1.5">
                   <FolderOpen className="h-4 w-4" aria-hidden="true" />
                   Browse
                 </Button>
-              </div>
-              <Button type="button" variant="outline" onClick={() => void addFolder(folderPathInput.trim())} disabled={busy || !folderActionsAvailable || !folderPathInput.trim()} className="h-9 w-full gap-1.5">
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                {busy ? 'Adding folder…' : 'Add folder'}
-              </Button>
-              {!folderActionsAvailable ? <p role="alert" className="text-xs text-amber-200">Folder picking is available in the Loom desktop app.</p> : null}
-            </section>
-
-            {!videoLibrary ? (
-              <label className="flex items-center gap-2 text-sm text-[var(--loom-text)]">
-                <input
-                  type="checkbox"
-                  checked={scanAfterAdding}
-                  onChange={(event) => setScanAfterAdding(event.target.checked)}
-                  className="h-4 w-4 accent-[var(--loom-accent)]"
-                />
-                Scan after adding
-              </label>
-            ) : null}
-
-            {error ? <p role="alert" className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p> : null}
-
-            <div className="flex justify-end gap-2 border-t border-[var(--loom-border)] pt-4">
-              <Button type="button" variant="outline" onClick={closeDialog} disabled={busy || Boolean(removingId)}>Cancel</Button>
-              <Button type="button" onClick={() => void finish()} disabled={busy || folders.length === 0}>
-                {busy ? 'Adding…' : 'Add library'}
-              </Button>
+              )}
             </div>
-          </>
-        )}
+          </SettingsDialogField>
 
-        <button type="button" onClick={closeDialog} disabled={busy || Boolean(removingId)} aria-label="Close add library" className="absolute right-3 top-3 rounded-full p-2 text-[var(--loom-muted)] hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)] disabled:opacity-50">
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
-      </DialogContent>
-    </Dialog>
+          {!videoLibrary ? (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-[var(--loom-text)]">Scan after adding</span>
+              <SettingsSwitch label="Scan after adding" checked={scanAfterAdding} onChange={setScanAfterAdding} />
+            </div>
+          ) : null}
+
+          {!folderActionsAvailable ? <SettingsDialogMessage tone="warning">Folder picking is available in the Loom desktop app.</SettingsDialogMessage> : null}
+          {error ? <SettingsDialogMessage>{error}</SettingsDialogMessage> : null}
+        </div>
+      )}
+    </SettingsDialog>
   );
 }

@@ -1,0 +1,25 @@
+# Upload this directory's contents to dev.nebulawp.org/stremio/archive.org-addon/
+# so that these URLs work:
+#   https://dev.nebulawp.org/stremio/archive.org-addon/manifest.json
+#   https://dev.nebulawp.org/stremio/archive.org-addon/catalog/movie/archive-pd.json
+#   https://dev.nebulawp.org/stremio/archive.org-addon/meta/movie/tt0063350.json
+#   https://dev.nebulawp.org/stremio/archive.org-addon/stream/movie/tt0063350.json
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /stremio/archive.org-addon/
+  # Serve real files (manifest.json) directly
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+  # Route Stremio endpoints to index.php, preserving query strings
+  RewriteRule ^manifest\.json$ index.php [L,QSA]
+  RewriteRule ^catalog/ index.php [L,QSA]
+  RewriteRule ^meta/ index.php [L,QSA]
+  RewriteRule ^stream/ index.php [L,QSA]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set Access-Control-Allow-Origin "*"
+  Header always set Access-Control-Allow-Headers "*"
+  Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+</IfModule>

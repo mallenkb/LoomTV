@@ -462,7 +462,12 @@ export function createAnalysisCoordinator(deps: {
     const jobs = deps.repository.getSegmentAnalysisJobs(undefined, 250);
     const counts = deps.repository.getSegmentAnalysisJobCounts();
     const manualCounts = deps.repository.getSegmentAnalysisJobCounts('manual');
-    const lastError = jobs.find((job) => job.state === 'error');
+    // Missing-helper failures remain in job history, but stop being a current
+    // warning once both helpers are available. Other failures still surface.
+    const lastError = jobs.find((job) => job.state === 'error' && !(detector.available && (
+      job.detail === 'fpcalc was not found. Provider and manual markers remain available.'
+      || job.detail === 'FFmpeg was not found.'
+    )));
     const lastCompleted = jobs.find((job) => job.state === 'complete');
     let library: { analyzed: number; waiting: number; total: number } | undefined;
     try {

@@ -69,9 +69,11 @@ export type StremioPluginServiceErrorCode =
   | 'STREMIO_PLUGIN_PROFILE_NOT_ALLOWED'
   | 'STREMIO_PLUGIN_ACCESS_DENIED'
   | 'STREMIO_PLUGIN_OFFICIAL_ID_MISMATCH'
+  | 'STREMIO_PLUGIN_EMBEDDED_ADDON'
   | 'STREMIO_PLUGIN_INVALID_ITEM_ID'
   | 'STREMIO_PLUGIN_PROVIDER_BUSY'
   | 'STREMIO_PLUGIN_RESULT_STALE'
+  | 'STREMIO_PLUGIN_SUBTITLE_EXPIRED'
   | 'STREMIO_PLUGIN_REQUEST_CANCELLED';
 
 export class StremioPluginServiceError extends Error {
@@ -131,6 +133,8 @@ export interface StremioPluginServiceDependencies {
   recordAudit?: (addonId: string, eventType: string, detail?: Record<string, unknown>) => void;
   listAudit?: (addonId: string, limit?: number) => readonly StremioPluginAuditEntry[];
   fetchImpl: StremioFetchImplementation;
+  /** Built-in add-on IDs that a pasted manifest may not claim. */
+  embeddedAddonIds?: ReadonlySet<string>;
   maxConcurrentProviderRequests?: number;
   maxQueuedProviderRequests?: number;
   maxConcurrentProfileAddonRequests?: number;
@@ -252,6 +256,16 @@ function profileNotAllowed(): StremioPluginServiceError {
     'STREMIO_PLUGIN_PROFILE_NOT_ALLOWED',
     'Stremio add-ons are not available to Guest or Kids profiles.',
   );
+}
+
+function configurationFields(record: StremioInstallRecord): StremioPluginConfigurationField[] {
+  return (record.manifest.config || []).map((field) => ({
+    key: field.key,
+    type: field.type,
+    required: field.required,
+    ...(field.title ? { title: field.title } : {}),
+    ...(field.options ? { options: [...field.options] } : {}),
+  }));
 }
 
 function requiresConfiguration(record: StremioInstallRecord): boolean {
@@ -385,6 +399,14 @@ export class StremioPluginService {
           'The official add-on endpoint returned an unexpected manifest identity.',
         );
       }
+      // Throwing here restores the registry, so a pasted link cannot move a
+      // built-in add-on back into review or replace its endpoint.
+      if (!expectedAddonId && this.deps.embeddedAddonIds?.has(review.addonId)) {
+        throw new StremioPluginServiceError(
+          'STREMIO_PLUGIN_EMBEDDED_ADDON',
+          `${review.manifest.name} is built into LoomTV and does not need to be installed.`,
+        );
+      }
       return review;
     }, (review, actor) => ({
       addonId: review.addonId,
@@ -453,19 +475,18 @@ export class StremioPluginService {
     this.deps.authorizeManagement();
     const record = this.getRegistry().get(addonId);
     if (!record) throw new StremioPluginServiceError('STREMIO_PLUGIN_ACCESS_DENIED', 'The Stremio add-on is not installed.');
-    const fields = (record.manifest.config || []).map((field) => ({
-      key: field.key,
-      type: field.type,
-      required: field.required,
-      ...(field.title ? { title: field.title } : {}),
-      ...(field.options ? { options: [...field.options] } : {}),
-    }));
+    const fields = configurationFields(record);
     return this.deps.getAddonConfigurationState?.(addonId, fields) || {
       fields,
       configured: this.isConfigured(record),
       configuredFields: [],
       revision: 0,
     };
+  }
+
+  /** The stored configuration revision, read without management authorization. */
+  private configurationRevision(record: StremioInstallRecord): number {
+    return this.deps.getAddonConfigurationState?.(record.addonId, configurationFields(record)).revision ?? 0;
   }
 
   saveConfiguration(addonId: string, values: Readonly<Record<string, unknown>>): Promise<StremioPluginConfigurationState> {
@@ -475,6 +496,8 @@ export class StremioPluginService {
       if (!this.deps.saveAddonConfiguration) throw new StremioPluginServiceError('STREMIO_PLUGIN_STORAGE_UNAVAILABLE', 'The host configuration store is unavailable.');
       const state = this.deps.saveAddonConfiguration(addonId, values);
       this.deps.recordAudit?.(addonId, 'configuration_saved', { fields: state.configuredFields });
+      // Requests already sent used the old configuration; cancel them.
+      this.abortProviderRequestsForAddon(addonId);
       return state;
     });
   }
@@ -583,6 +606,11 @@ export class StremioPluginService {
     return this.runProviderRequest(profileId, addonId, (registry, signal) => registry.fetchSubtitles(addonId, request, signal));
   }
 
+  /** Download one listed subtitle file through the same profile and approval gate as other provider requests. */
+  fetchSubtitleFile(profileId: string, addonId: string, url: string): Promise<string> {
+    return this.runProviderRequest(profileId, addonId, (registry, signal) => registry.fetchSubtitleFile(addonId, url, signal));
+  }
+
   private getRegistry(): StremioAddonRegistry {
     if (this.initializationError) throw this.initializationError;
     if (this.registry) return this.registry;
@@ -670,6 +698,7 @@ export class StremioPluginService {
     const request = this.globalProviderGate.run('global', (globalSignal) => this.profileAddonProviderGate.run(requestKey, async (requestSignal) => {
       const profileAuthorization = this.deps.captureProfileAuthorization?.(profileId);
       const before = this.requireProfileAccess(profileId, addonId);
+      const configurationBefore = this.configurationRevision(before);
       let providerStarted = false;
       try {
         providerStarted = true;
@@ -678,10 +707,11 @@ export class StremioPluginService {
         this.deps.validateProfileAuthorization?.(profileId, profileAuthorization);
         if (requestSignal.aborted) throw providerRequestCancelled();
         const after = this.requireProfileAccess(profileId, addonId);
-        if (before.reviewToken !== after.reviewToken || before.approvedAt !== after.approvedAt) {
+        if (before.reviewToken !== after.reviewToken || before.approvedAt !== after.approvedAt
+          || configurationBefore !== this.configurationRevision(after)) {
           throw new StremioPluginServiceError(
             'STREMIO_PLUGIN_RESULT_STALE',
-            'The add-on approval changed while this request was running.',
+            'The add-on approval or configuration changed while this request was running.',
             true,
           );
         }

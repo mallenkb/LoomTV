@@ -8,6 +8,11 @@ import { useLocation, useNavigate } from '@/lib/navigation';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
+import AddonSourcePicker, { type AddonStreamSelection } from '@/components/AddonSourcePicker';
+import {
+  addonEpisodes, addonIdentityForItem, addonPlaybackOptions, addonVideoTarget, loadAddonMeta,
+  type AddonStreamPlayer, type AddonVideoTarget,
+} from '@/lib/addonPlayback';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -45,6 +50,8 @@ interface TVDetailProps {
     mediaId?: string,
     artwork?: Pick<RouteArtworkState, 'logo' | 'logoCandidates' | 'poster' | 'posterCandidates' | 'backdrop' | 'backdropCandidates'>,
   ) => void;
+  /** Plays a stream chosen from an add-on source. */
+  onPlayStream?: AddonStreamPlayer;
 }
 
 function epCode(season: number, episode: number): string {
@@ -157,7 +164,7 @@ function seasonDisplayTitle(number: number, title: string): string {
 }
 
 function isCatalogTypeForKind(kind: 'series' | 'anime', type: string): boolean {
-  return kind === 'anime' ? type === 'anime' : type === 'series' || type === 'tv';
+  return kind === 'anime' ? type === 'anime' : type === 'series' || type === 'tv' || type === 'channel';
 }
 
 function showFromStremioCatalogItem(
@@ -167,6 +174,12 @@ function showFromStremioCatalogItem(
   if (!item || !isCatalogTypeForKind(kind, item.type)) return null;
   const poster = item.artwork?.poster || item.posterUrl || '';
   const backdrop = item.artwork?.background || item.backgroundUrl || poster;
+  // Add-on videos become the episode list; each keeps its provider video ID.
+  const episodes = addonEpisodes(item.videos).map(({ season, number, video }) => ({
+    season, number, title: video.title, summary: video.overview || '', still: video.thumbnail || '', rating: 0,
+    airDate: video.released?.slice(0, 10) || '',
+  }));
+  const seasonNumbers = [...new Set(episodes.map(episode => episode.season))];
   return {
     id: item.id,
     type: item.type === 'anime' ? 'anime' : 'tv',
@@ -199,11 +212,11 @@ function showFromStremioCatalogItem(
     })),
     filePath: '',
     providerIds: item.tmdbId ? { tmdbId: item.tmdbId } : undefined,
-    seasons: [],
+    seasons: seasonNumbers.map(number => ({ number, title: `Season ${number}`, episodeCount: episodes.filter(episode => episode.season === number).length })),
     subtitles: [],
-    episodes: [],
+    episodes,
     episodeFiles: [],
-    posterCandidates: poster ? [poster] : [],
+    posterCandidates: [poster, item.posterFallbackUrl || ''].filter(Boolean),
     backdropCandidates: backdrop ? [backdrop] : [],
     logoCandidates: item.artwork?.logo || item.logoUrl ? [item.artwork?.logo || item.logoUrl || ''] : [],
   };
@@ -402,7 +415,7 @@ function findLocalShowMatch(shows: readonly TVShow[], mediaId: string | undefine
   return mediaId ? shows.find((item) => item.id === mediaId) || null : null;
 }
 
-export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
+export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDetailProps) {
   const { id: mediaId } = useParams({ strict: false });
   const location = useLocation();
   const navigate = useNavigate();
@@ -424,6 +437,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
+  const [addonItem, setAddonItem] = useState<StremioPluginCatalogItem | null>(null);
+  const [sourceTarget, setSourceTarget] = useState<AddonVideoTarget | null>(null);
   const [detailsReady, setDetailsReady] = useState(false);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -454,19 +469,38 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     },
     [isRemoteDetailRoute, kind, mediaId, routeState?.stremioCatalogItem],
   );
+  // Full add-on metadata, with its episode list, replaces the catalog summary once it loads.
   const routeFallbackShow = useMemo(
     () => showFromStremioCatalogItem(
       kind,
-      routeCatalogItem || undefined,
+      (addonItem && addonItem.id === routeCatalogItem?.id ? addonItem : null) || routeCatalogItem || undefined,
     ),
-    [kind, routeCatalogItem],
+    [addonItem, kind, routeCatalogItem],
   );
+
+  useEffect(() => {
+    setAddonItem(null);
+    setSourceTarget(null);
+    if (!routeCatalogItem) return;
+    let cancelled = false;
+    // Add-on items load their own metadata. A Discover series with an IMDb ID
+    // gets a host key first, so add-ons that describe `tt` series list its episodes.
+    void addonIdentityForItem(routeCatalogItem)
+      .then((item) => (item.providerId ? loadAddonMeta(item) : null))
+      .then((item) => {
+        if (!cancelled && item?.videos) setAddonItem(item);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [routeCatalogItem]);
+  const addonEpisodeList = useMemo(() => addonEpisodes(addonItem?.videos), [addonItem?.videos]);
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioShow, setIsRemoteStremioShow] = useState(Boolean(routeState?.stremioCatalogItem));
   const routeAddonType = kind === 'anime'
     ? 'anime'
     : routeState?.stremioCatalogItem?.type === 'tv' ? 'tv' : 'series';
-  const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover') || isRemoteStremioShow);
+  const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover') || isRemoteStremioShow)
+    && addonEpisodeList.length === 0;
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(shouldOpenDetailsFirst ? 'details' : 'episodes');
   const { shows: episodeUpdateShows } = useEpisodeUpdates(Boolean(show && mediaId) && activeDetailTab === 'episodes' && !shouldOpenDetailsFirst);
   const showUpdates = episodeUpdateShows.find((entry) => entry.mediaId === mediaId);
@@ -836,7 +870,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     ?.find((file) => !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
 
   const heroEpisode = resumeEpisode || nextEpisode || firstPlayableEpisode || null;
-  const canPlayShow = Boolean(onPlay && heroEpisode?.filePath);
+  // An add-on show starts at its first regular episode, as listed by the provider.
+  const addonHeroEpisode = heroEpisode ? undefined : addonEpisodeList.find((entry) => entry.season > 0) || addonEpisodeList[0];
+  const canPlayShow = Boolean(onPlay && heroEpisode?.filePath) || Boolean(onPlayStream && addonHeroEpisode);
   const inMyList = lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
   const isRemoteContent = isRemoteStremioShow || Boolean(routeCatalogItem);
   const watchedEntryKeys = isRemoteContent
@@ -852,7 +888,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     ? getProgressState(heroEpisode.filePath, heroEpisode.localMetadata?.durationSeconds)
     : { position: 0, duration: 0, fraction: 0, watched: false, inProgress: false };
   const heroProgressPercent = Math.min(100, Math.max(0, heroProgress.fraction * 100));
-  const heroEpisodeLabel = heroEpisode ? epCode(heroEpisode.season, heroEpisode.episode) : '';
+  const heroEpisodeLabel = heroEpisode ? epCode(heroEpisode.season, heroEpisode.episode)
+    : addonHeroEpisode ? epCode(addonHeroEpisode.season, addonHeroEpisode.number) : '';
   const heroProgressCopy = heroProgress.duration > 0
     ? `${formatShortMinutes(heroProgress.position)} of ${formatShortMinutes(heroProgress.duration)}`
     : '';
@@ -899,7 +936,22 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     backdropCandidates: heroArtwork,
     rating: show.rating,
   };
+  // Selecting an add-on episode asks for that episode's sources only.
+  const openAddonEpisode = (season: number, episode: number): boolean => {
+    const entry = addonEpisodeList.find((candidate) => candidate.season === season && candidate.number === episode);
+    if (!entry || !addonItem) return false;
+    // The exact chosen video, with its inline streams (even an empty list) bound to their source.
+    setSourceTarget(addonVideoTarget(addonItem, entry.video.id, `${show.title} · ${epCode(season, episode)}`, entry.video, { season, episode }));
+    return true;
+  };
+
+  const handleSourceChosen = ({ target, url, stream, addonName }: AddonStreamSelection) => {
+    setSourceTarget(null);
+    onPlayStream?.(url, target.title, playerArtwork, addonPlaybackOptions(target, stream, addonName));
+  };
+
   const handlePlayEpisode = (season: number, episode: number) => {
+    if (onPlayStream && openAddonEpisode(season, episode)) return;
     const filePath = findEpisodeFile(season, episode);
     if (!filePath || !onPlay) return;
     const episodeSubtitles = show.episodeFiles?.find((file) =>
@@ -909,6 +961,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   };
 
   const handlePlayShow = () => {
+    if (!heroEpisode && addonHeroEpisode) { handlePlayEpisode(addonHeroEpisode.season, addonHeroEpisode.number); return; }
     if (!heroEpisode || !onPlay) return;
     onPlay(
       heroEpisode.filePath,
@@ -1230,7 +1283,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                               progressTick={progressTick}
                               durationHint={file.localMetadata?.durationSeconds}
                               isNew={newEpisodeKeys.has(`${season.number}:${file.episode}`) && !watchedKeys.has(localEpisodeWatchedKey(show.id, season.number, file.episode))}
-                              onPlay={() => onPlay && onPlay(file.filePath, show.title, file.subtitles || show.subtitles, playerEpisodes, show.episodeFiles, season.number, file.episode, show.id, playerArtwork)}
+                              onPlay={() => handlePlayEpisode(season.number, file.episode)}
                             />
                           ))}
                         </VirtualEpisodeList>
@@ -1289,6 +1342,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         trailerUrl={show.trailerUrl}
         onClose={() => setTrailerOpen(false)}
       />
+      <AddonSourcePicker target={sourceTarget} onClose={() => setSourceTarget(null)} onPlay={handleSourceChosen} />
     </div>
   );
 }

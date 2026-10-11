@@ -7,8 +7,8 @@ export declare const STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON: string;
 
 export type StremioResourceName = (typeof STREMIO_RESOURCES)[number];
 export type StremioInstallState = (typeof STREMIO_INSTALL_STATES)[number];
-export type StremioSourceKind = 'https-media' | 'hls' | 'torrent' | 'peer-to-peer' | 'unsupported';
-export type StremioSourceAvailability = 'playable' | 'rejected';
+export type StremioSourceKind = 'https-media' | 'hls' | 'youtube' | 'external' | 'torrent' | 'peer-to-peer' | 'unsupported';
+export type StremioSourceAvailability = 'playable' | 'external' | 'rejected';
 export type StremioExtraValue = string | number | boolean;
 
 export interface StremioAdapterLimits {
@@ -176,8 +176,14 @@ export interface LoomStremioSourceCandidate {
   requiresLoomAuthorization: true;
   requiresExplicitConsent: boolean;
   name?: string;
+  description?: string;
   url?: string;
   urlRedacted?: string;
+  /** Public HTTPS page for the system browser; never played or framed. */
+  externalUrl?: string;
+  ytId?: string;
+  notWebReady?: boolean;
+  requestHeadersRequired?: boolean;
   reason?: string;
   reasonCode?: string;
   reference?: string;
@@ -207,6 +213,7 @@ export interface LoomStremioMetaCandidate {
   id: string;
   type: string;
   title: string;
+  defaultVideoId?: string;
   source: StremioRequestSource;
   genres: readonly string[];
   posterUrl?: string;
@@ -343,6 +350,8 @@ export declare class StremioAddonRegistry {
   fetchMeta(addonId: string, request: StremioMetaRequest, signal?: unknown): Promise<StremioMetaResult>;
   fetchStreams(addonId: string, request: StremioVideoRequest, signal?: unknown): Promise<StremioStreamResult>;
   fetchSubtitles(addonId: string, request: StremioVideoRequest, signal?: unknown): Promise<StremioSubtitleResult>;
+  /** Download one subtitle file the add-on listed, as bounded SRT/WebVTT text. */
+  fetchSubtitleFile(addonId: string, url: string, signal?: unknown): Promise<string>;
 }
 
 export declare function createStremioAddonRegistry(options?: StremioAddonRegistryOptions): StremioAddonRegistry;

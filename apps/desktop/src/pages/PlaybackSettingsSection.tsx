@@ -1,32 +1,30 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { SettingsActions, SettingsDisclosure, SettingsField, SettingsGroup, SettingsNote, SettingsPageHeader, SettingsRow, SettingsSelect, SettingsStatus, SettingsSwitch } from '@/components/settings/SettingsLayout';
 import type { LibVlcAvailability, LocalSegmentAnalysisStatus, MpvAvailability, SkipAnalysisSettings } from '@/lib/desktopApi';
 import SkipTimestampManager from './SkipTimestampManager';
 
 type PlaybackSettingsSectionProps = {
   showServerControls?: boolean;
   rewindOnResumeSeconds: number;
-  onRewindOnResumeChange: (value: number) => void;
   skipBackSeconds: number;
   skipForwardSeconds: number;
   displaySleepTimeoutMinutes: number;
-  onSkipBackChange: (value: number) => void;
-  onSkipForwardChange: (value: number) => void;
-  onDisplaySleepTimeoutChange: (value: number) => void;
-  playbackSettingsDirty: boolean;
-  displaySleepSettingsDirty: boolean;
+  /** Seek and resume choices save as soon as they change. */
+  onPlaybackPreferenceChange: (key: 'skipBackSeconds' | 'skipForwardSeconds' | 'rewindOnResumeSeconds', value: number) => void;
+  onDisplaySleepTimeoutChange: (minutes: number) => void;
   displaySleepSettingsAvailable: boolean;
   skipAnalysis: SkipAnalysisSettings;
+  /** Draft change, saved by Save or a scan. Used for typed fields. */
   onSkipAnalysisChange: (value: SkipAnalysisSettings) => void;
+  /** Immediate change and save. Used for switches. */
+  onSkipAnalysisCommit: (value: SkipAnalysisSettings) => void;
   analysisStatus: LocalSegmentAnalysisStatus | null;
   onAnalysisAction: (
     action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
     scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
   ) => Promise<{ queued: number } | undefined> | void;
   onSave: () => void | boolean | Promise<void | boolean>;
-  onDisplaySleepSave: () => void | boolean | Promise<void | boolean>;
   libvlcAvailability?: LibVlcAvailability | null;
   mpvAvailability?: MpvAvailability | null;
   ffmpegStatus?: { available: boolean; path: string | null } | null;
@@ -39,7 +37,7 @@ const INTRO_TYPES = ['intro', 'recap'] as const;
 const OUTRO_TYPES = ['outro', 'credits', 'preview'] as const;
 
 const STATE_LABELS: Record<string, string> = {
-  idle: 'Idle — markers up to date',
+  idle: 'Idle, markers up to date',
   queued: 'Queued',
   running: 'Analyzing…',
   paused: 'Paused',
@@ -51,22 +49,18 @@ const STATE_LABELS: Record<string, string> = {
 export default function PlaybackSettingsSection({
   showServerControls = true,
   rewindOnResumeSeconds,
-  onRewindOnResumeChange,
   skipBackSeconds,
   skipForwardSeconds,
   displaySleepTimeoutMinutes,
-  onSkipBackChange,
-  onSkipForwardChange,
+  onPlaybackPreferenceChange,
   onDisplaySleepTimeoutChange,
-  playbackSettingsDirty,
-  displaySleepSettingsDirty,
   displaySleepSettingsAvailable,
   skipAnalysis,
   onSkipAnalysisChange,
+  onSkipAnalysisCommit,
   analysisStatus,
   onAnalysisAction,
   onSave,
-  onDisplaySleepSave,
   libvlcAvailability = null,
   mpvAvailability = null,
   ffmpegStatus = null,
@@ -74,7 +68,6 @@ export default function PlaybackSettingsSection({
   onMpvRefresh,
   onFfmpegRefresh,
 }: PlaybackSettingsSectionProps) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [scopeMediaId, setScopeMediaId] = useState('');
@@ -92,13 +85,6 @@ export default function PlaybackSettingsSection({
   const remaining = manualScanActive ? manualRemaining : running;
   const waiting = analysisStatus?.waitingCount || 0;
   const scanActive = remaining > 0;
-  const refreshAction = libvlcAvailability && !libvlcAvailability.available && onLibvlcRefresh
-    ? { label: 'Refresh LibVLC', run: onLibvlcRefresh }
-    : mpvAvailability && !mpvAvailability.available && onMpvRefresh
-      ? { label: 'Refresh libmpv', run: onMpvRefresh }
-      : ffmpegStatus && !ffmpegStatus.available && onFfmpegRefresh
-        ? { label: 'Refresh FFmpeg', run: onFfmpegRefresh }
-        : null;
   useEffect(() => {
     if (!scanActive) {
       setBatchSize(0);
@@ -111,6 +97,7 @@ export default function PlaybackSettingsSection({
     : 0;
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const update = (patch: Partial<SkipAnalysisSettings>) => onSkipAnalysisChange({ ...skipAnalysis, ...patch });
+  const commit = (patch: Partial<SkipAnalysisSettings>) => onSkipAnalysisCommit({ ...skipAnalysis, ...patch });
   const manuallyScan = async (scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' }) => {
     setScanNotice(null);
     if (!skipAnalysis.enabled) {
@@ -127,7 +114,7 @@ export default function PlaybackSettingsSection({
       setScanNotice(scope?.mode === 'quick'
         ? waiting > 0
           ? `No new items to analyze. ${waiting} item${waiting === 1 ? ' is' : 's are'} waiting for more episodes.`
-          : 'Everything is already analyzed and up to date — nothing new to scan.'
+          : 'Everything is already analyzed. Nothing new to scan.'
         : 'No analyzable content found in that scope.');
     }
   };
@@ -143,306 +130,233 @@ export default function PlaybackSettingsSection({
   const coverageRemaining = coverage ? Math.max(0, coverage.total - coverage.analyzed - coverageWaiting) : 0;
   const phase = analysisStatus?.phaseProgress;
 
+  const engines = [
+    { name: 'LibVLC', available: libvlcAvailability?.available, checking: libvlcAvailability === null, refresh: onLibvlcRefresh },
+    { name: 'libmpv', available: mpvAvailability?.available, checking: mpvAvailability === null, refresh: onMpvRefresh },
+    { name: 'FFmpeg', available: ffmpegStatus?.available, checking: ffmpegStatus === null, refresh: onFfmpegRefresh },
+  ];
+  const missingEngines = engines.filter((engine) => !engine.checking && !engine.available);
+  const checkingEngines = engines.some((engine) => engine.checking);
+
   return (
-    <div className="space-y-6">
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Seek controls</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Choose how far to skip and rewind when resuming after a pause.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-white">Backward skip seconds</span>
-              <input type="number" min={1} step={1} value={skipBackSeconds} onChange={(event) => onSkipBackChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none" />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-white">Forward skip seconds</span>
-              <input type="number" min={1} step={1} value={skipForwardSeconds} onChange={(event) => onSkipForwardChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none" />
-            </label>
-          </div>
-          <label className="mt-4 block space-y-2">
-            <span className="text-sm font-medium text-white">Rewind on resume</span>
-            <select value={rewindOnResumeSeconds} onChange={(event) => onRewindOnResumeChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white">
-              {Array.from({ length: 31 }, (_, seconds) => <option key={seconds} value={seconds}>{seconds === 0 ? 'Off' : `${seconds} second${seconds === 1 ? '' : 's'}${seconds === 3 ? ' (default)' : ''}`}</option>)}
-            </select>
-            <span className="block text-xs text-[var(--loom-muted)]">Replay a few seconds when you press play after pausing a movie or episode. Live TV is excluded.</span>
-          </label>
-          <div className="mt-4 flex justify-end">
-            <Button type="button" disabled={!playbackSettingsDirty} onClick={onSave}>Save playback settings</Button>
-          </div>
-        </CardContent>
-      </Card>
+    <div>
+      <SettingsPageHeader title="Playback" description="Seek buttons, resuming, and automatic intro and outro skipping." />
+      <SettingsGroup title="Controls">
+        <SettingsRow title="Skip back" description="How far the back button and left arrow jump.">
+          <SettingsSelect label="Skip back" value={skipBackSeconds} options={secondsOptions(SEEK_CHOICES, skipBackSeconds)} onChange={(value) => onPlaybackPreferenceChange('skipBackSeconds', value)} className="w-32" />
+        </SettingsRow>
+        <SettingsRow title="Skip forward" description="How far the forward button and right arrow jump.">
+          <SettingsSelect label="Skip forward" value={skipForwardSeconds} options={secondsOptions(SEEK_CHOICES, skipForwardSeconds)} onChange={(value) => onPlaybackPreferenceChange('skipForwardSeconds', value)} className="w-32" />
+        </SettingsRow>
+        <SettingsRow title="Rewind on resume" description="Replay a few seconds when you resume after a pause. Live TV is excluded.">
+          <SettingsSelect label="Rewind on resume" value={rewindOnResumeSeconds} options={secondsOptions(REWIND_CHOICES, rewindOnResumeSeconds, 'Off')} onChange={(value) => onPlaybackPreferenceChange('rewindOnResumeSeconds', value)} className="w-32" />
+        </SettingsRow>
+        {displaySleepSettingsAvailable ? (
+          <SettingsRow title="Keep display awake" description="While a video plays. Pausing lets the display sleep.">
+            <SettingsSelect
+              label="Keep display awake"
+              value={displaySleepTimeoutMinutes}
+              options={withCurrent(DISPLAY_SLEEP_CHOICES, displaySleepTimeoutMinutes, (minutes) => `${minutes} min`)}
+              onChange={onDisplaySleepTimeoutChange}
+              className="w-32"
+            />
+          </SettingsRow>
+        ) : null}
+      </SettingsGroup>
 
-      {displaySleepSettingsAvailable && <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Display sleep timer</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Keep the display awake during playback. Pausing allows it to sleep.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[
-              [0, 'Never'],
-              [15, '15 min'],
-              [30, '30 min'],
-              [45, '45 min'],
-              [60, '1 hour'],
-              [90, '1.5 hours'],
-              [120, '2 hours'],
-            ].map(([minutes, label]) => (
-              <button
-                key={minutes}
-                type="button"
-                onClick={() => onDisplaySleepTimeoutChange(Number(minutes))}
-                aria-pressed={displaySleepTimeoutMinutes === minutes}
-                className={`rounded-lg border px-3 py-3 text-sm transition-colors ${displaySleepTimeoutMinutes === minutes ? 'border-[var(--loom-accent)]/55 bg-[var(--loom-accent)]/10 text-white ring-1 ring-inset ring-[var(--loom-accent)]/15' : 'border-[var(--loom-border)] bg-[var(--loom-surface-2)] text-white/70 hover:border-white/25 hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <label className="mt-4 block space-y-2">
-            <span className="text-sm font-medium text-white">Rewind on resume</span>
-            <select value={rewindOnResumeSeconds} onChange={(event) => onRewindOnResumeChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white">
-              {Array.from({ length: 31 }, (_, seconds) => <option key={seconds} value={seconds}>{seconds === 0 ? 'Off' : `${seconds} second${seconds === 1 ? '' : 's'}${seconds === 3 ? ' (default)' : ''}`}</option>)}
-            </select>
-            <span className="block text-xs text-[var(--loom-muted)]">Replay a few seconds when you press play after pausing a movie or episode. Live TV is excluded.</span>
-          </label>
-          <div className="mt-4 flex justify-end">
-            <Button type="button" disabled={!displaySleepSettingsDirty} onClick={onDisplaySleepSave}>Save display timer</Button>
-          </div>
-        </CardContent>
-      </Card>}
+      {showServerControls ? (
+        <SettingsGroup title="Intro and outro skipping">
+          <SettingsRow title="Detect intros and outros" description="Find them automatically and show a skip button during playback.">
+            <SettingsSwitch
+              label="Detect intros and outros"
+              checked={skipAnalysis.enabled}
+              onChange={(enabled) => commit(enabled ? { enabled: true, analyzeNewMedia: true } : { enabled: false })}
+            />
+          </SettingsRow>
 
-      {showServerControls && <>
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Intro and outro skipping</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Find intros and outros automatically and show a skip button during playback.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4">
-            <label className="flex items-center gap-3 text-sm font-medium text-white">
-              <span className="relative grid h-5 w-5 shrink-0 place-items-center">
-                <input
-                  type="checkbox"
-                  checked={skipAnalysis.enabled}
-                  onChange={(event) => update(event.target.checked
-                    ? { enabled: true, analyzeNewMedia: true }
-                    : { enabled: false })}
-                  className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-bg)] transition-colors checked:border-[var(--loom-accent)] checked:bg-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-glow)]"
-                />
-                <Check className="pointer-events-none absolute h-3.5 w-3.5 text-[var(--loom-accent-foreground)] opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
-              </span>
-              Detect intros and outros
-            </label>
-            <div className="flex flex-wrap items-center gap-2">
-              {manualScanActive ? (
-                <Button type="button" onClick={stopScan}>Stop scan</Button>
-              ) : (
-                <Button type="button" disabled={!skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'quick' })}>Scan library</Button>
-              )}
-              <Button type="button" variant="outline" onClick={onSave}>Save</Button>
-            </div>
-          </div>
-
-          <p className="text-xs text-[var(--loom-muted)]">
-            Scanning saves your settings and checks new or changed items.
-          </p>
-          {scanNotice && !scanActive && <p className="settings-status-available text-xs">{scanNotice}</p>}
-
-          {scanActive ? (
-            <div className="rounded-lg bg-[var(--loom-surface-2)] p-4" aria-live="polite">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium text-white">
-                  {analysisStatus?.paused ? 'Paused' : manualScanActive ? 'Analyzing library…' : 'Automatic analysis running…'}
-                </span>
-                <span className="text-[var(--loom-muted)]">
-                  {percent}% · {remaining} item{remaining === 1 ? '' : 's'} left
-                </span>
-              </div>
-              <div
-                role="progressbar"
-                aria-valuenow={percent}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label="Skip analysis progress"
-                className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--loom-surface-3)]"
-              >
-                <div
-                  className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-700 ease-out"
-                  style={{ width: `${Math.max(percent, 2)}%` }}
-                />
-              </div>
-              {analysisStatus?.currentJob && (
-                <p className="mt-2 text-xs text-[var(--loom-muted)]">{analysisStatus.currentJob.detail}</p>
-              )}
-              {showProgress && phase && (
-                <p className="mt-1 text-xs text-[var(--loom-muted)]">
-                  Current phase: {phase.completed} of {phase.total} {phase.phase === 'fingerprinting' ? 'fingerprinted' : 'matched'}
-                </p>
-              )}
-              {coverage && (
-                <p className="mt-1 text-xs text-[var(--loom-muted)]">
-                  {coverage.analyzed} of {coverage.total} library items analyzed
-                  {coverageWaiting > 0 ? ` · ${coverageWaiting} waiting for more episodes` : ''}
-                  {coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : ''}
-                </p>
-              )}
-              {analysisStatus?.lastError && <p role="alert" className="settings-status-error mt-1 text-xs">{analysisStatus.lastError}</p>}
-              {!!analysisStatus?.recentJobs?.length && (
-                <div className="mt-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    aria-expanded={showProgress}
-                    aria-controls="skip-analysis-progress-list"
-                    onClick={() => setShowProgress((value) => !value)}
-                  >
-                    {showProgress ? 'Hide progress' : 'Show progress'}
-                  </Button>
-                  {showProgress && <AnalysisProgressList jobs={analysisStatus.recentJobs} />}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-xs text-[var(--loom-muted)]">
-              <p>{statusText}</p>
-              {coverage && (
-                <p className="mt-1">
-                  {coverage.analyzed} of {coverage.total} library items analyzed
-                  {coverageWaiting > 0 ? ` · ${coverageWaiting} waiting for more episodes` : ''}
-                  {coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : coverageWaiting === 0 ? ' — all caught up' : ''}
-                </p>
-              )}
-              {analysisStatus?.lastError && <p role="alert" className="settings-status-error mt-1">{analysisStatus.lastError}</p>}
-              {coordinatorDisabled && manualRemaining > 0 && (
-                <p className="mt-1">{manualRemaining} unfinished manual item{manualRemaining === 1 ? '' : 's'} retained and ready to resume when analysis is enabled.</p>
-              )}
-            </div>
-          )}
-
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((value) => !value)}
-              aria-expanded={showAdvanced}
-              aria-controls="playback-analysis-advanced"
-              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--loom-accent)] transition-colors hover:bg-[var(--loom-active-bg)]"
-            >
-              Advanced options
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-            </button>
-          </div>
-
-          {showAdvanced && (
-            <div id="playback-analysis-advanced" className="space-y-5 rounded-lg bg-[var(--loom-surface-2)] p-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Toggle label="Auto-scan new or changed media" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => update({ analyzeNewMedia })} />
-                <Toggle label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => update({ analyzeSpecials })} />
-                <Toggle label="Suppress first-episode intros" checked={skipAnalysis.suppressFirstEpisodeIntro} onChange={(suppressFirstEpisodeIntro) => update({ suppressFirstEpisodeIntro })} />
-                <Toggle label="Enable experimental SkipDB provider" checked={skipAnalysis.experimentalProviders?.skipdb ?? false} onChange={(skipdb) => update({ experimentalProviders: { ...skipAnalysis.experimentalProviders, skipdb } })} />
-              </div>
-
-              <div>
-                <h3 className="text-sm font-medium text-white">Skip sections</h3>
-                <div className="mt-3 grid gap-4 lg:grid-cols-2">
-                  <SegmentGroup title="Intro & recap" description="Opening sequences and previous-episode summaries." types={INTRO_TYPES} settings={skipAnalysis} update={update} />
-                  <SegmentGroup title="Outro, credits & next preview" description="Ending sequences, production credits, and upcoming-episode previews." types={OUTRO_TYPES} settings={skipAnalysis} update={update} />
-                </div>
-              </div>
-
-              <div className="grid gap-3 lg:grid-cols-2">
-                <ListField label="Excluded series IDs" value={skipAnalysis.exclusions.seriesIds} onChange={(seriesIds) => update({ exclusions: { ...skipAnalysis.exclusions, seriesIds } })} />
-                <ListField label="Excluded movie IDs" value={skipAnalysis.exclusions.movieIds} onChange={(movieIds) => update({ exclusions: { ...skipAnalysis.exclusions, movieIds } })} />
-                <ListField label="Excluded seasons (mediaId:season)" value={skipAnalysis.exclusions.seasons} onChange={(seasons) => update({ exclusions: { ...skipAnalysis.exclusions, seasons } })} />
-                <ListField label="Excluded local paths" value={skipAnalysis.exclusions.paths} onChange={(paths) => update({ exclusions: { ...skipAnalysis.exclusions, paths } })} />
-              </div>
-
-              <div className="rounded-lg bg-[var(--loom-surface-2)] p-4">
-                <p className="text-sm font-medium text-white">Maintenance</p>
-                <p className="mt-1 text-xs text-[var(--loom-muted)]">{analysisStatus?.fingerprintCount || 0} cached fingerprints · {formatBytes(analysisStatus?.fingerprintCacheBytes || 0)}</p>
-                {analysisStatus?.progress && <p className="mt-1 text-xs text-[var(--loom-muted)]">Job history: {analysisStatus.progress.complete}/{analysisStatus.progress.total} complete</p>}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" disabled={manualScanActive || !skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'full' })}>Rescan entire library</Button>
-                  <Button type="button" variant="outline" onClick={() => onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
-                  <Button type="button" variant="outline" onClick={() => onAnalysisAction('cancel')}>Cancel queued</Button>
-                  <Button type="button" variant="outline" onClick={() => onAnalysisAction('cleanup')}>Clear stale cache</Button>
-                  <Button type="button" variant="outline" onClick={() => onAnalysisAction('rebuild')}>Rebuild all automatic markers</Button>
-                </div>
-                <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_110px_auto]">
-                  <input value={scopeMediaId} onChange={(event) => setScopeMediaId(event.target.value)} placeholder="Media ID for season scan" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
-                  <input value={scopeSeason} onChange={(event) => setScopeSeason(event.target.value)} type="number" min={0} placeholder="Season" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
-                  <Button type="button" variant="outline" disabled={!skipAnalysis.enabled || !scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Save &amp; scan season</Button>
-                </div>
-              </div>
-              <div className="space-y-3 border-t border-[var(--loom-panel-border)] pt-4">
-                <Button type="button" variant="outline" aria-expanded={showManual} aria-controls="playback-manual-markers" onClick={() => setShowManual((value) => !value)}>
-                  {showManual ? 'Hide manual markers' : 'Edit manual markers'}
-                </Button>
-                {showManual && (
-                  <div id="playback-manual-markers">
-                    <SkipTimestampManager
-                      settings={skipAnalysis}
-                      onSettingsChange={onSkipAnalysisChange}
-                      onRun={(scope) => onAnalysisAction('run', scope)}
-                      onSaveSettings={onSave}
-                    />
+          {skipAnalysis.enabled ? (
+            <>
+              {scanActive ? (
+                <div className="settings-row space-y-2 px-4 py-3.5" aria-live="polite">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-medium text-[var(--loom-text)]">
+                      {analysisStatus?.paused ? 'Paused' : manualScanActive ? 'Analyzing library…' : 'Automatic analysis running…'}
+                    </span>
+                    <span className="flex items-center gap-3 text-xs text-[var(--loom-muted)]">
+                      {percent}% · {remaining} left
+                      {manualScanActive ? <Button type="button" variant="outline" size="sm" onClick={stopScan}>Stop</Button> : null}
+                    </span>
                   </div>
-                )}
+                  <div
+                    role="progressbar"
+                    aria-valuenow={percent}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Skip analysis progress"
+                    className="h-1.5 overflow-hidden rounded-full bg-[var(--loom-surface-3)]"
+                  >
+                    <div className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(percent, 2)}%` }} />
+                  </div>
+                  {analysisStatus?.currentJob ? <p className="text-xs text-[var(--loom-muted)]">{analysisStatus.currentJob.detail}</p> : null}
+                  {showProgress && phase ? (
+                    <p className="text-xs text-[var(--loom-muted)]">Current phase: {phase.completed} of {phase.total} {phase.phase === 'fingerprinting' ? 'fingerprinted' : 'matched'}</p>
+                  ) : null}
+                  {analysisStatus?.lastError ? <p role="alert" className="settings-status-error text-xs">{analysisStatus.lastError}</p> : null}
+                  {analysisStatus?.recentJobs?.length ? (
+                    <button
+                      type="button"
+                      aria-expanded={showProgress}
+                      aria-controls="skip-analysis-progress-list"
+                      onClick={() => setShowProgress((value) => !value)}
+                      className="text-xs font-medium text-[var(--loom-accent)] hover:underline"
+                    >
+                      {showProgress ? 'Hide items' : 'Show items'}
+                    </button>
+                  ) : null}
+                  {showProgress && analysisStatus?.recentJobs?.length ? <AnalysisProgressList jobs={analysisStatus.recentJobs} /> : null}
+                </div>
+              ) : (
+                <SettingsRow
+                  title="Library coverage"
+                  description={(
+                    <>
+                      {coverage
+                        ? `${coverage.analyzed} of ${coverage.total} items analyzed${coverageWaiting > 0 ? ` · ${coverageWaiting} waiting for more episodes` : ''}${coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : coverageWaiting === 0 ? ' · all caught up' : ''}`
+                        : statusText}
+                      {scanNotice ? <span className="mt-0.5 block settings-status-available">{scanNotice}</span> : null}
+                      {analysisStatus?.lastError ? <span role="alert" className="mt-0.5 block settings-status-error">{analysisStatus.lastError}</span> : null}
+                      {coordinatorDisabled && manualRemaining > 0 ? <span className="mt-0.5 block">{manualRemaining} unfinished manual item{manualRemaining === 1 ? '' : 's'} will resume when analysis is on.</span> : null}
+                    </>
+                  )}
+                >
+                  <Button type="button" variant="outline" size="sm" onClick={() => void manuallyScan({ mode: 'quick' })}>Scan now</Button>
+                </SettingsRow>
+              )}
+
+              <SettingsRow title="Scan new media automatically" description="Analyze new or changed episodes after each library sync.">
+                <SettingsSwitch label="Scan new media automatically" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => commit({ analyzeNewMedia })} />
+              </SettingsRow>
+
+            </>
+          ) : null}
+        </SettingsGroup>
+      ) : null}
+
+      {showServerControls && skipAnalysis.enabled ? (
+        <SettingsGroup
+          title="Advanced skipping"
+          description="Section types, length limits, exclusions, maintenance, and manual markers."
+          collapsible
+          storageKey="playback-advanced"
+        >
+          <SettingsRow title="Analyze Season 0 specials">
+            <SettingsSwitch label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => commit({ analyzeSpecials })} />
+          </SettingsRow>
+          <SettingsRow title="Skip intro detection on first episodes" description="A season's first episode often has a unique opening.">
+            <SettingsSwitch label="Skip intro detection on first episodes" checked={skipAnalysis.suppressFirstEpisodeIntro} onChange={(suppressFirstEpisodeIntro) => commit({ suppressFirstEpisodeIntro })} />
+          </SettingsRow>
+          <SettingsRow title="Use SkipDB" description="Experimental. Uses community markers when local analysis finds none.">
+            <SettingsSwitch label="Use SkipDB" checked={skipAnalysis.experimentalProviders?.skipdb ?? false} onChange={(skipdb) => commit({ experimentalProviders: { ...skipAnalysis.experimentalProviders, skipdb } })} />
+          </SettingsRow>
+
+          <SettingsDisclosure title="Section types" description="Which sections to detect, when to show a skip button, and their length limits.">
+            <SegmentGroup title="Intro and recap" types={INTRO_TYPES} settings={skipAnalysis} update={update} />
+            <SegmentGroup title="Outro, credits, and preview" types={OUTRO_TYPES} settings={skipAnalysis} update={update} />
+          </SettingsDisclosure>
+
+          <SettingsDisclosure title="Exclusions" description="Series, movies, seasons, and folders that are never analyzed.">
+            <div className="grid gap-3 py-2 lg:grid-cols-2">
+              <ListField label="Excluded series IDs" value={skipAnalysis.exclusions.seriesIds} onChange={(seriesIds) => update({ exclusions: { ...skipAnalysis.exclusions, seriesIds } })} />
+              <ListField label="Excluded movie IDs" value={skipAnalysis.exclusions.movieIds} onChange={(movieIds) => update({ exclusions: { ...skipAnalysis.exclusions, movieIds } })} />
+              <ListField label="Excluded seasons (mediaId:season)" value={skipAnalysis.exclusions.seasons} onChange={(seasons) => update({ exclusions: { ...skipAnalysis.exclusions, seasons } })} />
+              <ListField label="Excluded local paths" value={skipAnalysis.exclusions.paths} onChange={(paths) => update({ exclusions: { ...skipAnalysis.exclusions, paths } })} />
+            </div>
+          </SettingsDisclosure>
+
+          <SettingsDisclosure
+            title="Maintenance"
+            description={`${(analysisStatus?.fingerprintCount || 0).toLocaleString()} cached fingerprints · ${formatBytes(analysisStatus?.fingerprintCacheBytes || 0)}${analysisStatus?.progress ? ` · ${analysisStatus.progress.complete}/${analysisStatus.progress.total} jobs complete` : ''}`}
+          >
+            <SettingsRow title="Rescan entire library" description="Analyze every episode again, including ones with markers.">
+              <Button type="button" variant="outline" size="sm" disabled={manualScanActive} onClick={() => void manuallyScan({ mode: 'full' })}>Rescan</Button>
+            </SettingsRow>
+            <SettingsRow title="Scan one season">
+              <div className="flex flex-wrap items-end gap-2">
+                <SettingsField label="Media ID" value={scopeMediaId} onChange={(event) => setScopeMediaId(event.target.value)} placeholder="Media ID" className="w-48" />
+                <SettingsField label="Season" value={scopeSeason} onChange={(event) => setScopeSeason(event.target.value)} type="number" min={0} placeholder="1" className="w-20" />
+                <Button type="button" variant="outline" size="sm" disabled={!scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Scan season</Button>
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </SettingsRow>
+            <SettingsRow title={analysisStatus?.paused ? 'Resume analysis' : 'Pause analysis'} description="Queued work waits until you resume.">
+              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
+            </SettingsRow>
+            <SettingsRow title="Cancel queued analysis">
+              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction('cancel')}>Cancel queued</Button>
+            </SettingsRow>
+            <SettingsRow title="Clear stale cache" description="Remove fingerprints for files that are gone.">
+              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction('cleanup')}>Clear</Button>
+            </SettingsRow>
+            <SettingsRow title="Rebuild automatic markers" description="Discard detected markers and detect them again. Manual markers stay.">
+              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction('rebuild')}>Rebuild</Button>
+            </SettingsRow>
+          </SettingsDisclosure>
 
-      </>}
+          <SettingsDisclosure title="Manual markers" description="Set intro and outro times yourself for a title." onOpenChange={setShowManual}>
+            {showManual ? (
+              <div id="playback-manual-markers" className="py-2">
+                <SkipTimestampManager
+                  settings={skipAnalysis}
+                  onSettingsChange={onSkipAnalysisChange}
+                  onRun={(scope) => onAnalysisAction('run', scope)}
+                  onSaveSettings={onSave}
+                />
+              </div>
+            ) : null}
+          </SettingsDisclosure>
 
-      <Card className="settings-panel">
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle className="text-white">Playback availability</CardTitle>
-            {refreshAction && (
-              <Button type="button" variant="ghost" onClick={() => void refreshAction.run()}>
-                {refreshAction.label}
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] divide-y divide-[var(--loom-panel-border)]">
-            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <span className="font-medium text-white">LibVLC</span>
-              <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
-                {libvlcAvailability === null
-                  ? 'Checking…'
-                  : libvlcAvailability.available
-                    ? 'Ready'
-                    : 'Unavailable'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <span className="font-medium text-white">libmpv</span>
-              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
-                {mpvAvailability === null ? 'Checking…' : mpvAvailability.available ? 'Ready' : 'Unavailable'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <span className="font-medium text-white">FFmpeg</span>
-              <span className={ffmpegStatus?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
-                {ffmpegStatus === null ? 'Checking…' : ffmpegStatus.available ? 'Ready' : 'Unavailable'}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          <SettingsActions start="Section types and exclusions save when you press Save.">
+            <Button type="button" size="sm" onClick={() => void onSave()}>Save</Button>
+          </SettingsActions>
+        </SettingsGroup>
+      ) : null}
+
+      {checkingEngines || missingEngines.length ? (
+        <SettingsGroup title="Playback engines">
+          {checkingEngines ? <SettingsNote role="status">Checking playback engines…</SettingsNote> : null}
+          {missingEngines.map((engine) => (
+            <SettingsRow key={engine.name} title={engine.name} description={<SettingsStatus tone="warning">Unavailable</SettingsStatus>}>
+              {engine.refresh ? <Button type="button" variant="outline" size="sm" onClick={() => void engine.refresh?.()}>Check again</Button> : null}
+            </SettingsRow>
+          ))}
+        </SettingsGroup>
+      ) : null}
     </div>
+  );
+}
+
+const SEEK_CHOICES = [5, 10, 15, 20, 30, 45, 60];
+const REWIND_CHOICES = [0, 1, 2, 3, 5, 10, 15, 20, 30];
+const DISPLAY_SLEEP_CHOICES: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 0, label: 'Always' },
+  { value: 15, label: '15 min' },
+  { value: 30, label: '30 min' },
+  { value: 45, label: '45 min' },
+  { value: 60, label: '1 hour' },
+  { value: 90, label: '1.5 hours' },
+  { value: 120, label: '2 hours' },
+];
+
+/** Keeps a saved value that is not one of the presets selectable. */
+function withCurrent(choices: ReadonlyArray<{ value: number; label: string }>, current: number, label: (value: number) => string) {
+  if (choices.some((choice) => choice.value === current)) return choices;
+  return [...choices, { value: current, label: label(current) }].sort((left, right) => left.value - right.value);
+}
+
+function secondsOptions(choices: number[], current: number, zeroLabel?: string) {
+  return withCurrent(
+    choices.map((seconds) => ({ value: seconds, label: seconds === 0 && zeroLabel ? zeroLabel : `${seconds} sec` })),
+    current,
+    (seconds) => `${seconds} sec`,
   );
 }
 
@@ -453,7 +367,7 @@ function AnalysisProgressList({ jobs }: { jobs: ProgressJob[] }) {
     <div id="skip-analysis-progress-list" className="mt-3 max-h-52 overflow-y-auto rounded-md border border-[var(--loom-border)]">
       <table className="w-full text-left text-xs text-[var(--loom-muted)]">
         <caption className="sr-only">Completed, remaining, and failed skip-analysis items</caption>
-        <thead className="sticky top-0 bg-[var(--loom-bg)]">
+        <thead className="sticky top-0 bg-[var(--loom-settings-card-bg)]">
           <tr><th className="px-2 py-1">State</th><th className="px-2 py-1">Media</th><th className="px-2 py-1">Detail</th></tr>
         </thead>
         <tbody>
@@ -485,32 +399,75 @@ function AnalysisProgressList({ jobs }: { jobs: ProgressJob[] }) {
   );
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="flex items-center gap-2 text-sm text-white"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />{label}</label>;
-}
-
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return <label className="text-xs text-[var(--loom-muted)]">{label}<input type="number" min={1} value={value} onChange={(event) => onChange(Math.max(1, Number(event.target.value) || 1))} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-1.5 text-sm text-white" /></label>;
+  return <SettingsField label={label} type="number" min={1} value={value} onChange={(event) => onChange(Math.max(1, Number(event.target.value) || 1))} className="w-28" />;
 }
 
 function ListField({ label, value, onChange }: { label: string; value: string[]; onChange: (value: string[]) => void }) {
-  return <label className="block text-xs text-[var(--loom-muted)]">{label}<textarea value={value.join('\n')} onChange={(event) => onChange(event.target.value.split(/\n|,/).map((entry) => entry.trim()).filter(Boolean))} rows={3} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" /></label>;
+  return (
+    <label className="block min-w-0">
+      <span className="mb-1.5 block text-xs font-medium text-[var(--loom-muted)]">{label}</span>
+      <textarea
+        value={value.join('\n')}
+        onChange={(event) => onChange(event.target.value.split(/\n|,/).map((entry) => entry.trim()).filter(Boolean))}
+        rows={3}
+        placeholder="One per line"
+        className="w-full rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+      />
+    </label>
+  );
 }
+
+const SEGMENT_LABELS: Record<'intro' | 'recap' | 'outro' | 'credits' | 'preview', string> = {
+  intro: 'Intro',
+  recap: 'Recap',
+  outro: 'Outro',
+  credits: 'Credits',
+  preview: 'Preview',
+};
 
 function SegmentGroup({
   title,
-  description,
   types,
   settings,
   update,
 }: {
   title: string;
-  description: string;
   types: readonly ('intro' | 'recap' | 'outro' | 'credits' | 'preview')[];
   settings: SkipAnalysisSettings;
   update: (patch: Partial<SkipAnalysisSettings>) => void;
 }) {
-  return <section className="rounded-lg bg-[var(--loom-surface-2)] p-4"><h4 className="text-sm font-semibold text-[var(--loom-text)]">{title}</h4><p className="mt-1 text-xs text-[var(--loom-muted)]">{description}</p><div className="mt-3 space-y-3">{types.map((type) => <div key={type} className="rounded-md border border-[var(--loom-border)] p-3"><div className="flex items-center justify-between gap-3"><Toggle label={type[0].toUpperCase() + type.slice(1)} checked={settings.enabledTypes[type]} onChange={(checked) => update({ enabledTypes: { ...settings.enabledTypes, [type]: checked } })} /><Toggle label="Show skip prompt" checked={settings.promptTypes[type]} onChange={(checked) => update({ promptTypes: { ...settings.promptTypes, [type]: checked } })} /></div><div className="mt-3 grid grid-cols-2 gap-2"><NumberField label="Min seconds" value={settings.durationLimits[type].minSeconds} onChange={(minSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], minSeconds } } })} /><NumberField label="Max seconds" value={settings.durationLimits[type].maxSeconds} onChange={(maxSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], maxSeconds } } })} /></div></div>)}</div></section>;
+  return (
+    <section className="py-2">
+      <h3 className="pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--loom-faint)]">{title}</h3>
+      <div className="divide-y divide-[var(--loom-settings-divider)]">
+        {types.map((type) => (
+          <div key={type} className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 py-3">
+            <div className="min-w-0 flex-1 basis-40 space-y-2">
+              <div className="flex items-center gap-3">
+                <SettingsSwitch label={`Detect ${SEGMENT_LABELS[type].toLowerCase()}`} checked={settings.enabledTypes[type]} onChange={(checked) => update({ enabledTypes: { ...settings.enabledTypes, [type]: checked } })} />
+                <span className="text-sm font-medium text-[var(--loom-text)]">{SEGMENT_LABELS[type]}</span>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-[var(--loom-muted)]">
+                <input
+                  type="checkbox"
+                  checked={settings.promptTypes[type]}
+                  disabled={!settings.enabledTypes[type]}
+                  onChange={(event) => update({ promptTypes: { ...settings.promptTypes, [type]: event.target.checked } })}
+                  className="h-3.5 w-3.5 accent-[var(--loom-accent)]"
+                />
+                Show a skip button
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <NumberField label="Min seconds" value={settings.durationLimits[type].minSeconds} onChange={(minSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], minSeconds } } })} />
+              <NumberField label="Max seconds" value={settings.durationLimits[type].maxSeconds} onChange={(maxSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], maxSeconds } } })} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function formatBytes(bytes: number): string {

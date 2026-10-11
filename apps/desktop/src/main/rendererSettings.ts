@@ -66,7 +66,7 @@ export const rendererSettingsPatchSchema: z.ZodType<SettingsPayload> = z.object(
   tmdbApiKey: z.string().optional(),
   metadataApiKeys: z.record(z.string(), z.string()).optional(),
   metadataOfflineMode: z.boolean().optional(),
-  autoSyncIntervalHours: z.number().finite().positive().optional(),
+  autoSyncIntervalHours: z.number().finite().nonnegative().optional(),
   organizeFilesAfterSync: z.enum(['ask', 'auto', 'off']).optional(),
   cleanUpLibraryFiles: z.enum(['auto', 'off']).optional(),
   playbackSkipBackSeconds: z.number().finite().positive().optional(),

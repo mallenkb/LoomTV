@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { CaretDown, DotsSixVertical } from '@phosphor-icons/react';
+import { DotsSixVertical } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ChevronRight,
-  Clock3,
   Download,
   FolderOpen,
   Pencil,
@@ -15,8 +14,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/ConfirmProvider';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { SettingsBadge, SettingsGroup, useSettingsAccordion, SettingsNote, SettingsPageHeader, SettingsRow, SettingsSelect } from '@/components/settings/SettingsLayout';
+import { SETTINGS_INPUT_CLASS, SettingsDialog, SettingsDialogField, SettingsDialogMessage } from '@/components/settings/SettingsDialog';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi } from '@/lib/desktopApi';
@@ -217,26 +216,25 @@ function libraryStatusLabel(library: UnifiedLibrary): string {
   return 'Ready';
 }
 
-function libraryStatusClass(library: UnifiedLibrary): string {
-  if (library.scanning) return 'border-blue-400/30 bg-blue-400/10 text-blue-200';
-  if (library.status === 'unavailable') return 'border-red-400/30 bg-red-400/10 text-red-200';
-  if (library.status === 'degraded') return 'border-amber-400/30 bg-amber-400/10 text-amber-200';
-  if (library.status === 'empty') return 'border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] text-[var(--loom-muted)]';
-  return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200';
+function libraryStatusTone(library: UnifiedLibrary): 'muted' | 'warning' | 'error' | 'ok' {
+  if (library.scanning) return 'muted';
+  if (library.status === 'unavailable') return 'error';
+  if (library.status === 'degraded') return 'warning';
+  return 'ok';
 }
 
-function folderStatusClass(folder: UnifiedFolder): string {
-  if (folder.scanning) return 'border-blue-400/35 bg-blue-400/15 text-blue-100';
-  if (folder.state === 'available') return 'border-emerald-400/35 bg-emerald-400/15 text-emerald-100';
-  if (folder.state === 'degraded') return 'border-amber-400/35 bg-amber-400/15 text-amber-100';
-  return 'border-red-400/35 bg-red-400/15 text-red-100';
+function folderStatusTone(folder: UnifiedFolder): 'muted' | 'warning' | 'error' | 'ok' {
+  if (folder.scanning) return 'muted';
+  if (folder.state === 'available') return 'ok';
+  if (folder.state === 'degraded') return 'warning';
+  return 'error';
 }
 
 function folderStatusLabel(folder: UnifiedFolder): string {
   if (folder.scanning) return 'Scanning';
   if (folder.state === 'degraded') return 'Scan incomplete';
-  if (folder.state === 'unavailable') return folder.isNetworkLike ? 'Reconnect NAS share' : 'Folder unavailable';
-  return folder.isNetworkLike ? 'NAS available' : 'Available';
+  if (folder.state === 'unavailable') return folder.isNetworkLike ? 'Network folder unavailable' : 'Folder unavailable';
+  return 'Available';
 }
 
 function shouldIgnoreRowToggle(target: EventTarget | null): boolean {
@@ -280,14 +278,21 @@ export default function LibrarySettingsPanel({
   const photoLibrary = usePhotoLibrary();
   const mediaLibraries = useMediaLibraryRoots();
   const [hideEmpty, setHideEmpty] = useState(false);
-  const [expandedKind, setExpandedKind] = useState<LibraryKind | null>(null);
+  const accordion = useSettingsAccordion();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [busyKind, setBusyKind] = useState<LibraryKind | null>(null);
+  const [scanningAll, setScanningAll] = useState(false);
   const [actionError, setActionError] = useState('');
   const [editingFolder, setEditingFolder] = useState<EditingFolder | null>(null);
   const [editingError, setEditingError] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [sidebarDropTarget, setSidebarDropTarget] = useState<{ id: SidebarNavItemId; position: 'before' | 'after' } | null>(null);
+
+  // Library rows share the page's accordion, so opening one closes any other.
+  const toggleExpandedKind = (kind: LibraryKind) => {
+    const id = `library:${kind}`;
+    accordion.setOpenId(accordion.openId === id ? null : id);
+  };
 
   const statusByPath = useMemo(() => new Map(folderStatuses.map((status) => [status.path, status])), [folderStatuses]);
 
@@ -330,7 +335,7 @@ export default function LibrarySettingsPanel({
             path: folder,
             name: customFolderNames[folder] || folderBaseName(folder),
             count: 0,
-            scanning: false,
+            scanning: isScanning,
             state: status?.state || 'available',
             message: status?.message || null,
             source: 'legacy' as const,
@@ -372,7 +377,7 @@ export default function LibrarySettingsPanel({
       const rightPosition = rightId ? sidebarPositions.get(rightId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
       return leftPosition - rightPosition;
     });
-  }, [animeCount, customFolderNames, folderSections, mediaLibraries.roots, movieCount, photoLibrary.roots, sidebarOrderItems, statusByPath, tvShowCount]);
+  }, [animeCount, customFolderNames, folderSections, isScanning, mediaLibraries.roots, movieCount, photoLibrary.roots, sidebarOrderItems, statusByPath, tvShowCount]);
 
   const filteredLibraries = useMemo(() => {
     return hideEmpty ? libraries.filter((library) => library.status !== 'empty') : libraries;
@@ -550,272 +555,322 @@ export default function LibrarySettingsPanel({
   const configuredCount = libraries.filter((library) => library.folders.length > 0).length;
   const totalItemCount = libraries.reduce((total, library) => total + (library.itemCount || 0), 0);
 
+  // One scan for every library that has folders, one after another.
+  const scanAllLibraries = async () => {
+    setScanningAll(true);
+    setActionError('');
+    try {
+      // Movies, TV Shows, Anime, and Other folders share one library scan.
+      let sharedScanDone = false;
+      for (const library of libraries) {
+        if (!library.folders.length || !canAddFolder(library.kind)) continue;
+        const shared = library.kind !== 'photos' && !isMediaLibraryKind(library.kind);
+        if (shared && sharedScanDone) continue;
+        await scanLibraryKind(library.kind);
+        if (shared) sharedScanDone = true;
+      }
+      await refreshAll();
+      notifyLibraryRootsChanged();
+    } catch (cause) {
+      setActionError(errorMessage(cause, 'The libraries could not be scanned.'));
+    } finally {
+      setScanningAll(false);
+    }
+  };
+
+  const libraryErrorText = libraryActionError || actionError || mediaLibraries.error || (photoLibrary.error ? errorMessage(photoLibrary.error, 'Photo libraries could not be loaded.') : '');
+  const hiddenEmptyCount = libraries.length - filteredLibraries.length;
+
   return (
-    <div className="space-y-6">
-      <Card className="settings-panel">
-        <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <CardTitle className="text-white">Libraries</CardTitle>
-            <CardDescription className="mt-2 max-w-2xl text-[var(--loom-muted)]">
-              Manage every media folder in one place. Choose a type, then attach one or more folders.
-            </CardDescription>
-          </div>
-          <div className="flex shrink-0 items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-[var(--loom-muted)]">
-              <input type="checkbox" checked={hideEmpty} onChange={(event) => setHideEmpty(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />
-              Hide empty
-            </label>
-            <Button type="button" onClick={() => setWizardOpen(true)} className="gap-2">
+    <div>
+      <SettingsPageHeader
+        title="Library"
+        description="The folders Loom watches, how often it syncs them, and how files are named."
+      />
+      <SettingsGroup
+        title="Libraries"
+        action={(
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => void scanAllLibraries()}
+              disabled={anyScanning || scanningAll || configuredCount === 0}
+              aria-label={anyScanning || scanningAll ? 'Scanning libraries' : 'Scan all libraries'}
+              title={anyScanning || scanningAll ? 'Scanning libraries' : 'Scan all libraries'}
+              className="h-9 w-9"
+            >
+              <RefreshCw className={`h-4 w-4 ${anyScanning || scanningAll ? 'animate-spin' : ''}`} aria-hidden="true" />
+            </Button>
+            <Button type="button" variant="default" size="sm" onClick={() => setWizardOpen(true)} className="gap-1.5">
               <Plus className="h-4 w-4" aria-hidden="true" />
               New library
             </Button>
+          </>
+        )}
+      >
+        {libraryErrorText ? (
+          <div role="alert" className="settings-row settings-status-error flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+            <span>{libraryErrorText}</span>
+            {libraryActionError && onRetryLibraryAction ? (
+              <Button type="button" variant="outline" size="sm" onClick={onRetryLibraryAction} className="shrink-0">Try again</Button>
+            ) : null}
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {(libraryActionError || actionError || mediaLibraries.error || (photoLibrary.error ? errorMessage(photoLibrary.error, '') : '')) ? (
-            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-3 text-sm text-red-100">
-              <span>{libraryActionError || actionError || mediaLibraries.error || errorMessage(photoLibrary.error, 'Photo libraries could not be loaded.')}</span>
-              {libraryActionError && onRetryLibraryAction ? (
-                <Button type="button" variant="outline" onClick={onRetryLibraryAction} className="shrink-0 border-red-300/40 text-red-50 hover:bg-red-500/15">Try again</Button>
+        ) : null}
+
+        {mediaLibraries.loading || photoLibrary.loading ? <SettingsNote role="status">Loading library folders…</SettingsNote> : null}
+
+        {filteredLibraries.map((library) => {
+          const expanded = accordion.openId === `library:${library.kind}`;
+          const busy = busyKind === library.kind;
+          const sidebarItemId = LIBRARY_SIDEBAR_IDS[library.kind];
+          const isDraggingCard = Boolean(sidebarItemId && draggedSidebarItem === sidebarItemId);
+          const showDropLine = Boolean(
+            sidebarDropTarget
+            && sidebarItemId
+            && sidebarDropTarget.id === sidebarItemId
+            && draggedSidebarItem !== sidebarItemId,
+          );
+          const folderSummary = `${library.folders.length} ${library.folders.length === 1 ? 'folder' : 'folders'}`;
+          const itemSummary = library.itemCount === null ? 'Mixed media' : `${library.itemCount.toLocaleString()} ${library.itemCount === 1 ? 'item' : 'items'}`;
+          // Ready and empty are already clear from the folder and item counts.
+          const showStatus = library.scanning || library.status === 'degraded' || library.status === 'unavailable';
+          return (
+            <motion.div
+              key={library.kind}
+              data-library-card
+              data-open={expanded || undefined}
+              layout="position"
+              animate={isDraggingCard ? { x: 10, scale: 0.985, opacity: 0.48 } : { x: 0, scale: 1, opacity: 1 }}
+              transition={{
+                layout: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
+                x: { duration: 0.16, ease: [0.22, 1, 0.36, 1] },
+                scale: { duration: 0.16, ease: [0.22, 1, 0.36, 1] },
+                opacity: { duration: 0.12 },
+              }}
+              onDragOver={(event) => {
+                if (!sidebarItemId || !draggedSidebarItem || draggedSidebarItem === sidebarItemId) return;
+                event.preventDefault();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const position = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+                setSidebarDropTarget({ id: sidebarItemId, position });
+              }}
+              onDrop={(event) => {
+                if (!sidebarItemId || !draggedSidebarItem) return;
+                event.preventDefault();
+                const position = sidebarDropTarget?.id === sidebarItemId ? sidebarDropTarget.position : 'before';
+                setSidebarDropTarget(null);
+                onSidebarOrderDrop(sidebarItemId, position);
+              }}
+              className={`settings-row settings-library-card relative ${isDraggingCard ? 'z-10 shadow-2xl shadow-black/35' : ''}`}
+            >
+              {showDropLine ? (
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-x-3 z-20 h-[2px] rounded-full bg-[var(--loom-accent)] ${sidebarDropTarget?.position === 'before' ? '-top-px' : '-bottom-px'}`}
+                />
               ) : null}
-            </div>
-          ) : null}
-
-          {mediaLibraries.loading || photoLibrary.loading ? <p role="status" className="text-sm text-[var(--loom-muted)]">Loading library folders…</p> : null}
-
-          <div className="space-y-2">
-            {filteredLibraries.map((library) => {
-              const expanded = expandedKind === library.kind;
-              const busy = busyKind === library.kind;
-              const sidebarItemId = LIBRARY_SIDEBAR_IDS[library.kind];
-              const isDraggingCard = Boolean(sidebarItemId && draggedSidebarItem === sidebarItemId);
-              const showDropLine = Boolean(
-                sidebarDropTarget
-                && sidebarItemId
-                && sidebarDropTarget.id === sidebarItemId
-                && draggedSidebarItem !== sidebarItemId,
-              );
-              const folderSummary = `${library.folders.length} ${library.folders.length === 1 ? 'folder' : 'folders'}`;
-              const itemSummary = library.itemCount === null ? 'Mixed media' : `${library.itemCount.toLocaleString()} ${library.itemCount === 1 ? 'item' : 'items'}`;
-              return (
-                <motion.div
-                  key={library.kind}
-                  data-library-card
-                  layout="position"
-                  animate={isDraggingCard ? { x: 10, scale: 0.985, opacity: 0.48 } : { x: 0, scale: 1, opacity: 1 }}
-                  transition={{
-                    layout: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
-                    x: { duration: 0.16, ease: [0.22, 1, 0.36, 1] },
-                    scale: { duration: 0.16, ease: [0.22, 1, 0.36, 1] },
-                    opacity: { duration: 0.12 },
-                  }}
-                  onDragOver={(event) => {
-                    if (!sidebarItemId || !draggedSidebarItem || draggedSidebarItem === sidebarItemId) return;
+              <div
+                draggable={Boolean(sidebarItemId)}
+                aria-grabbed={sidebarItemId ? isDraggingCard : undefined}
+                title={sidebarItemId ? 'Drag to reorder in the sidebar' : undefined}
+                onClick={(event) => {
+                  if (shouldIgnoreRowToggle(event.target)) return;
+                  toggleExpandedKind(library.kind);
+                }}
+                onDragStart={(event) => {
+                  if (!sidebarItemId) {
                     event.preventDefault();
-                    const bounds = event.currentTarget.getBoundingClientRect();
-                    const position = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
-                    setSidebarDropTarget({ id: sidebarItemId, position });
-                  }}
-                  onDrop={(event) => {
-                    if (!sidebarItemId || !draggedSidebarItem) return;
+                    return;
+                  }
+                  const target = event.target;
+                  if (target instanceof Element && target.closest('[data-library-card-action]')) {
                     event.preventDefault();
-                    const position = sidebarDropTarget?.id === sidebarItemId ? sidebarDropTarget.position : 'before';
-                    setSidebarDropTarget(null);
-                    onSidebarOrderDrop(sidebarItemId, position);
-                  }}
-                  className={`relative rounded-xl border bg-[var(--loom-panel)] transition-[border-color,box-shadow] ${isDraggingCard ? 'z-10 shadow-2xl shadow-black/35' : ''} ${expanded ? 'border-[var(--loom-control-border)]' : 'border-[var(--loom-panel-border)] hover:border-[var(--loom-control-border)]'}`}
-                >
-                  {showDropLine ? (
-                    <span
-                      aria-hidden="true"
-                      className={`pointer-events-none absolute inset-x-0 z-20 h-[3px] rounded-full bg-[var(--loom-text)] opacity-15 ${sidebarDropTarget?.position === 'before' ? '-top-[6px]' : '-bottom-[6px]'}`}
-                    />
-                  ) : null}
-                  <div className="overflow-hidden rounded-[inherit]">
-                    <div
-                      draggable={Boolean(sidebarItemId)}
-                      aria-grabbed={sidebarItemId ? isDraggingCard : undefined}
-                      title={sidebarItemId ? 'Drag to reorder in the sidebar' : undefined}
-                      onClick={(event) => {
-                        if (shouldIgnoreRowToggle(event.target)) return;
-                        setExpandedKind(expanded ? null : library.kind);
-                      }}
-                      onDragStart={(event) => {
-                        if (!sidebarItemId) {
-                          event.preventDefault();
-                          return;
-                        }
-                        const target = event.target;
-                        if (target instanceof Element && target.closest('[data-library-card-action]')) {
-                          event.preventDefault();
-                          return;
-                        }
-                        const card = event.currentTarget.closest<HTMLElement>('[data-library-card]');
-                        if (card) {
-                          const bounds = card.getBoundingClientRect();
-                          event.dataTransfer.setDragImage(
-                            card,
-                            Math.max(0, event.clientX - bounds.left),
-                            Math.max(0, event.clientY - bounds.top),
-                          );
-                        }
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', sidebarItemId);
-                        setDraggedSidebarItem(sidebarItemId);
-                      }}
-                      onDragEnd={() => {
-                        setDraggedSidebarItem(null);
-                        setSidebarDropTarget(null);
-                      }}
-                      className={`flex min-h-[72px] flex-wrap items-center gap-2.5 px-4 py-3 sm:flex-nowrap ${isDraggingCard ? 'cursor-grabbing' : 'cursor-pointer'}`}
-                    >
-                      {sidebarItemId ? (
-                        <button
-                          type="button"
-                          aria-label={`Reorder ${library.label} in the sidebar`}
-                          aria-grabbed={isDraggingCard}
-                          title="Use the arrow keys to reorder"
-                          onKeyDown={(event) => {
-                            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            moveSidebarItem(sidebarItemId, event.key === 'ArrowUp' ? -1 : 1);
-                          }}
-                          className="-ml-1 grid h-11 w-4 shrink-0 place-items-center rounded-md text-[var(--loom-faint)] hover:text-[var(--loom-text)]"
-                        >
-                          <DotsSixVertical className="h-4 w-4" weight="bold" aria-hidden="true" />
-                        </button>
-                      ) : (
-                        <span className="-ml-1 h-11 w-4 shrink-0" aria-hidden="true" />
-                      )}
-                      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--loom-surface-3)] ${expanded ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-muted)]'}`}>
-                        <LibraryTypeIcon kind={library.kind} active={expanded} className="h-5 w-5" />
-                      </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold text-[var(--loom-text)]">{library.label}</span>
-                      <span className="mt-0.5 block truncate text-xs text-[var(--loom-muted)]">{folderSummary} · {itemSummary}</span>
-                    </span>
-                    <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-medium ${libraryStatusClass(library)}`}>
-                      {libraryStatusLabel(library)}
-                    </span>
-                    <span className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
-                      <Button type="button" variant="outline" size="sm" onClick={() => void addFromTable(library.kind)} disabled={busy || !canAddFolder(library.kind)} data-library-card-action className="gap-1.5">
-                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                        Add folder
-                      </Button>
-                      <Button type="button" variant="secondary" size="icon" onClick={() => void runAction(library.kind, () => scanLibraryKind(library.kind))} disabled={anyScanning || busy || !library.folders.length || !canAddFolder(library.kind)} aria-label={`Scan ${library.label}`} title={`Scan ${library.label}`} data-library-card-action className="h-9 w-9 border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] shadow-sm hover:border-[var(--loom-muted)]">
-                        <RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} aria-hidden="true" />
-                      </Button>
-                      <button type="button" onClick={() => setExpandedKind(expanded ? null : library.kind)} aria-label={`${expanded ? 'Hide' : 'Show'} ${library.label} folders`} aria-expanded={expanded} data-library-card-action className="grid h-9 w-9 place-items-center rounded-lg text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]">
-                        <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
-                      </button>
-                    </span>
-                  </div>
-                  <AnimatePresence initial={false}>
-                    {expanded ? (
-                      <motion.div
-                        key={`${library.kind}-details`}
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                        className="overflow-hidden border-t border-[var(--loom-border)] bg-[var(--loom-surface-2)]"
-                      >
-                        <div className="py-3 pl-[2.375rem] pr-4">
-                          {library.folders.length > 0 ? (
-                            <div className="divide-y divide-[var(--loom-border)] overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-bg)]">
-                              {library.folders.map((folder) => (
-                                <div key={folder.id} className="flex min-h-12 flex-wrap items-center gap-3 px-3 py-2.5 text-sm">
-                                  <FolderOpen className="h-4 w-4 shrink-0 text-[var(--loom-muted)]" aria-hidden="true" />
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-[var(--loom-text)]">{folder.name}</span>
-                                    <code className="mt-0.5 block break-all text-[11px] leading-4 text-[var(--loom-faint)]">{folder.path}</code>
+                    return;
+                  }
+                  const card = event.currentTarget.closest<HTMLElement>('[data-library-card]');
+                  if (card) {
+                    const bounds = card.getBoundingClientRect();
+                    event.dataTransfer.setDragImage(
+                      card,
+                      Math.max(0, event.clientX - bounds.left),
+                      Math.max(0, event.clientY - bounds.top),
+                    );
+                  }
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', sidebarItemId);
+                  setDraggedSidebarItem(sidebarItemId);
+                }}
+                onDragEnd={() => {
+                  setDraggedSidebarItem(null);
+                  setSidebarDropTarget(null);
+                }}
+                className={`settings-library-header group flex min-h-[64px] flex-wrap items-center gap-2.5 px-3 py-2.5 transition-colors sm:flex-nowrap ${isDraggingCard ? 'cursor-grabbing' : 'cursor-pointer'}`}
+              >
+                {sidebarItemId ? (
+                  <button
+                    type="button"
+                    aria-label={`Reorder ${library.label} in the sidebar`}
+                    aria-grabbed={isDraggingCard}
+                    title="Use the arrow keys to reorder"
+                    onKeyDown={(event) => {
+                      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      moveSidebarItem(sidebarItemId, event.key === 'ArrowUp' ? -1 : 1);
+                    }}
+                    className="grid h-10 w-4 shrink-0 place-items-center rounded-md text-[var(--loom-faint)] opacity-60 transition-opacity hover:text-[var(--loom-text)] group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    <DotsSixVertical className="h-4 w-4" weight="bold" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <span className="h-10 w-4 shrink-0" aria-hidden="true" />
+                )}
+                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] ${expanded ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-muted)]'}`}>
+                  <LibraryTypeIcon kind={library.kind} active={expanded} className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-[var(--loom-text)]">{library.label}</span>
+                  <span className="mt-0.5 block truncate text-xs text-[var(--loom-muted)]">{folderSummary} · {itemSummary}</span>
+                </span>
+                {showStatus ? <SettingsBadge tone={libraryStatusTone(library)}>{libraryStatusLabel(library)}</SettingsBadge> : null}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:ml-0">
+                  <Button type="button" variant="outline" size="sm" onClick={() => void addFromTable(library.kind)} disabled={busy || !canAddFolder(library.kind)} data-library-card-action className="gap-1.5">
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    Add folder
+                  </Button>
+                  <button type="button" onClick={() => toggleExpandedKind(library.kind)} aria-label={`${expanded ? 'Hide' : 'Show'} ${library.label} folders`} aria-expanded={expanded} data-library-card-action className="grid h-9 w-9 place-items-center rounded-lg text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]">
+                    <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-90 text-[var(--loom-text)]' : ''}`} aria-hidden="true" />
+                  </button>
+                </span>
+              </div>
+              <AnimatePresence initial={false}>
+                {expanded ? (
+                  <motion.div
+                    key={`${library.kind}-details`}
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-3 pb-2">
+                      {library.folders.length > 0 ? (
+                        <ul aria-label={`${library.label} folders`} className="divide-y divide-[var(--loom-settings-divider)]">
+                          {library.folders.map((folder) => (
+                            <li key={folder.id} className="flex min-h-11 flex-wrap items-center gap-2.5 py-2 text-sm sm:flex-nowrap">
+                              <span className="w-4 shrink-0" aria-hidden="true" />
+                              <span className="grid h-10 w-10 shrink-0 place-items-center text-[var(--loom-muted)]">
+                                <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex flex-wrap items-center gap-2">
+                                  <span className="truncate text-[var(--loom-text)]">{folder.name}</span>
+                                  <span role="status" aria-label={`Folder status: ${folderStatusLabel(folder)}`}>
+                                    <SettingsBadge tone={folderStatusTone(folder)}>{folderStatusLabel(folder)}</SettingsBadge>
                                   </span>
-                                  <span className="flex shrink-0 items-center gap-2">
-                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${folderStatusClass(folder)}`}>
-                                      {folderStatusLabel(folder)}
-                                    </span>
-                                    {folder.state !== 'available' && folder.message ? <span className="max-w-72 truncate text-xs text-[var(--loom-muted)]" title={folder.message}>{folder.message}</span> : null}
-                                  </span>
-                                  {folder.source === 'legacy' ? (
-                                    <Button type="button" variant="outline" size="icon" onClick={() => openFolderEditor(folder, library.kind)} aria-label={`Edit ${folder.name}`} title="Edit folder" className="h-8 w-8 border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]">
-                                      <Pencil className="h-4 w-4" aria-hidden="true" />
-                                    </Button>
-                                  ) : null}
-                                  <Button type="button" variant="outline" size="icon" onClick={() => void runAction(library.kind, () => removeFolder(library.kind, folder), false)} disabled={busy || folder.scanning} aria-label={`Remove ${folder.name}`} title="Remove folder" className="h-8 w-8 border-red-500/30 bg-red-500/10 text-red-200 hover:border-red-400/50 hover:bg-red-500/20 hover:text-red-50">
-                                    <X className="h-4 w-4" aria-hidden="true" />
+                                </span>
+                                <code className="mt-0.5 block break-all text-[11px] leading-4 text-[var(--loom-faint)]">{folder.path}</code>
+                                {folder.state !== 'available' && folder.message ? <span className="mt-0.5 block text-xs text-[var(--loom-muted)]">{folder.message}</span> : null}
+                              </span>
+                              <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:ml-0">
+                                {folder.source === 'legacy' ? (
+                                  <Button type="button" variant="outline" size="icon" onClick={() => openFolderEditor(folder, library.kind)} aria-label={`Edit ${folder.name}`} title="Edit folder" className="h-9 w-9">
+                                    <Pencil className="h-4 w-4" aria-hidden="true" />
                                   </Button>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="rounded-lg border border-dashed border-[var(--loom-panel-border)] px-4 py-5 text-center text-sm text-[var(--loom-muted)]">No folders added yet. Use Add folder to choose one from this computer.</div>
-                          )}
-                        </div>
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
+                                ) : null}
+                                <Button type="button" variant="outline" size="icon" onClick={() => void runAction(library.kind, () => removeFolder(library.kind, folder), false)} disabled={busy || folder.scanning} aria-label={`Remove ${folder.name}`} title="Remove folder" className="settings-destructive-text h-9 w-9">
+                                  <X className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="py-2 pl-[76px] text-sm text-[var(--loom-muted)]">No folders yet. Use Add folder to choose one from this computer or a mounted NAS share.</p>
+                      )}
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </motion.div>
+          );
+        })}
 
-          {filteredLibraries.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-[var(--loom-panel-border)] px-4 py-8 text-center">
-              <FolderOpen className="mx-auto h-8 w-8 text-[var(--loom-faint)]" aria-hidden="true" />
-              <p className="mt-2 text-sm font-medium text-[var(--loom-text)]">No configured libraries to show.</p>
-              <p className="mt-1 text-sm text-[var(--loom-muted)]">Turn off Hide empty to see every library type.</p>
-            </div>
-          ) : null}
+        {filteredLibraries.length === 0 && !(mediaLibraries.loading || photoLibrary.loading) ? (
+          <SettingsNote>No libraries yet. Use New library to add your first folder.</SettingsNote>
+        ) : null}
 
-          <p className="text-center text-xs leading-relaxed text-[var(--loom-faint)]">Folders can be local paths or mounted NAS shares. Loom keeps the original files in place.</p>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader className="gap-1">
-          <CardTitle className="text-base text-white">Library sync</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">{configuredCount} configured {configuredCount === 1 ? 'library' : 'libraries'} · {totalItemCount.toLocaleString()} indexed items</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {anyScanning ? (
-            <div className="space-y-2 rounded-lg bg-[var(--loom-surface-2)] p-3">
-              <div className="flex items-center justify-between gap-3 text-sm text-[var(--loom-muted)]"><span>Scanning library folders</span><span>{isScanning ? `${scanProgress}%` : 'In progress'}</span></div>
-              <div className="h-2 overflow-hidden rounded-full bg-[var(--loom-bg)]"><div className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-300" style={{ width: `${isScanning ? Math.max(4, scanProgress) : 35}%` }} /></div>
-            </div>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <div className="flex min-w-0 items-start gap-3">
-              <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--loom-accent)]" aria-hidden="true" />
-              <div><p className="text-sm font-semibold text-white">Automatic quick sync</p><p className="mt-0.5 text-xs text-[var(--loom-muted)]">Check for new or changed files on a schedule.</p></div>
-            </div>
-            <span className="relative block w-40 shrink-0">
-              <select value={autoSyncIntervalHours} onChange={(event) => void setAutoSyncIntervalHours(Number(event.target.value))} aria-label="Automatic quick sync interval" className="h-10 w-full appearance-none rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] py-2 pl-4 pr-10 text-sm text-[var(--loom-text)] outline-none focus:border-[var(--loom-accent)]">
-                {AUTO_SYNC_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <CaretDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)]" weight="regular" aria-hidden="true" />
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => void runAction('movies', async () => { scanLibrary(); await refreshLibrary(); })} disabled={anyScanning} className="gap-2"><RefreshCw className={`h-4 w-4 ${isScanning ? 'animate-spin' : ''}`} aria-hidden="true" />{isScanning ? 'Syncing…' : 'Quick sync'}</Button>
-            <Button type="button" onClick={() => void runAction('movies', async () => { refreshMetadata(); await refreshLibrary(); })} disabled={anyScanning} variant="outline">Refresh metadata</Button>
-            <Button type="button" onClick={() => void runAction('movies', async () => { fullRescanLibrary(); await refreshLibrary(); })} disabled={anyScanning} variant="outline">Full rescan</Button>
-          </div>
-          <OrganizeFilesSection disabled={anyScanning} />
-          <OriginalImportsSection disabled={anyScanning} />
-          <LibraryCleanupSection disabled={anyScanning} />
-        </CardContent>
-      </Card>
+        {hiddenEmptyCount > 0 || !hideEmpty ? (
+          <button
+            type="button"
+            onClick={() => setHideEmpty(!hideEmpty)}
+            className="settings-row settings-row-button block w-full px-4 py-2.5 text-left text-xs text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)]"
+          >
+            {hideEmpty
+              ? `Show ${hiddenEmptyCount} more library ${hiddenEmptyCount === 1 ? 'type' : 'types'}`
+              : 'Hide empty library types'}
+          </button>
+        ) : null}
+      </SettingsGroup>
 
       <LibraryHealthCard disabled={anyScanning} />
-      <Card className="settings-panel">
-        <CardHeader className="gap-1"><CardTitle className="text-base text-white">Data management</CardTitle><CardDescription className="text-[var(--loom-muted)]">Back up the database or clear this device's local Loom data.</CardDescription></CardHeader>
-        <CardContent className="grid gap-3">
-          <div className="settings-panel-soft rounded-xl p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="flex items-center gap-2 text-sm font-semibold text-white"><Download className="h-4 w-4 text-[var(--loom-accent)]" aria-hidden="true" />Database backup</p><p className="mt-1 text-xs text-[var(--loom-muted)]">Save a copy of library metadata, artwork, progress, and settings.</p></div><Button type="button" onClick={onBackupDatabase} variant="outline" className="gap-2"><Download className="h-4 w-4" aria-hidden="true" />Back up database</Button></div>{backupStatus ? <p className="mt-3 truncate text-sm text-[var(--loom-muted)]">{backupStatus}</p> : null}</div>
-          <div className="settings-destructive-panel rounded-xl border border-red-500/20 bg-red-500/5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="flex items-center gap-2 text-sm font-semibold text-white"><Trash2 className="h-4 w-4 text-red-400" aria-hidden="true" />Clear local app data</p><p className="mt-1 text-xs text-[var(--loom-muted)]">Remove saved folders, metadata, artwork, progress, and settings.</p></div><Button type="button" onClick={onClearAppData} disabled={isClearingData} variant="outline" className="gap-2 border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50"><Trash2 className="h-4 w-4" aria-hidden="true" />{isClearingData ? 'Clearing…' : 'Clear data'}</Button></div>{clearDataStatus ? <p role={clearDataStatus.startsWith('Clear failed') ? 'alert' : 'status'} className={`mt-3 text-sm ${clearDataStatus.startsWith('Clear failed') ? 'text-red-200' : 'text-[var(--loom-muted)]'}`}>{clearDataStatus}</p> : null}</div>
-        </CardContent>
-      </Card>
+
+      <SettingsGroup
+        title="Sync and organise"
+        description={`${configuredCount} ${configuredCount === 1 ? 'library' : 'libraries'} · ${totalItemCount.toLocaleString()} items`}
+        action={(
+          <Button type="button" variant="outline" size="sm" onClick={() => void runAction('movies', async () => { scanLibrary(); await refreshLibrary(); })} disabled={anyScanning} className="gap-1.5">
+            <RefreshCw className={`h-3.5 w-3.5 ${isScanning ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {isScanning ? 'Syncing…' : 'Quick sync'}
+          </Button>
+        )}
+      >
+        {anyScanning ? (
+          <div className="settings-row space-y-2 px-4 py-3.5" aria-live="polite">
+            <div className="flex items-center justify-between gap-3 text-sm text-[var(--loom-text)]"><span>Scanning library folders</span><span className="text-xs text-[var(--loom-muted)]">{isScanning ? `${scanProgress}%` : 'In progress'}</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--loom-surface-3)]"><div className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-300" style={{ width: `${isScanning ? Math.max(4, scanProgress) : 35}%` }} /></div>
+          </div>
+        ) : null}
+        <SettingsRow title="Automatic sync" description="Runs a quick sync on a schedule.">
+          <SettingsSelect
+            label="Automatic quick sync interval"
+            value={autoSyncIntervalHours}
+            options={[{ value: 0, label: 'Off' }, ...AUTO_SYNC_OPTIONS]}
+            onChange={(hours) => void setAutoSyncIntervalHours(hours)}
+          />
+        </SettingsRow>
+        <SettingsRow title="Refresh metadata" description="Download titles, artwork, and ratings again for every item.">
+          <Button type="button" variant="outline" size="sm" onClick={() => void runAction('movies', async () => { refreshMetadata(); await refreshLibrary(); })} disabled={anyScanning}>Refresh</Button>
+        </SettingsRow>
+        <SettingsRow title="Full rescan" description="Re-read every file from scratch. Slower than a quick sync.">
+          <Button type="button" variant="outline" size="sm" onClick={() => void runAction('movies', async () => { fullRescanLibrary(); await refreshLibrary(); })} disabled={anyScanning}>Rescan</Button>
+        </SettingsRow>
+        <OrganizeFilesSection disabled={anyScanning} />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Advanced"
+        description="Cleanup, original file names, backups, and local app data."
+        collapsible
+        storageKey="library-advanced"
+      >
+        <LibraryCleanupSection disabled={anyScanning} />
+        <OriginalImportsSection disabled={anyScanning} />
+        <SettingsRow title="Back up database" description={backupStatus || 'Save a copy of library metadata, artwork, progress, and settings.'}>
+          <Button type="button" onClick={onBackupDatabase} variant="outline" size="sm" className="gap-1.5"><Download className="h-3.5 w-3.5" aria-hidden="true" />Back up</Button>
+        </SettingsRow>
+        <SettingsRow
+          title="Clear local app data"
+          tone="danger"
+          description={clearDataStatus
+            ? <span role={clearDataStatus.startsWith('Clear failed') ? 'alert' : 'status'} className={clearDataStatus.startsWith('Clear failed') ? 'settings-status-error' : undefined}>{clearDataStatus}</span>
+            : 'Remove saved folders, metadata, artwork, progress, and settings. Media files stay on disk.'}
+        >
+          <Button type="button" onClick={onClearAppData} disabled={isClearingData} variant="destructive" size="sm" className="gap-1.5"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />{isClearingData ? 'Clearing…' : 'Clear data'}</Button>
+        </SettingsRow>
+      </SettingsGroup>
 
       <AddLibraryWizard
         open={wizardOpen}
@@ -826,49 +881,51 @@ export default function LibrarySettingsPanel({
         onScan={async (kind) => { await scanLibraryKind(kind); await refreshAll(); }}
       />
 
-      <Dialog open={Boolean(editingFolder)} onOpenChange={(open) => { if (!open && !isSavingEdit) setEditingFolder(null); }} contentClassName="max-w-md border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)]">
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-[var(--loom-text)]">Edit folder</DialogTitle>
-            <DialogDescription className="text-[var(--loom-muted)]">Change the display name or path for this folder.</DialogDescription>
-          </DialogHeader>
-          {editingFolder ? (
-            <form className="mt-5 space-y-4" onSubmit={(event) => void saveFolderEditor(event)}>
-              <label className="block text-sm text-[var(--loom-text)]">
-                Folder name
-                <input value={editingFolder.name} onChange={(event) => setEditingFolder((current) => current ? { ...current, name: event.target.value } : current)} disabled={isSavingEdit} className="mt-1.5 h-10 w-full rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 text-sm outline-none focus:border-[var(--loom-accent)]" />
-              </label>
-              <label className="block text-sm text-[var(--loom-text)]">
-                Folder path
-                <span className="mt-1.5 flex items-center gap-2">
-                  <input value={editingFolder.path} onChange={(event) => setEditingFolder((current) => current ? { ...current, path: event.target.value } : current)} disabled={isSavingEdit} spellCheck={false} className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 font-mono text-xs outline-none focus:border-[var(--loom-accent)]" />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={isSavingEdit}
-                    className="h-10 shrink-0 gap-2"
-                    onClick={() => {
-                      void desktopApi.pickLibraryFolder(editingFolder.path)
-                        .then((folder) => {
-                          if (folder) setEditingFolder((current) => current ? { ...current, path: folder } : current);
-                        })
-                        .catch((cause) => setEditingError(errorMessage(cause, 'The folder picker could not be opened.')));
-                    }}
-                  >
-                    <FolderOpen className="h-4 w-4" aria-hidden="true" />
-                    Browse
-                  </Button>
-                </span>
-              </label>
-              {editingError ? <p role="alert" className="text-sm text-red-300">{editingError}</p> : null}
-              <div className="flex justify-end gap-3">
-                <Button type="button" variant="outline" onClick={() => setEditingFolder(null)} disabled={isSavingEdit}>Cancel</Button>
-                <Button type="submit" disabled={isSavingEdit}>{isSavingEdit ? 'Saving…' : 'Save changes'}</Button>
+      <SettingsDialog
+        open={Boolean(editingFolder)}
+        onClose={() => setEditingFolder(null)}
+        busy={isSavingEdit}
+        size="sm"
+        title="Edit folder"
+        description="Change the name Loom shows or point it at a new location."
+        footer={(
+          <>
+            <Button size="sm" type="button" variant="outline" onClick={() => setEditingFolder(null)} disabled={isSavingEdit}>Cancel</Button>
+            <Button size="sm" type="submit" form="settings-edit-folder" disabled={isSavingEdit}>{isSavingEdit ? 'Saving…' : 'Save'}</Button>
+          </>
+        )}
+      >
+        {editingFolder ? (
+          <form id="settings-edit-folder" className="space-y-4" onSubmit={(event) => void saveFolderEditor(event)}>
+            <SettingsDialogField label="Name" htmlFor="settings-edit-folder-name">
+              <input id="settings-edit-folder-name" value={editingFolder.name} onChange={(event) => setEditingFolder((current) => current ? { ...current, name: event.target.value } : current)} disabled={isSavingEdit} className={SETTINGS_INPUT_CLASS} />
+            </SettingsDialogField>
+            <SettingsDialogField label="Location" htmlFor="settings-edit-folder-path">
+              <div className="flex items-center gap-2">
+                <input id="settings-edit-folder-path" value={editingFolder.path} onChange={(event) => setEditingFolder((current) => current ? { ...current, path: event.target.value } : current)} disabled={isSavingEdit} spellCheck={false} className={`${SETTINGS_INPUT_CLASS} flex-1 font-mono text-xs`} />
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  disabled={isSavingEdit}
+                  className="shrink-0 gap-1.5"
+                  onClick={() => {
+                    void desktopApi.pickLibraryFolder(editingFolder.path)
+                      .then((folder) => {
+                        if (folder) setEditingFolder((current) => current ? { ...current, path: folder } : current);
+                      })
+                      .catch((cause) => setEditingError(errorMessage(cause, 'The folder picker could not be opened.')));
+                  }}
+                >
+                  <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                  Browse
+                </Button>
               </div>
-            </form>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+            </SettingsDialogField>
+            {editingError ? <SettingsDialogMessage>{editingError}</SettingsDialogMessage> : null}
+          </form>
+        ) : null}
+      </SettingsDialog>
     </div>
   );
 }

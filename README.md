@@ -227,7 +227,7 @@ The release history lives in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License and third-party software
 
-Copyright (c) 2026 malllenkb
+Copyright (c) 2026 LoomTV
 
 LoomTV-authored source code and documentation use the [MIT License](LICENSE).
 

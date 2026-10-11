@@ -1,0 +1,1427 @@
+import { DEFAULT_RESUME_REWIND_SECONDS, normalizeResumeRewind } from '@/shared/resumeRewind';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { FFmpegStatus } from '../shared/desktopProtocol.ts';
+import { ExternalLink } from 'lucide-react';
+import { LibraryMutationError, toLibraryMutationError, useLibrary, type LibraryFolderKind, type LibraryMutationOperation } from '@/contexts/LibraryContext';
+import { useProfiles } from '@/contexts/ProfileContext';
+import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LibVlcAvailability, type LocalSegmentAnalysisStatus, type MpvAvailability, type SkipAnalysisSettings } from '@/lib/desktopApi';
+import { useConfirm } from '@/components/ConfirmProvider';
+import { useTheme } from '@/components/ThemeProvider';
+import { remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
+import {
+  DEFAULT_SIDEBAR_NAV_ORDER,
+  SIDEBAR_NAV_LABELS,
+  SETTINGS_SECTIONS,
+  getCompactUpdateStatus,
+  getUpdateButtonLabel,
+  normalizeProviderId,
+  normalizeSidebarNavOrder,
+  type SettingsSection,
+  type SidebarNavItemId,
+  type SidebarOrderItem,
+} from './Settings.helpers';
+import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
+import { assignOtherFolderToGroup, createOtherFolderGroup, normalizeOtherFolderGroups, type OtherFolderGroups } from '@/lib/otherFolderGroups';
+import AboutSettingsSection from './AboutSettingsSection';
+import LibrarySettingsSection from './LibrarySettingsSection';
+import MetadataSettingsSection from './MetadataSettingsSection';
+import NetworkSettingsSection from './NetworkSettingsSection';
+import PlaybackSettingsSection from './PlaybackSettingsSection';
+import LiveTvSettingsOverview from './LiveTvSettingsOverview';
+import AddonsSettingsOverview from './AddonsSettingsOverview';
+import ProfilesSettingsSection from './ProfilesSettingsSection';
+import ThemeSettingsSection from './ThemeSettingsSection';
+import type {
+  LocalNetworkPeer,
+  LocalNetworkStatus,
+  MetadataProvider,
+  SharedLibrarySnapshot,
+} from './Settings.types';
+import { parseStoredValue } from '@/lib/desktopDecoders';
+import { iptvSourceDisplayName, useIptvSources } from '@/lib/liveTvSources';
+import { isBrowsableStremioSource } from '@/lib/stremioPluginSidebarCache';
+import { useStremioSidebarSources } from '@/lib/stremioSourceNavigation';
+import { z } from 'zod';
+
+const savedRemoteLibrarySchema = z.object({ baseUrl: z.string() });
+const sharedLibrarySnapshotSchema = z.object({
+  baseUrl: z.string(),
+  deviceId: z.string(),
+  deviceToken: z.string(),
+  accessTokenExpiresAt: z.number().finite().optional(),
+  refreshToken: z.string().optional(),
+  refreshTokenExpiresAt: z.number().finite().optional(),
+  hostDeviceId: z.string().optional(),
+  hostDeviceName: z.string().optional(),
+  connectedAt: z.number().finite().default(0),
+  libraryEtag: z.string().optional(),
+  library: z.object({
+    movies: z.array(z.object({ title: z.string().optional(), year: z.number().optional() })).optional(),
+    tvShows: z.array(z.object({ title: z.string().optional(), year: z.number().optional() })).optional(),
+    animeShows: z.array(z.object({ title: z.string().optional(), year: z.number().optional() })).optional(),
+  }),
+});
+
+const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
+  enabled: true,
+  analyzeNewMedia: true,
+  enabledTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
+  promptTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
+  durationLimits: {
+    intro: { minSeconds: 15, maxSeconds: 180 },
+    recap: { minSeconds: 15, maxSeconds: 120 },
+    outro: { minSeconds: 15, maxSeconds: 300 },
+    credits: { minSeconds: 15, maxSeconds: 300 },
+    preview: { minSeconds: 15, maxSeconds: 120 },
+    movieCredits: { minSeconds: 15, maxSeconds: 900 },
+  },
+  suppressFirstEpisodeIntro: false,
+  analyzeSpecials: false,
+  exclusions: { seriesIds: [], movieIds: [], seasons: [], paths: [] },
+  seasonOverrides: {},
+};
+
+type LibraryAction = {
+  operation: LibraryMutationOperation;
+  run: () => Promise<void>;
+};
+
+function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
+  return [
+    {
+      id: 'tmdb',
+      label: 'TMDB API Key',
+      required: true,
+      badge: 'Recommended',
+      placeholder: 'TMDB key or read token',
+      description: (
+        <>
+          Posters, backdrops, cast, and ratings. Get a key at{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://www.themoviedb.org/settings/api')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            themoviedb.org <ExternalLink className="w-3 h-3" />
+          </button>
+        </>
+      ),
+    },
+    {
+      id: 'tvdb',
+      label: 'TheTVDB API Key',
+      badge: 'TV metadata',
+      placeholder: 'TheTVDB project API key',
+      description: (
+        <>
+          TV series, seasons, episodes, and artwork. Get a key at{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://thetvdb.com/api-information/signup')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            thetvdb.com <ExternalLink className="w-3 h-3" />
+          </button>
+          .
+        </>
+      ),
+    },
+    {
+      id: 'fanart',
+      label: 'Fanart.tv API Key',
+      badge: 'Clearlogos',
+      placeholder: 'Paste your Fanart.tv personal API key',
+      description: (
+        <>
+          Clearlogos during playback. Get a personal key at{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://fanart.tv/get-an-api-key/#personal')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            Fanart.tv <ExternalLink className="w-3 h-3" />
+          </button>
+          .
+        </>
+      ),
+    },
+    {
+      id: 'omdb',
+      label: 'OMDb API Key',
+      badge: 'Movies + completed',
+      placeholder: 'OMDb API key',
+      description: (
+        <>
+          Ratings for movies and completed series, plus fallback title details. Get a key at{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://www.omdbapi.com/apikey.aspx')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            omdbapi.com <ExternalLink className="w-3 h-3" />
+          </button>
+          .
+        </>
+      ),
+    },
+  ];
+}
+
+/**
+ * State and actions shared by classic Settings and Settings v2. `activeSection`
+ * gates the status probes that only one page needs; `null` is the v2 overview.
+ */
+export function useSettingsController(activeSection: SettingsSection | null) {
+  const { state, addLibraryFolder, addLibraryFolderPath, scanLibrary, fullRescanLibrary, refreshMetadata, clearAppData, removeLibraryFolder, updateLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
+  const { activeProfile } = useProfiles();
+  const confirm = useConfirm();
+  const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
+
+  const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
+  const [editingKeys, setEditingKeys] = useState<Record<string, boolean>>({});
+  const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
+  const [newProviderName, setNewProviderName] = useState('');
+  const [newProviderKey, setNewProviderKey] = useState('');
+  const [savedKey, setSavedKey] = useState(false);
+  const [isTestingKeys, setIsTestingKeys] = useState(false);
+  const [metadataKeyTestResults, setMetadataKeyTestResults] = useState<MetadataKeyTestResult[]>([]);
+  const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
+  const [libvlcAvailability, setLibvlcAvailability] = useState<LibVlcAvailability | null>(null);
+  const [mpvAvailability, setMpvAvailability] = useState<MpvAvailability | null>(null);
+  const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
+  const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
+  const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
+  const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
+  const [playbackRewindOnResumeSeconds, setPlaybackRewindOnResumeSeconds] = useState(DEFAULT_RESUME_REWIND_SECONDS);
+  const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
+  const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
+  const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
+  useEffect(() => window.desktopApi?.onPlaybackSleepTimerReset?.(() => {
+    setPlaybackDisplaySleepTimeoutMinutes(0);
+  }), []);
+  const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
+  const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
+  const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
+  const { sources: iptvSources } = useIptvSources();
+  const stremioPlugins = useStremioSidebarSources();
+  const [backupStatus, setBackupStatus] = useState('');
+  const [clearDataStatus, setClearDataStatus] = useState('');
+  const [isClearingData, setIsClearingData] = useState(false);
+  const [libraryActionError, setLibraryActionError] = useState<{ error: LibraryMutationError; action: LibraryAction } | null>(null);
+  const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
+  const [networkStatusMessage, setNetworkStatusMessage] = useState('');
+
+
+  const availableSidebarItems = useMemo<SidebarOrderItem[]>(() => {
+    const builtInItems = DEFAULT_SIDEBAR_NAV_ORDER.map((id) => ({
+      id,
+      label: SIDEBAR_NAV_LABELS[id] || id,
+    }));
+    const liveTvItems = iptvSources.map((source) => ({
+      id: `live:${source.id}`,
+      label: `${iptvSourceDisplayName(source.name)} (IPTV)`,
+    }));
+    const addonItems = stremioPlugins
+      .filter(isBrowsableStremioSource)
+      .map((plugin) => ({
+        id: `stremio:${plugin.addonId}`,
+        label: `${plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on'} (Add-on)`,
+      }));
+    const groupedFolders = new Set(Object.values(otherFolderGroups).flatMap((group) => group.folders));
+    const groupItems = Object.entries(otherFolderGroups).map(([groupId, group]) => ({
+      id: `group:${groupId}`,
+      label: group.name,
+    }));
+    const folderItems = (libraryFolderGroups.others || [])
+      .filter((folder) => !groupedFolders.has(folder))
+      .map((folder) => ({
+        id: `folder:${folder}`,
+        label: customFolderNames[folder]?.trim()
+          || folder.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop()
+          || 'Others',
+      }));
+    return [...builtInItems, ...liveTvItems, ...addonItems, ...groupItems, ...folderItems];
+  }, [customFolderNames, iptvSources, libraryFolderGroups.others, otherFolderGroups, stremioPlugins]);
+
+  const sidebarOrderItems = useMemo(() => {
+    const itemById = new Map(availableSidebarItems.map((item) => [item.id, item]));
+    return normalizeSidebarNavOrder(
+      sidebarNavOrder,
+      availableSidebarItems.map((item) => item.id),
+    ).map((id) => itemById.get(id)).filter((item): item is SidebarOrderItem => Boolean(item));
+  }, [availableSidebarItems, sidebarNavOrder]);
+  const [isTogglingNetworkSharing, setIsTogglingNetworkSharing] = useState(false);
+  const [requireNetworkApproval, setRequireNetworkApproval] = useState(false);
+  const [remoteLibraryAddress, setRemoteLibraryAddress] = useState('');
+  const [remoteLibraryFingerprint, setRemoteLibraryFingerprint] = useState('');
+  const [remoteShareCode, setRemoteShareCode] = useState('');
+  const [isConnectingRemoteLibrary, setIsConnectingRemoteLibrary] = useState(false);
+  const [remoteLibraryStatus, setRemoteLibraryStatus] = useState('');
+  const [showManualNetworkAddress, setShowManualNetworkAddress] = useState(false);
+  const [sharedLibrarySnapshot, setSharedLibrarySnapshot] = useState<SharedLibrarySnapshot | null>(null);
+  const [discoveredPeers, setDiscoveredPeers] = useState<LocalNetworkPeer[]>([]);
+  const [isScanningPeers, setIsScanningPeers] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
+  const [settingsPersistenceError, setSettingsPersistenceError] = useState('');
+  const isRemoteLibraryMode = desktopApi.isRemoteLibraryMode();
+  const visibleSettingsSections = useMemo(
+    () => isRemoteLibraryMode
+      ? SETTINGS_SECTIONS.filter((section) => section.id === 'profiles' || section.id === 'playback' || section.id === 'theme' || section.id === 'network' || section.id === 'about')
+      : activeProfile?.type === 'owner'
+      ? SETTINGS_SECTIONS
+      : SETTINGS_SECTIONS.filter((section) => section.id === 'profiles' || section.id === 'playback' || section.id === 'theme' || section.id === 'about'),
+    [activeProfile?.type, isRemoteLibraryMode],
+  );
+  const peerScanInFlightRef = useRef(false);
+  const remoteSnapshotPendingRef = useRef(false);
+  const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
+  const {
+    theme,
+    setTheme,
+    showProviderRatingBadges,
+    setShowProviderRatingBadges,
+  } = useTheme();
+  const openExternal = useCallback((url: string) => {
+    void desktopApi.openExternal(url);
+  }, []);
+  const METADATA_PROVIDERS = useMemo(() => makeMetadataProviders(openExternal), [openExternal]);
+  const remoteLibraryRefreshKey = useMemo(
+    () => remoteLibraryRefreshIdentity(sharedLibrarySnapshot),
+    [sharedLibrarySnapshot],
+  );
+
+  const persistSettings = useCallback(async (settings: Parameters<typeof desktopApi.saveSettings>[0]): Promise<boolean> => {
+    try {
+      const saved = await desktopApi.saveSettings(settings);
+      if (!saved) throw new Error('Loom did not confirm that the settings were saved.');
+      setSettingsPersistenceError('');
+      return true;
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Settings could not be saved.');
+      return false;
+    }
+  }, []);
+
+  const runLibraryAction = useCallback(async (action: LibraryAction) => {
+    setLibraryActionError(null);
+    try {
+      await action.run();
+    } catch (error) {
+      const typedError = error instanceof LibraryMutationError
+        ? error
+        : toLibraryMutationError(action.operation, error);
+      setLibraryActionError({
+        error: typedError,
+        action,
+      });
+    }
+  }, []);
+
+  const retryLibraryAction = useCallback(() => {
+    if (libraryActionError?.error.retryable) void runLibraryAction(libraryActionError.action);
+  }, [libraryActionError, runLibraryAction]);
+
+  const handleAddLibraryFolder = useCallback((kind: LibraryFolderKind) => {
+    void runLibraryAction({ operation: 'add-folder', run: () => addLibraryFolder(kind) });
+  }, [addLibraryFolder, runLibraryAction]);
+
+  const handleRemoveLibraryFolder = useCallback(async (folder: string) => {
+    await removeLibraryFolder(folder);
+  }, [removeLibraryFolder]);
+
+  const handleScanLibrary = useCallback(() => {
+    void runLibraryAction({ operation: 'scan', run: scanLibrary });
+  }, [runLibraryAction, scanLibrary]);
+
+  const handleRefreshMetadata = useCallback(() => {
+    void runLibraryAction({ operation: 'metadata-refresh', run: refreshMetadata });
+  }, [refreshMetadata, runLibraryAction]);
+
+  const handleFullRescanLibrary = useCallback(() => {
+    void runLibraryAction({ operation: 'full-rescan', run: fullRescanLibrary });
+  }, [fullRescanLibrary, runLibraryAction]);
+
+  const handleAutoSyncIntervalChange = useCallback((hours: number) => {
+    return runLibraryAction({ operation: 'auto-sync', run: () => setAutoSyncIntervalHours(hours) });
+  }, [runLibraryAction, setAutoSyncIntervalHours]);
+
+  const refreshMpvAvailability = useCallback(async () => {
+    if (isRemoteLibraryMode) {
+      setMpvAvailability(null);
+      return;
+    }
+    try {
+      setMpvAvailability(null);
+      setMpvAvailability(await desktopApi.mpv.refreshAvailability());
+    } catch (error) {
+      setMpvAvailability({ available: false, surface: 'unavailable', reason: 'libmpv availability could not be read.' });
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check libmpv availability.');
+    }
+  }, [isRemoteLibraryMode]);
+
+  const refreshLibvlcAvailability = useCallback(async () => {
+    if (isRemoteLibraryMode) {
+      setLibvlcAvailability(null);
+      return;
+    }
+    try {
+      setLibvlcAvailability(null);
+      setLibvlcAvailability(await desktopApi.libvlc.refreshAvailability());
+    } catch (error) {
+      setLibvlcAvailability({ available: false, enabled: false, surface: 'unavailable', reason: 'LibVLC availability could not be read.' });
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check LibVLC availability.');
+    }
+  }, [isRemoteLibraryMode]);
+
+  const refreshFfmpegAvailability = useCallback(async () => {
+    try {
+      setFfmpegStatus(null);
+      setFfmpegStatus(await desktopApi.checkFFmpeg());
+    } catch (error) {
+      setFfmpegStatus({ available: false, path: null });
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check FFmpeg availability.');
+    }
+  }, []);
+
+  const refreshLocalNetworkStatus = useCallback(async () => {
+    try {
+      setLocalNetworkStatus(await desktopApi.getLocalNetworkStatus());
+    } catch (error) {
+      console.error('Failed to load local network status:', error);
+      setNetworkStatusMessage('Could not read local network status.');
+    }
+  }, []);
+
+  useEffect(() => {
+    Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()]).then(([s, profilePreferences]) => {
+      const loadedKeys = {
+        ...Object.fromEntries(
+          Object.entries(s.metadataApiKeys || {}).filter(([provider]) => normalizeProviderId(provider) !== 'opensubtitles'),
+        ),
+        tmdb: s.metadataApiKeys?.tmdb || s.tmdbApiKey || '',
+        omdb: s.metadataApiKeys?.omdb || s.omdbApiKey || '',
+        fanart: s.metadataApiKeys?.fanart || '',
+        tvdb: s.metadataApiKeys?.tvdb || '',
+      };
+      setMetadataKeys(loadedKeys);
+      // Retire the hidden offline toggle without leaving existing owners offline.
+      if (s.metadataOfflineMode && activeProfile?.type === 'owner' && !isRemoteLibraryMode) {
+        void persistSettings({ metadataOfflineMode: false });
+      }
+      setEditingKeys(
+        Object.fromEntries(
+          Object.entries(loadedKeys).map(([provider, value]) => [provider, !value]),
+        ),
+      );
+      setSidebarNavOrder(normalizeSidebarNavOrder(profilePreferences.sidebarNavOrder ?? s.sidebarNavOrder));
+      setCustomFolderNames(s.customFolderNames || {});
+      setOtherFolderGroups(normalizeOtherFolderGroups(s.otherFolderGroups));
+      setOtherFolderIcon(normalizeOtherFolderIcon(s.otherFolderIcon));
+      const skipBack = profilePreferences.playbackSkipBackSeconds ?? s.playbackSkipBackSeconds;
+      const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
+      const loadedSkipBack = Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10;
+      const loadedSkipForward = Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15;
+      const loadedRewind = normalizeResumeRewind(profilePreferences.playbackRewindOnResumeSeconds);
+      setPlaybackRewindOnResumeSeconds(loadedRewind);
+      setPlaybackSkipBackSeconds(loadedSkipBack);
+      setPlaybackSkipForwardSeconds(loadedSkipForward);
+      const loadedDisplaySleepTimeout = Number.isFinite(Number(s.playbackDisplaySleepTimeoutMinutes))
+        ? Math.max(0, Math.min(480, Math.round(Number(s.playbackDisplaySleepTimeoutMinutes))))
+        : 0;
+      setPlaybackDisplaySleepTimeoutMinutes(loadedDisplaySleepTimeout);
+      setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
+      setRequireNetworkApproval(Boolean(s.localNetworkRequireApproval));
+    });
+    if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
+      void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
+    }
+    const savedRemoteLibrary = parseStoredValue(
+      localStorage.getItem('loomtv:last-remote-library'),
+      savedRemoteLibrarySchema.nullable(),
+      null,
+    );
+    if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
+    const savedSharedLibrary = parseStoredValue(
+      localStorage.getItem('loomtv:shared-library'),
+      sharedLibrarySnapshotSchema.nullable(),
+      null,
+    );
+    if (savedSharedLibrary?.library && (savedSharedLibrary.deviceToken || desktopApi.isRemoteLibraryMode())) {
+      setSharedLibrarySnapshot(savedSharedLibrary);
+    }
+  }, [activeProfile?.id, activeProfile?.type, isRemoteLibraryMode, persistSettings]);
+
+  const analysisIsActive = localAnalysisStatus?.state === 'running' || localAnalysisStatus?.state === 'queued';
+  useEffect(() => {
+    if (activeSection !== 'playback') return undefined;
+    let cancelled = false;
+    let pending = false;
+    const refresh = async () => {
+      if (cancelled || pending || document.hidden) return;
+      pending = true;
+      try {
+        const status = await desktopApi.getLocalSegmentAnalysisStatus();
+        if (!cancelled) setLocalAnalysisStatus(status);
+      } catch (error) {
+        if (!cancelled) console.warn('Could not refresh analysis status:', error);
+      } finally { pending = false; }
+    };
+    void refresh();
+    // Poll faster while a scan is running so the progress bar tracks it.
+    const timer = window.setInterval(refresh, analysisIsActive ? 2000 : 5000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [activeSection, analysisIsActive]);
+
+  useEffect(() => {
+    if (activeSection !== 'playback') return undefined;
+    let cancelled = false;
+    void Promise.allSettled([
+      desktopApi.libvlc.availability(),
+      desktopApi.mpv.refreshAvailability(),
+    ]).then(([libvlcResult, libmpvResult]) => {
+      if (cancelled) return;
+      setLibvlcAvailability(libvlcResult.status === 'fulfilled'
+        ? libvlcResult.value
+        : { available: false, enabled: false, surface: 'unavailable', reason: 'LibVLC availability could not be read.' });
+      setMpvAvailability(libmpvResult.status === 'fulfilled'
+        ? libmpvResult.value
+        : { available: false, surface: 'unavailable', reason: 'libmpv availability could not be read.' });
+    });
+    return () => { cancelled = true; };
+  }, [activeSection]);
+
+  const editFolder = useCallback(async (
+    folder: string,
+    nextFolder: string,
+    name: string,
+    icon: OtherFolderIconId,
+    kind: LibraryFolderKind,
+    groupId: string,
+    newGroupName: string,
+  ) => {
+    const normalizedNextFolder = nextFolder.trim();
+    if (normalizedNextFolder !== folder) {
+      await updateLibraryFolder(folder, normalizedNextFolder, kind);
+    }
+    const nextNames = { ...customFolderNames };
+    delete nextNames[folder];
+    delete nextNames[otherFolderIconStorageKey(folder)];
+    const trimmedName = name.trim();
+    if (trimmedName) nextNames[normalizedNextFolder] = trimmedName;
+    if (kind === 'others') nextNames[otherFolderIconStorageKey(normalizedNextFolder)] = icon;
+    const groupUpdate = kind === 'others'
+      ? assignOtherFolderToGroup(otherFolderGroups, folder, normalizedNextFolder, { groupId, newGroupName, icon })
+      : { groups: otherFolderGroups, groupId: '' };
+    await desktopApi.saveSettings({ customFolderNames: nextNames, otherFolderGroups: groupUpdate.groups });
+    setCustomFolderNames(nextNames);
+    setOtherFolderGroups(groupUpdate.groups);
+    window.dispatchEvent(new CustomEvent('loomtv:custom-folder-names-changed', { detail: nextNames }));
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: groupUpdate.groups }));
+  }, [customFolderNames, otherFolderGroups, updateLibraryFolder]);
+
+  const createCustomLibrary = useCallback(async (name: string, icon: OtherFolderIconId) => {
+    const created = createOtherFolderGroup(otherFolderGroups, name, icon);
+    await desktopApi.saveSettings({ otherFolderGroups: created.groups });
+    setOtherFolderGroups(created.groups);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: created.groups }));
+  }, [otherFolderGroups]);
+
+  const addFolderToCustomLibrary = useCallback(async (groupId: string) => {
+    const folder = await desktopApi.pickLibraryFolder();
+    if (!folder) return;
+    await addLibraryFolderPath('others', folder);
+    const assigned = assignOtherFolderToGroup(otherFolderGroups, '', folder, { groupId, icon: otherFolderGroups[groupId]?.icon || 'folder' });
+    await desktopApi.saveSettings({ otherFolderGroups: assigned.groups });
+    setOtherFolderGroups(assigned.groups);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: assigned.groups }));
+  }, [addLibraryFolderPath, otherFolderGroups]);
+
+  const deleteCustomLibrary = useCallback(async (groupId: string) => {
+    const group = otherFolderGroups[groupId];
+    if (!group) return;
+    const confirmed = await confirm({ title: `Delete ${group.name}?`, description: 'The folders will stay in Loom as ungrouped Others folders. No files will be deleted.', confirmLabel: 'Delete group', destructive: true });
+    if (!confirmed) return;
+    const next = { ...otherFolderGroups };
+    delete next[groupId];
+    await desktopApi.saveSettings({ otherFolderGroups: next });
+    setOtherFolderGroups(next);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: next }));
+  }, [confirm, otherFolderGroups]);
+
+  const changeOtherFolderIcon = useCallback((icon: OtherFolderIconId) => {
+    const previous = otherFolderIcon;
+    setOtherFolderIcon(icon);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-icon-changed', { detail: icon }));
+    void desktopApi.saveSettings({ otherFolderIcon: icon }).catch((error) => {
+      console.error('Failed to save Others icon:', error);
+      setOtherFolderIcon(previous);
+      window.dispatchEvent(new CustomEvent('loomtv:other-folder-icon-changed', { detail: previous }));
+    });
+  }, [otherFolderIcon]);
+
+
+  useEffect(() => {
+    sharedLibrarySnapshotRef.current = sharedLibrarySnapshot;
+  }, [sharedLibrarySnapshot]);
+
+  const setMetadataKey = (providerId: string, value: string) => {
+    setMetadataKeys((current) => ({ ...current, [providerId]: value }));
+  };
+
+  const cleanedMetadataKeys = (keys: Record<string, string> = metadataKeys) => Object.fromEntries(
+    Object.entries(keys)
+      .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
+      .filter(([provider, value]) => provider && provider !== 'opensubtitles' && value),
+  ) as Record<string, string>;
+
+  const saveMetadataSettings = async (keys: Record<string, string>): Promise<boolean> => {
+    const cleanedKeys = cleanedMetadataKeys(keys);
+    if (!await persistSettings({
+      metadataApiKeys: cleanedKeys,
+      omdbApiKey: cleanedKeys.omdb || '',
+      tmdbApiKey: cleanedKeys.tmdb || '',
+      metadataOfflineMode: false,
+    })) return false;
+
+    setMetadataKeys(cleanedKeys);
+    setEditingKeys(
+      Object.fromEntries(Object.keys(cleanedKeys).map((provider) => [provider, false])),
+    );
+    setSavedKey(true);
+    setTimeout(() => setSavedKey(false), 2000);
+    void refreshMetadata().catch((error) => {
+      setSettingsPersistenceError(`API keys saved, but metadata refresh failed. ${error instanceof Error ? error.message : 'Try Refresh metadata in Library settings.'}`);
+    });
+    return true;
+  };
+
+  const setProviderEditing = (providerId: string, isEditing: boolean) => {
+    if (isEditing) {
+      setEditingKeys((current) => ({ ...current, [providerId]: true }));
+      return;
+    }
+    void saveMetadataSettings(metadataKeys);
+  };
+
+  const toggleProviderVisibility = (providerId: string) => {
+    setVisibleKeys((current) => ({ ...current, [providerId]: !current[providerId] }));
+  };
+
+  const handleDeleteMetadataKey = async (providerId: string) => {
+    const nextKeys = { ...metadataKeys };
+    delete nextKeys[providerId];
+    if (!await saveMetadataSettings(nextKeys)) return;
+    setVisibleKeys((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+  };
+
+  const handleAddMetadataKey = async () => {
+    const providerId = normalizeProviderId(newProviderName);
+    if (!providerId || !newProviderKey.trim()) return;
+
+    if (!await saveMetadataSettings({
+      ...metadataKeys,
+      [providerId]: newProviderKey,
+    })) return;
+    setVisibleKeys((current) => ({ ...current, [providerId]: false }));
+    setNewProviderName('');
+    setNewProviderKey('');
+  };
+
+  const handleSaveApiKeys = async () => {
+    await saveMetadataSettings(metadataKeys);
+  };
+
+  const handleTestApiKeys = async () => {
+    const cleanedKeys = cleanedMetadataKeys(metadataKeys);
+    setIsTestingKeys(true);
+    setMetadataKeyTestResults([]);
+    try {
+      setMetadataKeyTestResults(await desktopApi.testMetadataKeys(cleanedKeys));
+    } catch (error) {
+      setMetadataKeyTestResults([{
+        provider: 'metadata',
+        ok: false,
+        message: error instanceof Error ? error.message : 'Failed to test API keys.',
+      }]);
+    } finally {
+      setIsTestingKeys(false);
+    }
+  };
+
+  const handleSavePlaybackSettings = async (): Promise<boolean> => {
+    const normalizedBack = Math.max(1, Math.round(Number(playbackSkipBackSeconds) || 0));
+    const normalizedForward = Math.max(1, Math.round(Number(playbackSkipForwardSeconds) || 0));
+    const normalizedRewind = normalizeResumeRewind(playbackRewindOnResumeSeconds);
+    setPlaybackRewindOnResumeSeconds(normalizedRewind);
+    setPlaybackSkipBackSeconds(normalizedBack);
+    setPlaybackSkipForwardSeconds(normalizedForward);
+    try {
+      await desktopApi.saveProfilePreferences({
+        playbackSkipBackSeconds: normalizedBack,
+        playbackRewindOnResumeSeconds: normalizedRewind,
+        playbackSkipForwardSeconds: normalizedForward,
+      }, activeProfile?.id);
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save profile playback settings.');
+      return false;
+    }
+    if (activeProfile?.type === 'owner' && !isRemoteLibraryMode) {
+      if (!await persistSettings({
+        localSkipAnalysisEnabled: skipAnalysis.enabled,
+        skipAnalysis,
+      })) return false;
+      setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    }
+    return true;
+  };
+
+  const handleAnalysisAction = async (
+    action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
+    scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
+  ): Promise<{ queued: number } | undefined> => {
+    let runResult: { queued: number } | undefined;
+    if (action === 'run') runResult = await desktopApi.runLocalSegmentAnalysis(scope);
+    else if (action === 'pause') await desktopApi.pauseLocalSegmentAnalysis();
+    else if (action === 'resume') await desktopApi.resumeLocalSegmentAnalysis();
+    else if (action === 'cancel') await desktopApi.cancelLocalSegmentAnalysis();
+    else if (action === 'cancel-manual') await desktopApi.cancelLocalSegmentAnalysis({ kind: 'manual' });
+    else if (action === 'cleanup') await desktopApi.cleanupLocalSegmentAnalysis();
+    else await desktopApi.rebuildLocalSegmentAnalysis();
+    setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    return runResult;
+  };
+
+  const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
+    setSidebarNavOrder(nextOrder);
+    try {
+      await desktopApi.saveProfilePreferences({ sidebarNavOrder: nextOrder }, activeProfile?.id);
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save profile navigation settings.');
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: nextOrder }));
+  };
+
+  const handleSidebarOrderDrop = (targetId: SidebarNavItemId, position: 'before' | 'after') => {
+    if (!draggedSidebarItem || draggedSidebarItem === targetId) {
+      setDraggedSidebarItem(null);
+      return;
+    }
+
+    const currentOrder = sidebarOrderItems
+      .map((item) => item.id)
+      .filter((item) => item !== draggedSidebarItem);
+    const currentTargetIndex = currentOrder.indexOf(targetId);
+    if (currentTargetIndex < 0) {
+      setDraggedSidebarItem(null);
+      return;
+    }
+    const insertionIndex = position === 'after' ? currentTargetIndex + 1 : currentTargetIndex;
+    const nextOrder = [
+      ...currentOrder.slice(0, insertionIndex),
+      draggedSidebarItem,
+      ...currentOrder.slice(insertionIndex),
+    ];
+
+    setDraggedSidebarItem(null);
+    void saveSidebarNavOrder(nextOrder);
+  };
+
+  const moveSidebarItem = (itemId: SidebarNavItemId, direction: -1 | 1) => {
+    const currentOrder = sidebarOrderItems.map((item) => item.id);
+    const index = currentOrder.indexOf(itemId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= currentOrder.length) return;
+
+    const nextOrder = [...currentOrder];
+    [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
+    void saveSidebarNavOrder(nextOrder);
+  };
+
+  const handleBackupDatabase = async () => {
+    setBackupStatus('');
+    const result = await desktopApi.backupDatabase();
+    if (result.ok && result.path) {
+      setBackupStatus(`Saved to ${result.path}`);
+    } else if (result.error !== 'cancelled') {
+      setBackupStatus('Backup failed. Try another location.');
+    }
+  };
+
+  const handleClearAppData = async () => {
+    const confirmed = await confirm({
+      title: 'Clear all app data?',
+      description: 'This removes every library folder, metadata record, cached artwork, watch position, and setting from this device. Your media files are not touched. This cannot be undone.',
+      confirmLabel: 'Clear app data',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setIsClearingData(true);
+    setClearDataStatus('');
+    try {
+      await clearAppData();
+      setLibraryActionError(null);
+      setClearDataStatus('App data cleared. Add a library folder to start fresh.');
+    } catch (error) {
+      console.error('Failed to clear app data:', error);
+      const typedError = error instanceof LibraryMutationError
+        ? error
+        : toLibraryMutationError('clear-data', error);
+      setLibraryActionError({
+        error: typedError,
+        action: { operation: 'clear-data', run: clearAppData },
+      });
+      setClearDataStatus(typedError.sanitizedMessage);
+    } finally {
+      setIsClearingData(false);
+    }
+  };
+
+  const setLocalNetworkSharing = async (enabled: boolean) => {
+    setNetworkStatusMessage('');
+    setIsTogglingNetworkSharing(true);
+    try {
+      await desktopApi.saveSettings({ localNetworkSharingEnabled: enabled });
+      await refreshLocalNetworkStatus();
+    } catch (error) {
+      console.error('Failed to update local network sharing:', error);
+      setNetworkStatusMessage('Could not update local network sharing.');
+    } finally {
+      setIsTogglingNetworkSharing(false);
+    }
+  };
+
+  const setLocalNetworkApproval = async (enabled: boolean) => {
+    const previous = requireNetworkApproval;
+    setRequireNetworkApproval(enabled);
+    setNetworkStatusMessage('');
+    try {
+      await desktopApi.saveSettings({ localNetworkRequireApproval: enabled });
+    } catch (error) {
+      setRequireNetworkApproval(previous);
+      console.error('Failed to update local network approval:', error);
+      setNetworkStatusMessage('Could not update approval preference.');
+    }
+  };
+
+  const copyNetworkValue = async (value?: string | null) => {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setNetworkStatusMessage('Copied.');
+    setTimeout(() => setNetworkStatusMessage(''), 1600);
+  };
+
+  const connectRemoteLibrary = async () => {
+    setIsConnectingRemoteLibrary(true);
+    setRemoteLibraryStatus('');
+    try {
+      const connection = await desktopApi.connectToLocalNetworkLibrary(
+        showManualNetworkAddress ? remoteLibraryAddress : '',
+        remoteShareCode,
+        remoteLibraryFingerprint || undefined,
+      );
+      const itemCount = (connection.library.movies?.length || 0)
+        + (connection.library.tvShows?.length || 0)
+        + (connection.library.animeShows?.length || 0);
+      localStorage.setItem('loomtv:last-remote-library', JSON.stringify({
+        baseUrl: connection.baseUrl,
+        connectedAt: Date.now(),
+      }));
+      const snapshot: SharedLibrarySnapshot = {
+        baseUrl: connection.baseUrl,
+        deviceId: connection.deviceId,
+        deviceToken: connection.deviceToken,
+        accessTokenExpiresAt: connection.accessTokenExpiresAt,
+        refreshToken: connection.refreshToken,
+        refreshTokenExpiresAt: connection.refreshTokenExpiresAt,
+        hostDeviceId: connection.hostDeviceId,
+        hostDeviceName: connection.hostDeviceName,
+        connectedAt: Date.now(),
+        libraryEtag: connection.libraryEtag,
+        library: connection.library,
+      };
+      localStorage.setItem('loomtv:shared-library', JSON.stringify(snapshot));
+      sharedLibrarySnapshotRef.current = snapshot;
+      setSharedLibrarySnapshot(snapshot);
+      setRemoteLibraryAddress(connection.baseUrl);
+      setRemoteShareCode('');
+      setRemoteLibraryStatus(`Connected to ${connection.hostDeviceName || 'shared device'}. Found ${itemCount} shared item${itemCount === 1 ? '' : 's'}.`);
+      desktopApi.activateRemoteLibrary(connection);
+    } catch (error) {
+      setRemoteLibraryStatus(error instanceof Error ? error.message : 'Could not connect to that shared library.');
+    } finally {
+      setIsConnectingRemoteLibrary(false);
+    }
+  };
+
+  const refreshRemoteLibrarySnapshot = useCallback(async () => {
+    const snapshot = sharedLibrarySnapshotRef.current;
+    if (!snapshot || remoteSnapshotPendingRef.current || document.hidden) return;
+    remoteSnapshotPendingRef.current = true;
+    try {
+      const refreshed = await desktopApi.refreshRemoteLibrary(
+        snapshot.baseUrl,
+        snapshot.deviceToken,
+        snapshot.libraryEtag,
+        snapshot.refreshToken,
+        snapshot.accessTokenExpiresAt,
+        snapshot.refreshTokenExpiresAt,
+      );
+      if (!refreshed || sharedLibrarySnapshotRef.current !== snapshot) return;
+      const next: SharedLibrarySnapshot = {
+        ...snapshot,
+        library: refreshed.library,
+        libraryEtag: refreshed.etag,
+        deviceToken: refreshed.deviceToken,
+        accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+        refreshToken: refreshed.refreshToken,
+        refreshTokenExpiresAt: refreshed.refreshTokenExpiresAt,
+      };
+      localStorage.setItem('loomtv:shared-library', JSON.stringify(next));
+      sharedLibrarySnapshotRef.current = next;
+      setSharedLibrarySnapshot(next);
+    } catch (error) {
+      console.warn('Remote library refresh failed:', error);
+    } finally { remoteSnapshotPendingRef.current = false; }
+  }, []);
+
+  const disconnectRemoteLibrary = async () => {
+    if (!sharedLibrarySnapshot) return;
+    await desktopApi.unpairFromRemoteLibrary(
+      sharedLibrarySnapshot.baseUrl,
+      sharedLibrarySnapshot.deviceToken,
+    );
+    localStorage.removeItem('loomtv:shared-library');
+    localStorage.removeItem('loomtv:last-remote-library');
+    sharedLibrarySnapshotRef.current = null;
+    setSharedLibrarySnapshot(null);
+    setRemoteLibraryStatus('Disconnected from shared library.');
+    desktopApi.disconnectRemoteDesktop();
+  };
+
+  const scanForPeers = useCallback(async () => {
+    if (peerScanInFlightRef.current) return;
+    peerScanInFlightRef.current = true;
+    setIsScanningPeers(true);
+    try {
+      const peers = await desktopApi.discoverLocalNetworkPeers(2500);
+      setDiscoveredPeers(peers);
+    } catch (error) {
+      console.warn('Peer scan failed:', error);
+      setDiscoveredPeers([]);
+    } finally {
+      peerScanInFlightRef.current = false;
+      setIsScanningPeers(false);
+    }
+  }, []);
+
+  const revokePairedDevice = async (deviceId: string) => {
+    const remaining = await desktopApi.revokePairedDevice(deviceId);
+    setLocalNetworkStatus((current) => current ? { ...current, pairedDevices: remaining } : current);
+  };
+
+  useEffect(() => {
+    if (activeSection !== 'network') return;
+    void refreshLocalNetworkStatus();
+    void scanForPeers();
+    const peerScanId = setInterval(() => { if (!document.hidden) void scanForPeers(); }, 8000);
+    const pinRefreshId = setInterval(() => { if (!document.hidden) void refreshLocalNetworkStatus(); }, 15000);
+    return () => {
+      clearInterval(peerScanId);
+      clearInterval(pinRefreshId);
+    };
+  }, [activeSection, refreshLocalNetworkStatus, scanForPeers]);
+
+  useEffect(() => {
+    if (activeSection !== 'about' && activeSection !== 'playback') return undefined;
+
+    let cancelled = false;
+    if (!ffmpegStatus) {
+      desktopApi.checkFFmpeg()
+        .then((status) => {
+          if (!cancelled) setFfmpegStatus(status);
+        })
+        .catch((error) => {
+          console.error('Failed to check FFmpeg:', error);
+          if (!cancelled) setFfmpegStatus({ available: false, path: null });
+        });
+    }
+
+    if (activeSection === 'about') desktopApi.getUpdateState()
+      .then((state) => {
+        if (!cancelled) setUpdateState(state);
+      })
+      .catch((error) => {
+        console.error('Failed to read update state:', error);
+      });
+    const unsubscribeUpdates = activeSection === 'about'
+      ? desktopApi.onUpdateState((state) => {
+        if (!cancelled) setUpdateState(state);
+      })
+      : () => undefined;
+
+    return () => {
+      cancelled = true;
+      unsubscribeUpdates();
+    };
+  }, [activeSection, ffmpegStatus]);
+
+  useEffect(() => {
+    if (activeSection !== 'about' && activeSection !== 'playback') return;
+    if (ffmpegStatus?.capabilities?.state !== 'probing') return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void desktopApi.checkFFmpeg().then((status) => {
+        if (!cancelled) setFfmpegStatus(status);
+      }).catch((error) => console.error('Failed to check FFmpeg:', error));
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [activeSection, ffmpegStatus]);
+
+  useEffect(() => {
+    if (!remoteLibraryRefreshKey) return;
+    const id = setInterval(() => void refreshRemoteLibrarySnapshot(), 30000);
+    return () => clearInterval(id);
+  }, [refreshRemoteLibrarySnapshot, remoteLibraryRefreshKey]);
+
+  const customProviders = Object.keys(metadataKeys)
+    .filter((providerId) => !METADATA_PROVIDERS.some((provider) => provider.id === providerId))
+    .sort();
+
+  const folderSections = [
+    {
+      key: 'movies' as const,
+      title: 'Movies',
+      description: 'Folders added here always scan into Movies.',
+      folders: libraryFolderGroups.movies || [],
+    },
+    {
+      key: 'tvShows' as const,
+      title: 'TV Shows',
+      description: 'Folders added here always scan into TV Shows.',
+      folders: libraryFolderGroups.tvShows || [],
+    },
+    {
+      key: 'anime' as const,
+      title: 'Anime / Animations',
+      description: 'Folders added here always scan into Anime.',
+      folders: libraryFolderGroups.anime || [],
+    },
+    {
+      key: 'others' as const,
+      title: 'Others',
+      description: 'Folders added here are scanned with automatic type detection.',
+      folders: libraryFolderGroups.others || [],
+    },
+  ];
+
+  const sharedLibrarySections = sharedLibrarySnapshot ? [
+    { title: 'Movies', items: sharedLibrarySnapshot.library.movies || [] },
+    { title: 'TV Shows', items: sharedLibrarySnapshot.library.tvShows || [] },
+    { title: 'Anime', items: sharedLibrarySnapshot.library.animeShows || [] },
+  ] : [];
+  const isNetworkSharingOn = Boolean(localNetworkStatus?.sharingEnabled);
+  const currentNetworkName = localNetworkStatus?.networkName || 'Connected locally';
+  const isUpdateChecking = isCheckingUpdateServer || updateState?.status === 'checking';
+  const isUpdateBusy = isUpdateChecking || updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const isUpdateDownloading = updateState?.status === 'downloading';
+  const updateDownloadPercent = isUpdateDownloading
+    ? Math.max(0, Math.min(100, Math.round(updateState.downloadPercent || 0)))
+    : 0;
+  const updateButtonLabel = isUpdateChecking ? 'Checking...' : getUpdateButtonLabel(updateState);
+  const updateStatusCopy = isUpdateBusy ? '' : getCompactUpdateStatus(updateState);
+
+  const handleUpdateAction = async () => {
+    if (isUpdateBusy) return;
+    if (updateState?.manualDownload) {
+      await desktopApi.openExternal('https://github.com/mallenkb/LoomTV/releases/latest');
+      return;
+    }
+
+    if (updateState?.status === 'downloaded') {
+      setUpdateState((current) => ({
+        ...(current || {
+          currentVersion: APP_VERSION,
+          platform: 'browser' as NodeJS.Platform,
+          arch: 'unknown',
+          supported: false,
+        }),
+        status: 'installing',
+        message: 'Preparing update restart...',
+      }));
+      const nextState = await desktopApi.installUpdate();
+      setUpdateState(nextState);
+      return;
+    }
+
+    setIsCheckingUpdateServer(true);
+    setUpdateState((current) => ({
+      ...(current || {
+        currentVersion: APP_VERSION,
+        platform: 'browser' as NodeJS.Platform,
+        arch: 'unknown',
+        supported: false,
+      }),
+      status: 'checking',
+      downloadPercent: undefined,
+      message: 'Checking for updates...',
+    }));
+    try {
+      const [nextState] = await Promise.all([
+        desktopApi.checkForUpdates(),
+        new Promise((resolve) => setTimeout(resolve, 650)),
+      ]);
+      setUpdateState(nextState);
+    } finally {
+      setIsCheckingUpdateServer(false);
+    }
+  };
+
+  // Settings v2 overview: the attention list needs update, network and
+  // analysis status without opening those pages first.
+  useEffect(() => {
+    if (activeSection !== null) return undefined;
+    let cancelled = false;
+    void desktopApi.getUpdateState()
+      .then((state) => { if (!cancelled) setUpdateState(state); })
+      .catch((error) => console.error('Failed to read update state:', error));
+    const unsubscribeUpdates = desktopApi.onUpdateState((state) => {
+      if (!cancelled) setUpdateState(state);
+    });
+    if (!isRemoteLibraryMode) void refreshLocalNetworkStatus();
+    if (activeProfile?.type === 'owner' && !isRemoteLibraryMode) {
+      void desktopApi.getLocalSegmentAnalysisStatus()
+        .then((status) => { if (!cancelled) setLocalAnalysisStatus(status); })
+        .catch((error) => console.warn('Could not refresh analysis status:', error));
+    }
+    return () => {
+      cancelled = true;
+      unsubscribeUpdates();
+    };
+  }, [activeProfile?.type, activeSection, isRemoteLibraryMode, refreshLocalNetworkStatus]);
+
+  /** Saves one seek preference right away (Settings v2 has no Save button for these). */
+  const savePlaybackPreference = useCallback(async (
+    key: 'skipBackSeconds' | 'skipForwardSeconds' | 'rewindOnResumeSeconds',
+    value: number,
+  ): Promise<boolean> => {
+    const preferenceKey = {
+      skipBackSeconds: 'playbackSkipBackSeconds',
+      skipForwardSeconds: 'playbackSkipForwardSeconds',
+      rewindOnResumeSeconds: 'playbackRewindOnResumeSeconds',
+    }[key];
+    const normalized = key === 'rewindOnResumeSeconds' ? normalizeResumeRewind(value) : Math.max(1, Math.round(value));
+    if (key === 'skipBackSeconds') setPlaybackSkipBackSeconds(normalized);
+    else if (key === 'skipForwardSeconds') setPlaybackSkipForwardSeconds(normalized);
+    else setPlaybackRewindOnResumeSeconds(normalized);
+    try {
+      await desktopApi.saveProfilePreferences({ [preferenceKey]: normalized }, activeProfile?.id);
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save profile playback settings.');
+      return false;
+    }
+    return true;
+  }, [activeProfile?.id]);
+
+  /** Settings v2 saves intro and outro detection changes as they happen. */
+  const saveSkipAnalysis = useCallback(async (next: SkipAnalysisSettings): Promise<boolean> => {
+    setSkipAnalysis(next);
+    if (activeProfile?.type !== 'owner' || isRemoteLibraryMode) return false;
+    if (!await persistSettings({ localSkipAnalysisEnabled: next.enabled, skipAnalysis: next })) return false;
+    try {
+      setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    } catch (error) {
+      console.warn('Could not refresh analysis status:', error);
+    }
+    return true;
+  }, [activeProfile?.type, isRemoteLibraryMode, persistSettings]);
+
+  /** Settings v2 saves the display sleep timer as soon as a choice is made. */
+  const saveDisplaySleep = useCallback(async (minutes: number): Promise<boolean> => {
+    if (isRemoteLibraryMode || activeProfile?.type !== 'owner') return false;
+    const normalized = Math.max(0, Math.min(480, Math.round(minutes)));
+    setPlaybackDisplaySleepTimeoutMinutes(normalized);
+    if (!await persistSettings({ playbackDisplaySleepTimeoutMinutes: normalized })) return false;
+    return true;
+  }, [activeProfile?.type, isRemoteLibraryMode, persistSettings]);
+
+  const renderSection = (section: SettingsSection): ReactNode => (
+    <>
+      {section === 'profiles' && <ProfilesSettingsSection />}
+      {section === 'plugins' && <AddonsSettingsOverview />}
+      {section === 'live-tv' && <LiveTvSettingsOverview />}
+      {section === 'playback' && (
+        <PlaybackSettingsSection
+          showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
+          rewindOnResumeSeconds={playbackRewindOnResumeSeconds}
+          skipBackSeconds={playbackSkipBackSeconds}
+          skipForwardSeconds={playbackSkipForwardSeconds}
+          displaySleepTimeoutMinutes={playbackDisplaySleepTimeoutMinutes}
+          onPlaybackPreferenceChange={(key, value) => void savePlaybackPreference(key, value)}
+          onDisplaySleepTimeoutChange={(minutes) => void saveDisplaySleep(minutes)}
+          displaySleepSettingsAvailable={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
+          skipAnalysis={skipAnalysis}
+          onSkipAnalysisChange={setSkipAnalysis}
+          onSkipAnalysisCommit={(next) => void saveSkipAnalysis(next)}
+          analysisStatus={localAnalysisStatus}
+          onAnalysisAction={handleAnalysisAction}
+          onSave={handleSavePlaybackSettings}
+          libvlcAvailability={isRemoteLibraryMode
+            ? { available: false, enabled: false, surface: 'unavailable', reason: 'Native LibVLC playback is available only for local files on this laptop.' }
+            : libvlcAvailability}
+          mpvAvailability={isRemoteLibraryMode
+            ? { available: false, reason: 'Native libmpv playback is available only for local files on this laptop.' }
+            : mpvAvailability}
+          ffmpegStatus={ffmpegStatus}
+          onLibvlcRefresh={isRemoteLibraryMode ? undefined : refreshLibvlcAvailability}
+          onMpvRefresh={isRemoteLibraryMode ? undefined : refreshMpvAvailability}
+          onFfmpegRefresh={refreshFfmpegAvailability}
+        />
+      )}
+
+      {section === 'library' && (
+        <LibrarySettingsSection
+            folderSections={folderSections}
+            folderStatuses={libraryFolderStatuses}
+            addLibraryFolder={handleAddLibraryFolder}
+            removeLibraryFolder={handleRemoveLibraryFolder}
+            customFolderNames={customFolderNames}
+            otherFolderGroups={otherFolderGroups}
+            onCreateOtherFolderGroup={createCustomLibrary}
+            onAddFolderToGroup={addFolderToCustomLibrary}
+            onDeleteOtherFolderGroup={deleteCustomLibrary}
+            onEditFolder={editFolder}
+            otherFolderIcon={otherFolderIcon}
+            onOtherFolderIconChange={changeOtherFolderIcon}
+            sidebarOrderItems={sidebarOrderItems}
+            draggedSidebarItem={draggedSidebarItem}
+            setDraggedSidebarItem={setDraggedSidebarItem}
+            onSidebarOrderDrop={handleSidebarOrderDrop}
+            moveSidebarItem={moveSidebarItem}
+            isScanning={isScanning}
+            scanProgress={scanProgress}
+            movieCount={movies.length}
+            tvShowCount={tvShows.length}
+            animeCount={animeShows.length}
+            scanLibrary={handleScanLibrary}
+            refreshMetadata={handleRefreshMetadata}
+            fullRescanLibrary={handleFullRescanLibrary}
+            autoSyncIntervalHours={autoSyncIntervalHours}
+            setAutoSyncIntervalHours={handleAutoSyncIntervalChange}
+            backupStatus={backupStatus}
+            clearDataStatus={clearDataStatus}
+            isClearingData={isClearingData}
+            libraryActionError={libraryActionError?.error.sanitizedMessage}
+            onRetryLibraryAction={libraryActionError?.error.retryable ? retryLibraryAction : undefined}
+            onBackupDatabase={() => void handleBackupDatabase()}
+            onClearAppData={() => void handleClearAppData()}
+        />
+      )}
+
+      {section === 'network' && (
+        <NetworkSettingsSection
+          localNetworkStatus={localNetworkStatus}
+          isNetworkSharingOn={isNetworkSharingOn}
+          isTogglingNetworkSharing={isTogglingNetworkSharing}
+          requireApproval={requireNetworkApproval}
+          setRequireApproval={(enabled) => void setLocalNetworkApproval(enabled)}
+          currentNetworkName={currentNetworkName}
+          networkStatusMessage={networkStatusMessage}
+          setLocalNetworkSharing={(enabled) => void setLocalNetworkSharing(enabled)}
+          copyNetworkValue={(value) => void copyNetworkValue(value)}
+          revokePairedDevice={(deviceId) => void revokePairedDevice(deviceId)}
+          discoveredPeers={discoveredPeers}
+          isScanningPeers={isScanningPeers}
+          scanForPeers={() => void scanForPeers()}
+          remoteLibraryAddress={remoteLibraryAddress}
+          setRemoteLibraryAddress={setRemoteLibraryAddress}
+          setRemoteLibraryFingerprint={setRemoteLibraryFingerprint}
+          remoteShareCode={remoteShareCode}
+          setRemoteShareCode={setRemoteShareCode}
+          showManualNetworkAddress={showManualNetworkAddress}
+          setShowManualNetworkAddress={setShowManualNetworkAddress}
+          connectRemoteLibrary={() => void connectRemoteLibrary()}
+          isConnectingRemoteLibrary={isConnectingRemoteLibrary}
+          remoteLibraryStatus={remoteLibraryStatus}
+          sharedLibrarySnapshot={sharedLibrarySnapshot}
+          sharedLibrarySections={sharedLibrarySections}
+          disconnectRemoteLibrary={() => void disconnectRemoteLibrary()}
+        />
+      )}
+      {section === 'metadata' && (
+        <MetadataSettingsSection
+          providers={METADATA_PROVIDERS}
+          metadataKeys={metadataKeys}
+          editingKeys={editingKeys}
+          visibleKeys={visibleKeys}
+          customProviders={customProviders}
+          newProviderName={newProviderName}
+          newProviderKey={newProviderKey}
+          savedKey={savedKey}
+          isTestingKeys={isTestingKeys}
+          metadataKeyTestResults={metadataKeyTestResults}
+          hasMetadataKeysToTest={Object.keys(cleanedMetadataKeys()).length > 0}
+          setMetadataKey={setMetadataKey}
+          setProviderEditing={setProviderEditing}
+          toggleProviderVisibility={toggleProviderVisibility}
+          deleteMetadataKey={handleDeleteMetadataKey}
+          setNewProviderName={setNewProviderName}
+          setNewProviderKey={setNewProviderKey}
+          addMetadataKey={handleAddMetadataKey}
+          saveApiKeys={() => void handleSaveApiKeys()}
+          testApiKeys={() => void handleTestApiKeys()}
+        />
+      )}
+
+      {section === 'theme' && (
+        <ThemeSettingsSection
+          controller={{
+            theme,
+            setTheme,
+            showProviderRatingBadges,
+            setShowProviderRatingBadges,
+            sidebarOrderItems,
+            moveSidebarItem,
+          }}
+        />
+      )}
+
+      {section === 'about' && (
+        <AboutSettingsSection
+          controller={{
+            ffmpegStatus,
+            updateState,
+            isUpdateBusy,
+            updateDownloadPercent,
+            updateButtonLabel,
+            handleUpdateAction,
+            libvlcAvailability,
+            mpvAvailability,
+            refreshLibvlcAvailability,
+            refreshMpvAvailability,
+            isRemoteLibraryMode,
+          }}
+        />
+      )}
+    </>
+  );
+
+  return {
+    activeProfile,
+    isRemoteLibraryMode,
+    visibleSettingsSections,
+    settingsPersistenceError,
+    renderSection,
+    metadataKeys,
+    libraryFolderGroups,
+    libraryFolderStatuses,
+    isScanning,
+    scanProgress,
+    libraryTitleCount: movies.length + tvShows.length + animeShows.length,
+    autoSyncIntervalHours,
+    setAutoSyncIntervalHours: handleAutoSyncIntervalChange,
+    scanLibrary: handleScanLibrary,
+    backupDatabase: handleBackupDatabase,
+    backupStatus,
+    localAnalysisStatus,
+    localNetworkStatus,
+    isNetworkSharingOn,
+    isTogglingNetworkSharing,
+    setLocalNetworkSharing,
+    requireNetworkApproval,
+    setLocalNetworkApproval,
+    playbackSkipBackSeconds,
+    playbackSkipForwardSeconds,
+    playbackRewindOnResumeSeconds,
+    savePlaybackPreference,
+    theme,
+    setTheme,
+    updateState,
+    isUpdateBusy,
+    updateButtonLabel,
+    handleUpdateAction,
+    isUpdateChecking,
+    isUpdateDownloading,
+    updateDownloadPercent,
+    updateStatusCopy,
+    ffmpegStatus,
+    libvlcAvailability,
+    mpvAvailability,
+    refreshLibvlcAvailability,
+    refreshMpvAvailability,
+    refreshFfmpegAvailability,
+    showProviderRatingBadges,
+    setShowProviderRatingBadges,
+    // Playback
+    playbackDisplaySleepTimeoutMinutes,
+    saveDisplaySleep,
+    skipAnalysis,
+    saveSkipAnalysis,
+    handleAnalysisAction,
+    // Metadata
+    metadataProviders: METADATA_PROVIDERS,
+    customProviders,
+    saveMetadataSettings,
+    deleteMetadataKey: handleDeleteMetadataKey,
+    testApiKeys: handleTestApiKeys,
+    isTestingKeys,
+    metadataKeyTestResults,
+    // Network
+    currentNetworkName,
+    networkStatusMessage,
+    copyNetworkValue,
+    revokePairedDevice,
+    discoveredPeers,
+    isScanningPeers,
+    scanForPeers,
+    remoteLibraryAddress,
+    setRemoteLibraryAddress,
+    setRemoteLibraryFingerprint,
+    remoteShareCode,
+    setRemoteShareCode,
+    showManualNetworkAddress,
+    setShowManualNetworkAddress,
+    connectRemoteLibrary,
+    isConnectingRemoteLibrary,
+    remoteLibraryStatus,
+    sharedLibrarySnapshot,
+    sharedLibrarySections,
+    disconnectRemoteLibrary,
+    // Library
+    folderSections,
+    addLibraryFolder: handleAddLibraryFolder,
+    removeLibraryFolder: handleRemoveLibraryFolder,
+    customFolderNames,
+    otherFolderGroups,
+    editFolder,
+    otherFolderIcon,
+    sidebarOrderItems,
+    draggedSidebarItem,
+    setDraggedSidebarItem,
+    onSidebarOrderDrop: handleSidebarOrderDrop,
+    moveSidebarItem,
+    refreshMetadata: handleRefreshMetadata,
+    fullRescanLibrary: handleFullRescanLibrary,
+    clearAppData: handleClearAppData,
+    clearDataStatus,
+    isClearingData,
+    libraryActionError: libraryActionError?.error.sanitizedMessage ?? '',
+    retryLibraryAction: libraryActionError?.error.retryable ? retryLibraryAction : undefined,
+    movieCount: movies.length,
+    tvShowCount: tvShows.length,
+    animeCount: animeShows.length,
+  };
+}
+
+export type SettingsController = ReturnType<typeof useSettingsController>;

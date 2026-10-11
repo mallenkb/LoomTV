@@ -34,6 +34,7 @@ function mount(props: Props, overrides: Partial<typeof subtitles> = {}) {
       return slots[index];
     },
     useMemo: (compute: () => unknown) => compute(),
+    useId: () => 'opensubtitles-test-id',
     useEffect(effect: () => () => void) {
       const index = cursor++;
       if (!(index in slots)) { slots[index] = true; cleanups.push(effect()); }

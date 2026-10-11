@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import type {
   StremioCatalogResult,
   StremioInstallRecord,
   StremioManifestReview,
   StremioMetaResult,
+  StremioStreamResult,
 } from '@loom-media-server/plugin-protocol';
 import type {
   OfficialStremioAddon,
@@ -16,6 +18,9 @@ import type {
   StremioPluginMetaResult,
   StremioPluginReview,
   StremioPluginSummary,
+  StremioPluginVideo,
+  StremioStreamDescriptor,
+  StremioStreamResult as ClientStremioStreamResult,
 } from '../shared/desktopProtocol.ts';
 
 const STREMIO_ITEM_ID_PREFIX = 'loomtv-stremio-item-v1';
@@ -84,6 +89,43 @@ export function officialStremioAddonId(id: OfficialStremioAddon['id']): Official
   return addonId;
 }
 
+/** Add-ons LoomTV embeds itself. A pasted manifest must not replace or duplicate them. */
+export const EMBEDDED_STREMIO_ADDON_IDS: ReadonlySet<string> = new Set([
+  'com.linvo.cinemeta',
+  'org.stremio.opensubtitlesv3',
+]);
+
+/**
+ * Accept the link forms Stremio shares: an HTTPS manifest URL, or the same
+ * URL with the `stremio://` install scheme. Credentials in the path or query
+ * are kept; the adapter validates and redacts the result.
+ */
+export function normalizeStremioManifestLink(value: string): string {
+  const input = value.trim();
+  const candidate = /^stremio:\/\//i.test(input) ? `https://${input.slice('stremio://'.length)}` : input;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new StremioManifestLinkError('This is not a valid add-on link. Paste the full manifest URL.');
+  }
+  if (url.protocol === 'http:') {
+    throw new StremioManifestLinkError('This add-on link uses HTTP. LoomTV only installs add-ons served over HTTPS.');
+  }
+  if (url.protocol !== 'https:') {
+    throw new StremioManifestLinkError('Paste an add-on manifest link that starts with https:// or stremio://.');
+  }
+  if (!/\/manifest\.json$/i.test(url.pathname)) {
+    throw new StremioManifestLinkError('This link is not an add-on manifest. Manifest links end in /manifest.json.');
+  }
+  return url.toString();
+}
+
+export class StremioManifestLinkError extends Error {
+  readonly code = 'STREMIO_PLUGIN_INVALID_MANIFEST_LINK';
+  readonly retryable = false;
+}
+
 function uniqueWarnings(record: StremioInstallRecord, reviewWarnings: readonly string[] = []): string[] {
   return [...new Set([
     ...record.manifest.compatibilityWarnings.map(({ message }) => message),
@@ -92,6 +134,20 @@ function uniqueWarnings(record: StremioInstallRecord, reviewWarnings: readonly s
       : []),
     ...reviewWarnings,
   ])];
+}
+
+/**
+ * Changes when the add-on is re-reviewed (a replaced manifest), re-approved,
+ * or reconfigured. Results stamped with an older value must not be used.
+ */
+export function stremioSourceRevision(
+  record: Pick<StremioInstallRecord, 'approvedAt' | 'reviewedAt' | 'reviewToken'>,
+  configurationState?: Pick<StremioPluginConfigurationState, 'revision'>,
+): string {
+  // Each review issues a new token, so its digest separates two reviews that
+  // share a timestamp. The digest cannot be used to approve anything.
+  const review = createHash('sha256').update(record.reviewToken).digest('base64url').slice(0, 16);
+  return `${review}:${record.approvedAt ?? 0}:${record.reviewedAt}:${configurationState?.revision ?? 0}`;
 }
 
 export function stremioPluginSummary(record: StremioInstallRecord, configurationState?: StremioPluginConfigurationState): StremioPluginSummary {
@@ -117,8 +173,15 @@ export function stremioPluginSummary(record: StremioInstallRecord, configuration
     configuration,
     configured: configurationState?.configured ?? !configurationRequired,
     configurationRevision: configurationState?.revision ?? 0,
+    revision: stremioSourceRevision(record, configurationState),
     resources: record.manifest.resources.map(({ name }) => name),
     types: [...record.manifest.types],
+    // The adapter already applied the manifest-wide types/idPrefixes fallback.
+    resourceDetails: record.manifest.resources.map(({ name, types, idPrefixes }) => ({
+      name,
+      types: [...types],
+      idPrefixes: [...idPrefixes],
+    })),
     catalogs: record.manifest.catalogs.map((catalog) => ({
       type: catalog.type,
       id: catalog.id,
@@ -181,20 +244,117 @@ function castReferences(
   return cast.length > 0 ? cast : undefined;
 }
 
+type StremioSourceCandidate = StremioStreamResult['sources'][number];
+
+/** Registers a provider subtitle URL with the host and returns an opaque token for the renderer. */
+export type StremioSubtitleTokenIssuer = (addonId: string, subtitle: { url: string; language: string }) => string;
+
+export type StremioWireOptions = {
+  /** `stremioSourceRevision` of the add-on when the request started. */
+  sourceRevision?: string;
+  subtitleToken?: StremioSubtitleTokenIssuer;
+};
+
+/** Keep each validated stream's structure so the renderer can pick the right action. */
+export function stremioStreamDescriptor(source: StremioSourceCandidate, subtitleToken?: StremioSubtitleTokenIssuer): StremioStreamDescriptor {
+  const transport: StremioStreamDescriptor['transport'] = source.playableByLoom && source.url
+    ? source.sourceKind === 'hls' ? 'hls' : 'media'
+    : source.sourceKind === 'youtube' && source.ytId ? 'youtube'
+      : source.sourceKind === 'external' && source.externalUrl ? 'external'
+        : source.sourceKind === 'torrent' || source.sourceKind === 'peer-to-peer' ? 'peer-to-peer'
+          : 'unsupported';
+  // Subtitle URLs can carry provider credentials, so only host tokens leave main.
+  const subtitles = subtitleToken && (transport === 'media' || transport === 'hls')
+    ? (source.subtitles || []).map(({ language, url }) => ({ language, token: subtitleToken(source.source.addonId, { url, language }) }))
+    : [];
+  return {
+    id: source.id,
+    transport,
+    ...(source.name ? { name: source.name } : {}),
+    ...(source.description ? { description: source.description } : {}),
+    ...(transport === 'media' || transport === 'hls' ? { url: source.url } : {}),
+    ...(transport === 'external' ? { externalUrl: source.externalUrl } : {}),
+    ...(transport === 'youtube' ? { ytId: source.ytId } : {}),
+    ...(transport === 'peer-to-peer' || transport === 'unsupported'
+      ? { reason: source.reason || 'LoomTV cannot play this source type.' }
+      : {}),
+    ...(source.notWebReady ? { notWebReady: true } : {}),
+    ...(source.requestHeadersRequired ? { requestHeadersRequired: true } : {}),
+    ...(subtitles.length ? { subtitles } : {}),
+  };
+}
+
+export function stremioStreamResult(result: StremioStreamResult, options: StremioWireOptions = {}): ClientStremioStreamResult {
+  return {
+    addonId: result.source.addonId,
+    ...(options.sourceRevision ? { sourceRevision: options.sourceRevision } : {}),
+    streams: result.sources.map((source) => stremioStreamDescriptor(source, options.subtitleToken)),
+    playableCount: result.playableCount,
+    unsupportedPeerToPeerCount: result.unsupportedPeerToPeerCount,
+    rejectedCount: result.rejectedCount,
+  };
+}
+
+const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+
+/**
+ * stremio-core plays `yt_id:CHANNEL_ID:VIDEO_ID` videos from the official
+ * YouTube add-on with the YouTube player. Only a video listed by approved
+ * metadata gets this, and only with a well-formed 11-character ID.
+ */
+function derivedYouTubeStreams(addonId: string, videoId: string): StremioStreamDescriptor[] | undefined {
+  if (!videoId.startsWith('yt_id:')) return undefined;
+  const ytId = videoId.split(':')[2];
+  return ytId && YOUTUBE_VIDEO_ID.test(ytId) ? [{ id: `${addonId}:${videoId}:youtube`, transport: 'youtube', ytId }] : undefined;
+}
+
+function stremioVideos(
+  addonId: string,
+  item: StremioCatalogResult['items'][number],
+  artworkDeliveryUrl?: ArtworkDeliveryUrl,
+  subtitleToken?: StremioSubtitleTokenIssuer,
+): StremioPluginVideo[] | undefined {
+  if (!item.videos?.length) return undefined;
+  return item.videos.map((video) => {
+    const thumbnail = video.thumbnailUrl && artworkDeliveryUrl ? artworkDeliveryUrl(video.thumbnailUrl) : '';
+    // Stremio semantics: a defined streams array, even an empty one, replaces
+    // the stream request for this video. Absent means "ask stream add-ons".
+    const streams = video.embeddedSources
+      ? video.embeddedSources.map((source) => stremioStreamDescriptor(source, subtitleToken))
+      : derivedYouTubeStreams(addonId, video.id);
+    return {
+      id: video.id,
+      title: video.title,
+      ...(video.available === undefined ? {} : { available: video.available }),
+      ...(video.season === undefined ? {} : { season: video.season }),
+      ...(video.episode === undefined ? {} : { episode: video.episode }),
+      ...(video.released ? { released: video.released } : {}),
+      ...(video.overview ? { overview: video.overview } : {}),
+      ...(thumbnail ? { thumbnail } : {}),
+      ...(streams ? { streams } : {}),
+    };
+  });
+}
+
 function stremioCatalogItem(
   addonId: string,
   item: StremioCatalogResult['items'][number],
   artworkDeliveryUrl?: ArtworkDeliveryUrl,
+  options: StremioWireOptions = {},
 ): StremioPluginCatalogItem {
   const artwork = artworkReferences(item, artworkDeliveryUrl);
   const cast = castReferences(item, artworkDeliveryUrl);
   const format = item.type === 'movie' ? 'Movie' : item.type === 'series' ? 'TV' : undefined;
+  const videos = stremioVideos(addonId, item, artworkDeliveryUrl, options.subtitleToken);
   return {
     id: stremioItemId(addonId, item.type, item.id),
     type: item.type,
     source: addonId,
     ...(format ? { format } : {}),
     title: item.title,
+    providerId: item.id,
+    ...(item.defaultVideoId ? { defaultVideoId: item.defaultVideoId } : {}),
+    ...(videos ? { videos, metaSource: addonId, ...(options.sourceRevision ? { metaSourceRevision: options.sourceRevision } : {}) } : {}),
     genres: [...item.genres],
     ...(artwork ? { artwork } : {}),
     ...(cast ? { cast } : {}),
@@ -211,12 +371,13 @@ export function stremioCatalogResult(
   request: StremioPluginCatalogRequest,
   result: StremioCatalogResult,
   artworkDeliveryUrl?: ArtworkDeliveryUrl,
+  options: StremioWireOptions = {},
 ): StremioPluginCatalogResult {
   return {
     addonId,
     type: request.type,
     catalogId: request.catalogId,
-    items: result.items.map((item) => stremioCatalogItem(addonId, item, artworkDeliveryUrl)),
+    items: result.items.map((item) => stremioCatalogItem(addonId, item, artworkDeliveryUrl, options)),
   };
 }
 
@@ -224,10 +385,12 @@ export function stremioMetaResult(
   addonId: string,
   result: StremioMetaResult,
   artworkDeliveryUrl?: ArtworkDeliveryUrl,
+  options: StremioWireOptions = {},
 ): StremioPluginMetaResult {
   return {
     addonId,
-    item: result.item ? stremioCatalogItem(addonId, result.item, artworkDeliveryUrl) : null,
+    ...(options.sourceRevision ? { sourceRevision: options.sourceRevision } : {}),
+    item: result.item ? stremioCatalogItem(addonId, result.item, artworkDeliveryUrl, options) : null,
   };
 }
 

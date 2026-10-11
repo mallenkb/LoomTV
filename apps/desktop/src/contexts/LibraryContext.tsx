@@ -720,7 +720,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   };
 
   const setAutoSyncIntervalHours = async (hours: number) => {
-    const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 72;
+    const normalizedHours = Number.isFinite(hours) && hours >= 0 ? hours : 72;
     const mutationToken = beginLibraryMutation('settings');
     const previousHours = autoSyncHoursRef.current;
     autoSyncHoursRef.current = normalizedHours;
@@ -802,7 +802,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           desktopApi.getSettings().catch(() => null),
         ]);
         if (cancelled) return;
-        if (settings?.autoSyncIntervalHours) {
+        if (settings?.autoSyncIntervalHours !== undefined) {
           dispatch({
             type: 'SET_AUTO_SYNC_INTERVAL_HOURS',
             payload: settings.autoSyncIntervalHours,
@@ -849,6 +849,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [activeProfile?.id, activeProfile?.type, applyScanCatalog, beginLibraryMutation, loadPrimaryCatalog, runLibraryScan]);
 
   useEffect(() => {
+    // Zero disables periodic quick sync while leaving manual scans available.
+    if (state.autoSyncIntervalHours === 0) return undefined;
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
     const intervalId = window.setInterval(() => {
       if (activeProfile?.type !== 'owner' || isScanningRef.current || !hasConfiguredFoldersRef.current) return;

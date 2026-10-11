@@ -313,6 +313,9 @@ export type DesktopBridgeApi = {
       getStremioMeta?: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
       getStremioMetaByItem?: (request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
       getStremioStreams?: (addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<import('../shared/desktopProtocol.ts').StremioStreamResult>>;
+      getStremioSubtitles?: (addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<import('../shared/desktopProtocol.ts').StremioSubtitleListResult>>;
+      downloadStremioSubtitle?: (token: string) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<{ text: string }>>;
+      issueStremioItemKey?: (type: 'movie' | 'series', providerId: string) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<string>>;
       getStremioAddonConfiguration?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
       saveStremioAddonConfiguration?: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
       listStremioPluginAudit?: (addonId: string, limit?: number) => Promise<StremioPluginIpcResult<readonly StremioPluginAuditEntry[]>>;
@@ -1624,6 +1627,23 @@ const desktopTransport = {
     throw new Error('Stremio streams are currently available only in the LoomTV desktop app.');
   },
 
+  async getStremioSubtitles(addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest): Promise<import('../shared/desktopProtocol.ts').StremioSubtitleListResult> {
+    if (window.desktopApi?.getStremioSubtitles) return unwrapStremioPluginResult(await window.desktopApi.getStremioSubtitles(addonId, request));
+    throw new Error('Add-on subtitles are currently available only in the LoomTV desktop app.');
+  },
+
+  /** Downloads one listed subtitle in the host; the renderer never sees its URL. */
+  async downloadStremioSubtitle(token: string): Promise<string> {
+    if (window.desktopApi?.downloadStremioSubtitle) return unwrapStremioPluginResult(await window.desktopApi.downloadStremioSubtitle(token)).text;
+    throw new Error('Add-on subtitles are currently available only in the LoomTV desktop app.');
+  },
+
+  /** A host key for an IMDb title, so add-ons that declare `tt` metadata can describe it. */
+  async issueStremioItemKey(type: 'movie' | 'series', providerId: string): Promise<string> {
+    if (window.desktopApi?.issueStremioItemKey) return unwrapStremioPluginResult(await window.desktopApi.issueStremioItemKey(type, providerId));
+    throw new Error('Stremio metadata is currently available only in the LoomTV desktop app.');
+  },
+
   async getStremioAddonConfiguration(addonId: string): Promise<StremioPluginConfigurationState> {
     if (window.desktopApi?.getStremioAddonConfiguration) return unwrapStremioPluginResult(await window.desktopApi.getStremioAddonConfiguration(addonId));
     throw new Error('Stremio add-on configuration is currently available only in the LoomTV desktop app.');
@@ -2286,7 +2306,8 @@ const desktopTransport = {
 // and MutationCache owns writes; components continue to use the same IPC API.
 const cachedReads = new Set<string>([
   'getLibraryIndex', 'getLibrary', 'getLibraryItem', 'getThumbnail', 'requestMetadataProvider', 'getStremioCatalog',
-  'getStremioMeta', 'getStremioMetaByItem', 'getMediaSegments', 'getStreamingProviders',
+  // getStremioMeta is cached by loadAddonMeta under the add-ons' revisions.
+  'getStremioMetaByItem', 'getMediaSegments', 'getStreamingProviders',
   'getPlaybackLogo', 'getOfficialMetadataCandidates', 'listIptvChannels',
   'getProfileLists', 'getProfilePreferences',
 ] satisfies (keyof typeof desktopTransport)[]);

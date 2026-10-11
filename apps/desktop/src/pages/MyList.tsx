@@ -82,6 +82,9 @@ function MyListContent() {
       .map((record) => record.item);
   }, [lists, normalizedQuery]);
   const watchedCount = watchedLocalItems.length + watchedDiscoverItems.length;
+  const [chosenTab, setChosenTab] = useState<'saved' | 'watched' | null>(null);
+  // Open on whichever list has titles until the viewer picks one.
+  const tab = chosenTab ?? (savedItems.length === 0 && watchedCount > 0 ? 'watched' : 'saved');
   const openDiscoverItem = (item: StremioPluginCatalogItem) => {
     const from = currentRoute;
     cacheDiscoverReturnRoute(from);
@@ -90,12 +93,34 @@ function MyListContent() {
     navigate(detailPath, { state: { from, stremioCatalogItem: item } });
   };
 
+  const hasAnything = savedItems.length > 0 || watchedCount > 0;
+  const tabs = (
+    <div role="tablist" aria-label="My List" className="inline-flex gap-1 rounded-[var(--loom-control-radius,0.5rem)] bg-[var(--loom-surface-2)] p-1">
+      {([['saved', 'Saved', savedItems.length], ['watched', 'Watched', watchedCount]] as const).map(([id, label, count]) => {
+        const selected = tab === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`my-list-tab-${id}`}
+            aria-selected={selected}
+            aria-controls="my-list-panel"
+            onClick={() => setChosenTab(id)}
+            className={`loom-control-button flex h-8 items-center gap-2 rounded-[var(--loom-control-radius,0.5rem)] px-3.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${selected ? 'bg-[var(--loom-text)] text-[var(--loom-bg)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'}`}
+          >
+            {label}
+            <span className={`text-xs tabular-nums ${selected ? 'opacity-70' : 'text-[var(--loom-faint)]'}`}>{count.toLocaleString()}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <LibraryPageLayout
       title="My List"
-      subtitle={savedItems.length > 0 || watchedCount > 0
-        ? `${savedItems.length} saved · ${watchedCount} watched`
-        : undefined}
+      headerAction={!state.isLoading && hasAnything ? tabs : undefined}
       query={query}
       onQueryChange={setQuery}
       placeholder="Search My List"
@@ -111,11 +136,12 @@ function MyListContent() {
       ) : savedItems.length === 0 && watchedCount === 0 ? (
         <EmptyMyListState />
       ) : (
-        <div className="space-y-10">
-          {savedItems.length > 0 && (
-            <section aria-labelledby="my-list-saved-heading" className="space-y-4">
-              <h2 id="my-list-saved-heading" className="text-lg font-semibold text-[var(--loom-text)]">Saved</h2>
-              {filteredItems.length > 0 ? (
+        <>
+          <div id="my-list-panel" role="tabpanel" aria-labelledby={`my-list-tab-${tab}`} className="space-y-6">
+            {tab === 'saved' ? (
+              savedItems.length === 0 ? (
+                <p className="py-16 text-center text-sm text-[var(--loom-muted)]">Nothing saved yet. Use the bookmark button on a title to save it here.</p>
+              ) : filteredItems.length > 0 ? (
                 <VirtualPosterGrid
                   items={filteredItems}
                   renderItem={(item) => (
@@ -128,44 +154,43 @@ function MyListContent() {
                   )}
                 />
               ) : (
-                <div className="py-8 text-center text-sm text-[var(--loom-muted)]">
+                <p className="py-16 text-center text-sm text-[var(--loom-muted)]">
                   {activeFilter === 'all' ? 'No saved titles match your search' : 'No saved titles match this filter'}
-                </div>
-              )}
-            </section>
-          )}
-
-          {watchedCount > 0 && (
-            <section aria-labelledby="my-list-watched-heading" className="space-y-4">
-              <h2 id="my-list-watched-heading" className="text-lg font-semibold text-[var(--loom-text)]">Watched</h2>
-              {watchedLocalItems.length > 0 && (
-                <VirtualPosterGrid
-                  items={watchedLocalItems}
-                  renderItem={(item) => (
-                    <MediaPosterCard
-                      item={item}
-                      from={currentRoute}
-                      variant={item.type === 'movie' ? 'movies' : 'tv'}
-                      metaLine={mediaMetaLine(item)}
-                    />
-                  )}
-                />
-              )}
-              {watchedDiscoverItems.length > 0 && (
-                <VirtualPosterGrid
-                  items={watchedDiscoverItems}
-                  renderItem={(item) => (
-                    <StremioPosterCard
-                      item={item}
-                      metaLine={item.releaseInfo || ''}
-                      onSelect={openDiscoverItem}
-                    />
-                  )}
-                />
-              )}
-            </section>
-          )}
-        </div>
+                </p>
+              )
+            ) : watchedCount === 0 ? (
+              <p className="py-16 text-center text-sm text-[var(--loom-muted)]">{normalizedQuery ? 'No watched titles match your search' : 'Titles you finish show up here.'}</p>
+            ) : (
+              <>
+                {watchedLocalItems.length > 0 && (
+                  <VirtualPosterGrid
+                    items={watchedLocalItems}
+                    renderItem={(item) => (
+                      <MediaPosterCard
+                        item={item}
+                        from={currentRoute}
+                        variant={item.type === 'movie' ? 'movies' : 'tv'}
+                        metaLine={mediaMetaLine(item)}
+                      />
+                    )}
+                  />
+                )}
+                {watchedDiscoverItems.length > 0 && (
+                  <VirtualPosterGrid
+                    items={watchedDiscoverItems}
+                    renderItem={(item) => (
+                      <StremioPosterCard
+                        item={item}
+                        metaLine={item.releaseInfo || ''}
+                        onSelect={openDiscoverItem}
+                      />
+                    )}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        </>
       )}
     </LibraryPageLayout>
   );

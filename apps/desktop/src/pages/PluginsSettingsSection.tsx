@@ -18,7 +18,11 @@ const BUILT_IN_SUBTITLE_ADDON_ID = 'org.stremio.opensubtitlesv3';
 const BUILT_IN_METADATA_ADDON_ID = 'com.linvo.cinemeta';
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'The add-on request failed.';
+  if (!(error instanceof Error)) return 'The add-on request failed.';
+  // Manifest validation names the fields it rejected; show the first few.
+  const issues = 'issues' in error && Array.isArray(error.issues) ? error.issues as { path?: unknown; message?: unknown }[] : [];
+  const details = issues.slice(0, 3).map(issue => `${String(issue.path || '')}: ${String(issue.message || '')}`);
+  return details.length ? `${error.message} ${details.join('; ')}${issues.length > 3 ? '; …' : ''}` : error.message;
 }
 
 function stateLabel(plugin: StremioPluginSummary): string {
@@ -34,7 +38,11 @@ function hasConfigurationValue(value: unknown): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-export default function PluginsSettingsSection() {
+export default function PluginsSettingsSection({ mode = 'all', addonId, onInstalled }: {
+  mode?: 'all' | 'install' | 'installed';
+  addonId?: string;
+  onInstalled?: () => void;
+}) {
   const confirm = useConfirm();
   const [installed, setInstalled] = useState<StremioPluginSummary[]>([]);
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
@@ -47,13 +55,19 @@ export default function PluginsSettingsSection() {
   const [configurationValues, setConfigurationValues] = useState<Record<string, Record<string, unknown>>>({});
   const [auditByAddon, setAuditByAddon] = useState<Record<string, readonly StremioPluginAuditEntry[]>>({});
   const userInstalled = installed.filter(plugin => plugin.addonId !== BUILT_IN_METADATA_ADDON_ID
-    && plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID);
+    && plugin.addonId !== BUILT_IN_SUBTITLE_ADDON_ID
+    && (!addonId || plugin.addonId === addonId));
 
   const refresh = useCallback(async () => {
     const [nextInstalled, nextProfiles] = await Promise.all([
       desktopApi.listStremioPlugins(),
-      desktopApi.listProfiles(),
+      mode === 'install' ? Promise.resolve([]) : desktopApi.listProfiles(),
     ]);
+    if (mode === 'install') {
+      setInstalled(nextInstalled);
+      saveCachedSidebarPlugins(nextInstalled);
+      return;
+    }
     // Retire the old plugin record now that captions use the built-in provider.
     if (nextInstalled.some(plugin => plugin.addonId === BUILT_IN_SUBTITLE_ADDON_ID)) {
       await desktopApi.removeStremioAddon(BUILT_IN_SUBTITLE_ADDON_ID);
@@ -72,7 +86,7 @@ export default function PluginsSettingsSection() {
     setProfiles(grantableProfiles);
     setProfileAccess(Object.fromEntries(accessEntries));
     setAuditByAddon(Object.fromEntries(auditEntries));
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     let mounted = true;
@@ -116,6 +130,7 @@ export default function PluginsSettingsSection() {
       setManifestUrl('');
       await refresh();
       window.dispatchEvent(new Event('loomtv:plugins-changed'));
+      onInstalled?.();
     } catch (approveError) {
       setError(errorMessage(approveError));
     } finally {
@@ -210,8 +225,37 @@ export default function PluginsSettingsSection() {
       !field.required || hasConfigurationValue(configurationValues[review.addonId]?.[field.key])
     ));
 
+  const manifestForm = (
+    <form
+      className={mode === 'install' ? 'flex w-full min-w-0 flex-col gap-2 sm:flex-row' : 'flex flex-col gap-3 sm:flex-row'}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const url = manifestUrl.trim();
+        if (!url) return;
+        void runReview('manual', () => desktopApi.reviewStremioManifestUrl(stremioManifestInput(url)));
+      }}
+    >
+      <label className="sr-only" htmlFor="stremio-manifest-url">Stremio manifest URL</label>
+      <input
+        id="stremio-manifest-url"
+        type="text"
+        inputMode="url"
+        autoComplete="off"
+        spellCheck={false}
+        required
+        value={manifestUrl}
+        onChange={(event) => setManifestUrl(event.target.value)}
+        placeholder="https://provider.example/manifest.json"
+        className="h-10 min-w-0 flex-1 rounded-[10px] border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-3 text-sm text-white outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+      />
+      <Button type="submit" disabled={busyKey !== null || !manifestUrl.trim()}>
+        {busyKey === 'manual' ? 'Reviewing…' : 'Review manifest'}
+      </Button>
+    </form>
+  );
+
   return (
-    <div className="space-y-4">
+    <div className={mode === 'install' ? 'w-full min-w-0 space-y-2' : 'space-y-4'}>
       <Dialog
         open={Boolean(review)}
         contentClassName="max-w-[min(92vw,48rem)] border border-[var(--loom-border)] bg-[var(--loom-surface)] p-0 text-[var(--loom-text)] shadow-2xl"
@@ -327,46 +371,24 @@ export default function PluginsSettingsSection() {
         </div>
       )}
 
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <PackagePlus className="h-4 w-4 text-[var(--loom-accent)]" />
-            Add by manifest URL
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Add a source using its HTTPS manifest link. The Archive.org listing link also works. Catalog sources appear in the sidebar after approval.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="flex flex-col gap-3 sm:flex-row"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const url = manifestUrl.trim();
-              if (!url) return;
-              void runReview('manual', () => desktopApi.reviewStremioManifestUrl(stremioManifestInput(url)));
-            }}
-          >
-            <label className="sr-only" htmlFor="stremio-manifest-url">Stremio manifest URL</label>
-            <input
-              id="stremio-manifest-url"
-              type="url"
-              inputMode="url"
-              required
-              pattern="https://.*"
-              value={manifestUrl}
-              onChange={(event) => setManifestUrl(event.target.value)}
-              placeholder="https://provider.example/manifest.json"
-              className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-3 text-sm text-white outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
-            />
-            <Button type="submit" disabled={busyKey !== null || !manifestUrl.trim()}>
-              {busyKey === 'manual' ? 'Reviewing…' : 'Review manifest'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {mode === 'install' ? (
+        <div className="w-full min-w-0">{manifestForm}</div>
+      ) : mode !== 'installed' ? (
+        <Card className="settings-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <PackagePlus className="h-4 w-4 text-[var(--loom-accent)]" />
+              Add by manifest URL
+            </CardTitle>
+            <CardDescription className="text-[var(--loom-muted)]">
+              Paste an add-on's manifest link (https:// or stremio://). The Archive.org listing link also works. Catalog sources appear in the sidebar after approval.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>{manifestForm}</CardContent>
+        </Card>
+      ) : null}
 
-      <Card className="settings-panel">
+      {mode !== 'install' && <Card className="settings-panel">
         <CardHeader>
           <CardTitle className="text-white">Installed add-ons</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
@@ -522,7 +544,7 @@ export default function PluginsSettingsSection() {
             </div>
           ))}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

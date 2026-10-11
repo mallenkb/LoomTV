@@ -44,7 +44,7 @@ export default function LibraryPageLayout({
         rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={onFilterChange} />}
       />
       <div className={`${frameClass} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${topPaddingClass}`}>
-        <header className="loom-library-page-heading mb-6 flex min-h-8 items-end justify-between gap-4">
+        <header className="loom-library-page-heading mb-6 flex min-h-8 items-center justify-between gap-4">
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">{title}</h1>
             {subtitle ? <p className="mt-1 text-sm text-[var(--loom-muted)]">{subtitle}</p> : null}

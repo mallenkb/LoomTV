@@ -1,300 +1,153 @@
-import { CheckCircle, Download, ExternalLink, RefreshCw } from 'lucide-react';
-import AnimatedDownloadIcon from '@/components/AnimatedDownloadIcon';
-import LoomLoader from '@/components/LoomLoader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { APP_VERSION, desktopApi, type UpdateState } from '@/lib/desktopApi';
-import type { AppThemeSettings } from '@/lib/theme';
-import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
-import { cn } from '@/lib/utils';
-import {
-  APP_LICENSE,
-  METADATA_ATTRIBUTIONS,
-  THIRD_PARTY_DEPENDENCIES,
-  isBundledFFmpegPath,
-} from './Settings.helpers';
+import { useEffect, useRef } from 'react';
+import { ExternalLink } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ToastProvider';
+import { SettingsDisclosure, SettingsGroup, SettingsList, SettingsPageHeader, SettingsRow, SettingsStatus } from '@/components/settings/SettingsLayout';
+import { APP_VERSION, desktopApi } from '@/lib/desktopApi';
+import { APP_LICENSE, METADATA_ATTRIBUTIONS, THIRD_PARTY_DEPENDENCIES, isBundledFFmpegPath } from './Settings.helpers';
+import type { SettingsController } from './useSettingsController';
 
-type FFmpegStatus = {
-  available: boolean;
-  path: string | null;
-  capabilities?: TranscodeCapabilities;
-};
+export type AboutController = Pick<SettingsController,
+  'updateState' | 'updateDownloadPercent' | 'isUpdateBusy' | 'updateButtonLabel' |
+  'handleUpdateAction' | 'ffmpegStatus' | 'libvlcAvailability' | 'mpvAvailability' |
+  'refreshLibvlcAvailability' | 'refreshMpvAvailability' | 'isRemoteLibraryMode'
+>;
 
-type AboutSettingsSectionProps = {
-  ffmpegStatus: FFmpegStatus | null;
-  updateState: UpdateState | null;
-  theme: AppThemeSettings;
-  isUpdateBusy: boolean;
-  isUpdateChecking: boolean;
-  isUpdateDownloading: boolean;
-  updateDownloadPercent: number;
-  updateButtonLabel: string;
-  updateStatusCopy: string;
-  onUpdateAction: () => void;
-};
+function runtimeSourceLabel(source: string | undefined): string {
+  return source === 'bundled' ? `Bundled with ${APP_LICENSE.name}` : 'Installed on this computer';
+}
 
-export default function AboutSettingsSection({
-  ffmpegStatus,
-  updateState,
-  theme,
-  isUpdateBusy,
-  isUpdateChecking,
-  isUpdateDownloading,
-  updateDownloadPercent,
-  updateButtonLabel,
-  updateStatusCopy,
-  onUpdateAction,
-}: AboutSettingsSectionProps) {
+export default function AboutSettingsSection({ controller }: { controller: AboutController }) {
+  const { showToast } = useToast();
+  const update = controller.updateState;
+  const status = update?.status;
+  const version = update?.currentVersion ?? APP_VERSION;
+  const updateReady = status === 'available' || status === 'downloaded';
+  const wasChecking = useRef(false);
+  const { ffmpegStatus: ffmpeg, libvlcAvailability, mpvAvailability, refreshLibvlcAvailability, refreshMpvAvailability, isRemoteLibraryMode } = controller;
+
+  // About can open before Playback has checked the native engines.
+  useEffect(() => {
+    if (libvlcAvailability === null && !isRemoteLibraryMode) void refreshLibvlcAvailability();
+  }, [isRemoteLibraryMode, libvlcAvailability, refreshLibvlcAvailability]);
+  useEffect(() => {
+    if (mpvAvailability === null && !isRemoteLibraryMode) void refreshMpvAvailability();
+  }, [isRemoteLibraryMode, mpvAvailability, refreshMpvAvailability]);
+
+  // A check that finds nothing new ends with a short confirmation.
+  useEffect(() => {
+    if (status === 'checking') wasChecking.current = true;
+    else if (wasChecking.current) {
+      wasChecking.current = false;
+      if (status === 'not-available' || status === 'idle') showToast({ title: `${APP_LICENSE.name} is up to date`, tone: 'success' });
+    }
+  }, [showToast, status]);
+
+  const updateText = status === 'available'
+    ? `Version ${update?.latestVersion ?? 'new'} is ready to download.`
+    : status === 'downloaded'
+      ? 'Update downloaded. Restart to finish.'
+      : status === 'downloading'
+        ? `Downloading ${update?.latestVersion ?? 'the update'}…`
+        : status === 'installing'
+          ? 'Restarting to install…'
+          : status === 'checking'
+            ? 'Checking for updates…'
+            : status === 'error'
+              ? update?.message || 'The last update check failed.'
+              : 'You have the latest version.';
+
+  const engine = (name: string, availability: { available: boolean; runtimeSource?: string; reason?: string } | null) => (
+    <SettingsRow
+      title={name}
+      description={isRemoteLibraryMode ? 'Used for local files on the desktop.' : availability?.available ? runtimeSourceLabel(availability.runtimeSource) : availability?.reason}
+    >
+      {isRemoteLibraryMode
+        ? <SettingsStatus tone="muted">Local desktop only</SettingsStatus>
+        : availability === null
+          ? <SettingsStatus tone="muted">Checking…</SettingsStatus>
+          : availability.available
+            ? <SettingsStatus tone="ok">Installed</SettingsStatus>
+            : <SettingsStatus tone="warning">Unavailable</SettingsStatus>}
+    </SettingsRow>
+  );
+
   return (
-    <div className="space-y-4">
-      <div className="settings-panel relative overflow-hidden rounded-2xl p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-2xl font-bold tracking-tight text-white">{APP_LICENSE.name}</h2>
-              <span className="rounded-full bg-[var(--loom-accent)]/15 px-2.5 py-0.5 text-xs font-semibold text-[var(--loom-accent)] ring-1 ring-[var(--loom-accent)]/25">
-                v{updateState?.currentVersion ?? APP_VERSION}
-              </span>
-              <span className="rounded-full bg-[var(--loom-surface-3)] px-2.5 py-0.5 text-xs font-medium text-[var(--loom-faint)] ring-1 ring-[var(--loom-border)]">
-                {APP_LICENSE.license}
-              </span>
-            </div>
-            <p className="text-sm text-[var(--loom-muted)] max-w-md leading-relaxed">
-              Local media library and playback app powered by Electron, React, and FFmpeg.
-            </p>
-            <div className={cn(
-              'mt-3 inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium',
-              ffmpegStatus === null
-                ? 'border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] text-[var(--loom-faint)]'
-                : ffmpegStatus.available
-                  ? 'settings-status-available border-green-400/35 bg-green-400/10'
-                  : 'settings-status-unavailable border-yellow-500/30 bg-yellow-500/10',
-            )}>
-              {ffmpegStatus === null ? (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-[var(--loom-faint)]" />
-                  Checking FFmpeg...
-                </>
-              ) : ffmpegStatus.available ? (
-                <>
-                  <CheckCircle className="h-3.5 w-3.5" />
-                  {isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled FFmpeg' : 'System FFmpeg'}
-                </>
-              ) : (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-yellow-400" />
-                  FFmpeg not found
-                </>
-              )}
-            </div>
-            <p className="mt-3 text-xs text-[var(--loom-faint)]">{APP_LICENSE.copyright}</p>
-            {ffmpegStatus?.capabilities && (
-              <div className="mt-3 text-xs text-[var(--loom-faint)]">
-                <span className="font-medium text-[var(--loom-muted)]">Transcoding:</span>{' '}
-                {ffmpegStatus.capabilities.state === 'probing' ? 'Checking FFmpeg capabilities...' : <>
-                  {ffmpegStatus.capabilities.hardwareAcceleration
-                    ? `${ffmpegStatus.capabilities.recommendedBackend} hardware encode`
-                    : 'software fallback'}
-                  {' · '}
-                  H.264 {ffmpegStatus.capabilities.codecs.h264 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.h264 ? 'software' : '—'}
-                  {' · '}HEVC {ffmpegStatus.capabilities.codecs.hevc ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.hevc ? 'software' : '—'}
-                  {' · '}AV1 {ffmpegStatus.capabilities.codecs.av1 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.av1 ? 'software' : '—'}
-                  {ffmpegStatus.capabilities.toneMapping ? ' · HDR tone-map ready' : ''}
-                </>}
-              </div>
-            )}
-          </div>
+    <div>
+      <SettingsPageHeader title="About" description="Version, updates, bundled media tools, and licenses." />
 
-          <div className="flex min-w-0 flex-col items-end gap-3">
-            <div className="inline-flex rounded-lg bg-[var(--loom-surface-2)] p-1">
-              <button
-                type="button"
-                onClick={onUpdateAction}
-                disabled={isUpdateBusy}
-                className={cn(
-                  'relative inline-flex h-9 min-w-36 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-3 text-xs font-semibold transition-colors',
-                  isUpdateDownloading
-                    ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
-                    : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]',
-                  isUpdateBusy
-                    ? 'cursor-wait shadow-inner shadow-black/20'
-                    : 'hover:bg-[var(--loom-accent-hover)]',
-                )}
-                aria-busy={isUpdateBusy}
-              >
-                {isUpdateDownloading && (
-                  <span
-                    className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-accent)] transition-[width] duration-300"
-                    style={{ width: `${updateDownloadPercent}%` }}
-                    aria-hidden="true"
-                  />
-                )}
-                <span className="relative z-10 inline-flex items-center gap-2">
-                  {isUpdateChecking ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : isUpdateDownloading ? (
-                    <AnimatedDownloadIcon className="h-4 w-4" isDownloading size={16} />
-                  ) : updateState?.status === 'installing' ? (
-                    <LoomLoader
-                      style={theme.loaderStyle}
-                      className="grid h-4 w-4 place-items-center text-current"
-                      markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-2.5 w-auto' : 'h-3.5 w-3.5'}
-                      color="currentColor"
-                    />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
-                  {isUpdateDownloading ? (
-                    <>
-                      <span>Downloading</span>
-                      <span className="tabular-nums">{updateDownloadPercent}%</span>
-                    </>
-                  ) : updateButtonLabel}
-                </span>
-              </button>
+      <SettingsGroup title="Updates">
+        <SettingsRow title={APP_LICENSE.name} description={<span role="status">{updateText}</span>}>
+          <span className="text-sm tabular-nums text-[var(--loom-muted)]">{version}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant={updateReady ? 'default' : 'outline'}
+            disabled={controller.isUpdateBusy && status !== 'downloading'}
+            onClick={() => void controller.handleUpdateAction()}
+          >
+            {controller.updateButtonLabel}
+          </Button>
+        </SettingsRow>
+        {status === 'downloading' || status === 'downloaded' ? (
+          <div className="settings-row space-y-2 px-4 py-3.5" aria-live="polite">
+            <div className="flex items-center justify-between text-xs text-[var(--loom-muted)]">
+              <span>{status === 'downloaded' ? 'Downloaded' : `Downloading ${update?.latestVersion ?? ''}`.trim()}</span>
+              <span className="tabular-nums">{status === 'downloading' ? `${controller.updateDownloadPercent}%` : '100%'}</span>
             </div>
-            {updateStatusCopy && (
-              <p className="max-w-52 px-1 text-right text-[11px] leading-4 text-[var(--loom-faint)]" aria-live="polite">
-                {updateStatusCopy}
-              </p>
-            )}
+            <div role="progressbar" aria-label="Update download" aria-valuemin={0} aria-valuemax={100} aria-valuenow={status === 'downloading' ? controller.updateDownloadPercent : 100} className="h-1.5 overflow-hidden rounded-full bg-[var(--loom-surface-3)]">
+              <div className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-300" style={{ width: `${status === 'downloading' ? controller.updateDownloadPercent : 100}%` }} />
+            </div>
           </div>
-        </div>
-      </div>
+        ) : null}
+      </SettingsGroup>
 
-      <Card className="settings-panel">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold text-white">Metadata &amp; Artwork Sources</CardTitle>
-          <CardDescription className="text-[var(--loom-faint)] text-xs">
-            Content data is fetched from these services at scan time.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2">
+      <SettingsGroup title="Bundled media tools">
+        <SettingsRow title="FFmpeg" description={ffmpeg?.available ? (isBundledFFmpegPath(ffmpeg.path) ? `Bundled with ${APP_LICENSE.name}` : 'Installed on this computer') : 'Needed for thumbnails, probing, and transcoding.'}>
+          {ffmpeg === null ? <SettingsStatus tone="muted">Checking…</SettingsStatus> : ffmpeg.available ? <SettingsStatus tone="ok">Installed</SettingsStatus> : <SettingsStatus tone="warning">Not found</SettingsStatus>}
+        </SettingsRow>
+        {engine('LibVLC', libvlcAvailability)}
+        {engine('libmpv', mpvAvailability)}
+      </SettingsGroup>
+
+      <SettingsGroup title="Legal">
+        <SettingsDisclosure title="License" description={`${APP_LICENSE.name} is released under the ${APP_LICENSE.license} license.`}>
+          <div className="space-y-2 py-1 text-xs leading-5 text-[var(--loom-muted)]">
+            <p>{APP_LICENSE.copyright}</p>
+            <p>Bundled media tools keep their own licenses. LibVLC uses LGPL terms; its plugins and dependencies may use other licenses. libmpv and FFmpeg builds can carry GPL terms. The packaged media notices document the bundled versions and dependencies.</p>
+          </div>
+        </SettingsDisclosure>
+        <SettingsDisclosure title="Third-party libraries" summary={THIRD_PARTY_DEPENDENCIES.length}>
+          <SettingsList label="Third-party libraries">
+            {THIRD_PARTY_DEPENDENCIES.map((dependency) => (
+              <li key={dependency.name}>
+                <button type="button" onClick={() => void desktopApi.openExternal(dependency.url)} className="group flex w-full items-center justify-between gap-3 py-2.5 text-left text-sm text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]">
+                  <span className="min-w-0 truncate group-hover:underline">{dependency.name}</span>
+                  <span className="flex shrink-0 items-center gap-2 text-xs text-[var(--loom-muted)]">
+                    {dependency.license}
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </SettingsList>
+        </SettingsDisclosure>
+        <SettingsDisclosure title="Metadata and artwork sources" summary={METADATA_ATTRIBUTIONS.length}>
+          <SettingsList label="Metadata and artwork sources">
             {METADATA_ATTRIBUTIONS.map((source) => (
-              <button
-                key={source.name}
-                type="button"
-                onClick={() => desktopApi.openExternal(source.url)}
-                className="settings-action-tile group flex items-start gap-3 rounded-xl p-3 text-left transition-all"
-              >
-                <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--loom-accent)]/10 transition-colors group-hover:bg-[var(--loom-accent)]/18">
-                  <ExternalLink className="h-3.5 w-3.5 text-[var(--loom-accent)]" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white leading-tight">{source.name}</p>
-                  <p className="mt-0.5 text-xs leading-4 text-[var(--loom-faint)]">{source.details}</p>
-                </div>
-              </button>
+              <li key={source.name}>
+                <button type="button" onClick={() => void desktopApi.openExternal(source.url)} className="group flex w-full items-start justify-between gap-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]">
+                  <span className="min-w-0">
+                    <span className="block text-sm text-[var(--loom-text)] group-hover:underline">{source.name}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--loom-muted)]">{source.details}</span>
+                  </span>
+                  <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--loom-muted)]" aria-hidden="true" />
+                </button>
+              </li>
             ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold text-white">Bundled Media Tools</CardTitle>
-          <CardDescription className="text-[var(--loom-faint)] text-xs leading-5">
-            Release payloads include FFmpeg/FFprobe and may include LibVLC and libmpv for supported
-            targets. Each tool remains governed by its own license, dependency notices, and source
-            requirements; Loom&apos;s MIT license does not replace those terms.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {[
-              { label: 'macOS FFmpeg builds', sub: "Martin Riedl's FFmpeg Build Server", url: 'https://ffmpeg.martin-riedl.de/' },
-              { label: 'Windows FFmpeg builds', sub: 'CODEX FFMPEG by Gyan Doshi', url: 'https://www.gyan.dev/ffmpeg/builds/' },
-              { label: 'FFmpeg legal notes', sub: 'Licensing and compliance guidance', url: 'https://ffmpeg.org/legal.html' },
-              { label: 'FFmpeg source code', sub: 'Official FFmpeg source repository', url: 'https://git.ffmpeg.org/ffmpeg.git' },
-              { label: 'LibVLC legal notices', sub: 'VideoLAN licensing and trademark guidance', url: 'https://www.videolan.org/legal.html' },
-              { label: 'LibVLC source code', sub: 'Official VLC source repository', url: 'https://code.videolan.org/videolan/vlc' },
-              { label: 'libmpv bundled library', sub: 'libmpv from the official mpv 0.41.0 macOS ARM release', url: 'https://github.com/mpv-player/mpv/releases/tag/v0.41.0' },
-              { label: 'libmpv source code', sub: 'Official mpv source repository and license notices', url: 'https://github.com/mpv-player/mpv' },
-            ].map((link) => (
-              <button
-                key={link.label}
-                type="button"
-                onClick={() => desktopApi.openExternal(link.url)}
-                className="settings-action-tile group flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-all"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white leading-tight">{link.label}</p>
-                  <p className="text-xs text-[var(--loom-faint)] mt-0.5">{link.sub}</p>
-                </div>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[var(--loom-accent)] opacity-60 group-hover:opacity-100 transition-opacity" />
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold text-white">Third-Party Libraries</CardTitle>
-          <CardDescription className="text-[var(--loom-faint)] text-xs">
-            Direct dependencies and major development tools. Packaged builds also include Chromium/Electron and native media notices.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="settings-panel-soft overflow-hidden rounded-xl">
-            <div className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] bg-[var(--loom-surface-3)] px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--loom-faint)]">
-              <span>Project</span>
-              <span>License</span>
-              <span />
-            </div>
-            <div className="max-h-72 overflow-y-auto divide-y divide-[var(--loom-border)]">
-              {THIRD_PARTY_DEPENDENCIES.map((dependency) => (
-                <div
-                  key={dependency.name}
-                  className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] items-center gap-2 px-3 py-2.5 transition-colors hover:bg-[var(--loom-surface-3)]/70"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-white">{dependency.name}</p>
-                    <p className="truncate text-xs text-[var(--loom-faint)]">{dependency.owner}</p>
-                  </div>
-                  <span className="truncate text-xs text-[var(--loom-faint)]">{dependency.license}</span>
-                  <button
-                    type="button"
-                    onClick={() => desktopApi.openExternal(dependency.url)}
-                    aria-label={`Open ${dependency.name}`}
-                    title={dependency.name}
-                    className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-[var(--loom-accent)] opacity-50 transition-all hover:opacity-100 hover:bg-[var(--loom-surface-3)]"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-[var(--loom-faint)]">
-            Trailers use YouTube&apos;s privacy-enhanced embedded player. YouTube content remains subject to the{' '}
-            <button
-              type="button"
-              onClick={() => desktopApi.openExternal('https://www.youtube.com/t/terms')}
-              className="text-[var(--loom-accent)] hover:underline"
-            >
-              YouTube Terms of Service
-            </button>
-            .
-          </p>
-          <p className="mt-3 text-xs leading-5 text-[var(--loom-faint)]">
-            * LibVLC/libvlccore are generally distributed under LGPL-2.1-or-later; VLC
-            plugins and bundled dependencies can carry different terms. The exact bundled
-            payload provenance and applicable notices are recorded in
-            <span className="text-[var(--loom-muted)]"> apps/desktop/resources/libvlc/NOTICE.md</span>.
-            Stock libmpv builds are ordinarily GPL-2.0-or-later and may include dependencies
-            with additional obligations; the selected payload is documented in
-            <span className="text-[var(--loom-muted)]"> apps/desktop/resources/mpv/NOTICE.md</span>.
-            <button
-              type="button"
-              onClick={() => desktopApi.openExternal('https://www.videolan.org/legal.html')}
-              className="ml-1 inline-flex items-center gap-1 text-[var(--loom-accent)] hover:underline"
-            >
-              View VideoLAN legal notices <ExternalLink className="h-3 w-3" />
-            </button>
-          </p>
-        </CardContent>
-      </Card>
+          </SettingsList>
+        </SettingsDisclosure>
+      </SettingsGroup>
     </div>
   );
 }

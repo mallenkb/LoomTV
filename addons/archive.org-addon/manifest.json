@@ -1,0 +1,29 @@
+{
+  "id": "org.archive.clean",
+  "version": "10.1.0",
+  "name": "Archive.org",
+  "description": "Archive.org public domain movies only. Streams come from a fixed allowlist of verified public-domain Archive.org items; anything not on the list returns no streams.",
+  "logo": "https://archive.org/images/logo.jpg",
+  "resources": [
+    { "name": "catalog", "types": ["movie"], "idPrefixes": ["tt"] },
+    { "name": "meta", "types": ["movie"], "idPrefixes": ["tt"] },
+    { "name": "stream", "types": ["movie"], "idPrefixes": ["tt"] }
+  ],
+  "types": ["movie"],
+  "idPrefixes": ["tt"],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "archive-pd",
+      "name": "Public Domain Movies",
+      "extra": [
+        { "name": "search", "isRequired": false },
+        { "name": "skip", "isRequired": false }
+      ]
+    }
+  ],
+  "behaviorHints": {
+    "adult": false,
+    "p2p": false
+  }
+}

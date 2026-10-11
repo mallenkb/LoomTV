@@ -211,7 +211,7 @@ function normalizeSettings(input: unknown): AppSettings {
     tmdbApiKey: metadataApiKeys.tmdb || '',
     metadataApiKeys,
     metadataOfflineMode: Boolean(raw.metadataOfflineMode),
-    autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
+    autoSyncIntervalHours: raw.autoSyncIntervalHours === 0 || (Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0)
       ? autoSyncIntervalHours
       : 72,
     // New and never-organized files are renamed after each sync unless the

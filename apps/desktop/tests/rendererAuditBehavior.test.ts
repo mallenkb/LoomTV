@@ -9,7 +9,6 @@ import { isEditableShortcutTarget, isPlayerControlTarget, isSliderShortcutTarget
 
 type Node = { type: unknown; props: Record<string, unknown> };
 type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
-type SearchResponse = { ok: boolean; json: () => Promise<unknown> };
 
 function mountComponent(path: string, mocks: Record<string, unknown>, globals: Record<string, unknown> = {}, props: Record<string, unknown> = {}, exportName = 'default') {
   const slots: Slot[] = [];
@@ -337,52 +336,80 @@ test('virtual grid remeasures after sibling layout changes and disconnects on un
 
 for (const outcome of ['success', 'failure'] as const) {
   test(`Archive search ignores stale ${outcome} and finally while a newer page loads`, async () => {
-    const requests: { result: ReturnType<typeof deferred<SearchResponse>>; signal: AbortSignal }[] = [];
+    type CatalogResult = { docs: { identifier: string }[]; numFound: number };
+    const requests: { result: ReturnType<typeof deferred<CatalogResult>>; signal: AbortSignal; query: string }[] = [];
     let debounce!: () => void;
     const panel = mountComponent('pages/ArchiveOrgAddon.tsx', {
       '@tanstack/react-router': { useParams: () => ({ addonId: 'org.archive.clean' }) },
       'lucide-react': {},
-      zod: { z },
-      '@/components/SafeArtwork': {},
-      '@/components/LibrarySearch': {},
-      '@/components/ContentShimmer': { PosterGridShimmer: 'loading' },
       '@/components/ThemeProvider': { useTheme: () => ({ theme: {} }) },
-      '@/lib/desktopApi': { desktopApi: { listAvailableStremioPlugins: async () => [{ addonId: 'org.archive.clean', state: 'enabled', trusted: true }] } },
-    }, {
-      window: { setTimeout: (fn: () => void) => { debounce = fn; return 1; }, clearTimeout: () => undefined },
-      fetch: (_url: string, options: { signal: AbortSignal }) => {
-        const result = deferred<SearchResponse>();
-        requests.push({ result, signal: options.signal });
-        return result.promise;
+      '@/contexts/ProfileContext': { useProfiles: () => ({ activeProfile: null }) },
+      '@/components/DiscoverCatalogLayout': { DiscoverHeader: 'header', DiscoverPosterGrid: 'grid', discoverFilterChipClass: () => '' },
+      '@/components/DiscoverDropdown': { __esModule: true, default: 'dropdown' },
+      '@/components/ContentShimmer': { PosterGridShimmer: 'loading' },
+      '@/lib/navigation': { useNavigate: () => () => undefined },
+      '@/lib/discoverNavigation': { cacheDiscoverReturnRoute: () => undefined, cacheExploreItem: () => undefined },
+      '@/lib/desktopApi': { desktopApi: {
+        listAvailableStremioPlugins: async () => [{ addonId: 'org.archive.clean', state: 'enabled', trusted: true }],
+        getSettings: async () => ({}),
+      } },
+      '@/lib/archiveCatalog': {
+        ARCHIVE_ADDON_ID: 'org.archive.clean',
+        ARCHIVE_PAGE_SIZE: 50,
+        archiveCatalog: (query: string, _page: number, _order: string, _year: string, signal: AbortSignal) => {
+          const result = deferred<CatalogResult>();
+          requests.push({ result, signal, query });
+          return result.promise;
+        },
+        archiveItem: (doc: { identifier: string }) => ({ id: doc.identifier, identifier: doc.identifier, title: doc.identifier }),
+        enrichArchiveItem: async (item: unknown) => item,
+        resolveArchiveStream: async () => 'https://example.invalid/movie.mp4',
       },
-    });
+      '@/lib/addonPlayback': { invalidateRequests: (counter: { current: number }) => { counter.current += 1; } },
+      './StremioAddonCatalog': {},
+    }, {
+      window: {
+        setTimeout: (fn: () => void) => { debounce = fn; return 1; },
+        clearTimeout: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      },
+    }, { onPlay: () => undefined }, 'ArchiveCatalog');
     panel.render();
     await nextTurn();
     const search = (value: string) => {
-      const input = panel.render().find(node => node.props.placeholder === 'Search public-domain movies');
-      assert.ok(input);
-        (input.props.onChange as (value: string) => void)(value);
+      const header = panel.render().find(node => node.type === 'header');
+      assert.ok(header);
+      (header.props.onQueryChange as (value: string) => void)(value);
       panel.render();
       debounce();
       panel.render();
     };
+    const gridIds = () => {
+      const grid = panel.render().find(node => node.type === 'grid');
+      return ((grid?.props.entries || []) as { id: string }[]).map(entry => entry.id);
+    };
     search('current');
     await nextTurn();
-    assert.equal(requests[0].signal.aborted, true);
-    if (outcome === 'success') requests[0].result.resolve({ ok: true, json: async () => ({ response: { docs: [{ identifier: 'stale' }], numFound: 1 } }) });
-    else requests[0].result.reject(new Error('stale failure'));
+    const stale = requests.find(request => request.query === '');
+    const current = requests.find(request => request.query === 'current');
+    assert.ok(stale && current);
+    assert.equal(stale.signal.aborted, true);
+    if (outcome === 'success') stale.result.resolve({ docs: [{ identifier: 'stale' }], numFound: 1 });
+    else stale.result.reject(new Error('stale failure'));
     await nextTurn();
     assert.ok(panel.render().some(node => node.type === 'loading'));
     assert.equal(panel.render().some(node => node.props.role === 'alert'), false);
-    requests[1].result.resolve({ ok: true, json: async () => ({ response: { docs: [{ identifier: 'current' }], numFound: 1 } }) });
+    current.result.resolve({ docs: [{ identifier: 'current' }], numFound: 1 });
     await nextTurn();
-    assert.ok(panel.render().some(node => node.props['aria-label'] === 'Play current'));
-    assert.equal(panel.render().some(node => node.props['aria-label'] === 'Play stale'), false);
+    assert.deepEqual(gridIds(), ['current']);
     search('unmounted');
     await nextTurn();
     panel.unmount();
-    assert.equal(requests[2].signal.aborted, true);
-    requests[2].result.reject(new Error('unmounted'));
+    const unmounted = requests.find(request => request.query === 'unmounted');
+    assert.ok(unmounted);
+    assert.equal(unmounted.signal.aborted, true);
+    unmounted.result.reject(new Error('unmounted'));
     await nextTurn();
   });
 }

@@ -234,7 +234,7 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   if (activePath === '/anime' || activePath.startsWith('/anime/')) return 'anime';
   if (activePath === '/others' || activePath.startsWith('/others/')) return 'others';
   if (activePath.startsWith('/live/')) return null;
-  if (activePath === '/settings') return 'settings';
+  if (activePath === '/settings' || activePath.startsWith('/settings/')) return 'settings';
 
   if (pathname.startsWith('/movie/')) return 'movies';
   if (pathname.startsWith('/tv/')) return 'tv';

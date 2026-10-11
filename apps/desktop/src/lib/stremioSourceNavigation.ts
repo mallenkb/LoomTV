@@ -7,7 +7,9 @@ export const ARCHIVE_MANIFEST_URL = 'https://dev.nebulawp.org/stremio/archive.or
 
 /** Resolve the shared Archive listing without fetching or scraping arbitrary pages. */
 export function stremioManifestInput(value: string): string {
-  const url = new URL(value.trim());
+  let url: URL;
+  // The host validates every other link and explains what is wrong with it.
+  try { url = new URL(value.trim()); } catch { return value.trim(); }
   const path = url.pathname.replace(/\/$/, '');
   if ((url.origin === 'https://stremio-addons.net' && path === '/addons/archive.org')
     || (url.origin === 'https://addons-stremio.com' && path === '/addon/archive-org')) return ARCHIVE_MANIFEST_URL;

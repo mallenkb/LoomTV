@@ -31,10 +31,12 @@ interface TrailerDialogProps {
   open: boolean;
   title: string;
   trailerUrl?: string;
+  /** Accessible name; defaults to "<title> trailer". */
+  label?: string;
   onClose: () => void;
 }
 
-export default function TrailerDialog({ open, title, trailerUrl, onClose }: TrailerDialogProps) {
+export default function TrailerDialog({ open, title, trailerUrl, label, onClose }: TrailerDialogProps) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const videoId = useMemo(() => youtubeVideoId(trailerUrl), [trailerUrl]);
   const isOpen = open && Boolean(videoId);
@@ -56,7 +58,7 @@ export default function TrailerDialog({ open, title, trailerUrl, onClose }: Trai
         ref={contentRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`${title} trailer`}
+        aria-label={label || `${title} trailer`}
         tabIndex={-1}
         className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-2xl border border-[var(--loom-panel-border)] bg-black shadow-2xl"
       >

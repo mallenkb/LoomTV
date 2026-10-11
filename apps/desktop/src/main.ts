@@ -136,7 +136,7 @@ import {
 } from './main/windowManager';
 import { libMpvRuntimeSummary as mpvRuntimeSummary, stopAllLibMpvPlayback as stopAllMpvPlayback } from './main/libmpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
-import { createServerTray, destroyServerTray } from './main/serverTray';
+import { createServerTray, destroyServerTray, isServerTrayMenuWindow } from './main/serverTray';
 import { startDesktopPresentation } from './main/desktopStartup.ts';
 import {
   addUnifiedDesktopLibraryRoot,
@@ -284,15 +284,20 @@ import {
   createDesktopStremioPluginService,
 } from './main/stremioPluginServiceDesktop.ts';
 import { StremioPluginServiceError } from './main/stremioPluginService.ts';
+import { createStremioSubtitleTokens } from './main/stremioSubtitleTokens.ts';
 import {
   OFFICIAL_STREMIO_ADDONS,
   officialStremioAddonId,
   officialStremioManifestUrl,
   parseStremioItemId,
+  normalizeStremioManifestLink,
+  stremioItemId,
+  stremioSourceRevision,
   stremioCatalogResult,
   stremioMetaResult,
   stremioPluginReview,
   stremioPluginSummary,
+  stremioStreamResult,
 } from './main/stremioPluginWire.ts';
 import {
   assertProfileCanAccessPath,
@@ -1860,6 +1865,33 @@ const stremioPluginSummaryForRenderer = (record: Parameters<typeof stremioPlugin
   stremioPluginSummary(record, getStremioAddonConfigurationState(record.addonId))
 );
 
+const stremioSubtitleTokens = createStremioSubtitleTokens();
+/** Namespace for host keys that name a shared public ID rather than an add-on's own item. */
+const DISCOVER_ITEM_NAMESPACE = 'loomtv.discover';
+
+function currentStremioSourceRevision(profileId: string, addonId: string): string {
+  const record = stremioPluginService.listForProfile(profileId).find((candidate) => candidate.addonId === addonId);
+  if (!record) {
+    throw new StremioPluginServiceError('STREMIO_PLUGIN_ACCESS_DENIED', 'This add-on is not enabled for the active profile.');
+  }
+  return stremioSourceRevision(record, getStremioAddonConfigurationState(record.addonId));
+}
+
+/** Stamp results with the revision at request start and keep subtitle URLs in main. */
+function stremioWireOptions(profileId: string, addonId: string) {
+  const sourceRevision = currentStremioSourceRevision(profileId, addonId);
+  return {
+    sourceRevision,
+    subtitleToken: (subtitleAddonId: string, subtitle: { url: string; language: string }) => stremioSubtitleTokens.issue({
+      profileId,
+      addonId: subtitleAddonId,
+      revision: subtitleAddonId === addonId ? sourceRevision : currentStremioSourceRevision(profileId, subtitleAddonId),
+      url: subtitle.url,
+      language: subtitle.language,
+    }),
+  };
+}
+
 const stremioPluginReviewForRenderer = (review: Parameters<typeof stremioPluginReview>[0]) => (
   stremioPluginReview(review, getStremioAddonConfigurationState(review.addonId))
 );
@@ -2585,7 +2617,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
     ),
   ),
   reviewStremioManifestUrl: async (manifestUrl) => stremioPluginReviewForRenderer(
-    await stremioPluginService.reviewManifestUrl(manifestUrl),
+    await stremioPluginService.reviewManifestUrl(normalizeStremioManifestLink(manifestUrl)),
   ),
   reviewInstalledStremioAddon: async (addonId) => stremioPluginReviewForRenderer(
     await stremioPluginService.reviewInstalled(addonId),
@@ -2610,28 +2642,39 @@ registerIpcHandlers<LibraryData, AppSettings>({
   getStremioAddonConfiguration: (addonId) => stremioPluginService.getConfigurationState(addonId),
   saveStremioAddonConfiguration: (addonId, values) => stremioPluginService.saveConfiguration(addonId, values),
   listStremioPluginAudit: (addonId, limit) => stremioPluginService.listAudit(addonId, limit),
-  fetchStremioCatalog: async (addonId, request) => stremioCatalogResult(
-    addonId,
-    request,
-    await stremioPluginService.fetchCatalogComplete(requireDesktopProfileId(), addonId, request),
-    (source) => pluginArtworkDeliveryUrl(addonId, source),
-  ),
+  fetchStremioCatalog: async (addonId, request) => {
+    const profileId = requireDesktopProfileId();
+    const options = stremioWireOptions(profileId, addonId);
+    return stremioCatalogResult(
+      addonId,
+      request,
+      await stremioPluginService.fetchCatalogComplete(profileId, addonId, request),
+      (source) => pluginArtworkDeliveryUrl(addonId, source),
+      options,
+    );
+  },
   fetchStremioMeta: async (addonId, request) => {
+    // The host-issued key names the provider ID. Metadata may come from any
+    // add-on this profile can use that declares `meta` for that ID, as in
+    // Stremio, so a catalog-only add-on's titles still open with details.
     const itemIdentity = parseStremioItemId(request?.id);
-    if (!itemIdentity || itemIdentity.addonId !== addonId || !stremioTypesMatch(request?.type, itemIdentity.type)) {
+    if (!itemIdentity || !stremioTypesMatch(request?.type, itemIdentity.type)) {
       throw new StremioPluginServiceError(
         'STREMIO_PLUGIN_INVALID_ITEM_ID',
-        'The requested Discover item does not belong to this add-on and content type.',
+        'The requested Discover item is not a valid host-issued item key.',
       );
     }
+    const profileId = requireDesktopProfileId();
+    const options = stremioWireOptions(profileId, addonId);
     return stremioMetaResult(
       addonId,
-      await stremioPluginService.fetchMeta(requireDesktopProfileId(), addonId, {
+      await stremioPluginService.fetchMeta(profileId, addonId, {
         ...request,
         type: itemIdentity.type,
         id: itemIdentity.providerId,
       }),
       (source) => pluginArtworkDeliveryUrl(addonId, source),
+      options,
     );
   },
   fetchStremioMetaByItem: async (request) => {
@@ -2642,36 +2685,70 @@ registerIpcHandlers<LibraryData, AppSettings>({
         'The requested Discover item is not a valid host-issued item key.',
       );
     }
+    const profileId = requireDesktopProfileId();
+    const options = stremioWireOptions(profileId, itemIdentity.addonId);
     return stremioMetaResult(
       itemIdentity.addonId,
-      await stremioPluginService.fetchMeta(requireDesktopProfileId(), itemIdentity.addonId, {
+      await stremioPluginService.fetchMeta(profileId, itemIdentity.addonId, {
         ...request,
         type: itemIdentity.type,
         id: itemIdentity.providerId,
       }),
       (source) => pluginArtworkDeliveryUrl(itemIdentity.addonId, source),
+      options,
     );
   },
   fetchStremioStreams: async (addonId, request) => {
-    const result = await stremioPluginService.fetchStreams(requireDesktopProfileId(), addonId, {
+    const profileId = requireDesktopProfileId();
+    const options = stremioWireOptions(profileId, addonId);
+    return stremioStreamResult(
+      await stremioPluginService.fetchStreams(profileId, addonId, {
+        type: request.type,
+        videoId: request.id,
+        ...(request.extra ? { extra: request.extra } : {}),
+      }),
+      options,
+    );
+  },
+  fetchStremioSubtitles: async (addonId, request) => {
+    const profileId = requireDesktopProfileId();
+    const options = stremioWireOptions(profileId, addonId);
+    const result = await stremioPluginService.fetchSubtitles(profileId, addonId, {
       type: request.type,
       videoId: request.id,
       ...(request.extra ? { extra: request.extra } : {}),
     });
-    const playableStreams = result.sources
-      .filter((s): s is typeof s & { url: string } => typeof (s as { url?: string }).url === 'string' && (s as { url: string }).url.startsWith('https://'))
-      .map((s) => ({
-        url: (s as { url: string }).url,
-        title: (s as { title?: string }).title,
-        behaviorHints: (s as { behaviorHints?: Record<string, unknown> }).behaviorHints,
-      }));
     return {
-      addonId: result.source.addonId,
-      streams: playableStreams,
-      playableCount: result.playableCount,
-      unsupportedPeerToPeerCount: result.unsupportedPeerToPeerCount,
-      rejectedCount: result.rejectedCount,
+      addonId,
+      sourceRevision: options.sourceRevision,
+      subtitles: result.subtitles.map(({ language, url }) => ({ language, token: options.subtitleToken(addonId, { url, language }) })),
     };
+  },
+  downloadStremioSubtitle: async (token) => {
+    const profileId = requireDesktopProfileId();
+    const grant = stremioSubtitleTokens.resolve(token, profileId);
+    if (!grant) {
+      throw new StremioPluginServiceError('STREMIO_PLUGIN_SUBTITLE_EXPIRED', 'This subtitle listing has expired. Search again.', true);
+    }
+    // A replaced manifest or new configuration may no longer offer this file.
+    if (currentStremioSourceRevision(profileId, grant.addonId) !== grant.revision) {
+      throw new StremioPluginServiceError('STREMIO_PLUGIN_RESULT_STALE', 'This add-on changed after the subtitle was listed. Search again.', true);
+    }
+    const text = await stremioPluginService.fetchSubtitleFile(profileId, grant.addonId, grant.url);
+    // A save or re-review during the download makes the file obsolete for this grant.
+    if (currentStremioSourceRevision(profileId, grant.addonId) !== grant.revision) {
+      throw new StremioPluginServiceError('STREMIO_PLUGIN_RESULT_STALE', 'This add-on changed while the subtitle downloaded. Search again.', true);
+    }
+    return { text };
+  },
+  issueStremioItemKey: (type, providerId) => {
+    requireDesktopProfileId();
+    // Only shared public identities (IMDb) can be named by the renderer.
+    // Add-on catalog keys are still issued only from provider responses.
+    if ((type !== 'movie' && type !== 'series') || !/^tt\d{5,12}$/.test(providerId)) {
+      throw new StremioPluginServiceError('STREMIO_PLUGIN_INVALID_ITEM_ID', 'Only IMDb movie and series IDs can be looked up this way.');
+    }
+    return stremioItemId(DISCOVER_ITEM_NAMESPACE, type, providerId);
   },
   getMediaSegments: skipSegmentService.getSegments,
   saveManualMediaSegment: skipSegmentService.saveManualSegment,
@@ -2919,6 +2996,12 @@ async function startBackgroundServices(): Promise<void> {
       console.warn('[tray] LOOMTV_ADMIN_URL must be a valid HTTP(S) admin URL without embedded credentials.');
     }
   }
+  const getWebUrl = () => `http://127.0.0.1:${getMediaServerPort()}/app/`;
+  const getWebLaunchUrl = () => {
+    const url = new URL(getWebUrl());
+    url.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
+    return url.toString();
+  };
   const getAdminUrl = () => {
     const state = getUnifiedDesktopServerState();
     return state.ready && state.adminUrl ? state.adminUrl : configuredAdminUrl;
@@ -2937,12 +3020,11 @@ async function startBackgroundServices(): Promise<void> {
       },
       onOpenWeb: () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
-        const webUrl = new URL(`http://127.0.0.1:${getMediaServerPort()}/app/`);
-        webUrl.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-        void shell.openExternal(webUrl.toString()).catch((error) => {
+        void shell.openExternal(getWebLaunchUrl()).catch((error) => {
           console.warn('[tray] Could not open Loom in the default browser:', error);
         });
       },
+      getWebCopyUrl: getWebLaunchUrl,
       onOpenAdmin: async () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
         await unifiedServerStartup?.catch(() => undefined);
@@ -2966,7 +3048,7 @@ async function startBackgroundServices(): Promise<void> {
         const state = getUnifiedDesktopServerState();
         return {
           port: state.ready && state.adminUrl ? Number(new URL(state.adminUrl).port) : getMediaServerPort(),
-          ipAddress: getPrimaryLocalNetworkAddress(),
+          webUrl: getWebUrl(),
           adminUrl: getAdminUrl(),
         };
       },
@@ -3259,6 +3341,7 @@ const idleMemoryTrimmer = createIdleMemoryTrimmer({
   },
 });
 app.on('browser-window-created', (_event, window) => {
+  if (isServerTrayMenuWindow(window)) return;
   window.on('hide', idleMemoryTrimmer.windowInactive);
   window.on('minimize', idleMemoryTrimmer.windowInactive);
   window.on('show', idleMemoryTrimmer.windowActive);

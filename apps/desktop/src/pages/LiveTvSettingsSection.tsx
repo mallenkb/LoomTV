@@ -13,7 +13,7 @@ import { desktopApi } from '@/lib/desktopApi';
 import { notifyIptvSourcesChanged } from '@/lib/liveTvSources';
 import type { IptvSourceIconId, IptvSourceSummary } from '@/shared/desktopProtocol';
 
-const INPUT_CLASS = 'h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-3 text-sm text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]';
+const INPUT_CLASS = 'h-10 min-w-0 flex-1 rounded-[10px] border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-3 text-sm text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The live TV request failed.';
@@ -49,7 +49,7 @@ function SourceIconPicker({
           <label
             key={option.id}
             title={option.label}
-            className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--loom-accent)] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 ${
+            className={`inline-flex h-9 cursor-pointer items-center gap-2 rounded-[10px] border px-2.5 text-xs font-medium transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--loom-accent)] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 ${
               selected
                 ? 'border-[var(--loom-accent)] bg-[color-mix(in_srgb,var(--loom-accent)_18%,transparent)] text-[var(--loom-text)]'
                 : 'border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
@@ -64,7 +64,7 @@ function SourceIconPicker({
               onChange={() => onChange(option.id)}
               className="sr-only"
             />
-            <Icon className="h-5 w-5" />
+            <Icon className="h-4 w-4" />
             <span>{option.label}</span>
           </label>
         );
@@ -78,19 +78,26 @@ function SourceIconPicker({
  * its channels, and puts a tab for it in the sidebar — the page itself lives at
  * that tab, not in settings.
  */
-export default function LiveTvSettingsSection() {
+export default function LiveTvSettingsSection({ addOnly = false, onAdded, editSource, onEdited, onEditCancelled }: {
+  addOnly?: boolean;
+  onAdded?: () => void;
+  editSource?: IptvSourceSummary;
+  onEdited?: () => void;
+  onEditCancelled?: () => void;
+}) {
+  const editOnly = Boolean(editSource);
   const confirm = useConfirm();
   const [sources, setSources] = useState<IptvSourceSummary[]>([]);
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [epgUrl, setEpgUrl] = useState('');
   const [name, setName] = useState('');
   const [iconId, setIconId] = useState<IptvSourceIconId>('general');
-  const [editingSource, setEditingSource] = useState<IptvSourceSummary | null>(null);
-  const [editPlaylistUrl, setEditPlaylistUrl] = useState('');
-  const [editEpgUrl, setEditEpgUrl] = useState('');
-  const [editName, setEditName] = useState('');
-  const [editIconId, setEditIconId] = useState<IptvSourceIconId>('general');
-  const [busyKey, setBusyKey] = useState<string | null>('load');
+  const [editingSource, setEditingSource] = useState<IptvSourceSummary | null>(editSource ?? null);
+  const [editPlaylistUrl, setEditPlaylistUrl] = useState(editSource?.playlistUrl ?? '');
+  const [editEpgUrl, setEditEpgUrl] = useState(editSource?.epgUrl ?? '');
+  const [editName, setEditName] = useState(editSource?.name ?? '');
+  const [editIconId, setEditIconId] = useState<IptvSourceIconId>(normalizeLiveTvSourceIcon(editSource?.iconId));
+  const [busyKey, setBusyKey] = useState<string | null>(addOnly || editOnly ? null : 'load');
   const [pageError, setPageError] = useState('');
   const [editError, setEditError] = useState('');
 
@@ -100,6 +107,7 @@ export default function LiveTvSettingsSection() {
   }, []);
 
   useEffect(() => {
+    if (addOnly || editOnly) return undefined;
     let mounted = true;
     desktopApi.listIptvSources()
       .then((next) => {
@@ -112,7 +120,7 @@ export default function LiveTvSettingsSection() {
         if (mounted) setBusyKey(null);
       });
     return () => { mounted = false; };
-  }, []);
+  }, [addOnly, editOnly]);
 
   // A refresh returns before its channel check finishes; keep re-reading so
   // the hidden count and the checking notice settle without a manual reload.
@@ -143,12 +151,13 @@ export default function LiveTvSettingsSection() {
       setEpgUrl('');
       setName('');
       setIconId('general');
+      onAdded?.();
     } catch (cause) {
       setPageError(errorMessage(cause));
     } finally {
       setBusyKey(null);
     }
-  }, [applySources, epgUrl, iconId, name, playlistUrl]);
+  }, [applySources, epgUrl, iconId, name, onAdded, playlistUrl]);
 
   const openEdit = useCallback((source: IptvSourceSummary) => {
     setEditingSource(source);
@@ -191,9 +200,12 @@ export default function LiveTvSettingsSection() {
       setEditError(errorMessage(cause));
     } finally {
       setBusyKey(null);
-      if (saved) window.requestAnimationFrame(() => setEditingSource(null));
+      if (saved) window.requestAnimationFrame(() => {
+        setEditingSource(null);
+        onEdited?.();
+      });
     }
-  }, [applySources, busyKey, editEpgUrl, editIconId, editName, editPlaylistUrl, editingSource]);
+  }, [applySources, busyKey, editEpgUrl, editIconId, editName, editPlaylistUrl, editingSource, onEdited]);
 
   const handleRefresh = useCallback(async (sourceId: string) => {
     setBusyKey(`refresh:${sourceId}`);
@@ -231,8 +243,170 @@ export default function LiveTvSettingsSection() {
 
   const isSavingEdit = Boolean(editingSource && busyKey === `edit:${editingSource.id}`);
 
+  const editContent = (
+    <DialogContent className="space-y-5 p-6">
+      <DialogHeader>
+        <DialogTitle className="text-[var(--loom-text)]">Edit live TV source</DialogTitle>
+        <DialogDescription className="text-[var(--loom-muted)]">
+          Change how this source appears or where Loom loads its playlist and guide.
+        </DialogDescription>
+      </DialogHeader>
+      <form
+        className="space-y-4"
+        aria-busy={isSavingEdit}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleEditSave();
+        }}
+      >
+        <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-source-name">
+          <span>Tab name</span>
+          <input
+            id="edit-iptv-source-name"
+            type="text"
+            required
+            maxLength={60}
+            value={editName}
+            onChange={(event) => setEditName(event.target.value)}
+            disabled={busyKey !== null}
+            className={`${INPUT_CLASS} w-full`}
+          />
+        </label>
+        <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-playlist-url">
+          <span>M3U playlist URL</span>
+          <input
+            id="edit-iptv-playlist-url"
+            type="url"
+            inputMode="url"
+            required
+            pattern="https://.*"
+            value={editPlaylistUrl}
+            onChange={(event) => setEditPlaylistUrl(event.target.value)}
+            disabled={busyKey !== null}
+            className={`${INPUT_CLASS} w-full`}
+          />
+        </label>
+        <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-epg-url">
+          <span>XMLTV guide URL <span className="text-[var(--loom-faint)]">(optional)</span></span>
+          <input
+            id="edit-iptv-epg-url"
+            type="url"
+            inputMode="url"
+            pattern="https://.*"
+            value={editEpgUrl}
+            onChange={(event) => setEditEpgUrl(event.target.value)}
+            disabled={busyKey !== null}
+            className={`${INPUT_CLASS} w-full`}
+          />
+        </label>
+        <div className="space-y-2">
+          <p className="text-sm text-[var(--loom-muted)]">Sidebar icon</p>
+          <SourceIconPicker
+            name="edit-iptv-source-icon"
+            value={editIconId}
+            onChange={setEditIconId}
+            disabled={busyKey !== null}
+          />
+        </div>
+        {editError ? (
+          <p role="alert" className="text-sm text-red-300">{editError}</p>
+        ) : null}
+        {isSavingEdit ? (
+          <p role="status" className="text-sm text-[var(--loom-muted)]">Saving changes…</p>
+        ) : null}
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            aria-disabled={isSavingEdit}
+            onClick={() => {
+              if (isSavingEdit) return;
+              setEditingSource(null);
+              setEditError('');
+              onEditCancelled?.();
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            aria-disabled={isSavingEdit}
+            disabled={!editName.trim() || !editPlaylistUrl.trim()}
+          >
+            {isSavingEdit ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </form>
+    </DialogContent>
+  );
+
+  if (editOnly) return editContent;
+
+  const addForm = (
+    <form
+      className="flex w-full min-w-0 flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleAdd();
+      }}
+    >
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+        <label className="sr-only" htmlFor="iptv-source-name">Tab name</label>
+        <input
+          id="iptv-source-name"
+          type="text"
+          required
+          maxLength={60}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Tab name"
+          className={`${INPUT_CLASS} w-full`}
+        />
+        <label className="sr-only" htmlFor="iptv-playlist-url">M3U playlist URL</label>
+        <input
+          id="iptv-playlist-url"
+          type="url"
+          inputMode="url"
+          required
+          pattern="https://.*"
+          value={playlistUrl}
+          onChange={(event) => setPlaylistUrl(event.target.value)}
+          placeholder="https://provider.example/playlist.m3u"
+          className={`${INPUT_CLASS} w-full sm:col-span-3`}
+        />
+      </div>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <label className="sr-only" htmlFor="iptv-epg-url">XMLTV guide URL</label>
+        <input
+          id="iptv-epg-url"
+          type="url"
+          inputMode="url"
+          pattern="https://.*"
+          value={epgUrl}
+          onChange={(event) => setEpgUrl(event.target.value)}
+          placeholder="https://provider.example/guide.xml.gz (optional)"
+          className={INPUT_CLASS}
+        />
+        <Button type="submit" disabled={busyKey !== null || !name.trim() || !playlistUrl.trim()}>
+          {busyKey === 'add' ? 'Adding…' : 'Add source'}
+        </Button>
+      </div>
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-[var(--loom-muted)]">Sidebar icon</p>
+        <SourceIconPicker
+          name="new-iptv-source-icon"
+          value={iconId}
+          onChange={setIconId}
+          disabled={busyKey !== null}
+        />
+      </div>
+    </form>
+  );
+
+  const addError = pageError ? <p role="alert" className="mt-2 text-sm text-red-300">{pageError}</p> : null;
+
   return (
-    <div className="space-y-6">
+    <div className={addOnly ? 'w-full min-w-0' : 'space-y-6'}>
       <Dialog
         open={Boolean(editingSource)}
         contentClassName="max-w-[min(92vw,48rem)] border border-[var(--loom-border)] bg-[var(--loom-surface)] p-0 text-[var(--loom-text)] shadow-2xl"
@@ -242,176 +416,32 @@ export default function LiveTvSettingsSection() {
           setEditError('');
         }}
       >
-        <DialogContent className="space-y-5 p-6">
-          <DialogHeader>
-            <DialogTitle className="text-[var(--loom-text)]">Edit live TV source</DialogTitle>
-            <DialogDescription className="text-[var(--loom-muted)]">
-              Change how this source appears or where Loom loads its playlist and guide.
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            className="space-y-4"
-            aria-busy={isSavingEdit}
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleEditSave();
-            }}
-          >
-            <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-source-name">
-              <span>Tab name</span>
-              <input
-                id="edit-iptv-source-name"
-                type="text"
-                required
-                maxLength={60}
-                value={editName}
-                onChange={(event) => setEditName(event.target.value)}
-                disabled={busyKey !== null}
-                className={`${INPUT_CLASS} w-full`}
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-playlist-url">
-              <span>M3U playlist URL</span>
-              <input
-                id="edit-iptv-playlist-url"
-                type="url"
-                inputMode="url"
-                required
-                pattern="https://.*"
-                value={editPlaylistUrl}
-                onChange={(event) => setEditPlaylistUrl(event.target.value)}
-                disabled={busyKey !== null}
-                className={`${INPUT_CLASS} w-full`}
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm text-[var(--loom-muted)]" htmlFor="edit-iptv-epg-url">
-              <span>XMLTV guide URL <span className="text-[var(--loom-faint)]">(optional)</span></span>
-              <input
-                id="edit-iptv-epg-url"
-                type="url"
-                inputMode="url"
-                pattern="https://.*"
-                value={editEpgUrl}
-                onChange={(event) => setEditEpgUrl(event.target.value)}
-                disabled={busyKey !== null}
-                className={`${INPUT_CLASS} w-full`}
-              />
-            </label>
-            <div className="space-y-2">
-              <p className="text-sm text-[var(--loom-muted)]">Sidebar icon</p>
-              <SourceIconPicker
-                name="edit-iptv-source-icon"
-                value={editIconId}
-                onChange={setEditIconId}
-                disabled={busyKey !== null}
-              />
-            </div>
-            {editError ? (
-              <p role="alert" className="text-sm text-red-300">{editError}</p>
-            ) : null}
-            {isSavingEdit ? (
-              <p role="status" className="text-sm text-[var(--loom-muted)]">Saving changes…</p>
-            ) : null}
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="ghost"
-                aria-disabled={isSavingEdit}
-                onClick={() => {
-                  if (isSavingEdit) return;
-                  setEditingSource(null);
-                  setEditError('');
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                aria-disabled={isSavingEdit}
-                disabled={!editName.trim() || !editPlaylistUrl.trim()}
-              >
-                {isSavingEdit ? 'Saving…' : 'Save changes'}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
+        {editContent}
       </Dialog>
 
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Add a live TV source</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Paste an M3U playlist URL from your provider. Add its XMLTV guide URL to get now-and-next
-            listings; if the playlist advertises its own guide, Loom uses that. Playlist, guide, and
-            channel URLs must all use HTTPS — plain-HTTP channels are skipped.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleAdd();
-            }}
-          >
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-              <label className="sr-only" htmlFor="iptv-source-name">Tab name</label>
-              <input
-                id="iptv-source-name"
-                type="text"
-                required
-                maxLength={60}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Tab name"
-                className={`${INPUT_CLASS} w-full`}
-              />
-              <label className="sr-only" htmlFor="iptv-playlist-url">M3U playlist URL</label>
-              <input
-                id="iptv-playlist-url"
-                type="url"
-                inputMode="url"
-                required
-                pattern="https://.*"
-                value={playlistUrl}
-                onChange={(event) => setPlaylistUrl(event.target.value)}
-                placeholder="https://provider.example/playlist.m3u"
-                className={`${INPUT_CLASS} w-full sm:col-span-3`}
-              />
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <label className="sr-only" htmlFor="iptv-epg-url">XMLTV guide URL</label>
-              <input
-                id="iptv-epg-url"
-                type="url"
-                inputMode="url"
-                pattern="https://.*"
-                value={epgUrl}
-                onChange={(event) => setEpgUrl(event.target.value)}
-                placeholder="https://provider.example/guide.xml.gz (optional)"
-                className={INPUT_CLASS}
-              />
-              <Button type="submit" disabled={busyKey !== null || !name.trim() || !playlistUrl.trim()}>
-                {busyKey === 'add' ? 'Adding…' : 'Add source'}
-              </Button>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-[var(--loom-muted)]">Sidebar icon</p>
-              <SourceIconPicker
-                name="new-iptv-source-icon"
-                value={iconId}
-                onChange={setIconId}
-                disabled={busyKey !== null}
-              />
-            </div>
-          </form>
-          {pageError ? (
-            <p role="alert" className="mt-3 text-sm text-red-300">{pageError}</p>
-          ) : null}
-        </CardContent>
-      </Card>
+      {addOnly ? (
+        <div className="w-full min-w-0">
+          {addForm}
+          {addError}
+        </div>
+      ) : (
+        <Card className="settings-panel">
+          <CardHeader>
+            <CardTitle className="text-white">Add a live TV source</CardTitle>
+            <CardDescription className="text-[var(--loom-muted)]">
+              Paste an M3U playlist URL from your provider. Add its XMLTV guide URL to get now-and-next
+              listings; if the playlist advertises its own guide, Loom uses that. Playlist, guide, and
+              channel URLs must all use HTTPS — plain-HTTP channels are skipped.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {addForm}
+            {addError}
+          </CardContent>
+        </Card>
+      )}
 
-      <Card className="settings-panel">
+      {!addOnly && <Card className="settings-panel">
         <CardHeader>
           <CardTitle className="text-white">Your live TV sources</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
@@ -517,7 +547,7 @@ export default function LiveTvSettingsSection() {
             </ul>
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

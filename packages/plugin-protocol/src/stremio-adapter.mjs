@@ -268,7 +268,18 @@ function optionalRemoteHttpsUrl(value, limits) {
   return result.ok ? result.url : undefined;
 }
 
-async function readResponseText(response, maxBytes) {
+/** Subtitle files are often not UTF-8. Prefer strict UTF-8, then a BOM, then Windows-1252. */
+function decodeSubtitleBytes(bytes) {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
+}
+
+async function readResponseText(response, maxBytes, decodeBytes = (bytes) => new TextDecoder().decode(bytes)) {
   const contentLength = Number.parseInt(response.headers?.get?.('content-length') || '', 10);
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     throw new StremioAdapterError('RESPONSE_TOO_LARGE', 'The add-on response exceeded LoomTV’s size limit.', { retryable: false });
@@ -299,7 +310,7 @@ async function readResponseText(response, maxBytes) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return new TextDecoder().decode(bytes);
+    return decodeBytes(bytes);
   }
 
   if (!Number.isFinite(contentLength) || contentLength < 0) {
@@ -322,6 +333,7 @@ async function fetchJson(url, {
   maxBytes,
   label,
   signal,
+  responseType = 'json',
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     throw new StremioAdapterError('FETCH_UNAVAILABLE', 'No HTTPS fetch implementation is available for the Stremio adapter.', { retryable: false });
@@ -363,7 +375,7 @@ async function fetchJson(url, {
     try {
       response = await fetchImpl(url, {
         method: 'GET',
-        headers: { accept: 'application/json' },
+        headers: { accept: responseType === 'subtitle' ? 'text/vtt, application/x-subrip, text/plain;q=0.9, */*;q=0.5' : 'application/json' },
         credentials: 'omit',
         redirect: 'error',
         signal: controller.signal,
@@ -395,6 +407,7 @@ async function fetchJson(url, {
       });
     }
 
+    if (responseType === 'subtitle') return readResponseText(response, maxBytes, decodeSubtitleBytes);
     const text = await readResponseText(response, maxBytes);
     try {
       return JSON.parse(text);
@@ -519,7 +532,11 @@ function normalizeStremioCatalog(value, path, issues) {
   addUnknownKeys(value, new Set(['type', 'id', 'name', 'extra', 'genres', 'extraSupported', 'extraRequired']), path, issues);
   const type = normalizeToken(value.type, `${path}.type`, issues);
   const id = addIssueIfInvalidString(value.id, `${path}.id`, issues, { required: true, maxLength: 128, message: 'Expected a catalog ID.' });
-  const name = addIssueIfInvalidString(value.name, `${path}.name`, issues, { required: true, maxLength: 160, message: 'Expected a catalog name.' });
+  // Stremio shows unnamed catalogs (the official YouTube add-on has them)
+  // under their ID, so an absent name falls back to the validated ID.
+  const name = value.name === undefined
+    ? undefined
+    : addIssueIfInvalidString(value.name, `${path}.name`, issues, { maxLength: 160, message: 'Expected a catalog name.' });
   const genres = normalizeStringArray(value.genres, `${path}.genres`, issues, { maxItems: MAX_CATALOG_OPTION_ITEMS, maxLength: 128 });
   const supported = normalizeStringArray(value.extraSupported, `${path}.extraSupported`, issues, { maxItems: 32, maxLength: 64, pattern: safeTokenPattern });
   const required = normalizeStringArray(value.extraRequired, `${path}.extraRequired`, issues, { maxItems: 32, maxLength: 64, pattern: safeTokenPattern });
@@ -529,7 +546,7 @@ function normalizeStremioCatalog(value, path, issues) {
     ...(name === 'genre' && value.genres !== undefined ? { options: genres } : {}),
   }));
   const extra = normalizeExtraDefinition(value.extra === undefined ? legacyExtra : value.extra, `${path}.extra`, issues);
-  return type && id && name ? { type, id, name, extra } : null;
+  return type && id ? { type, id, name: name ?? id.slice(0, 160), extra } : null;
 }
 
 function normalizeAddonCatalogs(value, path, issues) {
@@ -696,8 +713,13 @@ export function normalizeStremioManifest(input, manifestUrl, options = {}) {
     : addIssueIfInvalidString(input.contactEmail, '$.contactEmail', issues, { maxLength: 254, message: 'Expected a contact email string.' });
   const behaviorHints = normalizeBehaviorHints(input.behaviorHints, '$.behaviorHints', issues);
 
-  if (issues.length > 0) {
-    throw new StremioAdapterError('INVALID_MANIFEST', 'The Stremio manifest failed LoomTV’s compatibility and safety checks.', { issues, retryable: false });
+  // Stremio add-ons commonly publish fields beyond the SDK minimum. They are
+  // dropped from the normalized manifest, so they are reported, not rejected.
+  const ignoredFields = issues.filter((issue) => issue.code === 'unknown_field')
+    .map((issue) => issue.path.replace(/[^\x20-\x7e]/g, '?').slice(0, 80));
+  const blockingIssues = issues.filter((issue) => issue.code !== 'unknown_field');
+  if (blockingIssues.length > 0) {
+    throw new StremioAdapterError('INVALID_MANIFEST', 'The Stremio manifest failed LoomTV’s compatibility and safety checks.', { issues: blockingIssues, retryable: false });
   }
 
   const resourceNames = new Set(resources.map((resource) => resource.name));
@@ -726,6 +748,11 @@ export function normalizeStremioManifest(input, manifestUrl, options = {}) {
       code: 'stremio_addons_config_ignored',
       path: '$.stremioAddonsConfig',
       message: 'External Stremio Addons configuration metadata is not used by LoomTV.',
+    }] : []),
+    ...(ignoredFields.length > 0 ? [{
+      code: 'unknown_fields_ignored',
+      path: '$',
+      message: `LoomTV ignores ${ignoredFields.length === 1 ? 'this manifest field' : 'these manifest fields'}: ${ignoredFields.slice(0, 8).join(', ')}${ignoredFields.length > 8 ? ', …' : ''}.`,
     }] : []),
   ];
   return deepFreeze({
@@ -836,7 +863,8 @@ function normalizeVideo(value, context, limits) {
     throw new StremioAdapterError('INVALID_RESPONSE_SHAPE', 'The add-on returned a malformed video object.', { retryable: false });
   }
   const id = responseRequiredString(value.id, 'video.id', 256);
-  const title = responseRequiredString(value.title, 'video.title', 512);
+  // Cinemeta uses `name` for episode titles in both catalogs and metadata.
+  const title = responseString(value.title, 512) ?? responseRequiredString(value.name, 'video.title', 512);
   const video = {
     id,
     title,
@@ -911,10 +939,12 @@ function normalizeMetaCandidate(value, context, limits, { expectedType, expected
     throw new StremioAdapterError('INVALID_RESPONSE_SHAPE', 'The metadata videos field is invalid.', { retryable: false });
   }
   const cast = normalizeCast(value.cast, limits);
+  const defaultVideoId = isRecord(value.behaviorHints) ? responseString(value.behaviorHints.defaultVideoId, 256) : undefined;
   return {
     id,
     type,
     title,
+    ...(defaultVideoId === undefined ? {} : { defaultVideoId }),
     source: context,
     genres: genres.map((genre) => responseString(genre, 128)),
     ...(optionalRemoteHttpsUrl(value.poster, limits) === undefined ? {} : { posterUrl: optionalRemoteHttpsUrl(value.poster, limits) }),
@@ -941,11 +971,13 @@ function normalizeStreamCandidate(value, context, limits, path = 'stream') {
     });
   }
   const label = streamLabel(value);
+  const description = responseString(value.description, 1_000) || responseString(value.title, 1_000);
   const base = {
     id: `${context.addonId}:${context.itemId || 'item'}:${context.sourceIndex ?? 0}`,
     source: context,
     requiresLoomAuthorization: true,
     ...(label === undefined ? {} : { name: label }),
+    ...(description === undefined || description === label ? {} : { description }),
   };
   const p2p = inspectP2pSource(value);
   if (p2p) {
@@ -969,8 +1001,12 @@ function normalizeStreamCandidate(value, context, limits, path = 'stream') {
       const embedded = value.subtitles === undefined
         ? { subtitles: [], rejected: [] }
         : normalizeSubtitleList(value.subtitles, context, limits, `${path}.subtitles`);
+      const hints = isRecord(value.behaviorHints) ? value.behaviorHints : {};
       return {
         ...base,
+        ...(hints.notWebReady === true ? { notWebReady: true } : {}),
+        // LoomTV does not forward provider-chosen request headers.
+        ...(isRecord(hints.proxyHeaders) ? { requestHeadersRequired: true } : {}),
         sourceKind: isHls ? 'hls' : 'https-media',
         availability: 'playable',
         playableByLoom: true,
@@ -992,9 +1028,38 @@ function normalizeStreamCandidate(value, context, limits, path = 'stream') {
     };
   }
 
+  // A YouTube ID is opened in the host's YouTube embed, never as a provider URL.
+  if (typeof value.ytId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(value.ytId.trim())) {
+    return {
+      ...base,
+      sourceKind: 'youtube',
+      availability: 'external',
+      playableByLoom: false,
+      requiresExplicitConsent: false,
+      ytId: value.ytId.trim(),
+    };
+  }
+  // An external page is offered as a link for the system browser. It is not
+  // fetched, framed, or played by LoomTV.
+  if (value.externalUrl !== undefined) {
+    const externalCheck = inspectRemoteHttpsUrl(value.externalUrl, { maxLength: limits.maxUrlLength });
+    if (externalCheck.ok) {
+      return {
+        ...base,
+        sourceKind: 'external',
+        availability: 'external',
+        playableByLoom: false,
+        requiresExplicitConsent: true,
+        externalUrl: externalCheck.url,
+        urlRedacted: redactStremioResourceUrl(externalCheck.url),
+      };
+    }
+  }
+
   let reason = 'The stream did not contain a direct HTTPS media URL.';
-  if (value.ytId !== undefined) reason = 'YouTube player sources are not supported by the Loom adapter.';
-  else if (value.externalUrl !== undefined) reason = 'External webpage links are not direct media sources.';
+  if (value.ytId !== undefined) reason = 'The YouTube video ID is not valid.';
+  else if (value.externalUrl !== undefined) reason = 'The external link is not a public HTTPS page.';
+  else if (value.nzbUrl !== undefined || value.rarUrls !== undefined || value.zipUrls !== undefined) reason = 'Usenet and archive-extraction sources need a download engine that LoomTV does not include.';
   else if (value.fileMustInclude !== undefined) reason = 'Archive and file-selection sources are not supported by the Loom adapter.';
   return {
     ...base,
@@ -1529,6 +1594,29 @@ export class StremioAddonRegistry {
 
   async fetchSubtitles(addonId, { type, videoId, extra } = {}, signal) {
     return this.fetchResource(addonId, 'subtitles', type, videoId, extra, (payload, context) => normalizeSubtitlesResponse(payload, context, this.options.limits), signal);
+  }
+
+  /**
+   * Download one subtitle file that this add-on listed. The caller must pass a
+   * URL the host received from this add-on; it is revalidated here and
+   * fetched with the same public-HTTPS, redirect-free, size-bounded policy.
+   */
+  async fetchSubtitleFile(addonId, url, signal) {
+    this.requireEnabledInternalRecord(addonId);
+    const safeUrl = requireRemoteHttpsUrl(url, 'subtitle URL', this.options.limits);
+    const text = await fetchJson(safeUrl, {
+      fetchImpl: this.options.fetchImpl,
+      requestGuard: this.options.requestGuard,
+      limits: this.options.limits,
+      maxBytes: Math.min(this.options.limits.maxResponseBytes * 2, HARD_LIMITS.maxResponseBytes),
+      label: 'subtitle',
+      signal,
+      responseType: 'subtitle',
+    });
+    if (!/\d{1,2}:\d{2}[.,]\d{3}\s*-->/.test(text)) {
+      throw new StremioAdapterError('UNSUPPORTED_SUBTITLE_FORMAT', 'This subtitle is not in a supported SRT or WebVTT format.', { retryable: false });
+    }
+    return text;
   }
 
   async fetchResource(addonId, resource, type, id, extra, normalize, signal) {

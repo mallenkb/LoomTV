@@ -1,3 +1,6 @@
+import type { SubtitleVideo } from '../../lib/openSubtitlesV3';
+import type { AddonSubtitleContext } from '../../lib/addonPlayback';
+
 export type PlayerState = 'loading' | 'ready' | 'error';
 export type ControlTab = 'video' | 'audio' | 'subtitles';
 export type AspectMode = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
@@ -109,6 +112,10 @@ export interface VideoPlayerProps {
    * window, so recording a position would only pollute Continue Watching.
    */
   isLiveStream?: boolean;
+  /** Online subtitle identity for a stream with no library item, such as an add-on source. */
+  onlineSubtitleVideo?: SubtitleVideo;
+  /** The add-on video being played; its stream and installed subtitle add-ons are searched on request. */
+  addonSubtitles?: AddonSubtitleContext;
   /** Switch to another live channel (channel up/down, last channel). */
   onPlayLiveChannel?: (reference: string, name: string, logoUrl?: string) => void;
   onClose: () => void;

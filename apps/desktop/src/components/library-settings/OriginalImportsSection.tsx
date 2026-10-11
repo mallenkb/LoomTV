@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { SettingsDisclosure, SettingsNote } from '@/components/settings/SettingsLayout';
+import { SettingsDialog, SettingsDialogMessage } from '@/components/settings/SettingsDialog';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
 import type { LibraryImportSummary, LibraryOriginalPreview, MediaRenamePreview } from '@/shared/desktopProtocol';
@@ -72,64 +73,107 @@ export default function OriginalImportsSection({ disabled }: { disabled: boolean
   };
 
   return (
-    <div className="space-y-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-      <p className="text-sm font-semibold text-[var(--loom-text)]">Original imports</p>
-      <p className="text-xs text-[var(--loom-muted)]">Restore the first recorded names and locations, including available cleanup files. Original records stay after deletion, but they contain no backup of the video. Cleanup files are kept for 30 days. After restoring, you can rename using metadata again. Your original record stays the same.</p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={() => setDeleted((value) => !value)}>{deleted ? 'Show available imports' : 'Show deleted history'}</Button>
-        <Button variant="outline" size="sm" disabled={busy || disabled} onClick={() => { void load().catch((cause) => setError(String(cause))); }}>Refresh records</Button>
-      </div>
-      <div className="max-h-[40vh] space-y-2 overflow-y-auto">
-        {records.filter((record) => Boolean(record.removedAt) === deleted).map((record) => (
-          <div key={record.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--loom-bg)] p-3 text-xs">
-            <div>
-              <p className="text-[var(--loom-text)]">{record.title}</p>
-              <p className="text-[var(--loom-muted)]">{new Date(record.createdAt).toLocaleString()} · {record.entryCount} recorded entries</p>
-              <p className="text-[var(--loom-muted)]">{record.removedAt ? `Removal detected ${new Date(record.removedAt).toLocaleString()}` : record.restoredAt ? 'Original state restored' : record.restoreRequestedAt ? 'Restore requested. Review remaining files.' : 'Original record saved'}</p>
+    <>
+      {records.length ? (
+      <SettingsDisclosure
+        title="Original file names"
+        description="Restore the names and locations files had when LoomTV first saw them."
+        summary={records.filter((record) => !record.removedAt).length}
+      >
+        <div className="space-y-2 pt-1">
+          <div className="flex flex-wrap items-center gap-1">
+            <div role="radiogroup" aria-label="Records to show" className="settings-segmented inline-flex rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] p-0.5">
+              {([false, true] as const).map((value) => (
+                <button key={String(value)} type="button" role="radio" aria-checked={deleted === value} onClick={() => setDeleted(value)} className={`h-[30px] rounded-md px-2.5 text-xs font-medium transition-colors ${deleted === value ? 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'}`}>
+                  {value ? 'Deleted' : 'Available'}
+                </button>
+              ))}
             </div>
-            <Button variant="outline" size="sm" disabled={busy || disabled} onClick={() => void inspect(record.id)}>{record.removedAt ? 'View history' : 'Review original'}</Button>
+            <Button variant="outline" size="sm" disabled={busy || disabled} onClick={() => { void load().catch((cause) => setError(String(cause))); }}>Refresh</Button>
           </div>
-        ))}
-        {!records.some((record) => Boolean(record.removedAt) === deleted) ? <p className="text-xs text-[var(--loom-muted)]">No {deleted ? 'deleted' : 'available'} imports on this page. New records appear after a library scan.</p> : null}
-        {hasOlder ? <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load(records.length).catch((cause) => setError(String(cause))); }}>Load older imports</Button> : null}
-      </div>
-      {status ? <p role="status" className="text-xs text-[var(--loom-muted)]">{status}</p> : null}
-      {error && !preview ? <p role="alert" className="whitespace-pre-wrap text-xs text-red-200">{error}</p> : null}
-      <Dialog open={Boolean(preview)} onOpenChange={(open) => { if (!open && !busy) setPreview(null); }} contentClassName="max-w-3xl bg-[var(--loom-panel)] text-[var(--loom-text)]">
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{preview?.title}: original names</DialogTitle>
-            <DialogDescription className="text-[var(--loom-muted)]">Review the first saved locations before restoring. Occupied destinations are kept. Files you deleted cannot be recreated from this record.</DialogDescription>
-          </DialogHeader>
-          {preview?.originalQuality === 'historical-partial' ? <p className="my-3 text-xs text-amber-200">Some names were recovered from older rename records. The complete original folder contents were not recorded at that time.</p> : null}
-          {renamePreview ? <div className="my-3 max-h-[35vh] space-y-2 overflow-y-auto rounded-lg border border-[var(--loom-border)] p-3 text-xs">
-            <p className="font-semibold">Review metadata names</p>
-            <p>Only this import will be renamed. Automatic organization can manage it again after you apply these changes.</p>
-            {renamePreview.entries.map((entry) => <div key={entry.id} className="break-all"><p>{entry.fromName} → {entry.moveToFolder ? `${entry.moveToFolder}/` : ''}{entry.toName}</p>{entry.verification ? <p className="text-[var(--loom-muted)]">{entry.verification.note}</p> : null}{entry.sidecars.map((sidecar) => <p key={sidecar.fromName} className="text-[var(--loom-muted)]">{sidecar.fromName} → {sidecar.toName}</p>)}</div>)}
-            {renamePreview.skipped.map((entry, index) => <p key={index}>{entry.fileName}: {entry.reason}</p>)}
-            {!renamePreview.entries.length ? <p>No safe name changes are available for this import. Check its metadata match or the reasons above.</p> : null}
-            <Button size="sm" disabled={busy || disabled || !renamePreview.entries.length} onClick={() => void applyRename()}>Apply metadata names</Button>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => setRenamePreview(null)}>Cancel rename</Button>
-          </div> : null}
-          <div className="my-3 max-h-[50vh] space-y-3 overflow-y-auto">
-            {preview?.entries.slice(0, shown).map((entry, index) => (
-              <dl key={`${entry.original}:${index}`} className="space-y-1 rounded-lg bg-[var(--loom-bg)] p-3 text-xs">
-                <dt className="text-[var(--loom-muted)]">Original location</dt><dd className="select-text break-all">{entry.original}</dd>
-                <dt className="text-[var(--loom-muted)]">Current location</dt><dd className="select-text break-all">{entry.current}</dd>
-                <dt className="text-[var(--loom-muted)]">Status</dt><dd>{entry.status}</dd>
-              </dl>
+          <div className="max-h-[40vh] divide-y divide-[var(--loom-settings-divider)] overflow-y-auto">
+            {records.filter((record) => Boolean(record.removedAt) === deleted).map((record) => (
+              <div key={record.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs">
+                <div className="min-w-0">
+                  <p className="text-[var(--loom-text)]">{record.title}</p>
+                  <p className="text-[var(--loom-muted)]">
+                    {new Date(record.createdAt).toLocaleString()} · {record.entryCount} {record.entryCount === 1 ? 'file' : 'files'}
+                    {record.removedAt ? ` · removed ${new Date(record.removedAt).toLocaleString()}` : record.restoredAt ? ' · restored' : record.restoreRequestedAt ? ' · restore needs review' : ''}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" disabled={busy || disabled} onClick={() => void inspect(record.id)}>{record.removedAt ? 'View history' : 'Review'}</Button>
+              </div>
             ))}
-            {preview && preview.entries.length > shown ? <Button variant="outline" size="sm" onClick={() => setShown((value) => value + 50)}>Show more files</Button> : null}
+            {!records.some((record) => Boolean(record.removedAt) === deleted) ? <p className="py-2.5 text-xs text-[var(--loom-muted)]">No {deleted ? 'deleted' : 'available'} records.</p> : null}
           </div>
-          {preview?.issues.length ? <p className="whitespace-pre-wrap text-xs text-amber-200">{preview.issues.map((issue) => `${issue.path}: ${issue.reason}`).join('\n')}</p> : null}
-          {error ? <p role="alert" className="whitespace-pre-wrap text-xs text-red-200">{error}</p> : null}
-          <div className="mt-4 flex justify-end gap-2">
-            {preview && !preview.removedAt ? <Button disabled={disabled || busy} onClick={() => void restore()}>Restore original</Button> : null}
-            {preview && !preview.removedAt ? <Button variant="outline" disabled={busy || disabled} onClick={() => void previewRename()}>Rename using metadata</Button> : null}
-            <Button variant="outline" disabled={busy} onClick={() => { setPreview(null); setRenamePreview(null); }}>Close</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+          {hasOlder ? <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load(records.length).catch((cause) => setError(String(cause))); }}>Load older records</Button> : null}
+          <p className="text-[11px] leading-4 text-[var(--loom-faint)]">Records keep names and locations only, not copies of the video. Cleanup files are kept for 30 days.</p>
+        </div>
+      </SettingsDisclosure>
+      ) : null}
+      {status ? <SettingsNote role="status">{status}</SettingsNote> : null}
+      {error && !preview ? <SettingsNote role="alert" tone="error"><span className="whitespace-pre-wrap">{error}</span></SettingsNote> : null}
+      <SettingsDialog
+        open={Boolean(preview)}
+        onClose={() => { setPreview(null); setRenamePreview(null); }}
+        busy={busy}
+        size="lg"
+        title={preview ? `${preview.title}: original names` : 'Original names'}
+        description="Check the first saved locations before restoring. Occupied destinations are kept, and deleted files can't be recreated."
+        footerStart={preview ? `${preview.entries.length.toLocaleString()} ${preview.entries.length === 1 ? 'file' : 'files'}` : undefined}
+        footer={(
+          <>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => { setPreview(null); setRenamePreview(null); }}>Close</Button>
+            {preview && !preview.removedAt ? <Button size="sm" variant="outline" disabled={busy || disabled} onClick={() => void previewRename()}>Rename using metadata</Button> : null}
+            {preview && !preview.removedAt ? <Button size="sm" disabled={disabled || busy} onClick={() => void restore()}>Restore original</Button> : null}
+          </>
+        )}
+      >
+        <div className="space-y-3">
+          {preview?.originalQuality === 'historical-partial' ? <SettingsDialogMessage tone="warning">Some names came from older rename records. The full original folder contents weren't recorded then.</SettingsDialogMessage> : null}
+          {renamePreview ? (
+            <section className="overflow-hidden rounded-lg border border-[var(--loom-control-border)]">
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[var(--loom-surface-2)] px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--loom-text)]">Metadata names</p>
+                  <p className="text-xs text-[var(--loom-muted)]">Only this import is renamed.</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => setRenamePreview(null)}>Cancel</Button>
+                  <Button size="sm" disabled={busy || disabled || !renamePreview.entries.length} onClick={() => void applyRename()}>Apply names</Button>
+                </div>
+              </div>
+              <ul className="max-h-[30vh] divide-y divide-[color-mix(in_srgb,var(--loom-text)_8%,transparent)] overflow-y-auto text-xs">
+                {renamePreview.entries.map((entry) => (
+                  <li key={entry.id} className="space-y-0.5 break-all px-3 py-2">
+                    <p className="text-[var(--loom-muted)]">{entry.fromName}</p>
+                    <p className="text-[var(--loom-text)]">→ {entry.moveToFolder ? `${entry.moveToFolder}/` : ''}{entry.toName}</p>
+                    {entry.verification ? <p className="text-[var(--loom-faint)]">{entry.verification.note}</p> : null}
+                    {entry.sidecars.map((sidecar) => <p key={sidecar.fromName} className="text-[var(--loom-faint)]">{sidecar.fromName} → {sidecar.toName}</p>)}
+                  </li>
+                ))}
+                {renamePreview.skipped.map((entry, index) => <li key={index} className="px-3 py-2 text-[var(--loom-muted)]">{entry.fileName}: {entry.reason}</li>)}
+                {!renamePreview.entries.length ? <li className="px-3 py-2 text-[var(--loom-muted)]">No safe name changes for this import. Check its metadata match or the reasons above.</li> : null}
+              </ul>
+            </section>
+          ) : null}
+          <ul className="divide-y divide-[color-mix(in_srgb,var(--loom-text)_8%,transparent)] overflow-hidden rounded-lg border border-[var(--loom-control-border)] text-xs">
+            {preview?.entries.slice(0, shown).map((entry, index) => (
+              <li key={`${entry.original}:${index}`} className="space-y-0.5 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--loom-faint)]">Original</span>
+                  <span className="text-[11px] text-[var(--loom-muted)]">{entry.status}</span>
+                </div>
+                <p className="select-text break-all text-[var(--loom-text)]">{entry.original}</p>
+                <p className="select-text break-all text-[var(--loom-muted)]">Now: {entry.current}</p>
+              </li>
+            ))}
+          </ul>
+          {preview && preview.entries.length > shown ? <Button variant="outline" size="sm" className="w-full" onClick={() => setShown((value) => value + 50)}>Show more</Button> : null}
+          {preview?.issues.length ? <SettingsDialogMessage tone="warning"><span className="whitespace-pre-wrap">{preview.issues.map((issue) => `${issue.path}: ${issue.reason}`).join('\n')}</span></SettingsDialogMessage> : null}
+          {error ? <SettingsDialogMessage><span className="whitespace-pre-wrap">{error}</span></SettingsDialogMessage> : null}
+        </div>
+      </SettingsDialog>
+    </>
   );
 }

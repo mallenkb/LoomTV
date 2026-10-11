@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export type ConfirmOptions = {
@@ -52,42 +53,28 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
       <Dialog
         open={request !== null}
         onOpenChange={(open) => { if (!open) settle(false); }}
-        contentClassName="max-w-md rounded-2xl border-[var(--loom-border)] bg-[var(--loom-surface)] p-6"
+        contentClassName="loom-settings-dialog-surface w-[min(420px,calc(100vw-32px))] max-w-none border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)]"
       >
         {request && (
-          <DialogContent>
-            <DialogHeader className="text-left">
-              <div className="flex items-start gap-3">
-                {request.destructive && (
-                  <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-500/15 text-red-400">
-                    <AlertTriangle className="h-4.5 w-4.5" />
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <DialogTitle className="text-base font-semibold text-[var(--loom-text)]">{request.title}</DialogTitle>
-                  <DialogDescription className="mt-2 leading-6 text-[var(--loom-muted)]">{request.description}</DialogDescription>
-                </div>
+          <DialogContent className="px-5 pb-[18px] pt-[18px]">
+            <DialogHeader className="flex items-start gap-3 text-left">
+              {request.destructive && (
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-500/15 text-red-400" aria-hidden="true">
+                  <AlertTriangle className="h-4 w-4" />
+                </span>
+              )}
+              <div className="min-w-0">
+                <DialogTitle className="text-[15px] font-semibold leading-6 text-[var(--loom-text)]">{request.title}</DialogTitle>
+                <DialogDescription className="mt-0.5 text-[13px] leading-5 text-[var(--loom-muted)]">{request.description}</DialogDescription>
               </div>
             </DialogHeader>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => settle(false)}
-                className="h-10 rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-5 text-sm font-medium text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)]"
-              >
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => settle(false)}>
                 {request.cancelLabel || 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={() => settle(true)}
-                className={`h-10 rounded-full px-5 text-sm font-semibold transition-colors ${
-                  request.destructive
-                    ? 'bg-red-500/90 text-white hover:bg-red-500'
-                    : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]'
-                }`}
-              >
+              </Button>
+              <Button type="button" size="sm" variant={request.destructive ? 'destructive' : 'default'} onClick={() => settle(true)}>
                 {request.confirmLabel || 'Continue'}
-              </button>
+              </Button>
             </div>
           </DialogContent>
         )}

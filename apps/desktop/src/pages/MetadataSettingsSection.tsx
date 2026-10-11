@@ -1,6 +1,6 @@
-import { CheckCircle, Eye, EyeOff, Key, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { Check, CheckCircle, Eye, EyeOff, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { SettingsActions, SettingsDisclosure, SettingsGroup, SettingsNote, SettingsPageHeader, SettingsRow } from '@/components/settings/SettingsLayout';
 import type { MetadataKeyTestResult } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
 import { normalizeProviderId } from './Settings.helpers';
@@ -51,229 +51,121 @@ export default function MetadataSettingsSection({
   saveApiKeys,
   testApiKeys,
 }: MetadataSettingsSectionProps) {
-  return (
-    <>
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
-            <Key className="w-4 h-4 text-[var(--loom-accent)]" />
-            Metadata API Keys
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Add the services you use. TVmaze and Jikan need no keys, and OpenSubtitles subtitles are built into the player.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {providers.map((provider, providerIndex) => {
-            const currentValue = metadataKeys[provider.id] || '';
-            const isEditing = editingKeys[provider.id] ?? !currentValue;
-            const isVisible = visibleKeys[provider.id] || false;
-            const isLastBuiltInProvider = providerIndex === providers.length - 1;
-            return (
-              <div
-                key={provider.id}
-                className={cn(
-                  'space-y-2 pb-5',
-                  !isLastBuiltInProvider && 'border-b border-[var(--loom-border)]',
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-white">{provider.label}</p>
-                      {provider.badge && (
-                        <span className={`text-xs px-2 py-0.5 rounded font-normal ${provider.required ? 'bg-[var(--loom-accent)]/20 text-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
-                          {provider.badge}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-xs text-[var(--loom-muted)]">{provider.description}</p>
-                  </div>
-                </div>
-                <div className="settings-key-row flex items-center gap-2">
-                  <input
-                    type={isEditing || isVisible ? 'text' : 'password'}
-                    value={currentValue}
-                    onChange={(event) => setMetadataKey(provider.id, event.target.value)}
-                    placeholder={provider.placeholder}
-                    readOnly={!isEditing}
-                    className="min-w-0 flex-1 bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)] read-only:text-[var(--loom-muted)]"
-                  />
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    onClick={() => toggleProviderVisibility(provider.id)}
-                    disabled={!currentValue}
-                    title={isVisible ? `Hide ${provider.label}` : `Show ${provider.label}`}
-                    aria-label={isVisible ? `Hide ${provider.label}` : `Show ${provider.label}`}
-                    className="h-10 w-10 shrink-0"
-                  >
-                    {isVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    onClick={() => setProviderEditing(provider.id, !isEditing)}
-                    title={isEditing ? `Save ${provider.label}` : `Edit ${provider.label}`}
-                    aria-label={isEditing ? `Save ${provider.label}` : `Edit ${provider.label}`}
-                    className="h-10 w-10 shrink-0"
-                  >
-                    {isEditing ? <Save className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    onClick={() => deleteMetadataKey(provider.id)}
-                    disabled={!currentValue}
-                    title={`Delete ${provider.label}`}
-                    aria-label={`Delete ${provider.label}`}
-                    className="settings-destructive-text h-10 w-10 shrink-0 border-red-500/40 hover:bg-red-500/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-
-          {customProviders.length > 0 && (
-            <div className="space-y-3 border-t border-[var(--loom-border)] pt-5">
-              <p className="text-sm font-semibold text-white">Additional Metadata Keys</p>
-              {customProviders.map((providerId) => {
-                const currentValue = metadataKeys[providerId] || '';
-                const isEditing = editingKeys[providerId] ?? !currentValue;
-                const isVisible = visibleKeys[providerId] || false;
-                return (
-              <div key={providerId} className="settings-key-row settings-key-row-custom flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={providerId}
-                      readOnly
-                      className="w-36 shrink-0 bg-[var(--loom-bg)] text-[var(--loom-muted)] border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm"
-                    />
-                    <input
-                      type={isEditing || isVisible ? 'text' : 'password'}
-                      value={currentValue}
-                      onChange={(event) => setMetadataKey(providerId, event.target.value)}
-                      readOnly={!isEditing}
-                      placeholder="API key"
-                      className="min-w-0 flex-1 bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)] read-only:text-[var(--loom-muted)]"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="outline"
-                      onClick={() => toggleProviderVisibility(providerId)}
-                      disabled={!currentValue}
-                      title={isVisible ? `Hide ${providerId}` : `Show ${providerId}`}
-                      aria-label={isVisible ? `Hide ${providerId}` : `Show ${providerId}`}
-                      className="h-10 w-10 shrink-0"
-                    >
-                      {isVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="outline"
-                      onClick={() => setProviderEditing(providerId, !isEditing)}
-                      title={isEditing ? `Save ${providerId}` : `Edit ${providerId}`}
-                      aria-label={isEditing ? `Save ${providerId}` : `Edit ${providerId}`}
-                      className="h-10 w-10 shrink-0"
-                    >
-                      {isEditing ? <Save className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="outline"
-                      onClick={() => deleteMetadataKey(providerId)}
-                      disabled={!currentValue}
-                      title={`Delete ${providerId}`}
-                      aria-label={`Delete ${providerId}`}
-                      className="settings-destructive-text h-10 w-10 shrink-0 border-red-500/40 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="space-y-3 border-t border-[var(--loom-border)] pt-5">
-            <p className="text-sm font-semibold text-white">Add New Metadata Key</p>
-            <div className="settings-key-row settings-key-row-new flex items-center gap-2">
-              <input
-                type="text"
-                value={newProviderName}
-                onChange={(event) => setNewProviderName(event.target.value)}
-                placeholder="Provider name, e.g. fanart"
-                className="w-52 shrink-0 bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)]"
-              />
-              <input
-                type="text"
-                value={newProviderKey}
-                onChange={(event) => setNewProviderKey(event.target.value)}
-                placeholder="API key"
-                className="min-w-0 flex-1 bg-[var(--loom-bg)] text-white border border-[var(--loom-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--loom-accent)]"
-              />
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                onClick={addMetadataKey}
-                disabled={!normalizeProviderId(newProviderName) || !newProviderKey.trim()}
-                title="Add metadata key"
-                aria-label="Add metadata key"
-                className="h-10 w-10 shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-col gap-3">
-        {metadataKeyTestResults.length > 0 && (
-          <div className="rounded-lg bg-[var(--loom-panel)] p-3 text-sm">
-            <div className="space-y-2">
-              {metadataKeyTestResults.map((result) => (
-                <div key={result.provider} className="flex items-start gap-2">
-                  <span className={cn(
-                    'mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full',
-                    result.ok ? 'bg-emerald-400' : 'bg-red-400',
-                  )}
-                  />
-                  <p className={result.ok ? 'text-white/85' : 'settings-status-error'}>
-                    <span className="font-semibold uppercase">{result.provider}</span>
-                    <span className="text-[var(--loom-muted)]"> - {result.message}</span>
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button onClick={saveApiKeys} className="gap-2 w-full sm:w-auto">
-            {savedKey ? <CheckCircle className="w-4 h-4" /> : <Key className="w-4 h-4" />}
-            {savedKey ? 'API keys saved' : 'Save API keys'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={testApiKeys}
-            disabled={isTestingKeys || !hasMetadataKeysToTest}
-            className="gap-2 w-full sm:w-auto"
-          >
-            {isTestingKeys ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-            {isTestingKeys ? 'Testing API keys...' : 'Test API keys'}
-          </Button>
-        </div>
+  const keyRow = (providerId: string, label: string, placeholder: string) => {
+    const currentValue = metadataKeys[providerId] || '';
+    const isEditing = editingKeys[providerId] ?? !currentValue;
+    const isVisible = visibleKeys[providerId] || false;
+    return (
+      <div className="settings-key-row flex items-center gap-1.5">
+        <input
+          type={isEditing || isVisible ? 'text' : 'password'}
+          value={currentValue}
+          onChange={(event) => setMetadataKey(providerId, event.target.value)}
+          placeholder={placeholder}
+          readOnly={!isEditing}
+          aria-label={label}
+          className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 text-sm text-[var(--loom-text)] focus:border-[var(--loom-accent)] focus:outline-none read-only:text-[var(--loom-muted)]"
+        />
+        {currentValue ? (
+          <>
+            <Button type="button" size="icon" variant="outline" onClick={() => toggleProviderVisibility(providerId)} title={isVisible ? `Hide ${label}` : `Show ${label}`} aria-label={isVisible ? `Hide ${label}` : `Show ${label}`} className="h-9 w-9 shrink-0">
+              {isVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
+            <Button type="button" size="icon" variant="outline" onClick={() => setProviderEditing(providerId, !isEditing)} title={isEditing ? `Done editing ${label}` : `Edit ${label}`} aria-label={isEditing ? `Done editing ${label}` : `Edit ${label}`} className="h-9 w-9 shrink-0">
+              {isEditing ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+            </Button>
+            <Button type="button" size="icon" variant="outline" onClick={() => deleteMetadataKey(providerId)} title={`Delete ${label}`} aria-label={`Delete ${label}`} className="settings-destructive-text h-9 w-9 shrink-0">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </>
+        ) : null}
       </div>
-    </>
+    );
+  };
+
+  return (
+    <div>
+      <SettingsPageHeader title="Metadata keys" description="API keys for posters, cast, episode data, ratings, and logos." />
+      <SettingsGroup
+        title="Metadata services"
+        description="TVmaze, Jikan, and Cinemeta need no key. Add keys only for the services you want."
+      >
+        {providers.map((provider) => (
+          <SettingsRow
+            key={provider.id}
+            stacked
+            title={(
+              <span className="flex items-center gap-2">
+                {provider.label.replace(/ API Key$/, '')}
+                {provider.badge ? (
+                  <span className={`rounded px-1.5 py-0.5 text-[11px] font-normal ${provider.required ? 'bg-[var(--loom-accent)]/15 text-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>{provider.badge}</span>
+                ) : null}
+              </span>
+            )}
+            description={provider.description}
+          >
+            {keyRow(provider.id, provider.label, provider.placeholder)}
+          </SettingsRow>
+        ))}
+
+        {customProviders.map((providerId) => (
+          <SettingsRow key={providerId} stacked title={providerId}>
+            {keyRow(providerId, providerId, 'API key')}
+          </SettingsRow>
+        ))}
+
+        <SettingsDisclosure title="Add another service key" description="For add-ons or providers that ask for their own key.">
+          <div className="settings-key-row settings-key-row-new flex items-center gap-1.5">
+            <input
+              type="text"
+              value={newProviderName}
+              onChange={(event) => setNewProviderName(event.target.value)}
+              placeholder="Service name, e.g. fanart"
+              aria-label="Service name"
+              className="h-9 w-52 shrink-0 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 text-sm text-[var(--loom-text)] focus:border-[var(--loom-accent)] focus:outline-none"
+            />
+            <input
+              type="text"
+              value={newProviderKey}
+              onChange={(event) => setNewProviderKey(event.target.value)}
+              placeholder="API key"
+              aria-label="API key"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 text-sm text-[var(--loom-text)] focus:border-[var(--loom-accent)] focus:outline-none"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addMetadataKey}
+              disabled={!normalizeProviderId(newProviderName) || !newProviderKey.trim()}
+              className="h-9 gap-1.5"
+            >
+              <Plus className="h-4 w-4" />
+              Add
+            </Button>
+          </div>
+        </SettingsDisclosure>
+
+        {metadataKeyTestResults.map((result) => (
+          <SettingsNote key={result.provider} tone={result.ok ? 'muted' : 'error'}>
+            <span className="flex items-start gap-2">
+              <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', result.ok ? 'bg-emerald-400' : 'bg-red-400')} />
+              <span><span className="font-semibold uppercase">{result.provider}</span> · {result.message}</span>
+            </span>
+          </SettingsNote>
+        ))}
+
+        <SettingsActions start="Test checks each key with its service.">
+          <Button type="button" variant="outline" size="sm" onClick={testApiKeys} disabled={isTestingKeys || !hasMetadataKeysToTest} className="gap-1.5">
+            {isTestingKeys ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
+            {isTestingKeys ? 'Testing…' : 'Test keys'}
+          </Button>
+          <Button type="button" size="sm" onClick={saveApiKeys} className="gap-1.5">
+            {savedKey ? <CheckCircle className="h-3.5 w-3.5" /> : null}
+            {savedKey ? 'Saved' : 'Save keys'}
+          </Button>
+        </SettingsActions>
+      </SettingsGroup>
+    </div>
   );
 }

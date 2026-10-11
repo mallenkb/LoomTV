@@ -1,362 +1,145 @@
-import { Moon, Palette, Sun } from 'lucide-react';
-import LoomBrandLockup from '@/components/LoomBrandLockup';
-import LoomLoader from '@/components/LoomLoader';
-import LoomLogo from '@/components/LoomLogo';
-import LoomPlayMark from '@/components/LoomPlayMark';
+import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  type AppCastCardStyle,
-  type AppThemeColor,
-  type AppHomeStyle,
-  type AppThemeSettings,
-  THEME_COLORS,
-} from '@/lib/theme';
+import { SettingsGroup, SettingsPageHeader, SettingsRow, SettingsSegmented, SettingsSelect, SettingsSwitch } from '@/components/settings/SettingsLayout';
+import { THEME_COLORS, type AppThemeColor } from '@/lib/theme';
+import { cn } from '@/lib/utils';
 import { LOADER_OPTIONS } from './Settings.helpers';
+import type { SettingsController } from './useSettingsController';
+import AnimeCastCardPreview from './AnimeCastCardPreview';
 
-type ThemeSettingsSectionProps = {
-  theme: AppThemeSettings;
-  setTheme: (settings: Partial<AppThemeSettings>) => Promise<void>;
-  showProviderRatingBadges: boolean;
-  setShowProviderRatingBadges: (show: boolean) => Promise<void>;
-};
+export type AppearanceController = Pick<SettingsController,
+  | 'theme'
+  | 'setTheme'
+  | 'showProviderRatingBadges'
+  | 'setShowProviderRatingBadges'
+  | 'sidebarOrderItems'
+  | 'moveSidebarItem'
+>;
 
-function AnimeCastCardPreview({ layout }: { layout: AppCastCardStyle }) {
-  const isStandard = layout === 'standard';
-
-  const previewAvatar = (initials: string, className: string) => (
-    <span
-      aria-hidden="true"
-      className={`grid shrink-0 place-items-center rounded-full text-[10px] font-bold tracking-wide ${className}`}
-    >
-      {initials}
-    </span>
-  );
+export default function ThemeSettingsSection({ controller }: { controller: AppearanceController }) {
+  const { theme, sidebarOrderItems: order } = controller;
+  const modern = theme.homeStyle === 'modern';
 
   return (
-    <div
-      aria-label={`${isStandard ? 'Standard' : 'Compact'} anime cast card preview`}
-      className="mt-3 max-w-xl rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3"
-      role="img"
-    >
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--loom-faint)]">Preview</span>
-        <span className="text-xs text-[var(--loom-muted)]">
-          {isStandard ? 'Character and voice actor stacked' : 'Character and voice actor condensed'}
-        </span>
-      </div>
+    <div>
+      <SettingsPageHeader title="Appearance" description="Theme, accent color, Home layout, and what posters show. Changes apply right away." />
 
-      {isStandard ? (
-        <div className="overflow-hidden rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)]">
-          <div className="flex items-center gap-3 p-3">
-            {previewAvatar('MA', 'h-10 w-10 bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]')}
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-[var(--loom-text)]">Mikasa Ackerman</span>
-              <span className="block text-[11px] text-[var(--loom-muted)]">Character</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-3 border-t border-[var(--loom-border)] bg-[var(--loom-surface-3)] p-3">
-            {previewAvatar('YI', 'h-10 w-10 bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]')}
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium text-[var(--loom-text)]">Yui Ishikawa</span>
-              <span className="block text-[11px] font-semibold text-[var(--loom-muted)]">Voice actor</span>
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] p-3">
-          <div className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center gap-2">
-            {previewAvatar('MA', 'h-10 w-10 bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]')}
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-[var(--loom-text)]">Mikasa Ackerman</span>
-              <span className="block truncate text-[11px] text-[var(--loom-muted)]">Character · Yui Ishikawa</span>
-            </span>
-            {previewAvatar('YI', 'h-10 w-10 bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]')}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function ThemeSettingsSection({
-  theme,
-  setTheme,
-  showProviderRatingBadges,
-  setShowProviderRatingBadges,
-}: ThemeSettingsSectionProps) {
-  const canChooseAppearance = theme.homeStyle === 'default';
-
-  return (
-    <div className="space-y-6">
-      <Card className="settings-panel">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-[var(--loom-text)]">
-            <Palette className="h-4 w-4 text-[var(--loom-accent)]" />
-            Theme
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-8">
-          <div>
-            <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Style</p>
-            <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Home layout style">
-              {([
-                { id: 'modern', label: 'Modern', description: 'A cinematic hero, category pill, and floating controls.' },
-                { id: 'default', label: 'Classic', description: 'The familiar Loom library layout.' },
-              ] as const satisfies readonly { id: AppHomeStyle; label: string; description: string }[]).map((option) => {
-                const isSelected = theme.homeStyle === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => void setTheme({ homeStyle: option.id })}
-                    aria-pressed={isSelected}
-                    className={`rounded-xl border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
-                      isSelected
-                        ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)]'
-                        : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
-                    }`}
-                  >
-                    <span className="block text-sm font-semibold text-[var(--loom-text)]">{option.label}</span>
-                    <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">{option.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {canChooseAppearance && (
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Appearance</p>
-              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Appearance mode">
-                {([
-                  { mode: 'dark' as const, label: 'Dark', Icon: Moon },
-                  { mode: 'light' as const, label: 'Light', Icon: Sun },
-                ]).map(({ mode, label, Icon }) => {
-                  const isSelected = theme.mode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => void setTheme({ mode })}
-                      aria-pressed={isSelected}
-                      className={`theme-appearance-option flex h-14 items-center gap-3 rounded-lg border px-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
-                        isSelected
-                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
-                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
-                      }`}
-                    >
-                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${isSelected ? 'bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
-                        <Icon className="h-5 w-5" />
-                      </span>
-                      <span className={`text-sm font-semibold ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-text)]'}`}>{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {theme.homeStyle === 'modern' && (
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Home hero</p>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={theme.modernHeroMode === 'continue-watching'}
-                onClick={() => void setTheme({
-                  modernHeroMode: theme.modernHeroMode === 'continue-watching' ? 'featured' : 'continue-watching',
-                })}
-                className="flex w-full items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] p-4 text-left outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)]"
-              >
-                <span>
-                  <span className="block text-sm font-semibold text-[var(--loom-text)]">Show last watched title</span>
-                  <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">
-                    {theme.modernHeroMode === 'continue-watching'
-                      ? 'The hero stays on your most recently watched title.'
-                      : 'The hero rotates through the featured library carousel.'}
-                  </span>
-                </span>
-                <span
-                  aria-hidden="true"
-                  className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-                    theme.modernHeroMode === 'continue-watching'
-                      ? 'bg-[var(--loom-accent)]'
-                      : 'bg-[var(--loom-surface-3)]'
-                  }`}
+      <SettingsGroup title="Theme">
+        <SettingsRow title="Appearance" description={modern ? 'The Modern Home layout is always dark.' : 'Dark or light surfaces across the app.'}>
+          <SettingsSegmented
+            label="Appearance mode"
+            value={modern ? 'dark' : theme.mode}
+            disabled={modern}
+            options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]}
+            onChange={(mode) => void controller.setTheme({ mode })}
+          />
+        </SettingsRow>
+        <SettingsRow title="Accent color" description="Used for buttons, progress, and selection." stacked>
+          <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Accent color">
+            {(Object.keys(THEME_COLORS) as AppThemeColor[]).map((color) => {
+              const palette = THEME_COLORS[color];
+              const selected = theme.color === color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => void controller.setTheme({ color })}
+                  className={cn(
+                    'loom-control-button inline-flex h-9 items-center gap-2 rounded-[var(--loom-control-radius)] border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                    selected
+                      ? 'border-[var(--loom-accent)] bg-[var(--loom-active-bg)] text-[var(--loom-text)]'
+                      : 'border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]',
+                  )}
                 >
-                  <span
-                    className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                      theme.modernHeroMode === 'continue-watching' ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </span>
-              </button>
-            </div>
-          )}
-
-          <div>
-            <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Ratings</p>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showProviderRatingBadges}
-              onClick={() => void setShowProviderRatingBadges(!showProviderRatingBadges)}
-              className="flex w-full items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] p-4 text-left outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)]"
-            >
-              <span>
-                <span className="flex items-center gap-2 text-sm font-semibold text-[var(--loom-text)]">
-                  Show provider rating badges
-                  <span className="inline-flex items-center gap-1 rounded-md bg-black/20 px-1.5 py-1 text-xs font-medium text-[var(--loom-text)]">
-                    <ProviderRatingLogo provider="imdb" className="h-3.5 w-7 object-contain" />
-                    <span>8.1</span>
+                  <span className="grid h-4 w-4 place-items-center rounded-full" style={{ backgroundColor: palette.hex }}>
+                    {selected ? <Check className="h-2.5 w-2.5" aria-hidden="true" style={{ color: palette.foreground }} /> : null}
                   </span>
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">
-                  Use IMDb, Tomatometer, Popcornmeter, and Metacritic logos with their scores. Turn this off to use the normal star rating.
-                </span>
+                  {palette.label}
+                </button>
+              );
+            })}
+          </div>
+        </SettingsRow>
+        <SettingsRow title="Loading animation" description="Shown while pages load.">
+          <SettingsSelect
+            label="Loading animation"
+            value={theme.loaderStyle}
+            options={LOADER_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+            onChange={(loaderStyle) => void controller.setTheme({ loaderStyle })}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Home">
+        <SettingsRow title="Home layout" description="Modern has a full-bleed hero. Classic is a denser grid.">
+          <SettingsSegmented
+            label="Home layout style"
+            value={theme.homeStyle}
+            options={[{ value: 'modern', label: 'Modern' }, { value: 'default', label: 'Classic' }]}
+            onChange={(homeStyle) => void controller.setTheme({ homeStyle })}
+          />
+        </SettingsRow>
+        {modern ? (
+          <SettingsRow title="Show the last watched title at the top" description="Replaces the featured title in the hero.">
+            <SettingsSwitch
+              label="Show the last watched title at the top"
+              checked={theme.modernHeroMode === 'continue-watching'}
+              onChange={(on) => void controller.setTheme({ modernHeroMode: on ? 'continue-watching' : 'featured' })}
+            />
+          </SettingsRow>
+        ) : null}
+        <SettingsRow
+          title="Show ratings"
+          description={(
+            <span className="flex flex-wrap items-center gap-2">
+              Provider logos and scores on posters and detail pages.
+              <span role="img" className="inline-flex items-center gap-1 rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--loom-text)]" aria-label="IMDb rating example, 8.1 out of 10">
+                <ProviderRatingLogo provider="imdb" className="h-3.5 w-7 object-contain" />
+                <span aria-hidden="true">8.1</span>
               </span>
-              <span
-                aria-hidden="true"
-                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-                  showProviderRatingBadges ? 'bg-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)]'
-                }`}
-              >
-                <span
-                    className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                    showProviderRatingBadges ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </span>
-            </button>
-          </div>
+            </span>
+          )}
+        >
+          <SettingsSwitch label="Show ratings" checked={controller.showProviderRatingBadges} onChange={(show) => void controller.setShowProviderRatingBadges(show)} />
+        </SettingsRow>
+      </SettingsGroup>
 
-          <div>
-            <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Anime cast cards</p>
-            <div
-              className="grid w-full grid-cols-2 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] p-1 sm:w-fit sm:min-w-80"
-              role="group"
-              aria-label="Anime cast card style"
-            >
-              {([
-                { id: 'standard', label: 'Standard' },
-                { id: 'compact', label: 'Compact' },
-              ] as const).map((option) => {
-                const isSelected = theme.castCardStyle === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => void setTheme({ castCardStyle: option.id })}
-                    aria-pressed={isSelected}
-                    className={`min-h-10 rounded-lg px-4 py-2 text-center text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
-                      isSelected
-                        ? 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)] shadow-sm'
-                        : 'text-[var(--loom-muted)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-            <AnimeCastCardPreview layout={theme.castCardStyle} />
-          </div>
+      <SettingsGroup title="Anime">
+        <SettingsRow
+          title="Cast card style"
+          description={(
+            <span className="grid min-w-0 gap-2">
+              <span>How character and voice actor credits appear.</span>
+              <AnimeCastCardPreview layout={theme.castCardStyle} />
+            </span>
+          )}
+        >
+          <SettingsSegmented
+            label="Anime cast card style"
+            value={theme.castCardStyle}
+            options={[{ value: 'standard', label: 'Standard' }, { value: 'compact', label: 'Compact' }]}
+            onChange={(castCardStyle) => void controller.setTheme({ castCardStyle })}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
-
-          <div className="space-y-7">
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Theme</p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(THEME_COLORS) as AppThemeColor[]).map((color) => {
-                  const palette = THEME_COLORS[color];
-                  const isSelected = theme.color === color;
-                  return (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => void setTheme({ color })}
-                      className={`inline-flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                        isSelected
-                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)]'
-                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
-                      }`}
-                    >
-                      <span
-                        className="theme-color-option-label text-sm font-semibold"
-                        style={{ color: isSelected ? 'var(--loom-active-text)' : 'var(--loom-text)' }}
-                      >
-                        {palette.label}
-                      </span>
-                      <span
-                        className="block h-6 w-14 rounded-md ring-1 ring-black/10"
-                        style={{ backgroundColor: palette.hex }}
-                      >
-                        <span className="sr-only">{palette.hex}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-7">
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Preview</p>
-              <div className="grid gap-4 rounded-lg border bg-[var(--loom-bg)] p-4 lg:grid-cols-[minmax(0,1fr)_13rem]">
-                <div className="flex min-h-52 items-center justify-center rounded-lg border bg-[var(--loom-surface-2)] p-8">
-                  <LoomBrandLockup className="h-32 w-auto" />
-                </div>
-                <div className="grid gap-3">
-                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-[var(--loom-surface-2)] px-3 py-3">
-                    <span className="text-xs font-medium text-[var(--loom-muted)]">Icon</span>
-                    <LoomPlayMark className="h-7 w-7 text-[var(--loom-accent)]" />
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-[var(--loom-surface-2)] px-3 py-3">
-                    <span className="text-xs font-medium text-[var(--loom-muted)]">Horizontal</span>
-                    <LoomLogo className="h-7 w-auto" />
-                  </div>
-                  <Button className="h-12 gap-2 border">
-                    <Palette className="h-4 w-4" />
-                    Accent Action
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Loader</p>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {LOADER_OPTIONS.map((option) => {
-                  const isSelected = theme.loaderStyle === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => void setTheme({ loaderStyle: option.id })}
-                      className={`theme-loader-option flex min-h-28 flex-col items-center justify-center gap-3 rounded-2xl border p-3 text-center transition-colors ${
-                        isSelected
-                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)]'
-                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
-                      }`}
-                    >
-                      <LoomLoader
-                        style={option.id}
-                        className="h-12 w-12 rounded-full bg-[var(--loom-surface-3)] text-[var(--loom-text)] ring-1 ring-[var(--loom-border)]"
-                        markClassName={option.id === 'horizontal-logo' ? 'h-4 w-auto' : 'h-7 w-7'}
-                        color="currentColor"
-                      />
-                      <span className={`block text-sm font-semibold ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-text)]'}`}>{option.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <SettingsGroup title="Sidebar order" description="Move pages up or down in the sidebar." collapsible storageKey="theme-sidebar-order">
+        {order.map((item, index) => (
+          <SettingsRow key={item.id} title={item.label}>
+            <span className="flex items-center gap-1">
+              <Button type="button" variant="ghost" size="icon" className="h-9 w-9" disabled={index === 0} aria-label={`Move ${item.label} up`} title="Move up" onClick={() => controller.moveSidebarItem(item.id, -1)}>
+                <ChevronUp className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <Button type="button" variant="ghost" size="icon" className="h-9 w-9" disabled={index === order.length - 1} aria-label={`Move ${item.label} down`} title="Move down" onClick={() => controller.moveSidebarItem(item.id, 1)}>
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </span>
+          </SettingsRow>
+        ))}
+      </SettingsGroup>
     </div>
   );
 }

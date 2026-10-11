@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Search, SlidersHorizontal } from 'lucide-react';
 import {
   compareSubtitleLanguages, downloadOnlineSubtitle, findOnlineSubtitles, subtitleLanguageLabel, subtitleSearchMatches,
@@ -8,14 +8,26 @@ import {
 /** Shift applied to the selected online subtitle, in seconds; negative shows it earlier. */
 export type OnlineSubtitleTiming = { delay: number; setDelay: (seconds: number) => void };
 
-function TimingControls({ delay, setDelay }: OnlineSubtitleTiming) {
+/** What the panel lists and shows; `source` names the provider. */
+export type PanelSubtitle = { id: string; language: string; name: string; source: string };
+
+/** A subtitle source other than OpenSubtitles v3, such as installed add-ons. */
+export type SubtitlePanelProvider<T extends PanelSubtitle> = {
+  title: string;
+  label: string;
+  intro: string;
+  find: (signal: AbortSignal) => Promise<T[]>;
+  download: (subtitle: T, signal: AbortSignal) => Promise<string>;
+};
+
+function TimingControls({ delay, setDelay, id }: OnlineSubtitleTiming & { id: string }) {
   return (
     <div className="space-y-1.5 rounded-[8px] bg-black/25 p-3">
       <div className="flex items-center justify-between gap-2 text-xs">
-        <label htmlFor="online-subtitle-sync" className="text-white/90">Timing</label>
+        <label htmlFor={id} className="text-white/90">Timing</label>
         <span className="tabular-nums text-white/90" aria-live="polite">{delay > 0 ? '+' : ''}{delay.toFixed(2)}s</span>
       </div>
-      <input id="online-subtitle-sync" type="range" min={-10} max={10} step={0.25} value={delay}
+      <input id={id} type="range" min={-10} max={10} step={0.25} value={delay}
         onChange={event => setDelay(Number(event.target.value))}
         onKeyDown={event => event.stopPropagation()}
         aria-valuetext={`${Math.abs(delay).toFixed(2)} seconds ${delay < 0 ? 'earlier' : delay > 0 ? 'later' : 'offset'}`}
@@ -29,16 +41,32 @@ function TimingControls({ delay, setDelay }: OnlineSubtitleTiming) {
   );
 }
 
-export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelect, timing }: {
-  resolveVideo: (signal: AbortSignal) => Promise<SubtitleVideo>;
+export default function OpenSubtitlesV3Panel<T extends PanelSubtitle = OnlineSubtitle>({ resolveVideo, provider, selectedId, onSelect, timing }: {
+  resolveVideo?: (signal: AbortSignal) => Promise<SubtitleVideo>;
+  /** Replaces OpenSubtitles v3 with another source; listing and download stay on request. */
+  provider?: SubtitlePanelProvider<T>;
   selectedId?: string;
-  onSelect: (subtitle: OnlineSubtitle, text: string, signal: AbortSignal) => Promise<void>;
+  onSelect: (subtitle: T, text: string, signal: AbortSignal) => Promise<void>;
   /** Present while an online subtitle is showing; adds the timing button. */
   timing?: OnlineSubtitleTiming;
 }) {
+  const ids = useId();
+  const headingId = `${ids}-heading`;
+  const timingId = `${ids}-timing`;
+  const syncId = `${ids}-sync`;
+  const findSubtitles = async (signal: AbortSignal): Promise<T[]> => {
+    if (provider) return provider.find(signal);
+    if (!resolveVideo) throw new Error('This video cannot be matched for online subtitles.');
+    const video = await resolveVideo(signal);
+    signal.throwIfAborted();
+    return await findOnlineSubtitles(video, signal) as unknown as T[];
+  };
+  const downloadSubtitle = (subtitle: T, signal: AbortSignal) => provider
+    ? provider.download(subtitle, signal)
+    : downloadOnlineSubtitle(subtitle as unknown as OnlineSubtitle, signal);
   const [timingOpen, setTimingOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<OnlineSubtitle[] | null>(null);
+  const [results, setResults] = useState<T[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -49,7 +77,7 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     controller?.abort();
   }, []);
   const groups = useMemo(() => {
-    const map = new Map<string, OnlineSubtitle[]>();
+    const map = new Map<string, T[]>();
     for (const result of results || []) {
       if (!subtitleSearchMatches(result.language, result.name, query, result.source)) continue;
       const language = subtitleLanguageLabel(result.language);
@@ -67,12 +95,10 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     setDownloading(null);
     setError('');
     try {
-      const video = await resolveVideo(controller.signal);
-      if (controller.signal.aborted) return;
-      const found = await findOnlineSubtitles(video, controller.signal);
+      const found = await findSubtitles(controller.signal);
       if (!controller.signal.aborted) setResults(found);
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not search OpenSubtitles v3.');
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : `Could not search ${provider?.label || 'OpenSubtitles v3'}.`);
     } finally {
       if (request.current === controller) {
         request.current = null;
@@ -80,7 +106,7 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
       }
     }
   };
-  const select = async (subtitle: OnlineSubtitle) => {
+  const select = async (subtitle: T) => {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -88,7 +114,7 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
     setDownloading(subtitle.id);
     setError('');
     try {
-      const text = await downloadOnlineSubtitle(subtitle, controller.signal);
+      const text = await downloadSubtitle(subtitle, controller.signal);
       if (!controller.signal.aborted) await onSelect(subtitle, text, controller.signal);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load this subtitle.');
@@ -111,14 +137,14 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
   const status = downloading ? 'Downloading subtitle...' : results?.length === 0 ? 'No subtitles found for this title.'
     : results && !groups.length ? 'No subtitles match your search.' : '';
   return (
-    <section aria-labelledby="online-subtitles-heading">
+    <section aria-labelledby={headingId}>
       <div className="mb-2 flex items-center justify-between gap-3">
-        <h3 id="online-subtitles-heading" className="text-xs font-semibold text-white">Online subtitles</h3>
+        <h3 id={headingId} className="text-xs font-semibold text-white">{provider?.title || 'Online subtitles'}</h3>
         <div className="flex items-center gap-2">
-          <p className="text-[10px] uppercase tracking-wide text-white/70">OpenSubtitles v3</p>
+          <p className="text-[10px] uppercase tracking-wide text-white/70">{provider?.label || 'OpenSubtitles v3'}</p>
           {timing && (
             <button type="button" onClick={() => setTimingOpen(open => !open)}
-              aria-expanded={timingOpen || timing.delay !== 0} aria-controls="online-subtitle-timing"
+              aria-expanded={timingOpen || timing.delay !== 0} aria-controls={timingId}
               aria-label="Online subtitle timing" title="Timing"
               className={`-my-1 rounded-[6px] p-1 transition-colors hover:bg-white/10 hover:text-white ${timingOpen || timing.delay !== 0 ? 'text-[var(--loom-accent)]' : 'text-white/70'}`}>
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -129,13 +155,13 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
       <div className="overflow-hidden rounded-lg bg-white/10">
         <div className="space-y-2 p-3">
           {timing && (timingOpen || timing.delay !== 0) && (
-            <div id="online-subtitle-timing"><TimingControls {...timing} /></div>
+            <div id={timingId}><TimingControls {...timing} id={syncId} /></div>
           )}
           <div className="flex items-center gap-2">
             <label className="flex min-w-0 flex-1 items-center gap-2 rounded-[8px] bg-black/25 px-3 py-2 transition-colors focus-within:bg-black/40">
               <Search className="h-3.5 w-3.5 shrink-0 text-white/50" aria-hidden="true" />
               <input type="search" value={query} onChange={event => setQuery(event.target.value)}
-                onKeyDown={event => event.stopPropagation()} aria-label="Search OpenSubtitles languages or names"
+                onKeyDown={event => event.stopPropagation()} aria-label={`Search ${provider?.label || 'OpenSubtitles'} languages or names`}
                 placeholder={results ? 'Filter by language or name' : 'Language or name'}
                 style={{ border: 'none', boxShadow: 'none', outline: 'none', appearance: 'none', WebkitAppearance: 'none' }}
                 className="min-w-0 flex-1 !border-0 !bg-transparent !p-0 text-xs text-white !shadow-none !outline-none !ring-0 placeholder:text-white/50" />
@@ -153,7 +179,7 @@ export default function OpenSubtitlesV3Panel({ resolveVideo, selectedId, onSelec
               </button>
             )}
           </div>
-          {results === null && !loading && <p className="text-[11px] leading-relaxed text-white/60">Matches this video on IMDb and lists subtitles from OpenSubtitles v3. Only the one you pick is downloaded.</p>}
+          {results === null && !loading && <p className="text-[11px] leading-relaxed text-white/60">{provider?.intro || 'Matches this video on IMDb and lists subtitles from OpenSubtitles v3. Only the one you pick is downloaded.'}</p>}
           {error && <p role="alert" className="text-xs text-amber-200">{error}</p>}
           {(status || loading) && <p className="text-xs text-white/60">{loading ? 'Searching...' : status}</p>}
         </div>

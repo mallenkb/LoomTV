@@ -14,8 +14,12 @@ export type CachedSidebarPlugin = Pick<StremioPluginSummary, 'addonId' | 'name' 
   configured?: boolean;
 };
 
+/** Built in to Discover and Captions, so never a separate sidebar source. */
+const EMBEDDED_ADDON_IDS = new Set(['com.linvo.cinemeta', 'org.stremio.opensubtitlesv3']);
+
 export function isBrowsableStremioSource(plugin: CachedSidebarPlugin): boolean {
-  return plugin.state === 'enabled' && plugin.trusted && plugin.configured !== false
+  return !EMBEDDED_ADDON_IDS.has(plugin.addonId)
+    && plugin.state === 'enabled' && plugin.trusted && plugin.configured !== false
     && (Boolean(plugin.catalogCount && plugin.catalogCount > 0) || plugin.addonId === 'org.archive.clean');
 }
 

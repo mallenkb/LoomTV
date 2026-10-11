@@ -48,6 +48,8 @@ import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
 import { ArtworkSuspensionContext, useWindowHiddenFor } from './contexts/ArtworkSuspensionContext';
 import { isIptvPlaybackReference } from './shared/iptvPlayback.ts';
 import { buildExternalPlaybackReference } from './shared/externalPlayback.ts';
+import type { AddonStreamPlayer, AddonSubtitleContext } from './lib/addonPlayback';
+import type { SubtitleVideo } from './lib/openSubtitlesV3';
 
 interface NowPlaying {
   playbackRequestId: string;
@@ -71,6 +73,10 @@ interface NowPlaying {
   currentEpisode?: number;
   startPosition?: number;
   isLiveStream?: boolean;
+  /** IMDb identity for online subtitles when the title is not in the library. */
+  subtitleVideo?: SubtitleVideo;
+  /** The add-on video being played, for add-on subtitle search. */
+  addonSubtitles?: AddonSubtitleContext;
 }
 
 function isRemotePlaybackSource(filePath: string): boolean {
@@ -462,7 +468,7 @@ function AppShell({
     mediaId?: string,
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
-    options?: { isLiveStream?: boolean },
+    options?: { isLiveStream?: boolean; subtitleVideo?: SubtitleVideo; addonSubtitles?: AddonSubtitleContext },
   ) => {
     const openPlayer = async () => {
       // The profile gate and the media IPC handler read the same persisted
@@ -499,6 +505,8 @@ function AppShell({
         currentEpisode,
         startPosition,
         isLiveStream: options?.isLiveStream === true,
+        subtitleVideo: options?.subtitleVideo,
+        addonSubtitles: options?.addonSubtitles,
       });
     };
     void openPlayer();
@@ -524,7 +532,8 @@ function AppShell({
     );
   }, [handlePlayMedia]);
 
-  const handlePlayArchiveMovie = useCallback((streamUrl: string, title: string, posterUrl: string) => {
+  /** A stream chosen from an add-on source. It has no library item or episode list. */
+  const handlePlayAddonStream = useCallback<AddonStreamPlayer>((streamUrl, title, artwork, options) => {
     handlePlayMedia(
       buildExternalPlaybackReference(streamUrl),
       title,
@@ -534,7 +543,9 @@ function AppShell({
       undefined,
       undefined,
       undefined,
-      { poster: posterUrl, backdrop: posterUrl },
+      artwork,
+      undefined,
+      { subtitleVideo: options?.subtitleVideo, addonSubtitles: options?.addonSubtitles },
     );
   }, [handlePlayMedia]);
 
@@ -599,7 +610,7 @@ function AppShell({
             title="This page ran into a problem"
             description="The rest of Loom is still running. Retry, or pick another section from the sidebar."
           >
-            <PlaybackActionsContext.Provider value={{ handlePlayMedia, handlePlayLiveChannel, handlePlayArchiveMovie }}>
+            <PlaybackActionsContext.Provider value={{ handlePlayMedia, handlePlayLiveChannel, handlePlayAddonStream }}>
               <Outlet />
             </PlaybackActionsContext.Provider>
           </ErrorBoundary>
@@ -639,6 +650,8 @@ function AppShell({
             currentEpisode={nowPlaying.currentEpisode}
             startPosition={nowPlaying.startPosition}
             isLiveStream={nowPlaying.isLiveStream}
+            onlineSubtitleVideo={nowPlaying.subtitleVideo}
+            addonSubtitles={nowPlaying.addonSubtitles}
             onPlayLiveChannel={handlePlayLiveChannel}
             onEpisodeChange={handleEpisodeSelect}
             onClose={handleClose}
@@ -660,7 +673,7 @@ function AppShell({
 type PlaybackActions = {
   handlePlayMedia: NonNullable<React.ComponentProps<typeof TVDetail>['onPlay']>;
   handlePlayLiveChannel: NonNullable<React.ComponentProps<typeof LiveTv>['onPlay']>;
-  handlePlayArchiveMovie: NonNullable<React.ComponentProps<typeof ArchiveOrgAddon>['onPlay']>;
+  handlePlayAddonStream: AddonStreamPlayer;
 };
 const PlaybackActionsContext = createContext<PlaybackActions | null>(null);
 function usePlaybackActions() {
@@ -668,12 +681,12 @@ function usePlaybackActions() {
   if (!actions) throw new Error('Playback actions are unavailable.');
   return actions;
 }
-function MovieRoute() { return <MovieDetail onPlay={usePlaybackActions().handlePlayMedia} />; }
-function SeriesRoute() { return <TVDetail kind="series" onPlay={usePlaybackActions().handlePlayMedia} />; }
-function AnimeRoute() { return <TVDetail kind="anime" onPlay={usePlaybackActions().handlePlayMedia} />; }
+function MovieRoute() { const actions = usePlaybackActions(); return <MovieDetail onPlay={actions.handlePlayMedia} onPlayStream={actions.handlePlayAddonStream} />; }
+function SeriesRoute() { const actions = usePlaybackActions(); return <TVDetail kind="series" onPlay={actions.handlePlayMedia} onPlayStream={actions.handlePlayAddonStream} />; }
+function AnimeRoute() { const actions = usePlaybackActions(); return <TVDetail kind="anime" onPlay={actions.handlePlayMedia} onPlayStream={actions.handlePlayAddonStream} />; }
 function OthersRoute() { return <Others onPlay={usePlaybackActions().handlePlayMedia} />; }
 function LiveRoute() { return <LiveTv onPlay={usePlaybackActions().handlePlayLiveChannel} />; }
-function AddonRoute() { return <ArchiveOrgAddon onPlay={usePlaybackActions().handlePlayArchiveMovie} />; }
+function AddonRoute() { return <ArchiveOrgAddon onPlay={usePlaybackActions().handlePlayAddonStream} />; }
 
 function warmDetails(id: string, preload: boolean, state: unknown) {
   const routeState = state as { fromDiscover?: boolean; stremioCatalogItem?: unknown; from?: string } | undefined;

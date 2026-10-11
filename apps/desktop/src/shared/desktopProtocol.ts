@@ -734,6 +734,12 @@ interface StremioPluginCatalogExtra {
   optionsLimit?: number;
 }
 
+export interface StremioPluginResourceDetail {
+  name: string;
+  types: readonly string[];
+  idPrefixes: readonly string[];
+}
+
 interface StremioPluginCatalogDefinition {
   type: string;
   id: string;
@@ -754,8 +760,12 @@ export interface StremioPluginSummary {
   configuration: readonly StremioPluginConfigurationField[];
   configured: boolean;
   configurationRevision: number;
+  /** Changes on re-review, re-approval, or reconfiguration; see `stremioSourceRevision`. */
+  revision: string;
   resources: readonly string[];
   types: readonly string[];
+  /** Per-resource types and ID prefixes, after manifest-wide fallback. */
+  resourceDetails?: readonly StremioPluginResourceDetail[];
   catalogs: readonly StremioPluginCatalogDefinition[];
   warnings: readonly string[];
   reviewedAt: number;
@@ -828,10 +838,23 @@ export interface StremioPluginCatalogItem {
   tmdbId?: string;
   format?: string;
   title: string;
+  /** The provider's own ID, used for stream and subtitle requests. */
+  providerId?: string;
+  /** Stremio `behaviorHints.defaultVideoId`: the video to open for this title. */
+  defaultVideoId?: string;
+  /** Add-on whose metadata supplied `videos`; owns any inline streams. */
+  metaSource?: string;
+  /** `metaSource` revision when `videos` were fetched. */
+  metaSourceRevision?: string;
+  /** Host-issued key for metadata requests when `id` is not one, such as a Discover title. */
+  metaKey?: string;
+  videos?: readonly StremioPluginVideo[];
   genres: readonly string[];
   artwork?: StremioPluginArtworkReferences;
   /** Renderer-owned provider artwork used by the standalone Explore sources. */
   posterUrl?: string;
+  /** Renderer-owned fallback when a catalog's preferred poster is unavailable. */
+  posterFallbackUrl?: string;
   backgroundUrl?: string;
   logoUrl?: string;
   cast?: readonly StremioPluginCastMember[];
@@ -859,6 +882,7 @@ export interface StremioPluginCatalogResult {
 
 export interface StremioPluginMetaResult {
   addonId: string;
+  sourceRevision?: string;
   item: StremioPluginCatalogItem | null;
 }
 
@@ -868,15 +892,61 @@ export interface StremioStreamRequest {
   extra?: Readonly<Record<string, string | number | boolean>>;
 }
 
-interface StremioStreamItem {
-  url: string;
-  title?: string;
-  behaviorHints?: Readonly<Record<string, unknown>>;
+/**
+ * A provider subtitle. Its URL and provider ID can carry credentials, so both
+ * stay in the host; `token` names it for download.
+ */
+export interface StremioStreamSubtitle {
+  language: string;
+  token: string;
+}
+
+export interface StremioSubtitleListResult {
+  addonId: string;
+  sourceRevision: string;
+  subtitles: readonly StremioStreamSubtitle[];
+}
+
+/**
+ * A validated stream. `transport` decides the action: `media` and `hls`
+ * play in LoomTV, `youtube` opens the YouTube embed, `external` opens the
+ * system browser, and the rest are listed with `reason`.
+ */
+export interface StremioStreamDescriptor {
+  id: string;
+  transport: 'media' | 'hls' | 'youtube' | 'external' | 'peer-to-peer' | 'unsupported';
+  name?: string;
+  description?: string;
+  url?: string;
+  externalUrl?: string;
+  ytId?: string;
+  reason?: string;
+  notWebReady?: boolean;
+  requestHeadersRequired?: boolean;
+  subtitles?: readonly StremioStreamSubtitle[];
+}
+
+export interface StremioPluginVideo {
+  id: string;
+  title: string;
+  available?: boolean;
+  season?: number;
+  episode?: number;
+  released?: string;
+  overview?: string;
+  /** Host-controlled artwork delivery URL. */
+  thumbnail?: string;
+  /**
+   * Inline Stremio `video.streams`. A defined array, even an empty one,
+   * replaces the stream request; absent means stream add-ons are asked.
+   */
+  streams?: readonly StremioStreamDescriptor[];
 }
 
 export interface StremioStreamResult {
   addonId: string;
-  streams: readonly StremioStreamItem[];
+  sourceRevision?: string;
+  streams: readonly StremioStreamDescriptor[];
   playableCount: number;
   unsupportedPeerToPeerCount: number;
   rejectedCount: number;

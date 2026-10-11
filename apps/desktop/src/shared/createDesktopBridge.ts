@@ -228,6 +228,12 @@ const desktopApi = {
     ipcRenderer.invoke('plugins:stremio:meta-item', request),
   getStremioStreams: (addonId: string, request: import('./desktopProtocol.ts').StremioStreamRequest) =>
     ipcRenderer.invoke('plugins:stremio:streams', addonId, request),
+  getStremioSubtitles: (addonId: string, request: import('./desktopProtocol.ts').StremioStreamRequest) =>
+    ipcRenderer.invoke('plugins:stremio:subtitles', addonId, request),
+  downloadStremioSubtitle: (token: string) =>
+    ipcRenderer.invoke('plugins:stremio:subtitle-download', token),
+  issueStremioItemKey: (type: 'movie' | 'series', providerId: string) =>
+    ipcRenderer.invoke('plugins:stremio:item-key', type, providerId),
   getStremioAddonConfiguration: (addonId: string) =>
     ipcRenderer.invoke('plugins:stremio:configuration', addonId),
   saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) =>

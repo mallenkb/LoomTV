@@ -709,9 +709,18 @@ body.platform-darwin .loom-photo-viewer-header {
    show the page behind it, but the dialog itself must never reveal artwork or
    other page content through a translucent panel. */
 .loom-modal-surface {
+  --loom-modal-padding: 20px;
+  --loom-modal-control-radius: 10px;
+  border-radius: 20px !important;
+  padding: var(--loom-modal-padding) !important;
+  border-color: color-mix(in srgb, var(--loom-text) 5%, transparent);
   background-color: var(--loom-surface) !important;
   background-image: none !important;
   backdrop-filter: none !important;
+}
+
+.loom-modal-surface :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select) {
+  min-height: 40px;
 }
 
 .loom-modern-search-control {
@@ -1548,11 +1557,11 @@ body.platform-darwin .loom-main-drag-region {
 }
 
 .loom-main-drag-region.loom-main-drag-region-settings {
-  left: auto;
-  right: 1rem;
-  width: clamp(11rem, 28vw, 16rem);
-  top: 0.45rem;
-  z-index: 46;
+  left: var(--loom-sidebar-width);
+  right: 0;
+  top: 0;
+  height: 4.5rem;
+  z-index: 35;
 }
 
 .loom-player-drag-region {
@@ -2279,13 +2288,15 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 }
 
 .settings-panel {
-  border: 1px solid color-mix(in srgb, var(--loom-text) 16%, transparent) !important;
-  background: var(--loom-surface-2);
+  border: 1px solid var(--loom-settings-border, var(--loom-border)) !important;
+  border-radius: var(--loom-settings-card-radius, 12px) !important;
+  background: var(--loom-settings-card-bg, var(--loom-surface-2));
 }
 
 .settings-panel-soft {
-  border: 1px solid color-mix(in srgb, var(--loom-text) 14%, transparent) !important;
-  background: var(--loom-surface-2);
+  border: 1px solid var(--loom-settings-border, var(--loom-border)) !important;
+  border-radius: var(--loom-settings-card-radius, 12px) !important;
+  background: var(--loom-settings-card-bg, var(--loom-surface-2));
 }
 
 .settings-folder-row {
@@ -2298,12 +2309,55 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 }
 
 .settings-action-tile {
-  border: 1px solid color-mix(in srgb, var(--loom-text) 14%, transparent) !important;
-  background: var(--loom-surface-2);
+  border: 1px solid var(--loom-settings-border, var(--loom-border)) !important;
+  border-radius: var(--loom-settings-card-radius, 12px) !important;
+  background: var(--loom-settings-card-bg, var(--loom-surface-2));
 }
 
 .loom-settings-tabs {
   border-color: color-mix(in srgb, var(--loom-text) 16%, transparent) !important;
+}
+
+/* Settings groups: one bordered list per group, rows split by hairlines. */
+.loom-settings-page,
+.loom-settings-v2,
+.loom-settings-v3 {
+  --loom-settings-card-radius: 12px;
+  --loom-settings-border: color-mix(in srgb, var(--loom-text) 5%, transparent);
+}
+
+.loom-settings-page,
+.loom-settings-v3 {
+  --loom-settings-card-bg: #111111;
+}
+
+:root[data-theme="light"] :is(.loom-settings-page, .loom-settings-v3) {
+  --loom-settings-card-bg: var(--loom-surface);
+}
+
+.loom-settings-page {
+  --loom-settings-divider: color-mix(in srgb, var(--loom-text) 8%, transparent);
+}
+
+.settings-group {
+  border: 1px solid var(--loom-settings-border, var(--loom-border));
+  border-radius: var(--loom-settings-card-radius, 12px);
+  background: var(--loom-settings-card-bg, var(--loom-surface-2));
+}
+
+.settings-group-section + .settings-group-section {
+  margin-top: 2rem;
+}
+
+.settings-group-action > button:not([data-variant="default"]):not([data-variant="destructive"]) {
+  border: 1px solid var(--loom-border);
+  background: var(--loom-surface-2);
+  color: var(--loom-text);
+}
+
+.settings-group-action > button:not([data-variant="default"]):not([data-variant="destructive"]):hover {
+  background: var(--loom-surface-3);
+  color: var(--loom-text);
 }
 
 .settings-action-tile:hover {
@@ -2366,8 +2420,8 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 :root[data-home-style="modern"] .settings-panel-soft,
 :root[data-home-style="modern"] .settings-action-tile {
   border-color: var(--loom-panel-border) !important;
-  border-radius: 1.5rem !important;
-  background: color-mix(in srgb, var(--loom-panel) 88%, transparent);
+  border-radius: var(--loom-settings-card-radius, 12px) !important;
+  background: var(--loom-settings-card-bg, color-mix(in srgb, var(--loom-panel) 88%, transparent));
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.30);
   backdrop-filter: blur(20px) saturate(125%);
 }
@@ -2379,12 +2433,26 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   background: color-mix(in srgb, var(--loom-surface-3) 46%, transparent);
 }
 
-:root[data-home-style="modern"] .loom-settings-page :where(button, [role="button"], input, select) {
+:root[data-home-style="modern"] .loom-settings-page :where(button:not(.settings-row-button):not(.settings-action-tile), [role="button"]:not(.settings-action-tile):not(.settings-card), input, select) {
   border-radius: 9999px !important;
 }
 
-:root[data-home-style="modern"] .loom-settings-page button.text-left,
-:root[data-home-style="modern"] .loom-settings-page .settings-action-tile {
+:root[data-home-style="modern"] .settings-group {
+  border-color: var(--loom-panel-border);
+  border-radius: var(--loom-settings-card-radius, 12px);
+  background: var(--loom-settings-card-bg, color-mix(in srgb, var(--loom-panel) 88%, transparent));
+  backdrop-filter: blur(20px) saturate(125%);
+}
+
+:root[data-home-style="modern"] .loom-settings-page button.settings-row-button {
+  border-radius: 0 !important;
+}
+
+:root[data-home-style="modern"] .settings-segmented {
+  border-radius: 9999px;
+}
+
+:root[data-home-style="modern"] .loom-settings-page button.text-left:not(.settings-row-button):not(.settings-action-tile) {
   border-radius: 24px !important;
 }
 
@@ -2400,6 +2468,10 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   border-radius: 1rem !important;
 }
 
+:root :is(.loom-settings-page, .loom-settings-v2, .loom-settings-v3, .loom-modal-surface) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [role="combobox"]) {
+  border-radius: 10px !important;
+}
+
 :root[data-theme="light"] .loom-settings-page {
   --loom-settings-border: rgb(28 25 23 / 0.05);
 }
@@ -2410,7 +2482,8 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 :root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-panel-soft,
 :root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-action-tile,
 :root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-folder-row,
-:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-network-card {
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-network-card,
+:root[data-theme="light"][data-home-style="default"] .loom-settings-page .settings-group {
   background: #ffffff !important;
 }
 
@@ -2439,6 +2512,140 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
 :root[data-theme="light"] .theme-color-option-label {
   color: #000000 !important;
+}
+
+/* Main Settings: open rows, nested panels, badges, and the sticky header. */
+.loom-settings-page {
+  --loom-settings-sunk: color-mix(in srgb, var(--loom-text) 2.5%, var(--loom-settings-card-bg, var(--loom-surface-2)));
+  --loom-settings-hover: color-mix(in srgb, var(--loom-text) 4%, transparent);
+}
+
+.loom-settings-page .settings-row-button:hover,
+.loom-settings-page .settings-library-header:hover {
+  background: var(--loom-settings-hover);
+}
+
+/* An open top-level row sits on a sunken surface with an accent edge, and its
+   panel hangs off a guide line under the title, so the children read as one
+   level below it. */
+.settings-disclosure:not(.settings-disclosure-nested)[data-open],
+.settings-library-card[data-open] {
+  background: var(--loom-settings-sunk);
+}
+
+.settings-disclosure:not(.settings-disclosure-nested)[data-open] > .settings-disclosure-header,
+.settings-library-card[data-open] > .settings-library-header {
+  box-shadow: inset 2px 0 0 var(--loom-accent);
+}
+
+.settings-disclosure[data-open] > .settings-disclosure-header .settings-disclosure-chevron {
+  color: var(--loom-text);
+}
+
+.settings-disclosure-nested + .settings-disclosure-nested {
+  border-top: 0;
+}
+
+.settings-badge-warning {
+  background: rgb(251 191 36 / 0.14);
+  color: #fcd34d;
+}
+
+.settings-badge-error {
+  background: rgb(248 113 113 / 0.14);
+  color: #fca5a5;
+}
+
+.settings-badge-ok {
+  background: rgb(52 211 153 / 0.14);
+  color: #6ee7b7;
+}
+
+:root[data-theme="light"] .settings-badge-warning { background: rgb(217 119 6 / 0.12); color: #b45309; }
+:root[data-theme="light"] .settings-badge-error { background: rgb(220 38 38 / 0.1); color: #b91c1c; }
+:root[data-theme="light"] .settings-badge-ok { background: rgb(5 150 105 / 0.1); color: #047857; }
+
+.settings-status-warning {
+  color: #fcd34d;
+}
+
+:root[data-theme="light"] .settings-status-warning {
+  color: #b45309;
+}
+
+.loom-settings-dialog-body .settings-panel,
+.loom-settings-dialog-body .settings-panel-soft {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Content scrolls under the floating tab bar; this band fades it out so the
+   tabs never sit on top of rows. */
+.loom-settings-tabs-positioner::before {
+  content: '';
+  position: absolute;
+  top: -1.5rem;
+  right: 0;
+  left: 0;
+  height: calc(100% + 3rem);
+  background: linear-gradient(to bottom, var(--loom-bg) 0%, var(--loom-bg) 65%, color-mix(in srgb, var(--loom-bg) 0%, transparent) 100%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs-positioner::before {
+  left: var(--loom-sidebar-width);
+}
+
+:root[data-home-style="modern"] .loom-settings-search-button {
+  border-color: var(--loom-panel-border);
+  background: color-mix(in srgb, var(--loom-panel) 84%, transparent);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.30);
+}
+
+.settings-destructive-hover:hover {
+  color: #fca5a5;
+}
+
+:root[data-theme="light"] .settings-destructive-hover:hover {
+  color: #b91c1c;
+}
+
+/* Settings search sits near the top like a command palette, edge to edge. */
+.loom-settings-search.loom-modal-surface {
+  top: 12dvh !important;
+  transform: translate(-50%, 0) !important;
+  max-height: min(520px, 80dvh);
+  padding: 0 !important;
+  border-radius: 16px !important;
+  background-color: var(--loom-panel) !important;
+}
+
+:root .loom-settings-search.loom-modal-surface[role="dialog"] button[role="option"] {
+  border-radius: 8px !important;
+}
+
+.loom-settings-dialog-surface.loom-modal-surface {
+  padding: 0 !important;
+  border-radius: 16px !important;
+  background-color: var(--loom-panel) !important;
+}
+
+@keyframes loom-settings-found {
+  from { box-shadow: 0 0 0 2px var(--loom-accent); }
+  to { box-shadow: 0 0 0 2px transparent; }
+}
+
+.loom-settings-found {
+  border-radius: 12px;
+  animation: loom-settings-found 1.8s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loom-settings-found { animation: none; outline: 2px solid var(--loom-accent); }
 }
 
 .settings-status-available {
@@ -4241,4 +4448,118 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   :root[data-loom-client="browser"] .loom-modern-hero-actions {
     justify-content: flex-start;
   }
+}
+
+/* Settings v2: points at the card a search result opened. */
+@keyframes loom-settings-v2-flash {
+  0%, 35% { box-shadow: 0 0 0 2px var(--loom-accent), 0 0 0 8px color-mix(in srgb, var(--loom-accent) 22%, transparent); }
+  100% { box-shadow: 0 0 0 2px transparent, 0 0 0 8px transparent; }
+}
+
+.loom-settings-v2-flash {
+  animation: loom-settings-v2-flash 1.9s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loom-settings-v2-flash {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--loom-accent);
+  }
+}
+
+/* Settings v2 keeps the layout of the approved "K" prototype but takes every
+   color from the active Loom theme, so it follows dark or light mode and the
+   chosen accent color. */
+.loom-settings-v2 {
+  --v2-bg: var(--loom-bg);
+  --v2-side: color-mix(in srgb, var(--loom-surface) 55%, var(--loom-bg));
+  --v2-row: var(--loom-surface);
+  --v2-row-sunk: color-mix(in srgb, var(--loom-surface) 60%, var(--loom-bg));
+  --v2-control: var(--loom-surface-3);
+  --v2-line: color-mix(in srgb, var(--loom-text) 8%, transparent);
+  --v2-control-line: color-mix(in srgb, var(--loom-text) 16%, transparent);
+  --v2-active: var(--loom-active-bg);
+  --v2-active-text: var(--loom-active-text);
+  --v2-text: var(--loom-text);
+  --v2-soft: color-mix(in srgb, var(--loom-text) 80%, transparent);
+  --v2-muted: var(--loom-muted);
+  --v2-faint: var(--loom-faint);
+  --v2-accent: var(--loom-accent);
+  --v2-accent-hover: var(--loom-accent-hover);
+  --v2-on-accent: var(--loom-accent-foreground);
+  --v2-ok: #7bd389;
+  --v2-ok-bg: color-mix(in srgb, #7bd389 12%, var(--loom-surface));
+  --v2-warn-bg: color-mix(in srgb, var(--loom-accent) 10%, var(--loom-surface));
+  --v2-bad: #e5736b;
+  --v2-bad-bg: color-mix(in srgb, #e5736b 12%, var(--loom-surface));
+  --v2-bad-line: color-mix(in srgb, #e5736b 40%, transparent);
+  background: var(--v2-bg);
+  color: var(--v2-text);
+}
+
+:root[data-theme="light"] .loom-settings-v2 {
+  --v2-ok: #15803d;
+  --v2-bad: #b42318;
+}
+
+:root[data-home-style="modern"] .loom-settings-v2:not(.loom-modal-surface) {
+  padding-left: var(--loom-frame-start);
+}
+
+.loom-settings-v2 :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--v2-accent);
+  outline-offset: 2px;
+}
+
+/* Add-ons and Live TV reuse their classic controls inside Settings v2; give
+   their panels the prototype's row-card look. */
+.loom-settings-v2-embed {
+  --loom-settings-border: var(--v2-line);
+  --loom-panel: var(--v2-row);
+  --loom-surface-2: var(--v2-row-sunk);
+  --loom-surface-3: var(--v2-active);
+  --loom-bg: var(--v2-bg);
+  --loom-text: var(--v2-text);
+  --loom-muted: var(--v2-muted);
+  --loom-faint: var(--v2-faint);
+  background: transparent !important;
+}
+
+.loom-settings-v2-embed :is(.settings-panel, .settings-panel-soft, .settings-action-tile) {
+  border: 1px solid var(--loom-settings-border, var(--loom-border)) !important;
+  border-radius: var(--loom-settings-card-radius, 12px) !important;
+  background: var(--v2-row) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.loom-settings-v2-embed :is(.settings-panel, .settings-panel-soft) h3 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--v2-muted);
+}
+
+:root .loom-settings-v2-embed.loom-settings-page :where(button, [role="button"], input, select) {
+  border-radius: 10px !important;
+}
+
+/* Buttons follow the theme everywhere, dialogs included: pills on Modern,
+   the theme radius on Standard. */
+:root {
+  --loom-control-radius: var(--radius, 0.5rem);
+}
+
+:root[data-home-style="modern"] {
+  --loom-control-radius: 9999px;
+}
+
+:root .loom-modal-surface[role="dialog"] :is(button[data-variant], .loom-control-button) {
+  border-radius: var(--loom-control-radius) !important;
+}
+
+/* Modal controls override route-level capsule styles, including embedded forms. */
+:root .loom-modal-surface[role="dialog"] :is(button:not([data-variant]):not(.loom-control-button), input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [role="combobox"], [role="radio"], [role="tab"], label:has(input[type="radio"]), [data-ui-chip]) {
+  border-radius: var(--loom-modal-control-radius) !important;
 }

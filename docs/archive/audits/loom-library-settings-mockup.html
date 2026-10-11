@@ -2033,14 +2033,14 @@ if (false) {
     state.libs = emptyLibs(); state.extras = [];
     state.draft = { sel: [], names: {}, folders: {} };
     if (scn === 'half' || scn === 'nasfail') {
-      lib('movies').folders = [{ path: '/Users/mallenkb/My Movies/Movies', status: 'ok' }];
+      lib('movies').folders = [{ path: '/Users/LoomTV/My Movies/Movies', status: 'ok' }];
       lib('movies').count = 12;
-      lib('tv').folders = [{ path: '/Users/mallenkb/My Movies/TV Shows', status: 'ok' }];
+      lib('tv').folders = [{ path: '/Users/LoomTV/My Movies/TV Shows', status: 'ok' }];
       lib('tv').count = 8;
       lib('anime').count = 0;
       if (scn === 'nasfail') {
         lib('movies').folders.push({ path: '/Volumes/NAS/Movies', status: 'missing' });
-        lib('anime').folders = [{ path: '/Users/mallenkb/My Movies/Anime', status: 'ok' }];
+        lib('anime').folders = [{ path: '/Users/LoomTV/My Movies/Anime', status: 'ok' }];
         lib('anime').count = 12;
       }
     }

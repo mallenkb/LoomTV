@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ArrowRight, Search } from 'lucide-react';
+import { SETTINGS_INPUT_CLASS, SettingsDialog, SettingsDialogMessage } from '@/components/settings/SettingsDialog';
 import type { MediaRenameRecord } from '@/shared/desktopProtocol';
 
 const PAGE_SIZE = 50;
@@ -22,52 +23,47 @@ export default function RenameRecordDialog({ record, disabled, error, onClose }:
   }, [query, record.changes]);
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} contentClassName="max-w-3xl border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)]">
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename record</DialogTitle>
-          <DialogDescription className="text-[var(--loom-muted)]">
-            Names and locations for the rename on {new Date(record.createdAt).toLocaleString()}. Use Original imports to restore the first saved state.
-          </DialogDescription>
-        </DialogHeader>
-        <label className="mt-4 block text-sm">
-          Find a file or folder in this batch
+    <SettingsDialog
+      open
+      onClose={onClose}
+      busy={disabled}
+      size="lg"
+      title="Rename record"
+      description={`Renamed ${new Date(record.createdAt).toLocaleString()}${record.undoneAt ? ' · Undone' : ''}. To go back to the first names, use Original file names.`}
+      footerStart={<span role="status">{changes.length.toLocaleString()} {changes.length === 1 ? 'change' : 'changes'}</span>}
+      footer={<Button size="sm" type="button" variant="outline" onClick={onClose} disabled={disabled}>Close</Button>}
+    >
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)]" aria-hidden="true" />
           <input
             type="search"
+            aria-label="Find a file or folder in this batch"
+            placeholder="Find a file or folder"
             value={query}
             onChange={(event) => { setQuery(event.target.value); setShown(PAGE_SIZE); }}
-            className="mt-1 block w-full rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] px-3 py-2 text-[var(--loom-text)]"
+            className={`${SETTINGS_INPUT_CLASS} pl-9`}
           />
-        </label>
-        <p className="my-3 text-xs text-[var(--loom-muted)]" role="status">
-          {changes.length.toLocaleString()} recorded {changes.length === 1 ? 'change' : 'changes'}{record.undoneAt ? ' · Undone' : ''}
-        </p>
-        <div className="max-h-[50vh] space-y-3 overflow-y-auto pr-1">
-          {changes.slice(0, shown).map((change, index) => (
-            <div key={`${change.fromPath}:${index}`} className="rounded-lg bg-[var(--loom-bg)] p-3 text-xs">
-              <p className="mb-2 font-semibold">{KIND_LABELS[change.kind]}</p>
-              <dl className="space-y-2">
-                <div>
-                  <dt className="text-[var(--loom-muted)]">Name before this batch</dt>
-                  <dd className="mt-0.5 select-text break-all">{change.fromPath}</dd>
-                </div>
-                <div>
-                  <dt className="text-[var(--loom-muted)]">Renamed to</dt>
-                  <dd className="mt-0.5 select-text break-all">{change.toPath}</dd>
-                </div>
-              </dl>
-            </div>
-          ))}
-          {changes.length === 0 ? <p className="text-sm text-[var(--loom-muted)]">No recorded names match your search.</p> : null}
-          {changes.length > shown ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => setShown((current) => current + PAGE_SIZE)}>Show more names</Button>
-          ) : null}
         </div>
-        {error ? <p role="alert" className="mt-3 text-xs text-red-200">{error}</p> : null}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={disabled}>Close</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        {changes.length ? (
+          <ul className="divide-y divide-[color-mix(in_srgb,var(--loom-text)_8%,transparent)] overflow-hidden rounded-lg border border-[var(--loom-control-border)]">
+            {changes.slice(0, shown).map((change, index) => (
+              <li key={`${change.fromPath}:${index}`} className="space-y-1 px-3 py-2.5 text-xs">
+                <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--loom-faint)]">{KIND_LABELS[change.kind]}</p>
+                <p className="select-text break-all text-[var(--loom-muted)]">{change.fromPath}</p>
+                <p className="flex select-text items-start gap-1.5 break-all text-[var(--loom-text)]">
+                  <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-[var(--loom-faint)]" aria-hidden="true" />
+                  {change.toPath}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="py-6 text-center text-sm text-[var(--loom-muted)]">No recorded names match your search.</p>}
+        {changes.length > shown ? (
+          <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => setShown((current) => current + PAGE_SIZE)}>Show more</Button>
+        ) : null}
+        {error ? <SettingsDialogMessage>{error}</SettingsDialogMessage> : null}
+      </div>
+    </SettingsDialog>
   );
 }

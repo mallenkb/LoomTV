@@ -12,7 +12,8 @@
   },
   "scripts": {
     "preinstall": "node scripts/enforce-pnpm.cjs",
-    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs && node scripts/fetch-native-runtimes.cjs",
+    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs",
+    "prestart:built": "node scripts/fetch-fpcalc.cjs",
     "prebuild": "node scripts/enforce-pnpm.cjs",
     "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
     "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/fetch-native-runtimes.cjs --required && node scripts/stage-native-runtimes.cjs --required",
@@ -50,7 +51,7 @@
     "scanner:test": "node scripts/ensure-node-natives.cjs && cargo test --locked --release --manifest-path native/scanner/Cargo.toml && cargo build --locked --release --manifest-path native/scanner/Cargo.toml && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/scanner*.test.ts"
   },
   "keywords": [],
-  "author": "malllenkb",
+  "author": "LoomTV",
   "license": "MIT",
   "devDependencies": {
     "@electron-forge/cli": "7.11.1",
@@ -319,7 +320,7 @@
     "linux": {
       "icon": "resources/icon.png",
       "category": "AudioVideo",
-      "maintainer": "mallenkb <releases@loomtv.local>",
+      "maintainer": "LoomTV <releases@loomtv.local>",
       "extraResources": [
         {
           "from": "resources/ffmpeg/linux",

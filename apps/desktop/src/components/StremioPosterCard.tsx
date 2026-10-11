@@ -24,6 +24,7 @@ function artworkSources(item: StremioPluginCatalogItem): string[] {
     item.artwork?.background,
     item.artwork?.logo,
     item.posterUrl,
+    item.posterFallbackUrl,
     item.backgroundUrl,
     item.logoUrl,
   ].filter((value): value is string => Boolean(value))));
@@ -46,6 +47,8 @@ const StremioPosterCard = memo(function StremioPosterCard({
   onSelect,
   onPlayTrailer,
   onPlay,
+  playbackDisabled = false,
+  playbackLabel = 'Play',
 }: {
   item: StremioPluginCatalogItem;
   rank?: number;
@@ -54,6 +57,8 @@ const StremioPosterCard = memo(function StremioPosterCard({
   onSelect: (item: StremioPluginCatalogItem) => void;
   onPlayTrailer?: () => void;
   onPlay?: (item: StremioPluginCatalogItem) => void;
+  playbackDisabled?: boolean;
+  playbackLabel?: string;
 }) {
   const { watchedKeys, setWatched } = useProfiles();
   const watchedKey = discoverWatchedKey(item);
@@ -65,6 +70,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
       tabIndex={0}
       onClick={() => onSelect(item)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         onSelect(item);
@@ -81,21 +87,25 @@ const StremioPosterCard = memo(function StremioPosterCard({
           fallback={fallbackArtwork(item.title)}
         />
         <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
+        {playbackDisabled && playbackLabel !== 'Play' ? (
+          <span role="status" className="absolute bottom-2 left-2 z-20 rounded-full bg-black/80 px-2.5 py-1 text-xs font-medium text-white">{playbackLabel}</span>
+        ) : null}
         <div className={BACKDROP_CLASS} />
         <div className={PLAY_OVERLAY_CLASS}>
           {onPlay ? (
             <button
               type="button"
-              aria-label={`Play ${item.title}`}
+              aria-label={`${playbackLabel} ${item.title}`}
+              disabled={playbackDisabled}
               onClick={(event) => {
                 event.stopPropagation();
                 onPlay(item);
               }}
               onKeyDown={(event) => event.stopPropagation()}
-              className="loom-poster-play-action inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3.5 text-sm font-semibold text-black shadow-xl transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              className="loom-poster-play-action inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3.5 text-sm font-semibold text-black shadow-xl transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:cursor-default disabled:opacity-70"
             >
               <Play className="h-4 w-4 fill-current" />
-              Play
+              {playbackLabel}
             </button>
           ) : onPlayTrailer ? (
             <button
