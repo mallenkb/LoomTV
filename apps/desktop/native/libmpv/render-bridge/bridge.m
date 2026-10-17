@@ -138,7 +138,7 @@ static void renderUpdate(void *context) {
 }
 @end
 
-LM_EXPORT uint32_t loom_mpv_bridge_version(void) { return 2; }
+LM_EXPORT uint32_t loom_mpv_bridge_version(void) { return LOOM_MPV_BRIDGE_VERSION; }
 
 // Call on a worker thread. No AppKit objects or playback surfaces are created
 // here. The caller can keep one prepared, idle core ready for the next session.

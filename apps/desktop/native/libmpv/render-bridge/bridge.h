@@ -2,6 +2,8 @@
 #define LOOMTV_LIBMPV_BRIDGE_H
 #include <stddef.h>
 #include <stdint.h>
+/* Bump with every ABI change; libmpvPlayback.ts refuses any other value. */
+#define LOOM_MPV_BRIDGE_VERSION 2u
 #ifdef __cplusplus
 extern "C" {
 #endif

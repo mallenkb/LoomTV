@@ -129,6 +129,9 @@ function configuredPaths(): { bridgePath: string; libraryPath: string } | null {
   return candidates.find((candidate) => fs.existsSync(candidate.bridgePath) && fs.existsSync(candidate.libraryPath)) || null;
 }
 
+// Must equal LOOM_MPV_BRIDGE_VERSION in native/libmpv/render-bridge/bridge.h.
+export const LIBMPV_BRIDGE_VERSION = 2;
+
 function bind(library: KoffiLibrary, name: string, result: string, args: string[]): NativeFunction {
   return library.func(name, result, args) as NativeFunction;
 }
@@ -166,7 +169,10 @@ function loadRuntime(force = false): Runtime | null {
     const koffi = loadKoffi();
     const library = koffi.load(paths.bridgePath);
     const version = bind(library, 'loom_mpv_bridge_version', 'uint32', []);
-    if (Number(version()) !== 2) throw new Error('The bundled libmpv bridge version is unsupported.');
+    const bridgeVersion = Number(version());
+    if (bridgeVersion !== LIBMPV_BRIDGE_VERSION) {
+      throw new Error(`The bundled libmpv bridge is version ${bridgeVersion}; this build requires version ${LIBMPV_BRIDGE_VERSION}.`);
+    }
     cachedWarning = '';
     cachedRuntime = {
       ...paths,
