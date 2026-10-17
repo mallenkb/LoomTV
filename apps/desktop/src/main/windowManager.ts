@@ -6,7 +6,7 @@ import { isExpectedAppUrl } from './trustedIpcSender';
 import { installSettingsShortcut } from './openSettings';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 import { recordStartupMark } from './startupTiming.ts';
-import { PACKAGED_RENDERER_URL } from './rendererProtocol.ts';
+import { PACKAGED_RENDERER_URL, isPackagedRendererUrl } from './rendererProtocol.ts';
 
 const MAIN_WINDOW_DEV_SERVER_URL = (() => {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
@@ -31,20 +31,30 @@ export function packagedRendererRoot(): string {
   return path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}`);
 }
 
+/** Whether a URL belongs to LoomTV's own renderer (packaged scheme or dev server). */
+export function isRendererAppUrl(value: string): boolean {
+  if (isPackagedRendererUrl(value)) return true;
+  if (!MAIN_WINDOW_DEV_SERVER_URL) return false;
+  try { return new URL(value).origin === new URL(MAIN_WINDOW_DEV_SERVER_URL).origin; } catch { return false; }
+}
+
 function expectedRendererAppUrl(): string {
   if (MAIN_WINDOW_DEV_SERVER_URL) return new URL(MAIN_WINDOW_DEV_SERVER_URL).origin;
   return PACKAGED_RENDERER_URL;
 }
 
-function isAllowedEmbeddedFrameUrl(value: string): boolean {
+export function isAllowedEmbeddedFrameUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
+    // YouTube can move its frame to consent or account subdomains, so those
+    // two sites match by suffix. Vimeo is limited to its embed player.
     return host === 'youtube.com'
       || host.endsWith('.youtube.com')
       || host === 'youtube-nocookie.com'
-      || host.endsWith('.youtube-nocookie.com');
+      || host.endsWith('.youtube-nocookie.com')
+      || host === 'player.vimeo.com';
   } catch {
     return false;
   }

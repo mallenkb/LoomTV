@@ -1,31 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { X } from 'lucide-react';
 import { useModalLayer } from '@/components/ui/dialog';
-
-function youtubeVideoId(value?: string): string {
-  if (!value) return '';
-
-  try {
-    const rawValue = value.trim();
-    if (/^[A-Za-z0-9_-]{6,}$/.test(rawValue)) return rawValue;
-    const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`);
-    const host = url.hostname.toLowerCase().replace(/^www\./, '');
-    let candidate = '';
-
-    if (host === 'youtu.be') {
-      candidate = url.pathname.split('/').filter(Boolean)[0] || '';
-    } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtube-nocookie.com') {
-      if (url.pathname === '/watch') candidate = url.searchParams.get('v') || '';
-      else if (url.pathname.startsWith('/embed/')) candidate = url.pathname.split('/').filter(Boolean)[1] || '';
-      else if (url.pathname.startsWith('/shorts/')) candidate = url.pathname.split('/').filter(Boolean)[1] || '';
-      else if (url.pathname.startsWith('/live/')) candidate = url.pathname.split('/').filter(Boolean)[1] || '';
-    }
-
-    return /^[A-Za-z0-9_-]{6,}$/.test(candidate) ? candidate : '';
-  } catch {
-    return '';
-  }
-}
+import { youtubeEmbedUrl, youtubeVideoId } from '../shared/externalPlayback.ts';
 
 interface TrailerDialogProps {
   open: boolean;
@@ -45,7 +21,7 @@ export default function TrailerDialog({ open, title, trailerUrl, label, onClose 
 
   if (!isOpen) return null;
 
-  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+  const embedUrl = youtubeEmbedUrl(videoId);
 
   return (
     <div

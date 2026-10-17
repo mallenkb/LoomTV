@@ -731,3 +731,41 @@ test('before-quit resumes without blocking the event loop when teardown times ou
   assert.equal(f.views.get(1), true);
   await f.drain();
 });
+
+test('LibVLC warms after the first window is shown, not in the ready event', () => {
+  const electronApp = Object.assign(new EventEmitter(), { isReady: () => false });
+  const diagnostics: string[] = [];
+  const timers: Array<{ callback: () => void; delay: number }> = [];
+  loadModule('libvlcWarmup', {
+    electron: { app: electronApp, BrowserWindow: { getAllWindows: () => [] } },
+    'node:fs': fs, 'node:path': path,
+    koffi: { load: () => { throw new Error('no libvlc in tests'); } },
+    './libvlcRuntimeConfig.ts': { LIBVLC_INSTANCE_ARGUMENTS: [] },
+    './playbackDiagnostics.ts': { recordPlaybackDiagnostic: (event: string) => { diagnostics.push(event); } },
+    './libvlcTeardown.ts': { callLibVlcAsync: () => Promise.resolve(), trackLibVlcTeardown: () => Promise.resolve() },
+  }, {
+    process: { platform: 'darwin', arch: 'arm64', env: {} },
+    setTimeout: (callback: () => void, delay: number) => { timers.push({ callback, delay }); return {}; },
+  });
+
+  electronApp.emit('ready');
+  assert.deepEqual(diagnostics, []);
+  assert.equal(timers.length, 0);
+
+  const window = new EventEmitter();
+  electronApp.emit('browser-window-created', {}, window);
+  assert.equal(timers.length, 0);
+  window.emit('show');
+  assert.equal(timers.length, 1);
+  assert.ok(timers[0].delay >= 1_000);
+  assert.deepEqual(diagnostics, []);
+
+  // A second window showing must not schedule another warmup.
+  const second = new EventEmitter();
+  electronApp.emit('browser-window-created', {}, second);
+  second.emit('show');
+  assert.equal(timers.length, 1);
+
+  timers[0].callback();
+  assert.equal(diagnostics[0], 'vlc.warmup.start');
+});

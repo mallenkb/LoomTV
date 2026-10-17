@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -284,12 +284,33 @@ export function releaseWarmLibVlcRuntime(): Promise<void> {
   return trackLibVlcTeardown(() => callLibVlcAsync(loaded.release, loaded.instance));
 }
 
+// libvlc_new blocks the main thread for ~150 ms. Warming in the ready event
+// delayed the first window by that much, so warm a little after the first
+// window appears instead. Host-only sessions never show a window and warm on
+// first play through getWarmLibVlcInstance.
+const WARMUP_DELAY_AFTER_SHOW_MS = 2_000;
+
 function registerWarmup(): void {
   const electronApp = app as (typeof app | undefined);
   if (!electronApp || typeof electronApp.once !== 'function' || typeof electronApp.isReady !== 'function') return;
   if (!enabled()) return;
-  if (electronApp.isReady()) warmLibVlcRuntime();
-  else electronApp.once('ready', () => { warmLibVlcRuntime(); });
+  const scheduleWarmup = () => {
+    setTimeout(() => { warmLibVlcRuntime(); }, WARMUP_DELAY_AFTER_SHOW_MS).unref?.();
+  };
+  const visibleWindow = electronApp.isReady()
+    && typeof BrowserWindow?.getAllWindows === 'function'
+    && BrowserWindow.getAllWindows().some((window) => window.isVisible());
+  if (visibleWindow) {
+    scheduleWarmup();
+    return;
+  }
+  const onWindowCreated = (_event: unknown, window: BrowserWindow) => {
+    window.once('show', () => {
+      electronApp.removeListener('browser-window-created', onWindowCreated);
+      if (!warmupStarted) scheduleWarmup();
+    });
+  };
+  electronApp.on('browser-window-created', onWindowCreated);
 }
 
 registerWarmup();
