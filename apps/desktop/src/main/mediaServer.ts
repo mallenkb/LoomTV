@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { smallerTmdbArtwork } from '../shared/artworkRenditions';
+import { artworkRenditionPixels, smallerTmdbArtwork } from '../shared/artworkRenditions';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +35,7 @@ import { cachedArtworkResponseHeaders } from './artworkCache';
 import { trackServerConnections } from './updateInstall';
 import {
   cacheArtworkSource,
+  cacheResizedArtwork,
   cachePluginArtworkSource,
   createProfile,
   getAllProgress,
@@ -42,6 +43,7 @@ import {
   getCachedThumbnail,
   getCachedPluginArtwork,
   getCustomArtworkData,
+  getResizedArtwork,
   getPlaybackTrackPreferences,
   getProfileLists,
   getProfilePreferences,
@@ -1641,10 +1643,31 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           res.end(decoded.buffer);
         };
 
+        // Providers without renditions (TVDB, fanart.tv, Cinemeta, ...) can
+        // send 4K backdrops to a 300-pixel card. Serve a host-resized copy;
+        // until it exists, the original goes out with a short cache lifetime.
+        const resizeWidth = artworkRenditionPixels(reqUrl.searchParams.get('width'));
+        const wantsResizedCopy = !artworkOwnerId && resizeWidth > 0 && sourceUrl === originalSourceUrl;
+        if (wantsResizedCopy) {
+          const resizedArtwork = getResizedArtwork(sourceUrl, resizeWidth);
+          if (resizedArtwork) {
+            sendArtwork(resizedArtwork);
+            return;
+          }
+        }
+
         const cachedArtwork = artworkOwnerId
           ? getCachedPluginArtwork(artworkOwnerId, sourceUrl)
           : getCachedArtwork(sourceUrl);
         if (cachedArtwork) {
+          if (wantsResizedCopy) {
+            // Null means the original is already narrow enough.
+            void cacheResizedArtwork(sourceUrl, resizeWidth).then(
+              (resized) => sendArtwork(resized || cachedArtwork),
+              () => sendArtwork(cachedArtwork, 'private, max-age=60'),
+            );
+            return;
+          }
           sendArtwork(cachedArtwork);
           return;
         }
@@ -1668,9 +1691,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         void (artworkOwnerId
           ? cachePluginArtworkSource(artworkOwnerId, sourceUrl)
           : cacheArtworkSource(sourceUrl))
-          .then((fetchedArtwork) => {
+          .then(async (fetchedArtwork) => {
             if (fetchedArtwork) {
-              sendArtwork(fetchedArtwork);
+              const resized = wantsResizedCopy ? await cacheResizedArtwork(sourceUrl, resizeWidth).catch(() => null) : null;
+              sendArtwork(resized || fetchedArtwork);
               return;
             }
             if (!canWriteResponse(res)) return;
