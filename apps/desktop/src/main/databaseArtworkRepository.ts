@@ -7,6 +7,7 @@ import type { LibraryData } from './appContracts.ts';
 import { artworkCacheFileName, collectArtworkSourcesForCache } from './artworkCache.ts';
 import { runBoundedArtworkFetch } from './artworkFetchAdmission.ts';
 import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
+import { artworkCacheOwner, resizedArtworkCacheKey } from '../shared/artworkRenditions.ts';
 import {
   assertArtworkStorageTarget,
   prepareCustomArtworkImport,
@@ -31,7 +32,12 @@ export type FetchedArtworkBytes = {
 type ArtworkRepositoryDependencies = {
   cacheDirectory: string;
   fetchArtworkBytes: (sourceUrl: string) => Promise<FetchedArtworkBytes | null>;
+  /** Returns null when the image is already no wider than `maxWidth`. */
+  resizeArtworkBytes?: (bytes: Buffer, mimeType: string, maxWidth: number) => Promise<FetchedArtworkBytes | null>;
 };
+
+// Originals that are already narrow enough, so repeat requests skip the read.
+const MAX_UNRESIZABLE_ARTWORK = 2_048;
 
 const customArtworkRowSchema = z.object({ target: z.string(), data_url: z.string() });
 const customArtworkMapRowSchema = customArtworkRowSchema.extend({ media_id: z.string() });
@@ -98,6 +104,7 @@ export function createDatabaseArtworkRepository(
   deps: ArtworkRepositoryDependencies,
 ) {
   const pendingArtwork = new Map<string, Promise<CachedArtwork | null>>();
+  const unresizableArtwork = new Set<string>();
 
   function saveCustomArtwork(mediaId: string, target: string, dataUrl: string): void {
     if (typeof mediaId !== 'string' || !mediaId.trim() || mediaId.length > 1024) throw new Error('Artwork media id is invalid.');
@@ -255,33 +262,75 @@ export function createDatabaseArtworkRepository(
       const cached = await runBoundedArtworkFetch(() => deps.fetchArtworkBytes(sourceUrl));
       if (!cached) return null;
 
-      enforceQuota(cached.byteLength, sourceUrl);
-      const cachePath = path.join(deps.cacheDirectory, artworkCacheFileName(sourceUrl, cached.mimeType));
-      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-      fs.writeFileSync(cachePath, cached.bytes);
-      database.prepare(`
-        INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, content_hash, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        sourceUrl,
-        '',
-        cachePath,
-        cached.mimeType,
-        cached.byteLength,
-        cached.contentHash,
-        Date.now(),
-      );
-
-      return {
-        cachePath,
-        mimeType: cached.mimeType,
-        byteLength: cached.byteLength,
-        contentHash: cached.contentHash,
-      };
+      return storeArtwork(sourceUrl, cached);
     })().finally(() => {
       pendingArtwork.delete(sourceUrl);
     });
     pendingArtwork.set(sourceUrl, request);
+    return request;
+  }
+
+  function storeArtwork(cacheKey: string, cached: FetchedArtworkBytes): CachedArtwork {
+    enforceQuota(cached.byteLength, cacheKey);
+    const cachePath = path.join(deps.cacheDirectory, artworkCacheFileName(cacheKey, cached.mimeType));
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, cached.bytes);
+    database.prepare(`
+      INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, content_hash, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      cacheKey,
+      '',
+      cachePath,
+      cached.mimeType,
+      cached.byteLength,
+      cached.contentHash,
+      Date.now(),
+    );
+    return {
+      cachePath,
+      mimeType: cached.mimeType,
+      byteLength: cached.byteLength,
+      contentHash: cached.contentHash,
+    };
+  }
+
+  /** The cached copy of `sourceUrl` at most `maxWidth` wide, if one exists. */
+  function getResizedArtwork(sourceUrl: string, maxWidth: number): CachedArtwork | null {
+    return getCachedArtwork(resizedArtworkCacheKey(sourceUrl, maxWidth));
+  }
+
+  /**
+   * Derive a narrower copy from the cached original. Returns null when there
+   * is no cached original, the original is narrow enough, or resizing fails;
+   * the caller then keeps serving the original.
+   */
+  async function cacheResizedArtwork(sourceUrl: string, maxWidth: number): Promise<CachedArtwork | null> {
+    const key = resizedArtworkCacheKey(sourceUrl, maxWidth);
+    if (!deps.resizeArtworkBytes || unresizableArtwork.has(key)) return null;
+    const existing = getCachedArtwork(key);
+    if (existing) return existing;
+    const pending = pendingArtwork.get(key);
+    if (pending) return pending;
+    const resize = deps.resizeArtworkBytes;
+
+    const request = (async () => {
+      const original = getCachedArtwork(sourceUrl);
+      if (!original) return null;
+      const bytes = original.cachePath
+        ? await fs.promises.readFile(original.cachePath)
+        : Buffer.from(original.dataUrl?.slice(original.dataUrl.indexOf(',') + 1) || '', 'base64');
+      const resized = await resize(bytes, original.mimeType, maxWidth).catch(() => null);
+      if (!resized) {
+        if (unresizableArtwork.size >= MAX_UNRESIZABLE_ARTWORK) unresizableArtwork.clear();
+        unresizableArtwork.add(key);
+        return null;
+      }
+      return storeArtwork(key, resized);
+    })().finally(() => {
+      pendingArtwork.delete(key);
+    });
+    pendingArtwork.set(key, request);
     return request;
   }
 
@@ -291,6 +340,7 @@ export function createDatabaseArtworkRepository(
     const cacheDir = deps.cacheDirectory;
     fs.mkdirSync(cacheDir, { recursive: true });
     const sourceSet = new Set(sources);
+    const ownerSet = new Set(sources.map(artworkCacheOwner));
     const rows = parseDatabaseRows(
       database.prepare("SELECT source_url, cache_path, byte_length, data_url != '' AS inline_data FROM artwork_cache").all(),
       artworkCacheEntryRowSchema.extend({ inline_data: z.number().optional() }),
@@ -299,7 +349,8 @@ export function createDatabaseArtworkRepository(
     const deleteStale = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
     const pruneStale = database.transaction(() => {
       for (const row of rows) {
-        if (!sourceSet.has(row.source_url)) {
+        // Smaller renditions and resized copies live as long as their original.
+        if (!ownerSet.has(artworkCacheOwner(row.source_url))) {
           if (row.cache_path) {
             try {
               if (fs.existsSync(row.cache_path)) fs.unlinkSync(row.cache_path);
@@ -344,7 +395,9 @@ export function createDatabaseArtworkRepository(
   return {
     cacheArtworkSource,
     cacheLibraryArtwork,
+    cacheResizedArtwork,
     getCachedArtwork,
+    getResizedArtwork,
     getCustomArtwork,
     getCustomArtworkData,
     getCustomArtworkMap,
