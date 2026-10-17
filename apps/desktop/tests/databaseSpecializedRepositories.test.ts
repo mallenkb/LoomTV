@@ -284,6 +284,55 @@ test('artwork repository reads existing PNG and new JPEG files with their stored
   assert.ok(fs.existsSync(pngPath));
 });
 
+test('artwork repository derives resized copies from the cached original and keeps them while the original is in the library', async (t) => {
+  const database = createDatabase();
+  const cacheDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-artwork-resized-'));
+  t.after(() => {
+    database.close();
+    fs.rmSync(cacheDirectory, { recursive: true, force: true });
+  });
+  const sanitized = (text: string) => {
+    const bytes = Buffer.from(text);
+    return { bytes, mimeType: 'image/jpeg', byteLength: bytes.byteLength, contentHash: createHash('sha256').update(bytes).digest('hex') };
+  };
+  const resizes: Array<[string, number]> = [];
+  const repository = createDatabaseArtworkRepository(database, {
+    cacheDirectory,
+    fetchArtworkBytes: async (sourceUrl) => sanitized(`original:${sourceUrl}`),
+    resizeArtworkBytes: async (bytes, _mimeType, maxWidth) => {
+      resizes.push([bytes.toString(), maxWidth]);
+      return bytes.toString().includes('narrow') ? null : sanitized(`${bytes.toString()}@${maxWidth}`);
+    },
+  });
+
+  const wide = 'https://artworks.thetvdb.com/wide.jpg';
+  assert.equal(await repository.cacheResizedArtwork(wide, 780), null, 'nothing to resize before the original is cached');
+  const original = await repository.cacheArtworkSource(wide);
+  const resized = await repository.cacheResizedArtwork(wide, 780);
+  assert.ok(resized?.cachePath && resized.cachePath !== original?.cachePath);
+  assert.equal(fs.readFileSync(resized.cachePath, 'utf8'), `original:${wide}@780`);
+  assert.deepEqual(repository.getResizedArtwork(wide, 780), resized);
+  assert.equal(repository.getResizedArtwork(wide, 300), null);
+  assert.deepEqual(repository.getCachedArtwork(wide), original);
+
+  const narrow = 'https://artworks.thetvdb.com/narrow.jpg';
+  await repository.cacheArtworkSource(narrow);
+  assert.equal(await repository.cacheResizedArtwork(narrow, 780), null);
+  assert.equal(await repository.cacheResizedArtwork(narrow, 780), null);
+  assert.deepEqual(resizes, [[`original:${wide}`, 780], [`original:${narrow}`, 780]], 'a narrow original is inspected once');
+
+  const tmdbOriginal = 'https://image.tmdb.org/t/p/original/backdrop.jpg';
+  const tmdbSmaller = 'https://image.tmdb.org/t/p/w780/backdrop.jpg';
+  await repository.cacheArtworkSource(tmdbSmaller);
+  await repository.cacheLibraryArtwork([wide, tmdbOriginal]);
+  assert.deepEqual(repository.getResizedArtwork(wide, 780), resized, 'a sync keeps the copy of a kept original');
+  assert.ok(repository.getCachedArtwork(tmdbSmaller), 'a sync keeps smaller TMDB renditions of a kept original');
+  await repository.cacheLibraryArtwork(artworkLibrary('https://artworks.thetvdb.com/other.jpg'));
+  assert.equal(repository.getResizedArtwork(wide, 780), null);
+  assert.equal(fs.existsSync(resized.cachePath), false, 'the copy is removed with its original');
+  assert.equal(repository.getCachedArtwork(tmdbSmaller), null);
+});
+
 test('artwork file digests are reused per file version and recomputed after any rewrite', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-artwork-digest-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

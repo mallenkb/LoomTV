@@ -11,6 +11,7 @@ import {
   artworkNegativeCacheAllows,
   rememberArtworkFailure,
   rememberArtworkSuccess,
+  resizeArtworkBytes,
   sanitizeArtworkBytes,
 } from './artworkSecurity.ts';
 import type { LibraryData } from './appContracts.ts';
@@ -431,6 +432,7 @@ function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkReposito
   artworkRepository ||= createDatabaseArtworkRepository(getDb(), {
     cacheDirectory: artworkCacheDirectory(),
     fetchArtworkBytes,
+    resizeArtworkBytes: (bytes, mimeType, maxWidth) => runBoundedArtworkFetch(() => resizeArtworkBytes(bytes, mimeType, maxWidth)),
   });
   return artworkRepository;
 }
@@ -1170,6 +1172,14 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
 // paired device follow a redirect to the metadata provider.
 export async function cacheArtworkSource(sourceUrl: string): Promise<CachedArtwork | null> {
   return getArtworkRepository().cacheArtworkSource(sourceUrl);
+}
+
+export function getResizedArtwork(sourceUrl: string, maxWidth: number): CachedArtwork | null {
+  return getArtworkRepository().getResizedArtwork(sourceUrl, maxWidth);
+}
+
+export async function cacheResizedArtwork(sourceUrl: string, maxWidth: number): Promise<CachedArtwork | null> {
+  return getArtworkRepository().cacheResizedArtwork(sourceUrl, maxWidth);
 }
 
 const PLUGIN_ARTWORK_MAX_ENTRIES_PER_ADDON = 512;

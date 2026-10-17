@@ -304,14 +304,14 @@ const ARTWORK_WORKER_SOURCE = String.raw`
     }
     parentPort.postMessage({ ready: true });
     await new Promise((resolve) => parentPort.once('message', resolve));
-    const checkSize = (size) => {
+    const checkSize = (size, width = workerData.expectedWidth, height = workerData.expectedHeight) => {
       if (!Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height)
         || size.width <= 0 || size.height <= 0
         || size.width > workerData.maxDimension || size.height > workerData.maxDimension
         || size.width * size.height > workerData.maxPixels) {
         throw new Error('decoded dimensions exceed the host limit');
       }
-      if (size.width !== workerData.expectedWidth || size.height !== workerData.expectedHeight) {
+      if (size.width !== width || size.height !== height) {
         throw new Error('encoded and decoded dimensions differ');
       }
     };
@@ -327,10 +327,14 @@ const ARTWORK_WORKER_SOURCE = String.raw`
     checkSize(await decoded.metadata());
     const isJpeg = workerData.inputFormat === 'jpeg';
     const mimeType = isJpeg ? 'image/jpeg' : 'image/png';
-    let { data: normalized, info } = await (isJpeg ? decoded.clone().jpeg({ quality: 88 }) : decoded.clone().png()).toBuffer({ resolveWithObject: true });
+    const resized = workerData.outputWidth !== workerData.expectedWidth || workerData.outputHeight !== workerData.expectedHeight;
+    const output = () => resized
+      ? decoded.clone().resize(workerData.outputWidth, workerData.outputHeight, { fit: 'fill' })
+      : decoded.clone();
+    let { data: normalized, info } = await (isJpeg ? output().jpeg({ quality: 88 }) : output().png()).toBuffer({ resolveWithObject: true });
     if (isJpeg && normalized.length > workerData.maxOutputBytes) {
       for (const quality of [82, 72]) {
-        const jpeg = await decoded.clone().jpeg({ quality }).toBuffer({ resolveWithObject: true });
+        const jpeg = await output().jpeg({ quality }).toBuffer({ resolveWithObject: true });
         if (jpeg.data.length > 0 && jpeg.data.length <= workerData.maxOutputBytes) {
           normalized = jpeg.data;
           info = jpeg.info;
@@ -338,16 +342,21 @@ const ARTWORK_WORKER_SOURCE = String.raw`
         }
       }
     }
-    checkSize(info);
+    checkSize(info, workerData.outputWidth, workerData.outputHeight);
     if (normalized.length === 0 || normalized.length > workerData.maxOutputBytes) {
       throw new Error('normalized image size is invalid');
     }
-    const output = Uint8Array.from(normalized);
-    parentPort.postMessage({ ok: true, bytes: output, mimeType, width: info.width, height: info.height }, [output.buffer]);
+    const transfer = Uint8Array.from(normalized);
+    parentPort.postMessage({ ok: true, bytes: transfer, mimeType, width: info.width, height: info.height }, [transfer.buffer]);
   })().catch((error) => parentPort.postMessage({ ok: false, error: error.message }));
 `;
 
-function decodeArtworkInWorker(bytes: Buffer, inspection: ArtworkInspection, options: ArtworkSanitizerOptions): Promise<SanitizedArtwork> {
+function decodeArtworkInWorker(
+  bytes: Buffer,
+  inspection: ArtworkInspection,
+  options: ArtworkSanitizerOptions,
+  outputSize = { width: inspection.width, height: inspection.height },
+): Promise<SanitizedArtwork> {
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try {
@@ -359,6 +368,8 @@ function decodeArtworkInWorker(bytes: Buffer, inspection: ArtworkInspection, opt
           decoderModulePath: artworkRequire.resolve('sharp'),
           expectedWidth: inspection.width,
           expectedHeight: inspection.height,
+          outputWidth: outputSize.width,
+          outputHeight: outputSize.height,
           inputFormat: inspection.format,
           maxDimension: MAX_ARTWORK_DIMENSION,
           maxPixels: MAX_ARTWORK_PIXELS,
@@ -415,7 +426,7 @@ function decodeArtworkInWorker(bytes: Buffer, inspection: ArtworkInspection, opt
         if (normalized.length === 0 || normalized.length > MAX_ARTWORK_OUTPUT_BYTES) rejectArtwork('normalized image size is invalid');
         if (result.mimeType !== 'image/png' && result.mimeType !== 'image/jpeg') rejectArtwork('normalized image content type is invalid');
         const output = inspectArtworkBytes(normalized, result.mimeType);
-        if (output.width !== inspection.width || output.height !== inspection.height
+        if (output.width !== outputSize.width || output.height !== outputSize.height
           || result.width !== output.width || result.height !== output.height) rejectArtwork('encoded and decoded dimensions differ');
         const hash = createHash('sha256').update(normalized).digest('hex');
         finish(() => resolve({
@@ -460,6 +471,23 @@ export async function sanitizeArtworkBytes(bytes: Buffer, contentType = '', opti
       return sanitizeArtworkBytesWithDecoder(bytes, contentType, options.fallbackDecoder);
     }
   });
+}
+
+/**
+ * Downscale already-sanitized artwork to at most `maxWidth` pixels wide. It
+ * returns null when the image is not wider, so callers keep the original.
+ * No main-thread fallback: a smaller copy is only an optimization.
+ */
+export async function resizeArtworkBytes(
+  bytes: Buffer,
+  contentType: string,
+  maxWidth: number,
+  options: Pick<ArtworkSanitizerOptions, 'workerFactory'> = {},
+): Promise<SanitizedArtwork | null> {
+  const inspection = inspectArtworkBytes(bytes, contentType);
+  if (!Number.isSafeInteger(maxWidth) || maxWidth <= 0 || inspection.width <= maxWidth) return null;
+  const outputSize = { width: maxWidth, height: Math.max(1, Math.round(inspection.height * maxWidth / inspection.width)) };
+  return runWithArtworkDecodeBudget(inspection.width * inspection.height, () => decodeArtworkInWorker(bytes, inspection, options, outputSize));
 }
 
 const negativeArtworkCache = new Map<string, number>();

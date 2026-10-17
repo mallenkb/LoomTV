@@ -7,6 +7,7 @@ import {
   inspectArtworkBytes,
   artworkNegativeCacheAllows,
   rememberArtworkFailure,
+  resizeArtworkBytes,
   sanitizeArtworkBytes,
   sanitizeArtworkBytesWithDecoder,
   type ArtworkDecoder,
@@ -258,4 +259,26 @@ test('the real worker rejects a decoder dimension mismatch without fallback', as
     }),
   }), /encoded and decoded dimensions differ/);
   assert.equal(fallbackCalls, 0);
+});
+
+test('wide artwork is resized in the worker to the requested width, keeping its aspect ratio and format', async () => {
+  const input = await sharp({ create: { width: 1920, height: 1080, channels: 3, background: '#305080' } }).jpeg().toBuffer();
+  const output = await resizeArtworkBytes(input, 'image/jpeg', 780);
+  assert.ok(output);
+  assert.equal(output.mimeType, 'image/jpeg');
+  assert.deepEqual([output.width, output.height], [780, 439]);
+  const metadata = await sharp(output.bytes).metadata();
+  assert.deepEqual([metadata.format, metadata.width, metadata.height], ['jpeg', 780, 439]);
+  assert.equal(output.contentHash, createHash('sha256').update(output.bytes).digest('hex'));
+  assert.ok(output.byteLength < input.byteLength);
+});
+
+test('artwork no wider than the requested width is left alone without starting a worker', async () => {
+  const input = await sharp({ create: { width: 500, height: 750, channels: 3, background: '#305080' } }).jpeg().toBuffer();
+  let workers = 0;
+  const output = await resizeArtworkBytes(input, 'image/jpeg', 780, {
+    workerFactory: (source, options) => { workers += 1; return new Worker(source, options); },
+  });
+  assert.equal(output, null);
+  assert.equal(workers, 0);
 });
