@@ -36,6 +36,10 @@ type ProfileContextValue = {
   isLoading: boolean;
   loadError: string | null;
   gateOpen: boolean;
+  /** The gate was opened from inside an entered session (Switch or Edit
+   * profiles), so it may sit beside the side nav. False for the startup,
+   * first-run and locked gates, which must cover the whole app. */
+  gateOpenedFromApp: boolean;
   gateIntent: GateIntent | null;
   clearGateIntent: () => void;
   generation: number;
@@ -92,6 +96,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedThisSession, setSelectedThisSession] = useState(false);
+  const selectedThisSessionRef = useRef(selectedThisSession);
+  selectedThisSessionRef.current = selectedThisSession;
   const [ownerSessionAuthorized, setOwnerSessionAuthorized] = useState(false);
   const [generation, setGeneration] = useState(0);
   const generationRef = useRef(0);
@@ -316,6 +322,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     await flushProgressWrites();
     const state = await desktopApi.lockProfile();
     setActiveState(state);
+    setGateOpenedFromApp(false);
     setSelectedThisSession(false);
     setOwnerSessionAuthorized(false);
     await hydratePersonalState(null);
@@ -422,13 +429,19 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }, [refreshProfiles]);
 
   const [gateIntent, setGateIntent] = useState<GateIntent | null>(null);
+  const [gateOpenedFromApp, setGateOpenedFromApp] = useState(false);
   const openGate = useCallback((intent?: GateIntent) => {
     setGateIntent(intent ?? null);
+    // Read now: the updater runs during the next render, after the ref has
+    // already taken the `false` set below.
+    const enteredSession = selectedThisSessionRef.current;
+    setGateOpenedFromApp((current) => current || enteredSession);
     setSelectedThisSession(false);
   }, []);
   const clearGateIntent = useCallback(() => setGateIntent(null), []);
   const closeGate = useCallback(() => {
     setGateIntent(null);
+    setGateOpenedFromApp(false);
     if (activeState.profileId) setSelectedThisSession(true);
   }, [activeState.profileId]);
   const activeProfile = useMemo(
@@ -454,6 +467,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     loadError,
     gateOpen,
+    gateOpenedFromApp: gateOpen && gateOpenedFromApp,
     gateIntent,
     clearGateIntent,
     generation,
@@ -480,7 +494,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     exportProfile,
     importProfile,
   }), [
-    profiles, activeProfile, activeState, preferences, visibleLists, isLoading, loadError, gateOpen, gateIntent, clearGateIntent,
+    profiles, activeProfile, activeState, preferences, visibleLists, isLoading, loadError, gateOpen, gateOpenedFromApp, gateIntent, clearGateIntent,
     generation, canManageProfiles, canCreateProfiles,
     openGate, closeGate, selectProfile, selectGuestProfile, lock, createProfile, updateProfile,
     deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry, setWatched,
