@@ -7,9 +7,11 @@ launches an mpv executable or opens a separate player window.
 `scripts/fetch-native-runtimes.cjs` downloads the pinned macOS arm64 payload
 into `resources/mpv/lib/` during `desktop:start` and packaging. Packaged builds
 copy that directory outside `app.asar` so the library and bridge can be loaded
-at runtime.
+at runtime. After installing the payload, the same script compiles the render
+bridge from `native/libmpv/render-bridge/` over the payload's copy, so bridge
+changes need no new payload.
 
-To rebuild the payload after changing the render bridge or updating mpv, run
+To rebuild the payload after updating mpv, run
 `corepack pnpm --filter loom-media-server-desktop libmpv:bundle` on an Apple
 silicon Mac with Homebrew's mpv installed. Set
 `LOOMTV_SKIP_NATIVE_RUNTIME_FETCH=1` while testing a local bundle so the next

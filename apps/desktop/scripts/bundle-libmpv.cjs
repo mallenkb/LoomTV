@@ -11,6 +11,8 @@
 //
 // The output is packed into the libmpv runtime archive listed in
 // native-runtimes.json. Builds download that archive; they never run this.
+// fetch-native-runtimes.cjs replaces the archive's bridge with one built from
+// the current source, so the archive needs no rebuild when only the bridge changes.
 //
 // Usage: node scripts/bundle-libmpv.cjs [output-directory]
 
