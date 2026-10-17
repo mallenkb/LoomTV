@@ -54,7 +54,7 @@ The `GHSA-86w9-cpqp-85rv` node-forge signature-verification finding is mitigated
 patch applying the nested `DigestAlgorithm` element-count fix from upstream PR
 [#1152](https://github.com/digitalbazaar/forge/pull/1152). Since upstream has not published a
 fixed release, the waiver is limited to Expo tooling paths in the mobile and TV workspaces and
-expires on 2026-10-16. Remove the patch and waiver after adopting the upstream fix.
+was re-reviewed on 2026-10-17 and expires on 2026-10-31. The registry still lists 1.4.0 as the latest release, the upstream fix remains open, and every audited path remains under mobile or TV Expo tooling. Remove the patch and waiver after adopting the upstream fix.
 
 `pnpm sbom` creates a deterministic CycloneDX 1.6 inventory from `pnpm-lock.yaml`. It omits a
 generation timestamp, sorts components, includes available integrity hashes, and records the

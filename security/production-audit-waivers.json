@@ -30,10 +30,10 @@
     },
     "GHSA-86w9-cpqp-85rv": {
       "module": "node-forge",
-      "reviewedOn": "2026-10-02",
-      "expires": "2026-10-16",
+      "reviewedOn": "2026-10-17",
+      "expires": "2026-10-31",
       "owner": "@mallenkb",
-      "reason": "A local pnpm patch applies the nested DigestAlgorithm element-count fix from upstream PR digitalbazaar/forge#1152. The upstream node-forge release is still affected and has no published patched version. The waiver is limited to Expo tooling dependency paths in the mobile and TV workspaces; remove it as soon as a fixed upstream release is available and adopted.",
+      "reason": "Re-reviewed on 2026-10-17: node-forge 1.4.0 remains the latest published version, and upstream PR digitalbazaar/forge#1152 remains open. The existing local pnpm patch matches its nested DigestAlgorithm element-count fix. The production audit still reports only Expo CLI and code-signing-tool dependency paths in the mobile and TV workspaces. Keep this exception limited to those existing paths; remove it and the patch as soon as a fixed upstream release is adopted, or fail the gate if the exposure changes.",
       "allowedPathPrefixes": [
         "apps__mobile>",
         "apps__tv>"

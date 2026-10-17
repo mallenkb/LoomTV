@@ -4,6 +4,22 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.22](docs/releases/v2.0.22.md)
+
+Restores packaged libmpv playback, serves smaller artwork, trims Mac packages, hardens Electron releases, and defers LibVLC warmup.
+
+### [2.0.21](docs/releases/v2.0.21.md) (not published)
+
+Publication was blocked by an expired dependency-review exception. Its desktop changes are included in 2.0.22.
+
+### [2.0.20](docs/releases/v2.0.20.md)
+
+Reworks Discover and Settings, adds add-on subtitles and external playback sources, and improves desktop playback information and responsiveness.
+
+### [2.0.19](docs/releases/v2.0.19.md)
+
+See the full release notes for this desktop update.
+
 ### [2.0.18](docs/releases/v2.0.18.md)
 
 Republishes the Electron desktop app with no app-code changes since 2.0.17.
