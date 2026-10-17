@@ -121,6 +121,9 @@
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "afterSign": "scripts/after-sign.cjs",
     "afterPack": "scripts/ensure-update-config.cjs",
+    "electronLanguages": [
+      "en"
+    ],
     "artifactBuildCompleted": "scripts/prepare-mac-update-archive.cjs",
     "directories": {
       "output": "out/builder"
