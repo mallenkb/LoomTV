@@ -7,6 +7,11 @@
 // resources folder re-extracts without downloading again. A stamp per runtime
 // records which archive is installed; a matching stamp skips the runtime.
 //
+// The libmpv archive also carries a render bridge, but that bridge is LoomTV
+// source and changes more often than the archive. After the libmpv runtime is
+// in place the script compiles the bridge from native/libmpv/render-bridge
+// over the archived copy, and rebuilds it whenever that source changes.
+//
 // Runtimes are selected by platform and CPU architecture. Without flags the
 // script fetches for the machine it runs on, which is what desktop:start
 // needs; a machine with no matching runtimes gets a warning. With --required,
@@ -28,6 +33,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { ensureBridge } = require('./libmpv-bridge.cjs');
 
 const DESKTOP_ROOT = path.resolve(__dirname, '..');
 const RESOURCES_ROOT = path.join(DESKTOP_ROOT, 'resources');
@@ -263,6 +269,18 @@ async function main() {
     const archive = await verifiedArchive(manifest, runtime);
     install(runtime, archive);
     console.log(`[native-runtimes] Installed ${runtime.id} into resources/${runtime.destination}.`);
+  }
+  for (const runtime of runtimes.filter((candidate) => candidate.id.startsWith('libmpv-darwin-'))) {
+    if (process.platform !== 'darwin') {
+      const message = `The libmpv bridge for ${runtime.id} can only be built on macOS.`;
+      if (required) throw new Error(message);
+      console.warn(`[native-runtimes] ${message}`);
+      continue;
+    }
+    const destination = path.join(RESOURCES_ROOT, runtime.destination);
+    if (ensureBridge(destination, runtime.archs[0], path.join(STAMP_ROOT, `${runtime.id}-bridge.json`))) {
+      console.log(`[native-runtimes] Built the libmpv bridge into resources/${runtime.destination}.`);
+    }
   }
   if (runtimes.length > 0) {
     console.log(`[native-runtimes] ${runtimes.length} runtime(s) for ${platform} ${archs.join('+')} match ${manifest.release}.`);

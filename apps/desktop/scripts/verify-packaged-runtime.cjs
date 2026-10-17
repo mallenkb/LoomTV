@@ -4,6 +4,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const asar = require('@electron/asar');
+const { bridgeProblems } = require('./libmpv-bridge.cjs');
 
 const root = process.cwd();
 const outDir = path.join(root, 'out');
@@ -378,6 +379,9 @@ function verifyMpvPayload(targetPlatform, targetArch) {
     targetPlatform,
     false,
   );
+  if (targetPlatform === 'darwin' && platform === 'darwin') {
+    for (const problem of bridgeProblems(payloadRoot)) fail(problem);
+  }
 }
 
 const packageDir = process.argv[2]
@@ -595,8 +599,9 @@ if (!exists(mpvNotice)) {
 }
 
 // Native payload verification is intentionally filesystem-only. It checks the
-// selected platform/architecture, file formats, plugin layout, and optional
-// hashes; it never requires, dlopens, or launches LibVLC or MPV.
+// selected platform/architecture, file formats, plugin layout, optional hashes,
+// and the libmpv bridge's version and exports; it never requires, dlopens, or
+// launches LibVLC or MPV.
 const selectedNativeRuntimeTarget = `${targetPlatform}-${targetArch}`;
 const bundledNativePlaybackTargets = runtimeManifest?.distributionPolicy?.bundledNativePlaybackTargets;
 if (bundledNativePlaybackTargets?.libvlc.includes(selectedNativeRuntimeTarget)) {

@@ -2,12 +2,13 @@
 
 `bridge.m` is a macOS render-API bridge with a C ABI for Electron. It is the
 second playback engine after LibVLC and before Chromium/HLS.
-`scripts/bundle-libmpv.cjs` builds it together with a self-contained libmpv,
-builds download that bundle (see `resources/mpv/README.md`), and
-`src/main/libmpvPlayback.ts` loads it.
+`scripts/bundle-libmpv.cjs` builds a self-contained libmpv, builds download
+that bundle (see `resources/mpv/README.md`), `scripts/fetch-native-runtimes.cjs`
+compiles this bridge into it, and `src/main/libmpvPlayback.ts` loads it.
 
 It loads libmpv directly with `dlopen` and has no player-process launch path.
-It uses the installed upstream `mpv/client.h` and `mpv/render_gl.h` headers
+`include/mpv/` holds unmodified copies of the upstream `client.h`, `render.h`
+and `render_gl.h` (ISC licence) from mpv 0.41.0, the version in the bundle,
 rather than a handwritten copy of their ABI.
 
 Creation prepares an idle core without opening media or creating a window.
@@ -23,19 +24,29 @@ copies only the surrounding video region into GPU textures, applies horizontal
 and vertical Gaussian passes, and composites through the same rounded shape
 used by the subtitle overlay. No video pixels cross IPC. Plain and Solid box
 clear the blur region. The renderer reports geometry during subtitle and layout
-changes, including the controls' position transition. Rebuild the bundled bridge
-alongside the desktop code when updating this ABI.
+changes, including the controls' position transition.
 
-`corepack pnpm --filter loom-media-server-desktop libmpv:bundle` builds the
-bridge and the libmpv bundle together. To build only the bridge on macOS:
+When changing the ABI, bump `LOOM_MPV_BRIDGE_VERSION` in `bridge.h` and
+`LIBMPV_BRIDGE_VERSION` in `libmpvPlayback.ts` together;
+`tests/libmpvBridgeVersion.test.ts` fails if they differ. The host refuses any
+other version.
+
+The libmpv runtime archive also contains a bridge, but only as new as the
+archive. 2.0.19 shipped the archive's version 1 bridge after the host moved to
+version 2, so packaged builds lost libmpv while dev builds, with a locally
+rebuilt bridge, worked. `fetch-native-runtimes.cjs` now compiles the bridge
+from this folder over the archived copy, pinned to the bundle's minimum macOS,
+and rebuilds it whenever these sources change. `verify-packaged-runtime.cjs`
+checks the packaged bridge's recorded version and its exports.
+
+To build only the bridge on macOS:
 
 ```sh
-LIBMPV_INCLUDE_DIR=/absolute/path/to/include \
-  node apps/desktop/native/libmpv/render-bridge/build.mjs
+node apps/desktop/native/libmpv/render-bridge/build.mjs
 ```
 
-The include directory must contain `mpv/client.h` and `mpv/render_gl.h`. The
-output is ignored by Git.
+Set `LIBMPV_INCLUDE_DIR` to build against other mpv headers. The output is
+ignored by Git.
 
 ## Release builds
 
