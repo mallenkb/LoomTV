@@ -132,8 +132,12 @@ import {
   getRendererDevServerUrl,
   getTrayIconPath,
   getWindowIconPath,
+  isAllowedEmbeddedFrameUrl,
+  isRendererAppUrl,
   packagedRendererRoot,
 } from './main/windowManager';
+import { installPermissionPolicy } from './main/permissionPolicy.ts';
+import { VIDEO_EMBED_ORIGINS } from './shared/externalPlayback.ts';
 import { libMpvRuntimeSummary as mpvRuntimeSummary, stopAllLibMpvPlayback as stopAllMpvPlayback } from './main/libmpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray, isServerTrayMenuWindow } from './main/serverTray';
@@ -410,6 +414,13 @@ const disableZeroCopy = ['1', 'true', 'yes'].includes(
 if (disableZeroCopy) app.commandLine.appendSwitch('disable-zero-copy');
 
 app.commandLine.appendSwitch(...httpDiskCacheSwitch());
+
+// Every session, including the tray menu's partition, gets a default-deny
+// permission policy before any window can use it. session-created also fires
+// for the default session.
+app.on('session-created', (createdSession) => {
+  installPermissionPolicy(createdSession, { isAppUrl: isRendererAppUrl, isEmbeddedVideoUrl: isAllowedEmbeddedFrameUrl });
+});
 
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
@@ -1783,7 +1794,7 @@ function configureRendererSecurityPolicy(): void {
     "font-src 'self' file: data:",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src 'self' loomtv://media-libraries https://www.youtube-nocookie.com https://www.youtube.com",
+    `frame-src 'self' loomtv://media-libraries ${VIDEO_EMBED_ORIGINS.join(' ')}`,
     "frame-ancestors 'none'",
     "form-action 'none'",
   ].join('; ');

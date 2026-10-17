@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import { z } from 'zod';
+import { VIDEO_EMBED_ORIGINS } from './src/shared/externalPlayback';
 
 const packageJsonPayload: unknown = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const packageJson = z.object({ version: z.string().optional() }).parse(packageJsonPayload);
@@ -24,7 +25,7 @@ const devRendererCsp = [
   "font-src 'self' file: data:",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-src 'self' loomtv://media-libraries https://www.youtube-nocookie.com https://www.youtube.com",
+  `frame-src 'self' loomtv://media-libraries ${VIDEO_EMBED_ORIGINS.join(' ')}`,
 ].join('; ');
 
 const prodRendererCsp = [
@@ -37,7 +38,7 @@ const prodRendererCsp = [
   "font-src 'self' file: data:",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-src 'self' loomtv://media-libraries https://www.youtube-nocookie.com https://www.youtube.com",
+  `frame-src 'self' loomtv://media-libraries ${VIDEO_EMBED_ORIGINS.join(' ')}`,
 ].join('; ');
 
 function rendererCspPlugin(): Plugin {

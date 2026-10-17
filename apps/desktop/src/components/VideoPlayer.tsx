@@ -23,7 +23,7 @@ import {
 } from '@/lib/desktopApi';
 import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
 import { isIptvPlaybackReference } from '../shared/iptvPlayback.ts';
-import { isTrustedVideoPageUrl, parseExternalPlaybackReference } from '../shared/externalPlayback.ts';
+import { isTrustedVideoPageUrl, parseExternalPlaybackReference, videoPageEmbedUrl } from '../shared/externalPlayback.ts';
 import { cleanEpisodeTitleForDisplay, looksLikeGenericEpisodeTitle } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
@@ -274,6 +274,22 @@ export default function VideoPlayer({
   } | null>(null);
   const trackChangeGenerationRef = useRef(0);
   const loadTokenRef = useRef(0);
+  // Native engines tried for the current load token. Each playback request
+  // tries each engine at most once, so two engines that both fail after
+  // startup end in the browser fallback instead of swapping forever.
+  const nativeEnginesAttemptedRef = useRef<{ loadToken: number; kinds: Set<PlaybackEngine['kind']> }>({ loadToken: -1, kinds: new Set() });
+  const markNativeEngineAttempted = useCallback((kind: PlaybackEngine['kind']) => {
+    const attempted = nativeEnginesAttemptedRef.current;
+    if (attempted.loadToken !== loadTokenRef.current) {
+      nativeEnginesAttemptedRef.current = { loadToken: loadTokenRef.current, kinds: new Set([kind]) };
+    } else {
+      attempted.kinds.add(kind);
+    }
+  }, []);
+  const nativeEngineAttempted = useCallback((kind: PlaybackEngine['kind']) => {
+    const attempted = nativeEnginesAttemptedRef.current;
+    return attempted.loadToken === loadTokenRef.current && attempted.kinds.has(kind);
+  }, []);
   const sourceLoadTokenRef = useRef(0);
   const playerActiveRef = useRef(true);
   const nativeAutoplayIssuedRef = useRef(false);
@@ -1785,18 +1801,22 @@ export default function VideoPlayer({
         setErrorMessage(state.error || 'LibVLC could not resume this video. Retry playback.');
         return;
       }
+      const loadToken = loadTokenRef.current;
+      const isCurrentRequest = () => playerActiveRef.current && loadToken === loadTokenRef.current;
       void (async () => {
         // Whichever native engine fails, try the other one before the HLS
         // transcode path, which costs an FFmpeg process and loses instant
-        // track switching.
-        const FallbackNativeEngine = failedEngineKind === 'libvlc'
-          ? MpvPlaybackEngine
-          : failedEngineKind === 'mpv' ? LibVlcPlaybackEngine : null;
+        // track switching. An engine this request already tried is skipped.
+        const fallbackKind = failedEngineKind === 'libvlc' ? 'mpv' : failedEngineKind === 'mpv' ? 'libvlc' : null;
+        const FallbackNativeEngine = fallbackKind === null || nativeEngineAttempted(fallbackKind)
+          ? null
+          : fallbackKind === 'mpv' ? MpvPlaybackEngine : LibVlcPlaybackEngine;
         if (FallbackNativeEngine && await FallbackNativeEngine.available().catch(() => false)) {
           nativeAutoplayIssuedRef.current = false;
           const fallbackEngine = new FallbackNativeEngine(handleNativePlaybackState);
-          if (!playbackEngineRef.current && playerActiveRef.current) {
+          if (!playbackEngineRef.current && isCurrentRequest()) {
             playbackEngineRef.current = fallbackEngine;
+            markNativeEngineAttempted(fallbackEngine.kind);
             try {
               const style = subtitleStyleRef.current;
               const loaded = await fallbackEngine.load(filePath, {
@@ -1823,7 +1843,7 @@ export default function VideoPlayer({
                   }
                 }),
               });
-              if (loaded && playerActiveRef.current && playbackEngineRef.current === fallbackEngine) {
+              if (loaded && isCurrentRequest() && playbackEngineRef.current === fallbackEngine) {
                 setNativePlaybackActive(true);
                 setNativeEngineKind(fallbackEngine.kind);
                 document.documentElement.classList.add('loom-native-active');
@@ -1840,13 +1860,13 @@ export default function VideoPlayer({
             await fallbackEngine.destroy();
           }
         }
-        if (!playerActiveRef.current) return;
+        if (!isCurrentRequest()) return;
         setStatusMessage('Falling back to the compatible player...');
         setErrorMessage(state.error || null);
         void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
       })();
     }
-  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, reportFirstFrame, savePlaybackProgress, startBrowserStreamAt, updatePlaybackSnapshot]);
+  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, markNativeEngineAttempted, nativeEngineAttempted, reportFirstFrame, savePlaybackProgress, startBrowserStreamAt, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -1976,15 +1996,24 @@ export default function VideoPlayer({
 
     const externalRef = parseExternalPlaybackReference(filePath);
     if (externalRef) {
-      const isYoutube = isTrustedVideoPageUrl(externalRef.url);
-      // Only known video-site pages are framed. Every other external reference
+      // Only known video-site pages are framed, and only through their embed
+      // player: watch pages refuse to be framed. Every other external reference
       // is a validated media URL; many have no file extension, so treat them as
       // media rather than loading an arbitrary provider page in a frame.
-      if (isYoutube) {
-        setExternalIframeUrl(externalRef.url);
+      if (isTrustedVideoPageUrl(externalRef.url)) {
+        const embedUrl = videoPageEmbedUrl(externalRef.url);
         setNativePlaybackActive(false);
         setNativeEngineKind(null);
         setStreamUrl('');
+        if (!embedUrl) {
+          setExternalIframeUrl(null);
+          setPlayerState('error');
+          setStatusMessage('');
+          setErrorMessage('This link is not a single YouTube or Vimeo video. Open a video page and try again.');
+          void stopTranscodeSession();
+          return;
+        }
+        setExternalIframeUrl(embedUrl);
         const timingAttempt = playbackTimingAttemptRef.current;
         if (timingAttempt) {
           timingAttempt.engine = null;
@@ -2057,6 +2086,7 @@ export default function VideoPlayer({
         for (const NativePlaybackEngine of nativeEngineFactories) {
           const engine = new NativePlaybackEngine(handleNativePlaybackState);
           playbackEngineRef.current = engine;
+          markNativeEngineAttempted(engine.kind);
           const timingAttempt = playbackTimingAttemptRef.current;
           if (timingAttempt) timingAttempt.engine = engine.kind;
           logPlaybackTiming('engine_start_requested');
@@ -2179,6 +2209,7 @@ export default function VideoPlayer({
     filePath,
     handleNativePlaybackState,
     logPlaybackTiming,
+    markNativeEngineAttempted,
     playableStartPosition,
     playbackRequestId,
     playRequestedAtMs,

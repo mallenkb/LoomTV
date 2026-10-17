@@ -516,7 +516,7 @@ export function libVlcRuntimeSummary(): string {
 
   const candidate = configuredLibraryCandidate();
   if (candidate) {
-    return `[playback] LibVLC default — ${candidate.source} runtime detected at ${candidate.path}; one process-lifetime instance is warmed at app startup`;
+    return `[playback] LibVLC default — ${candidate.source} runtime detected at ${candidate.path}; one process-lifetime instance is warmed shortly after the first window opens`;
   }
 
   return '[playback] LibVLC default — no bundled or installed runtime file detected; compatibility playback will be used if startup warmup cannot create the native runtime';

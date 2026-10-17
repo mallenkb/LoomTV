@@ -623,6 +623,36 @@ for (const trayAsset of ['trayIcon.png', 'trayIcon@2x.png']) {
   }
 }
 
-if (process.exitCode) process.exit(process.exitCode);
+// Release packaging goes through electron-builder, not Forge, so check the
+// fuse wire in the packaged binary itself rather than either config file.
+async function verifyElectronFuses() {
+  const { getCurrentFuseWire, FuseV1Options } = require('@electron/fuses');
+  // The wire stores each fuse as an ASCII '1' (enabled) or '0' (disabled).
+  const ENABLED = '1'.charCodeAt(0);
+  const DISABLED = '0'.charCodeAt(0);
+  const electronPath = platform === 'darwin'
+    ? appBundlePath(packageDir)
+    : path.join(packageDir, platform === 'win32' ? 'LoomTV.exe' : 'loom-media-server-desktop');
+  if (!exists(electronPath)) {
+    fail(`Missing packaged Electron executable for the fuse check: ${electronPath}`);
+    return;
+  }
+  const expected = {
+    RunAsNode: DISABLED,
+    EnableNodeOptionsEnvironmentVariable: DISABLED,
+    EnableNodeCliInspectArguments: DISABLED,
+    EnableEmbeddedAsarIntegrityValidation: ENABLED,
+    OnlyLoadAppFromAsar: ENABLED,
+  };
+  const wire = await getCurrentFuseWire(electronPath);
+  for (const [name, state] of Object.entries(expected)) {
+    if (wire[FuseV1Options[name]] !== state) {
+      fail(`Electron fuse ${name} should be ${state === ENABLED ? 'enabled' : 'disabled'} in ${electronPath}.`);
+    }
+  }
+}
 
-console.log('[runtime-check] Packaged runtime dependencies are present.');
+verifyElectronFuses().catch((error) => fail(`Electron fuse check failed: ${error.message}`)).finally(() => {
+  if (process.exitCode) process.exit(process.exitCode);
+  console.log('[runtime-check] Packaged runtime dependencies are present.');
+});
