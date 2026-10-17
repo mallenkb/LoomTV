@@ -30,13 +30,24 @@ test('full-screen desktop layers opt into shared modal semantics', () => {
   const modernHome = source('components/ModernHome.tsx');
 
   assert.match(app, /aria-hidden=\{appUnderlayHidden \? 'true' : undefined\}/);
-  for (const layer of [profileGate, player, modernHome]) {
+  for (const layer of [player, modernHome]) {
     assert.match(layer, /useModalLayer\(/);
     assert.match(layer, /role="dialog"/);
     assert.match(layer, /aria-modal="true"/);
     assert.match(layer, /data-modal-layer=/);
   }
+  // The profile gate is modal when it covers the app (startup, first run,
+  // locked). Opened from inside the app it sits beside the side nav instead:
+  // not a modal layer, the nav stays reachable, and only the page under it is
+  // inert.
+  assert.match(profileGate, /useModalLayer\(\{\s*open: !besideSidebar,/);
+  assert.match(profileGate, /role="dialog"/);
+  assert.match(profileGate, /aria-modal=\{besideSidebar \? undefined : 'true'\}/);
+  assert.match(profileGate, /data-modal-layer="profile-gate"/);
   assert.match(profileGate, /onEscape: handleGateEscape/);
+  assert.match(app, /<ProfileGate besideSidebar=\{gateOpenedFromApp\} \/>/);
+  assert.match(app, /const sidebarHidden = Boolean\(nowPlaying \|\| librarySetupVisible \|\| \(gateOpen && !gateOpenedFromApp\)\);/);
+  assert.match(app, /inert=\{pageUnderGate \? true : undefined\}/);
   assert.match(player, /data-modal-layer="video-player"/);
   assert.match(player, /data-modal-layer="playback-settings"/);
   assert.match(player, /data-modal-layer="episode-list"/);

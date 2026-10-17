@@ -454,6 +454,23 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   backdrop-filter: blur(24px) saturate(130%);
 }
 
+/* Native video is outside Chromium's backdrop. These filters allocate large
+   Retina render targets when paused controls stay visible, without blurring
+   the video. Keep their translucent backgrounds without the extra targets. */
+.loom-player-native .loom-player-top-controls .loom-player-top-control,
+.loom-player-native .loom-player-controls [class*='backdrop-blur-'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Keep native-player UI damage on bounded layers instead of repainting the
+   transparent Retina window. Video pixels stay in the native render view. */
+body.platform-darwin .loom-player-native .loom-player-controls,
+body.platform-darwin .loom-player-native .loom-player-top-controls,
+body.platform-darwin .loom-player-native .player-side-panel {
+  will-change: transform;
+}
+
 .loom-app-shell {
   background: var(--loom-bg);
 }
@@ -2525,17 +2542,25 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   background: var(--loom-settings-hover);
 }
 
-/* An open top-level row sits on a sunken surface with an accent edge, and its
-   panel hangs off a guide line under the title, so the children read as one
-   level below it. */
+/* The profile gate opened from inside the app fills the content area and
+   leaves the side nav in place. On the narrow browser layout the nav is a
+   bottom bar, so the gate spans the width and stops above it. */
+.loom-profile-gate-beside {
+  inset: 0 0 0 var(--loom-sidebar-width);
+}
+
+@media (max-width: 1024px) {
+  :root[data-loom-client="browser"][data-home-style="modern"] .loom-profile-gate-beside {
+    inset: 0 0 var(--loom-mobile-nav-total) 0;
+  }
+}
+
+/* An open top-level row sits on a sunken surface across its whole card, so
+   the header and its panel read as one block. No accent edge: a stripe on the
+   header alone stopped where the panel began and clipped the card's corner. */
 .settings-disclosure:not(.settings-disclosure-nested)[data-open],
 .settings-library-card[data-open] {
   background: var(--loom-settings-sunk);
-}
-
-.settings-disclosure:not(.settings-disclosure-nested)[data-open] > .settings-disclosure-header,
-.settings-library-card[data-open] > .settings-library-header {
-  box-shadow: inset 2px 0 0 var(--loom-accent);
 }
 
 .settings-disclosure[data-open] > .settings-disclosure-header .settings-disclosure-chevron {

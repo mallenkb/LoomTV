@@ -8,6 +8,7 @@ import { useUnifiedDesktopServer } from '@/lib/unifiedServer';
 import ProfileAvatar, { PROFILE_AVATAR_KEYS, PROFILE_COLOR_KEYS, PROFILE_COLOR_PRESETS } from './ProfileAvatar';
 import PinDigitInput from './PinDigitInput';
 import LoomLogo from '@/components/LoomLogo';
+import { Button } from '@/components/ui/button';
 import { useModalLayer } from '@/components/ui/dialog';
 
 type GateMode = 'select' | 'edit';
@@ -19,7 +20,19 @@ type EditorOrigin = 'gate' | 'source';
  * profiles mode, and the focused profile detail editor. It is the startup
  * surface and becomes an overlay when opened from an active profile.
  */
-export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'host' | 'remote' | null }) {
+/**
+ * `besideSidebar` is for a gate opened from inside the running app (Switch or
+ * Edit profiles): it fills the content area and leaves the side nav usable. The
+ * front-door gate (no active profile, first run, locked) still covers the whole
+ * window so nothing behind it can be reached.
+ */
+export default function ProfileGate({
+  initialSetup = null,
+  besideSidebar = false,
+}: {
+  initialSetup?: 'host' | 'remote' | null;
+  besideSidebar?: boolean;
+}) {
   const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, loadError, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const { server: unifiedGateServer, loaded: unifiedGateServerLoaded } = useUnifiedDesktopServer();
   const [mode, setMode] = useState<GateMode>('select');
@@ -60,9 +73,30 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
   }, [activeProfile, closeAndReturn, closeEditor, editorTarget, mode, pinTarget]);
 
   useModalLayer({
+    open: !besideSidebar,
     contentRef: gateRef,
     onEscape: handleGateEscape,
   });
+
+  // Beside the side nav the gate is not a modal layer, so it handles Escape
+  // itself. Dialogs opened inside it are modal layers and consume Escape first.
+  useEffect(() => {
+    if (!besideSidebar) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      handleGateEscape();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [besideSidebar, handleGateEscape]);
+
+  // Navigating from the side nav leaves the profile screens.
+  const openedAtRef = useRef(`${location.pathname}${location.search}`);
+  useEffect(() => {
+    if (!besideSidebar) return;
+    if (`${location.pathname}${location.search}` !== openedAtRef.current) closeGate();
+  }, [besideSidebar, closeGate, location.pathname, location.search]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -185,50 +219,41 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
     <div
       ref={gateRef}
       role="dialog"
-      aria-modal="true"
+      aria-modal={besideSidebar ? undefined : 'true'}
       aria-labelledby="profile-gate-title"
       aria-describedby="profile-gate-description"
       tabIndex={-1}
       data-modal-layer="profile-gate"
-      className="loom-no-drag fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]"
+      className={cn(
+        'loom-no-drag fixed z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]',
+        besideSidebar ? 'loom-profile-gate-beside' : 'inset-0',
+      )}
     >
       <h1 id="profile-gate-title" className="sr-only">Profile selection</h1>
       <p id="profile-gate-description" className="sr-only">Choose or manage the profile that is watching on this device.</p>
       {!editorTarget && <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
         {mode === 'select' && activeProfile && !editorTarget && !pinTarget ? (
-          <button
-            type="button"
-            onClick={closeAndReturn}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={closeAndReturn} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Back
-          </button>
+          </Button>
         ) : mode === 'edit' && !pinTarget ? (
-          <button
-            type="button"
-            onClick={returnTo ? closeAndReturn : () => setMode('select')}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={returnTo ? closeAndReturn : () => setMode('select')} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Back
-          </button>
+          </Button>
         ) : <span />}
         {!editorTarget && !pinTarget && (
           <div className="flex items-center gap-3">
             {mode === 'select' && canManage && (
-              <button
-                type="button"
-                onClick={() => setMode('edit')}
-                className="rounded-lg border border-[var(--loom-surface-3)] px-5 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
-              >
+              <Button type="button" variant="outline" size="sm" onClick={() => setMode('edit')}>
                 Edit Profiles
-              </button>
+              </Button>
             )}
             {mode === 'edit' && (
-              <button type="button" onClick={() => setMode('select')} className="rounded-lg bg-[var(--loom-accent)] px-5 py-2 text-sm font-bold uppercase tracking-wide text-[var(--loom-accent-foreground)] hover:opacity-90">
+              <Button type="button" size="sm" onClick={() => setMode('select')}>
                 Done
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -305,17 +330,19 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
             {mode === 'edit' && canManage && <AddProfileCard onClick={() => { setEditorOrigin('gate'); setEditorTarget('new'); }} />}
           </div>
           {mode === 'edit' && canManage && (
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => void importProfile().then((result) => setTransferMessage(
                 result.ok
                   ? `Imported ${result.profile?.name || 'profile'} · ${result.importedProgress || 0} progress entries · ${result.importedLists || 0} list entries`
                   : result.error || null,
               ))}
-              className="mt-8 rounded-lg border border-[var(--loom-surface-3)] px-5 py-2.5 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
+              className="mt-8"
             >
               Import Profile
-            </button>
+            </Button>
           )}
           {transferMessage && <p className="mt-3 text-center text-xs text-[var(--loom-muted)]">{transferMessage}</p>}
         </main>
@@ -498,7 +525,7 @@ function ProfilePinPad({
             <>
               <p className="text-xs text-[var(--loom-muted)]">This deletes the Owner’s viewing history and personal settings. Shared media and other profiles remain.</p>
               <input value={resetConfirmation} onChange={(event) => setResetConfirmation(event.target.value)} placeholder="Type RESET" className="w-full rounded-lg border border-red-900 bg-[var(--loom-surface-2)] px-3 py-2 text-sm" />
-              <button type="button" disabled={resetConfirmation !== 'RESET'} onClick={() => void onResetOwner(resetConfirmation)} className="rounded-lg bg-red-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Reset Owner profile</button>
+              <button type="button" disabled={resetConfirmation !== 'RESET'} onClick={() => void onResetOwner(resetConfirmation)} className="loom-control-button rounded-[var(--loom-control-radius,0.5rem)] bg-red-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Reset Owner profile</button>
             </>
           )}
         </div>
@@ -682,37 +709,41 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
     <>
       <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
         {setupMode ? (
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             type="button"
             onClick={() => {
               desktopApi.returnToDesktopOnboarding();
               window.location.reload();
             }}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50"
+            className="gap-2"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
-          </button>
+          </Button>
         ) : (
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50"
+            className="gap-2"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => void handleSave()}
           disabled={saveDisabled}
-          className="rounded-lg bg-[var(--loom-accent)] px-5 py-2 text-sm font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:opacity-40"
         >
           {busy ? 'Saving…' : setupMode ? 'Save and continue' : 'Save'}
-        </button>
+        </Button>
       </header>
 
       <main className="flex flex-1 items-center justify-center px-8 pb-[6vh]">
@@ -757,7 +788,7 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
               disabled={avatarBusy}
               aria-pressed={avatarKey.startsWith('data:image/')}
               className={cn(
-                'mt-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--loom-border)] px-3 py-2.5 text-sm text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50',
+                'mt-2 flex items-center justify-center gap-2 loom-control-button rounded-[var(--loom-control-radius,0.5rem)] border border-[var(--loom-border)] px-3 py-2.5 text-sm text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50',
                 avatarKey.startsWith('data:image/') && 'border-[var(--loom-accent)] text-[var(--loom-text)]',
               )}
             >
@@ -955,14 +986,14 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
                       type="button"
                       onClick={() => void handleDelete()}
                       disabled={busy}
-                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      className="loom-control-button rounded-[var(--loom-control-radius,0.5rem)] bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                     >
                       Delete permanently
                     </button>
                     <button
                       type="button"
                       onClick={() => setConfirmingDelete(false)}
-                      className="rounded-lg px-4 py-2 text-sm text-[var(--loom-muted)] hover:text-[var(--loom-text)]"
+                      className="loom-control-button rounded-[var(--loom-control-radius,0.5rem)] px-4 py-2 text-sm text-[var(--loom-muted)] hover:text-[var(--loom-text)]"
                     >
                       Keep profile
                     </button>
@@ -984,7 +1015,7 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
             <div className="mt-4 border-t border-[var(--loom-surface-3)] pt-4">
               <p className="mb-2 text-xs text-[var(--loom-muted)]">Forgotten PIN recovery deletes only the Owner’s personal data. Your library, server settings, paired devices, and other profiles remain.</p>
               <input value={ownerResetConfirmation} onChange={(event) => setOwnerResetConfirmation(event.target.value)} placeholder="Type RESET" className="mb-2 w-full rounded-lg border border-red-900 bg-[var(--loom-surface-2)] px-3 py-2 text-sm" />
-              <button type="button" disabled={ownerResetConfirmation !== 'RESET' || busy} onClick={() => void resetOwnerProfile(ownerResetConfirmation).then(onClose)} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Reset Owner profile</button>
+              <button type="button" disabled={ownerResetConfirmation !== 'RESET' || busy} onClick={() => void resetOwnerProfile(ownerResetConfirmation).then(onClose)} className="loom-control-button rounded-[var(--loom-control-radius,0.5rem)] bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Reset Owner profile</button>
             </div>
           )}
         </div>

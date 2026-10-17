@@ -66,6 +66,7 @@ typedef struct {
 @property(nonatomic, strong) LMSignal *signal;
 @property(nonatomic, strong) LMSubtitleBlur *subtitleBlur;
 - (void)renderFrame;
+- (void)disposeRenderer;
 @end
 
 @interface LMEngine : NSObject {
@@ -115,6 +116,39 @@ static void renderUpdate(void *context) {
     [self setNeedsDisplay:YES];
 }
 - (void)drawRect:(NSRect)rect { (void)rect; [self renderFrame]; }
+- (void)disposeRenderer {
+    NSCAssert(NSThread.isMainThread, @"A libmpv render view must be disposed on AppKit's thread.");
+    self.signal.view = nil;
+    NSOpenGLContext *context = self.openGLContext;
+    [context makeCurrentContext];
+    if (renderer) {
+        api.mpv_render_context_set_update_callback(renderer, NULL, NULL);
+        api.mpv_render_context_free(renderer);
+        renderer = NULL;
+    }
+    [self.subtitleBlur dispose];
+    self.subtitleBlur = nil;
+    self.signal = nil;
+    if (context && self.window) {
+        // AppKit can cache the last presented backing pair after GL detaches.
+        // Retire the full-size image while this hidden view still has a window.
+        [self setFrameSize:NSMakeSize(1, 1)];
+        [context update];
+        [context makeCurrentContext];
+        glViewport(0, 0, 1, 1);
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        [context flushBuffer];
+        glFinish();
+    } else if (context) glFlush();
+    [self removeFromSuperview];
+    [context clearDrawable];
+    // AppKit's thread retains its current context independently of the view.
+    // Detach both owners so closing releases the Retina drawable and buffers.
+    if (NSOpenGLContext.currentContext == context) [NSOpenGLContext clearCurrentContext];
+    [self clearGLContext];
+}
 - (void)renderFrame {
     if (!renderer) return;
     [self.openGLContext makeCurrentContext];
@@ -177,11 +211,18 @@ LM_EXPORT void *loom_mpv_create(const char *path, char *error, size_t capacity) 
             {"input-vo-keyboard", "no"}, {"input-media-keys", "no"},
             {"idle", "yes"}, {"keep-open", "yes"}, {"force-window", "no"},
             {"osd-level", "0"}, {"audio-display", "no"}, {"hwdec", "auto-safe"},
+            // Extra libavcodec hardware threads retain full-size decoder state.
+            // One worker reduces 4K VideoToolbox memory; software fallback keeps
+            // its separate automatic thread count and rendering stays unchanged.
+            {"hwdec-threads", "1"},
             {"sub-auto", "no"}, {"audio-file-auto", "no"}, {"cover-art-auto", "no"},
             {"stop-screensaver", "no"}, {"video-timing-offset", "0"}
         };
         for (size_t i = 0; i < sizeof(options) / sizeof(options[0]); ++i) {
             int code = engine->api.mpv_set_option_string(engine->player, options[i][0], options[i][1]);
+            // Before mpv 0.41, hardware decoding already used one thread and
+            // this option did not exist. Keep those API-2 runtimes usable.
+            if (code == MPV_ERROR_OPTION_NOT_FOUND && strcmp(options[i][0], "hwdec-threads") == 0) continue;
             if (code < 0) {
                 copyError(error, capacity, [NSString stringWithFormat:@"libmpv option %s: %s", options[i][0], engine->api.mpv_error_string(code)]);
                 return NULL;
@@ -217,8 +258,8 @@ LM_EXPORT int loom_mpv_attach(void *opaque, void *parent, char *error, size_t ca
         LMEngine *engine = (__bridge LMEngine *)opaque;
         __block int result = 0;
         mainSync(^{
+            if (engine->view) { result = -1; copyError(error, capacity, @"This engine already owns a renderer."); return; }
             @try {
-                if (engine->view) { result = -1; copyError(error, capacity, @"This engine already owns a renderer."); return; }
                 NSView *host = (__bridge NSView *)parent;
                 NSOpenGLPixelFormatAttribute attributes[] = {
                     NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
@@ -228,6 +269,7 @@ LM_EXPORT int loom_mpv_attach(void *opaque, void *parent, char *error, size_t ca
                 NSOpenGLPixelFormat *format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
                 if (!format) { result = -1; copyError(error, capacity, @"No supported OpenGL pixel format."); return; }
                 LMView *view = [[LMView alloc] initWithFrame:host.bounds pixelFormat:format];
+                engine->view = view;
                 if (!view || !view.openGLContext) { result = -1; copyError(error, capacity, @"Could not create the libmpv render view."); return; }
                 view->api = engine->api;
                 view.subtitleBlur = [LMSubtitleBlur new];
@@ -239,7 +281,6 @@ LM_EXPORT int loom_mpv_attach(void *opaque, void *parent, char *error, size_t ca
                 mpv_render_param parameters[] = {{LM_API_TYPE, "opengl"}, {LM_GL_INIT, &gl}, {0, NULL}};
                 result = engine->api.mpv_render_context_create(&view->renderer, engine->player, parameters);
                 if (result < 0) { copyError(error, capacity, @(engine->api.mpv_error_string(result))); return; }
-                engine->view = view;
                 view.signal = [LMSignal new];
                 LMSignal *signal = view.signal;
                 atomic_init(&signal->pending, false);
@@ -250,6 +291,11 @@ LM_EXPORT int loom_mpv_attach(void *opaque, void *parent, char *error, size_t ca
             } @catch (NSException *exception) {
                 result = -1;
                 copyError(error, capacity, exception.reason ?: @"The native render view could not attach.");
+            } @finally {
+                if (result < 0) {
+                    [engine->view disposeRenderer];
+                    engine->view = nil;
+                }
             }
         });
         return result;
@@ -435,18 +481,8 @@ LM_EXPORT int loom_mpv_destroy(void *opaque) {
     @autoreleasepool {
         LMEngine *engine = (__bridge_transfer LMEngine *)opaque;
         mainSync(^{
-            LMView *view = engine->view;
-            if (view) {
-                view.signal.view = nil;
-                [view.openGLContext makeCurrentContext];
-                engine->api.mpv_render_context_set_update_callback(view->renderer, NULL, NULL);
-                engine->api.mpv_render_context_free(view->renderer);
-                [view.subtitleBlur dispose];
-                view->renderer = NULL;
-                [view removeFromSuperview];
-                [view.openGLContext clearDrawable];
-                engine->view = nil;
-            }
+            [engine->view disposeRenderer];
+            engine->view = nil;
         });
         // LMEngine dealloc now owns the only core and dlopen references.
     }

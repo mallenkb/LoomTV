@@ -370,7 +370,7 @@ function DesktopBootstrap() {
  * has been chosen for this session.
  */
 function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode | null }) {
-  const { activeProfile, gateOpen, generation, isLoading } = useProfiles();
+  const { activeProfile, gateOpen, gateOpenedFromApp, generation, isLoading } = useProfiles();
   const [firstRunSetupDismissed, setFirstRunSetupDismissed] = useState(false);
   useEffect(() => {
     if (!isLoading && activeProfile && activeProfile.type !== 'owner') setFirstRunSetupDismissed(true);
@@ -387,7 +387,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
           onFirstRunLibrarySetupDismissed={() => setFirstRunSetupDismissed(true)}
         />
       </LibraryProvider>
-      {gateOpen && <ProfileGate />}
+      {gateOpen && <ProfileGate besideSidebar={gateOpenedFromApp} />}
     </>
   );
 }
@@ -401,7 +401,7 @@ function AppShell({
 }) {
   const shouldReduceMotion = useReducedMotion();
   const { state: libraryState } = useLibrary();
-  const { activeProfile, gateOpen, openGate } = useProfiles();
+  const { activeProfile, gateOpen, gateOpenedFromApp, openGate } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
@@ -437,10 +437,15 @@ function AppShell({
     || location.hash.includes('/settings');
   const showContinueBarOnRoute = ['/', '/anime', '/tv', '/movies'].includes(location.pathname);
   const showLibraryFilter = !nowPlaying && !gateOpen && isLibraryFilterPath(location.pathname);
-  const hideContinueBar = Boolean(nowPlaying) || !showContinueBarOnRoute;
+  const hideContinueBar = Boolean(nowPlaying) || gateOpen || !showContinueBarOnRoute;
   const reserveContinueBarSpace = showContinueBarOnRoute && !nowPlaying;
   const librarySetupVisible = librarySetupOpen && activeProfile?.type === 'owner';
   const appUnderlayHidden = Boolean(nowPlaying || gateOpen || librarySetupVisible);
+  // A gate opened from inside the app sits beside the side nav, so only the
+  // page under it is hidden and the nav stays reachable. The startup and
+  // locked gates still cover everything.
+  const sidebarHidden = Boolean(nowPlaying || librarySetupVisible || (gateOpen && !gateOpenedFromApp));
+  const pageUnderGate = gateOpenedFromApp && !sidebarHidden;
   const markHomeReady = useCallback(() => {
     setHomeReady(true);
     markAppReady();
@@ -583,7 +588,7 @@ function AppShell({
       <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
       {appStartupReady && !homeReady && <StartupSplash />}
       <ArtworkSuspensionContext.Provider value={artworkSuspended}>
-      <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
+      <div className="loom-app-underlay contents" aria-hidden={sidebarHidden ? 'true' : undefined}>
       <Sidebar />
       <div
         className={`loom-main-drag-region${isSettingsRoute ? ' loom-main-drag-region-settings' : ''}`}
@@ -591,6 +596,8 @@ function AppShell({
       />
       <main
         className="flex-1 overflow-hidden"
+        inert={pageUnderGate ? true : undefined}
+        aria-hidden={pageUnderGate ? 'true' : undefined}
         // The now-playing bar is 93px tall before its shell padding. Keep a
         // full breathing band below every library grid so its final row can be
         // scrolled clear of the fixed bar.

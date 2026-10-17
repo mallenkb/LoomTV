@@ -22,7 +22,6 @@ export default function AboutSettingsSection({ controller }: { controller: About
   const update = controller.updateState;
   const status = update?.status;
   const version = update?.currentVersion ?? APP_VERSION;
-  const updateReady = status === 'available' || status === 'downloaded';
   const wasChecking = useRef(false);
   const { ffmpegStatus: ffmpeg, libvlcAvailability, mpvAvailability, refreshLibvlcAvailability, refreshMpvAvailability, isRemoteLibraryMode } = controller;
 
@@ -82,7 +81,7 @@ export default function AboutSettingsSection({ controller }: { controller: About
           <Button
             type="button"
             size="sm"
-            variant={updateReady ? 'default' : 'outline'}
+            variant="default"
             disabled={controller.isUpdateBusy && status !== 'downloading'}
             onClick={() => void controller.handleUpdateAction()}
           >

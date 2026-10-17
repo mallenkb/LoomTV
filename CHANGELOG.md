@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.23](docs/releases/v2.0.23.md)
+
+Reduces libmpv memory during 4K playback and after closing, limits Chromium GPU use for paused native video, and keeps navigation available while switching profiles.
+
 ### [2.0.22](docs/releases/v2.0.22.md)
 
 Restores packaged libmpv playback, serves smaller artwork, trims Mac packages, hardens Electron releases, and defers LibVLC warmup.

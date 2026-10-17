@@ -23,7 +23,10 @@ function fixture() {
   const runtime = {
     libraryPath: '/mock/libmpv',
     api: {
-      create: () => 1, attach: () => 0, command: () => 0, destroy: () => undefined,
+      create: () => 1, attach: () => 0, command: () => 0,
+      destroy: Object.assign(() => 0, {
+        async: (_engine: number, done: (error: Error | null, result: number) => void) => done(null, 0),
+      }),
       pollInto: (_engine: number, output: Buffer) => {
         if (queued.length === 0) return 0;
         return output.write(JSON.stringify(queued.splice(0)));
@@ -41,7 +44,7 @@ function fixture() {
     './mpvPlaybackHelpers.ts': helpers,
     './libvlcPlayback.ts': {
       loadKoffi: () => ({}),
-      createNativeViewHost: () => ({ drawable: 1, destroy: () => undefined }),
+      createNativeViewHost: () => ({ drawable: 1, setVisible: () => undefined, destroy: () => undefined }),
     },
     './nativePlaybackPower.ts': {
       releaseNativePlaybackDisplaySleep: () => undefined,

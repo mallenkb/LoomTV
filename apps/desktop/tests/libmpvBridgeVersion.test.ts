@@ -47,6 +47,29 @@ test('every bridge function the host binds is declared in bridge.h', () => {
   assert.deepEqual(bound.filter((name) => !declared.includes(name)), []);
 });
 
+// Opt in on a MacBook so headless CI does not need an AppKit display session.
+test('native renderer teardown releases its AppKit and OpenGL owners', {
+  skip: process.platform !== 'darwin' || process.env.LOOMTV_NATIVE_PLAYBACK_TESTS !== '1',
+}, (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-render-lifecycle-'));
+  try {
+    const source = path.join(desktopRoot, 'native/libmpv/render-bridge');
+    const executable = path.join(directory, 'lifecycle');
+    const compile = spawnSync('xcrun', ['clang', '-std=c11', '-fobjc-arc', '-fblocks',
+      '-Wno-deprecated-declarations', '-I', path.join(source, 'include'),
+      path.join(source, 'tests/lifecycle.m'), '-framework', 'Cocoa', '-framework', 'OpenGL',
+      '-framework', 'CoreGraphics', '-o', executable], { encoding: 'utf8' });
+    assert.equal(compile.status, 0, compile.stderr);
+    const runtime = path.join(desktopRoot, 'resources/mpv/lib/libmpv.dylib');
+    const run = spawnSync(executable, fs.existsSync(runtime) ? [runtime] : [], { encoding: 'utf8', timeout: 15_000 });
+    if (run.status === 77) { t.skip(run.stdout.trim()); return; }
+    assert.equal(run.status, 0, run.stderr || String(run.error || run.signal));
+    assert.match(run.stdout, /PASS: repeated teardown, duplicate attach and failed attach/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('bridgeProblems rejects a bridge recorded at another version', () => {
   const all = () => new Set(bridge.expectedBridgeExports());
   const stale = payload({ bridge: { file: bridge.BRIDGE_NAME, sha256: '0'.repeat(64) } });
