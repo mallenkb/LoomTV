@@ -101,7 +101,7 @@ export default function PlayerMarkerEditor({
         {error && <p className="mt-3 text-sm text-red-300" role="alert">{error}</p>}
         <div className="mt-5 flex items-center justify-between gap-3">
           <div className="flex gap-1">
-            <button type="button" disabled={saving} onClick={onReset} className="rounded-md px-2 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-50">Reset</button>
+            <button type="button" disabled={saving} onClick={onReset} className="rounded-md bg-white/10 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-white/[0.16] disabled:opacity-50">Reset</button>
             <button type="button" disabled={saving} onClick={onUndo} className="rounded-md px-2 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-50">Undo</button>
             {editorSegment?.source !== 'manual' && <button type="button" disabled={saving || !editorSegment} onClick={onReject} className="rounded-md px-2 py-2 text-xs text-red-300 hover:bg-white/10 disabled:opacity-50">Reject</button>}
             {canRestore && <button type="button" disabled={saving} onClick={onRestore} className="rounded-md px-2 py-2 text-xs text-emerald-300 hover:bg-white/10 disabled:opacity-50">Restore</button>}

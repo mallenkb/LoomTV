@@ -4,6 +4,8 @@ import type { SubtitleStyleSettings } from './types';
 import { MAX_SOFT_BOX_OPACITY, MIN_SOFT_BOX_OPACITY, selectedSubtitleStylePreset, type SubtitleStylePreset } from './subtitleStylePresets';
 import StyledSubtitleText from './StyledSubtitleText';
 import { DEFAULT_SUBTITLE_STYLE } from './constants';
+import { RulerSlider } from '@/components/ui/ruler-slider';
+import { formatSyncOffset, type OnlineSubtitleTiming } from './syncOffset';
 
 // Corners: the card matches the track list (rounded-lg, 12px in this theme);
 // tiles and toggle tracks are 8px, and controls inside them 6px.
@@ -20,8 +22,11 @@ export const SUBTITLE_SIZE_STEPS = [
 // Position is the distance from the top in percent. Raised clears burned-in
 // captions; High clears a lower-third or on-screen graphics.
 export const SUBTITLE_POSITION_STEPS = [
-  { label: 'Bottom', value: DEFAULT_SUBTITLE_STYLE.position }, { label: 'Raised', value: 88 }, { label: 'High', value: 78 },
+  { label: 'Bottom', value: DEFAULT_SUBTITLE_STYLE.position }, { label: 'Raised', value: 92 }, { label: 'High', value: 86 },
 ] as const;
+
+// The Height slider in More options goes up to 40% above the bottom edge.
+const MAX_SUBTITLE_HEIGHT_PERCENT = 40;
 
 // How far the preview lifts its text for each position step.
 const PREVIEW_POSITION_PADDING: Record<(typeof SUBTITLE_POSITION_STEPS)[number]['label'], string> = {
@@ -59,12 +64,14 @@ function Segmented<T extends { label: string; value: number }>({ label, steps, v
   );
 }
 
-export default function SubtitleAppearancePanel({ style, updateStyle, applyPreset, previewImage }: {
+export default function SubtitleAppearancePanel({ style, updateStyle, applyPreset, previewImage, timing }: {
   style: SubtitleStyleSettings;
   /** A still from what is playing, so the preview shows subtitles over a real scene. */
   previewImage?: string;
   updateStyle: (key: keyof SubtitleStyleSettings, value: number | string | boolean) => void;
   applyPreset: (preset: SubtitleStylePreset) => void;
+  /** Present while an online subtitle is showing; adds Timing to More options. */
+  timing?: OnlineSubtitleTiming;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const selected = selectedSubtitleStylePreset(style);
@@ -79,7 +86,7 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
     <section aria-labelledby="subtitle-appearance-heading">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 id="subtitle-appearance-heading" className="text-xs font-semibold text-white">Appearance</h3>
-        <button type="button" onClick={reset} className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
+        <button type="button" onClick={reset} className="rounded-[6px] bg-white/10 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-white/[0.16]">Reset</button>
       </div>
       <div className="rounded-lg bg-white/[0.04] p-3">
         <div className={`flex h-28 items-end justify-center overflow-hidden rounded-[8px] bg-slate-500/40 bg-cover bg-center px-2 transition-[padding] ${PREVIEW_POSITION_PADDING[nearestStep(SUBTITLE_POSITION_STEPS, style.position).label]}`}
@@ -123,21 +130,33 @@ export default function SubtitleAppearancePanel({ style, updateStyle, applyPrese
                       <label key={key} className="flex items-center gap-1.5 text-sm text-white/90">
                         <input type="color" value={/^#[0-9a-f]{6}$/i.test(style[key]) ? style[key] : '#000000'}
                           onChange={event => updateStyle(key, event.target.value)}
-                          className="h-8 w-8 cursor-pointer rounded-[6px] border border-white/40 bg-transparent p-0.5" />
+                          className="h-8 w-8 cursor-pointer rounded-[6px]" />
                         {label}
                       </label>
                     ))}
                 </div>
               </div>
+              {timing && (
+                <RulerSlider label="Timing" min={-10} max={10} step={0.25} value={timing.delay} defaultValue={0}
+                  format={formatSyncOffset}
+                  onValueChange={timing.setDelay}
+                  onKeyDown={event => event.stopPropagation()}
+                  aria-valuetext={`${Math.abs(timing.delay).toFixed(2)} seconds ${timing.delay < 0 ? 'earlier' : timing.delay > 0 ? 'later' : 'offset'}`} />
+              )}
+              {/* Fine-tunes the position presets; the slider reads as height above the bottom edge. */}
+              <RulerSlider label="Height" min={0} max={MAX_SUBTITLE_HEIGHT_PERCENT} step={1}
+                value={Math.round(100 - style.position)}
+                defaultValue={100 - DEFAULT_SUBTITLE_STYLE.position}
+                marks={SUBTITLE_POSITION_STEPS.map(step => 100 - step.value)}
+                format={height => `${height}%`}
+                onValueChange={height => updateStyle('position', 100 - height)}
+                aria-valuetext={`${Math.round(100 - style.position)}% from the bottom`} />
               {selected === 'soft' && (
-                <label className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-white/90">Box opacity</span>
-                  <input type="range" min={MIN_SOFT_BOX_OPACITY * 100} max={MAX_SOFT_BOX_OPACITY * 100} step={5}
-                    value={Math.round(style.backgroundOpacity * 100)}
-                    onChange={event => updateStyle('backgroundOpacity', Number(event.target.value) / 100)}
-                    aria-valuetext={`${Math.round(style.backgroundOpacity * 100)}%`}
-                    className="w-36 accent-[var(--loom-accent)]" />
-                </label>
+                <RulerSlider label="Box opacity" min={MIN_SOFT_BOX_OPACITY * 100} max={MAX_SOFT_BOX_OPACITY * 100} step={5}
+                  value={Math.round(style.backgroundOpacity * 100)}
+                  defaultValue={MAX_SOFT_BOX_OPACITY * 100}
+                  format={opacity => `${opacity}%`}
+                  onValueChange={opacity => updateStyle('backgroundOpacity', opacity / 100)} />
               )}
             </div>
           )}

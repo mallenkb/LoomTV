@@ -42,6 +42,13 @@ export function usePlaybackProgressDisplay(
       const transform = `scaleX(${progressRatio})`;
       if (progressFillRef.current.style.transform !== transform) progressFillRef.current.style.transform = transform;
     }
+    if (seekSliderRef.current) {
+      // Clips the full-color layer of the timeline marker bands to the played part.
+      const played = `${progressPercent}%`;
+      if (seekSliderRef.current.style.getPropertyValue('--loom-progress') !== played) {
+        seekSliderRef.current.style.setProperty('--loom-progress', played);
+      }
+    }
     if (progressThumbRef.current) {
       const left = `${progressPercent}%`;
       if (progressThumbRef.current.style.left !== left) progressThumbRef.current.style.left = left;

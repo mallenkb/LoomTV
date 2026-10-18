@@ -13,6 +13,7 @@ import {
   validateArtworkFile,
   validateArtworkBytes,
 } from '@/lib/artworkInputValidation';
+import { RulerSlider } from '@/components/ui/ruler-slider';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
 export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster' | 'logo', string>>;
@@ -1111,52 +1112,49 @@ export default function ArtworkEditorControls({
                   <span>{artworkPreview.width} x {artworkPreview.height}</span>
                 </div>
                 <div className="grid gap-4 rounded-lg bg-[var(--loom-surface-3)] p-4">
-                  <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">
-                    Zoom
-                    <input
-                      type="range"
-                      min={1}
-                      max={3}
-                      step={0.01}
-                      value={artworkPreview.zoom}
-                      onChange={(event) => updateArtworkPreview({ zoom: Number(event.target.value) })}
-                      className="w-full accent-[var(--loom-accent)]"
-                    />
-                  </label>
+                  <RulerSlider
+                    tone="app"
+                    label="Zoom"
+                    min={1}
+                    max={3}
+                    step={0.01}
+                    value={artworkPreview.zoom}
+                    defaultValue={1}
+                    format={(zoom) => `${Math.round(zoom * 100)}%`}
+                    onValueChange={(zoom) => updateArtworkPreview({ zoom })}
+                  />
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">
-                      Horizontal
-                      <input
-                        type="range"
-                        min={-50}
-                        max={50}
-                        step={1}
-                        value={artworkPreview.offsetX}
-                        onChange={(event) => updateArtworkPreview({ offsetX: Number(event.target.value) })}
-                        className="w-full accent-[var(--loom-accent)]"
-                      />
-                    </label>
-                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">
-                      Vertical
-                      <input
-                        type="range"
-                        min={-50}
-                        max={50}
-                        step={1}
-                        value={artworkPreview.offsetY}
-                        onChange={(event) => updateArtworkPreview({ offsetY: Number(event.target.value) })}
-                        className="w-full accent-[var(--loom-accent)]"
-                      />
-                    </label>
+                    <RulerSlider
+                      tone="app"
+                      label="Horizontal"
+                      min={-50}
+                      max={50}
+                      step={1}
+                      value={artworkPreview.offsetX}
+                      defaultValue={0}
+                      format={(offset) => `${offset > 0 ? '+' : ''}${offset}`}
+                      onValueChange={(offsetX) => updateArtworkPreview({ offsetX })}
+                    />
+                    <RulerSlider
+                      tone="app"
+                      label="Vertical"
+                      min={-50}
+                      max={50}
+                      step={1}
+                      value={artworkPreview.offsetY}
+                      defaultValue={0}
+                      format={(offset) => `${offset > 0 ? '+' : ''}${offset}`}
+                      onValueChange={(offsetY) => updateArtworkPreview({ offsetY })}
+                    />
                   </div>
                   <div className="flex justify-end">
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="secondary"
                       onClick={() => updateArtworkPreview({ zoom: 1, offsetX: 0, offsetY: 0 })}
-                      className="h-8 px-3 text-xs text-[var(--loom-muted)] hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+                      className="h-8 px-3 text-xs hover:bg-[color-mix(in_oklab,var(--loom-text)_12%,transparent)]"
                     >
-                      Reset Crop
+                      Reset crop
                     </Button>
                   </div>
                 </div>

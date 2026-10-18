@@ -77,6 +77,9 @@ export const METADATA_ATTRIBUTIONS = [
   { name: 'Fanart.tv', details: 'Clearlogos and media-center artwork.', url: 'https://fanart.tv/' },
   { name: 'Cinemeta / Stremio', details: 'Library metadata and artwork without an API key, plus movie and TV discovery when no TMDB key is configured.', url: 'https://v3-cinemeta.strem.io/' },
   { name: 'OpenSubtitles v3 / Stremio', details: 'Online subtitles from OpenSubtitles, delivered by the official Stremio v3 add-on. Discovered through the Stremio official add-on registry.', url: 'https://github.com/Stremio/stremio-official-addons' },
+  { name: 'TheIntroDB', details: 'Intro, recap, and credits timestamps for the skip buttons on movies and TV.', url: 'https://theintrodb.org/' },
+  { name: 'AniSkip', details: 'Opening and ending timestamps for the skip buttons on anime.', url: 'https://aniskip.com/' },
+  { name: 'SkipDB', details: 'Community intro and credits timestamps used as another source for the skip buttons.', url: 'https://skipdb.tv/' },
 ];
 
 export function normalizeProviderId(value: string): string {

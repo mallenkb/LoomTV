@@ -96,6 +96,10 @@
   --loom-media-scrim-strong: rgba(0, 0, 0, 0.70);
   --loom-media-track: rgba(255, 255, 255, 0.16);
 
+  /* Intro, recap and credits ranges on the seek bar: a bright pastel tint of
+     the theme accent, so it reads against both the track and the fill. */
+  --loom-segment-marker: color-mix(in oklab, var(--loom-accent) 45%, white);
+
   /* Star ratings are a fixed semantic gold, not the theme accent. */
   --loom-rating: #f5c451;
   --loom-rating-surface: rgba(245, 196, 81, 0.15);
@@ -308,59 +312,10 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   overflow: hidden;
 }
 
-.loom-volume-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 24px;
-  background: transparent;
-  cursor: pointer;
-}
 
-.loom-volume-slider::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 9999px;
-  background:
-    linear-gradient(
-      90deg,
-      var(--loom-accent) 0%,
-      var(--loom-accent) var(--loom-volume-pct, 100%),
-      rgba(255, 255, 255, 0.28) var(--loom-volume-pct, 100%),
-      rgba(255, 255, 255, 0.28) 100%
-    );
-}
 
-.loom-volume-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
 
-.loom-volume-slider::-moz-range-track {
-  height: 4px;
-  border-radius: 9999px;
-  background:
-    linear-gradient(
-      90deg,
-      var(--loom-accent) 0%,
-      var(--loom-accent) var(--loom-volume-pct, 100%),
-      rgba(255, 255, 255, 0.28) var(--loom-volume-pct, 100%),
-      rgba(255, 255, 255, 0.28) 100%
-    );
-}
 
-.loom-volume-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: none;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
 
 .line-clamp-3 {
   display: -webkit-box;
@@ -4587,4 +4542,28 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 /* Modal controls override route-level capsule styles, including embedded forms. */
 :root .loom-modal-surface[role="dialog"] :is(button:not([data-variant]):not(.loom-control-button), input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [role="combobox"], [role="radio"], [role="tab"], label:has(input[type="radio"]), [data-ui-chip]) {
   border-radius: var(--loom-modal-control-radius) !important;
+}
+
+/* Color inputs render as one filled swatch: no inner box, padding or border
+   from the native control, just a hairline so white and black stay visible. */
+input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+  outline: 1px solid rgb(255 255 255 / 0.18);
+  outline-offset: -1px;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: inherit;
+}
+input[type="color"]::-moz-color-swatch {
+  border: 0;
+  border-radius: inherit;
 }

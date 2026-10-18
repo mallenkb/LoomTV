@@ -32,6 +32,7 @@ import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import { normalizeAnimeCast } from '@/shared/animeCast';
+import SeasonActionsMenu from '@/components/SeasonActionsMenu';
 import DetailHeroActions from '@/components/DetailHeroActions';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localEpisodeWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
@@ -1215,7 +1216,7 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
                       aria-controls={`season-${season.number}-episodes`}
                       data-shared-highlight-item
                       data-shared-highlight-id={String(season.number)}
-                      className={`relative z-10 flex w-full items-center text-left p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${hasFiles ? 'pr-28' : ''}`}
+                      className={`relative z-10 flex w-full items-center text-left p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${hasFiles ? 'pr-40' : ''}`}
                     >
                       <span className="flex items-center gap-3">
                         <span className="text-[var(--loom-text)]">
@@ -1232,12 +1233,14 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
                       </span>
                     </button>
                       {hasFiles && (
+                        <div className="absolute right-4 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1.5">
+                        {!isRemoteContent && <SeasonActionsMenu showId={show.id} season={season.number} seasonTitle={seasonTitle} />}
                         <Button
                           size="sm"
                           disabled={seasonIsCompleted}
                           onClick={seasonIsCompleted ? undefined : () => handlePlaySeason(season.number)}
                           aria-label={seasonIsCompleted ? `${seasonTitle} completed` : `${seasonIsResume ? 'Resume' : 'Play'} ${seasonTitle}`}
-                          className={`loom-season-play-button ${seasonIsCompleted ? 'loom-season-play-button-complete' : ''} absolute right-4 top-1/2 z-20 h-7 -translate-y-1/2 overflow-hidden rounded-full px-3 text-xs gap-1 whitespace-nowrap ${seasonIsCompleted
+                          className={`loom-season-play-button ${seasonIsCompleted ? 'loom-season-play-button-complete' : ''} relative h-7 overflow-hidden rounded-full px-3 text-xs gap-1 whitespace-nowrap ${seasonIsCompleted
                             ? 'border border-emerald-400/45 bg-emerald-700 text-white shadow-[0_0_12px_rgba(16,185,129,0.16)] disabled:cursor-default disabled:opacity-100'
                             : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]'
                           }`}
@@ -1250,6 +1253,7 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
                             {seasonIsCompleted ? 'Completed' : seasonIsResume ? 'Resume' : 'Play'}
                           </span>
                         </Button>
+                        </div>
                       )}
                     </div>
 

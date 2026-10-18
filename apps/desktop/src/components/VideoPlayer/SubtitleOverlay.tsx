@@ -3,7 +3,11 @@ import { activeSubtitleText, type SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
 import { subtitleCueSeconds, subtitleMediaSeconds } from './playbackClock';
 import StyledSubtitleText from './StyledSubtitleText';
+import { DEFAULT_SUBTITLE_STYLE } from './constants';
 import type { SubtitleBlurRegion } from '../../shared/playbackProtocol';
+
+/** Seek row (24px + 8px gap) plus the 56px button row, with a small margin. */
+const CONTROL_BAR_CLEARANCE_PX = 100;
 
 interface SubtitleOverlayProps {
   controlsVisible: boolean;
@@ -138,11 +142,16 @@ function SubtitleOverlay({
   if (!visible || !text) return null;
 
   const baseBottomPx = bounds.viewportHeight * ((100 - verticalPosition) / 100);
-  const desiredBottomPx = baseBottomPx + (controlsVisible ? 128 : 0);
+  // While the controls show, every position lifts by what the Bottom preset
+  // needs to clear the seek bar, then drops back by the same amount.
+  const bottomPresetPx = bounds.viewportHeight * ((100 - DEFAULT_SUBTITLE_STYLE.position) / 100);
+  const controlsLiftPx = controlsVisible ? Math.max(0, CONTROL_BAR_CLEARANCE_PX - bottomPresetPx) : 0;
   const maxBottomPx = Math.max(0, bounds.viewportHeight - bounds.blockHeight - 16);
   const bottom = bounds.viewportHeight > 0
-    ? `${Math.min(desiredBottomPx, maxBottomPx)}px`
-    : `calc(${100 - verticalPosition}% + ${controlsVisible ? 128 : 0}px)`;
+    ? `${Math.min(baseBottomPx + controlsLiftPx, maxBottomPx)}px`
+    : controlsVisible
+      ? `calc(${100 - verticalPosition}% + max(0px, ${CONTROL_BAR_CLEARANCE_PX}px - ${100 - DEFAULT_SUBTITLE_STYLE.position}%))`
+      : `${100 - verticalPosition}%`;
 
   return (
     <div

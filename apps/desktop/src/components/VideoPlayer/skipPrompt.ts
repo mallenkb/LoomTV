@@ -79,3 +79,43 @@ export function pinVisibleTarget(
   }
   return freshTargetMs;
 }
+
+export type TimelineSegmentBand = {
+  key: string;
+  type: SkipPromptSegmentType;
+  leftPct: number;
+  widthPct: number;
+};
+
+/**
+ * Positions each known marker on the seek bar as a percentage of the player's
+ * duration. Broader ranges come first so a credits band never hides the
+ * ending, recap or intro drawn inside it.
+ */
+export function timelineSegmentBands<T extends SkipPromptSegment & { id?: string }>(
+  segments: readonly T[],
+  durationSeconds: number,
+): TimelineSegmentBand[] {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
+  const durationMs = durationSeconds * 1000;
+  const bands: (TimelineSegmentBand & { lengthMs: number })[] = [];
+  segments.forEach((segment, index) => {
+    if (!isKnownSkipPromptType(segment.type)) return;
+    if (!Number.isFinite(segment.startMs)) return;
+    const startMs = Math.max(0, segment.startMs);
+    const rawEndMs = segment.endMs ?? segment.mediaDurationMs;
+    if (!Number.isFinite(rawEndMs)) return;
+    const endMs = Math.min(durationMs, rawEndMs);
+    if (endMs <= startMs) return;
+    bands.push({
+      key: segment.id ?? `${segment.type}-${index}`,
+      type: segment.type,
+      leftPct: (startMs / durationMs) * 100,
+      widthPct: ((endMs - startMs) / durationMs) * 100,
+      lengthMs: endMs - startMs,
+    });
+  });
+  return bands
+    .sort((left, right) => right.lengthMs - left.lengthMs)
+    .map(({ lengthMs: _lengthMs, ...band }) => band);
+}

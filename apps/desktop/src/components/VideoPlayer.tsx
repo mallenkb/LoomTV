@@ -100,7 +100,7 @@ import { useStillWatching } from './VideoPlayer/useStillWatching';
 import PlayerControlBar from './VideoPlayer/PlayerControlBar';
 import PlayerEpisodePanel from './VideoPlayer/PlayerEpisodePanel';
 import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
-import PlayerSettingsPanel from './VideoPlayer/PlayerSettingsPanel';
+import PlayerSettingsPanel, { type SkipRescanState } from './VideoPlayer/PlayerSettingsPanel';
 import OpenSubtitlesV3Panel, { type PanelSubtitle } from './VideoPlayer/OpenSubtitlesV3Panel';
 import { findAddonSubtitles, type AddonSubtitleOption } from '../lib/addonPlayback';
 import type { SubtitleVideo } from '../lib/openSubtitlesV3';
@@ -114,7 +114,7 @@ import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyl
 import { subtitleBackgroundColor } from '../shared/subtitleBackground.ts';
 import type { SubtitleBlurRegion } from '../shared/playbackProtocol';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
-import { activeSkipSegmentAt, buildSkipAction, pinVisibleTarget, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
+import { activeSkipSegmentAt, buildSkipAction, pinVisibleTarget, shouldShowSkipPrompt, skipPromptLabel, timelineSegmentBands } from './VideoPlayer/skipPrompt';
 import { isProfileSelectionRequiredError } from './VideoPlayer/playbackProfileGuard';
 import {
   groupEpisodesBySeason,
@@ -191,6 +191,9 @@ type PlaybackTimingAttempt = {
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
+const SKIP_RESCAN_POLL_MS = 2000;
+const SKIP_RESCAN_TIMEOUT_MS = 10 * 60_000;
 
 export default function VideoPlayer({
   playbackRequestId,
@@ -710,6 +713,50 @@ export default function VideoPlayer({
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
     };
   }, [currentEpisode, currentSeason, episodeFiles.length, episodes.length, filePath, mediaId]);
+
+  // Re-runs local intro and credits detection for what's playing, waits for
+  // that job to finish, then reloads the markers onto the timeline.
+  const [skipRescan, setSkipRescan] = useState<SkipRescanState>({ state: 'idle' });
+  const skipRescanTokenRef = useRef(0);
+  useEffect(() => {
+    skipRescanTokenRef.current += 1;
+    setSkipRescan({ state: 'idle' });
+  }, [currentEpisode, currentSeason, filePath, mediaId]);
+  useEffect(() => () => { skipRescanTokenRef.current += 1; }, []);
+  const rescanSkipMarkers = useCallback(async () => {
+    if (!mediaId) return;
+    const token = skipRescanTokenRef.current += 1;
+    const current = () => skipRescanTokenRef.current === token;
+    const request = episodes.length > 0 && episodeFiles.length > 0
+      ? { mediaId, season: currentSeason, episode: currentEpisode }
+      : { mediaId };
+    setSkipRescan({ state: 'scanning' });
+    try {
+      const before = await desktopApi.getLocalSegmentAnalysisStatus();
+      if (!before.enabled || !before.available) {
+        if (current()) setSkipRescan({ state: 'error', message: before.message || 'Intro detection is turned off or unavailable.' });
+        return;
+      }
+      const { queued } = await desktopApi.runLocalSegmentAnalysis({ ...request, mode: 'full' });
+      if (queued === 0) {
+        if (current()) setSkipRescan({ state: 'error', message: 'Nothing to scan for this file.' });
+        return;
+      }
+      const deadline = Date.now() + SKIP_RESCAN_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, SKIP_RESCAN_POLL_MS));
+        if (!current()) return;
+        const status = await desktopApi.getLocalSegmentAnalysisStatus();
+        if (!(status.manualPendingCount || status.manualRunningCount)) break;
+      }
+      const response = await desktopApi.getMediaSegments(request);
+      if (!current()) return;
+      setMediaSegments(response.segments);
+      setSkipRescan({ state: 'done' });
+    } catch (error) {
+      if (current()) setSkipRescan({ state: 'error', message: error instanceof Error ? error.message : 'The rescan failed.' });
+    }
+  }, [currentEpisode, currentSeason, episodeFiles.length, episodes.length, mediaId]);
 
   useEffect(() => {
     pauseLogoSources.slice(0, 3).forEach((source) => {
@@ -2887,15 +2934,16 @@ export default function VideoPlayer({
     onEscape: () => setShowMarkerEditor(false),
   });
 
+  // Subtitles have their own tray; this one holds Audio and Video.
   const openMediaPanel = useCallback(() => {
-    if (showMediaPanel && mediaPanelTab === 'video') {
+    if (showMediaPanel && mediaPanelTab !== 'subtitles') {
       setShowMediaPanel(false);
       return;
     }
 
     setShowSidebar(false);
     setShowLiveGuide(false);
-    setMediaPanelTab('video');
+    setMediaPanelTab('audio');
     setShowMediaPanel(true);
   }, [showMediaPanel, mediaPanelTab]);
 
@@ -3195,8 +3243,7 @@ export default function VideoPlayer({
     updatePlaybackSnapshot,
   });
 
-  const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = parseFloat(e.target.value);
+  const handleVolume = useCallback((v: number) => {
     volumeCommandRef.current = v;
     muteCommandRef.current = { muted: v === 0, until: Date.now() + 1500 };
     if (v > 0) lastAudibleVolumeRef.current = v;
@@ -3888,6 +3935,10 @@ export default function VideoPlayer({
     () => activeSkipSegmentAt(mediaSegments.filter((segment) => skipPromptTypes[segment.type] !== false), position),
     [mediaSegments, position, skipPromptTypes],
   );
+  const timelineSegments = useMemo(
+    () => (isLiveStream ? [] : timelineSegmentBands(mediaSegments, duration)),
+    [mediaSegments, duration, isLiveStream],
+  );
   if (activeMediaSegment == null && skipPinnedTargetRef.current.id !== null) {
     skipPinnedTargetRef.current = { id: null, targetMs: null };
   }
@@ -4364,6 +4415,7 @@ export default function VideoPlayer({
           isLiveStream={isLiveStream}
           showRemainingTime={showRemainingTime}
           progressPct={progressPct}
+          timelineSegments={timelineSegments}
           paused={paused}
           muted={muted}
           volume={volume}
@@ -4406,7 +4458,7 @@ export default function VideoPlayer({
           ref={mediaPanelDialogRef}
           role="dialog"
           aria-modal="true"
-          aria-label="Playback settings"
+          aria-label={mediaPanelTab === 'subtitles' ? 'Subtitles' : 'Playback settings'}
           tabIndex={-1}
           data-modal-layer="playback-settings"
           className="contents"
@@ -4448,11 +4500,13 @@ export default function VideoPlayer({
             subtitleTracks={subtitleTracks}
             selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
             selectSubtitleTrack={selectSubtitleTrack}
-            onlineSubtitles={isLiveStream ? undefined : (
+            onlineSubtitleTiming={activeOnlineCaption ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
+            onlineSubtitles={isLiveStream ? undefined : (onlineTabActive) => (
               <div className="space-y-2">
                 {addonSubtitles && (
                   <OpenSubtitlesV3Panel<AddonSubtitleOption>
                     key={`addon:${onlinePlaybackKey}`}
+                    autoSearch={onlineTabActive}
                     provider={{
                       title: 'Add-on subtitles',
                       label: 'Your add-ons',
@@ -4471,14 +4525,13 @@ export default function VideoPlayer({
                       },
                     }}
                     selectedId={activeOnlineCaption?.provider === 'addon' ? activeOnlineCaption.subtitle.id : undefined}
-                    timing={activeOnlineCaption?.provider === 'addon' ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
                     onSelect={(subtitle, text, signal) => applyOnlineCaption('addon', subtitle, text, signal)}
                   />
                 )}
                 <OpenSubtitlesV3Panel
                   key={onlinePlaybackKey}
+                  autoSearch={onlineTabActive}
                   selectedId={activeOnlineCaption?.provider === 'opensubtitles' ? activeOnlineCaption.subtitle.id : undefined}
-                  timing={activeOnlineCaption?.provider === 'opensubtitles' ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
                   resolveVideo={async (signal): Promise<SubtitleVideo> => {
                     if (onlineSubtitleVideo) return onlineSubtitleVideo;
                     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
@@ -4515,6 +4568,8 @@ export default function VideoPlayer({
               setShowMediaPanel(false);
               openMarkerEditor();
             }}
+            skipRescan={mediaId && !isLiveStream ? skipRescan : undefined}
+            onRescanSkipMarkers={() => void rescanSkipMarkers()}
           />
         </div>
       )}

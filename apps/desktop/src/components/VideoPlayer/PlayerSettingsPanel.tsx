@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { compareSubtitleLanguages, subtitleLanguageLabel } from '../../lib/openSubtitlesV3';
 import { ScrollArea } from '../ui/scroll-area';
@@ -13,6 +13,8 @@ import type {
   RotationMode,
   SubtitleStyleSettings,
 } from './types';
+import { RulerSlider } from '@/components/ui/ruler-slider';
+import { formatSyncOffset, type OnlineSubtitleTiming } from './syncOffset';
 
 const ASPECT_OPTIONS: { value: AspectMode; label: string }[] = [
   { value: 'default', label: 'Default' },
@@ -93,6 +95,8 @@ function SegmentedSetting<T extends string | number>({
   );
 }
 
+export type SkipRescanState = { state: 'idle' | 'scanning' | 'done' } | { state: 'error'; message: string };
+
 interface PlayerSettingsPanelProps {
   videoOnly?: boolean;
   mediaPanelWidth: number;
@@ -142,7 +146,10 @@ interface PlayerSettingsPanelProps {
   audioDelayAvailable: boolean;
   subtitlesDefaultEnabled: boolean;
   subtitleTracks: MediaTrack[];
-  onlineSubtitles?: React.ReactNode;
+  /** Rendered inside the Online tab; `active` is true while that tab is showing. */
+  onlineSubtitles?: (active: boolean) => React.ReactNode;
+  /** Delay for the online subtitle that is showing, if any; shown under More options. */
+  onlineSubtitleTiming?: OnlineSubtitleTiming;
   selectedSubtitleTrackIndex: number;
   selectSubtitleTrack: (trackIndex: number) => void;
   secondarySubtitlesAvailable: boolean;
@@ -155,6 +162,9 @@ interface PlayerSettingsPanelProps {
   updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string | boolean) => void;
   applySubtitlePreset: (preset: SubtitleStylePreset) => void;
   onCorrectSkipTiming: () => void;
+  /** Present when a rescan is possible for what's playing. */
+  skipRescan?: SkipRescanState;
+  onRescanSkipMarkers?: () => void;
 }
 
 export default function PlayerSettingsPanel({
@@ -193,6 +203,7 @@ export default function PlayerSettingsPanel({
   subtitlesDefaultEnabled,
   subtitleTracks,
   onlineSubtitles,
+  onlineSubtitleTiming,
   selectedSubtitleTrackIndex,
   selectSubtitleTrack,
   secondarySubtitlesAvailable,
@@ -204,8 +215,27 @@ export default function PlayerSettingsPanel({
   updateSubtitleStyle,
   applySubtitlePreset,
   onCorrectSkipTiming,
+  skipRescan,
+  onRescanSkipMarkers,
 }: PlayerSettingsPanelProps) {
   const activeTab: ControlTab = videoOnly ? 'video' : mediaPanelTab;
+  // Subtitles open as their own tray; Audio and Video share the other one.
+  const subtitlesTray = activeTab === 'subtitles';
+  const trayTitle = videoOnly ? 'Video settings' : subtitlesTray ? 'Subtitles' : 'Playback settings';
+  // The subtitles tray splits local tracks and styling from the online search.
+  const [subtitleSection, setSubtitleSection] = useState<'tracks' | 'online'>('tracks');
+  const showOnlineTab = subtitlesTray && Boolean(onlineSubtitles);
+  const trayTabs: { id: string; label: string; selected: boolean; select: () => void }[] = videoOnly ? []
+    : subtitlesTray
+      ? showOnlineTab
+        ? [
+          { id: 'tracks', label: 'Subtitles', selected: subtitleSection === 'tracks', select: () => setSubtitleSection('tracks') },
+          { id: 'online', label: 'Open Subtitles', selected: subtitleSection === 'online', select: () => setSubtitleSection('online') },
+        ]
+        : []
+      : (['audio', 'video'] as ControlTab[]).map((tab) => ({
+        id: tab, label: tab === 'audio' ? 'Audio' : 'Video', selected: activeTab === tab, select: () => setMediaPanelTab(tab),
+      }));
   const trackSource = (track: MediaTrack) => track.source === 'opensubtitles' ? 'OpenSubtitles download'
     : track.source === 'sidecar' ? 'Added subtitle file' : 'Embedded in video';
   const subtitleGroups = useMemo(() => {
@@ -218,6 +248,22 @@ export default function PlayerSettingsPanel({
     });
     return [...groups.values()].sort((a, b) => compareSubtitleLanguages(a.label, b.label));
   }, [subtitleTracks]);
+
+  // Shown under both subtitle tabs, so a downloaded subtitle can be styled in place.
+  const subtitleAppearance = subtitleStyleCompatibilityMessage ? (
+    <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.08] p-4" role="status">
+      <p className="text-xs font-semibold text-white">Visual styling unavailable for this track</p>
+      <p className="mt-1 text-xs leading-relaxed text-white/75">{subtitleStyleCompatibilityMessage}</p>
+    </div>
+  ) : (
+    <SubtitleAppearancePanel
+      style={subtitleStyle}
+      updateStyle={updateSubtitleStyle}
+      applyPreset={applySubtitlePreset}
+      previewImage={subtitlePreviewImage}
+      timing={onlineSubtitleTiming}
+    />
+  );
 
   const selectedTrackLabel = (tracks: MediaTrack[], selectedIndex: number, emptyLabel: string) => {
     const selectedTrack = tracks.find((track) => track.index === selectedIndex);
@@ -241,28 +287,28 @@ export default function PlayerSettingsPanel({
 
       <div className="space-y-3 border-b border-white/10 px-5 pb-4 pt-4">
         <div className="flex items-center justify-between gap-3">
-          <p className="truncate text-base font-semibold tracking-tight text-white">{videoOnly ? 'Video settings' : 'Playback settings'}</p>
+          <p className="truncate text-base font-semibold tracking-tight text-white">{trayTitle}</p>
           <button
             type="button"
             onClick={onClose}
             className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--loom-muted)] transition-colors hover:bg-white/10 hover:text-white"
-            aria-label="Close playback settings"
+            aria-label={`Close ${trayTitle.toLowerCase()}`}
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        {!videoOnly && (
-          <div className="grid grid-cols-3 gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5" role="tablist" aria-label="Playback settings sections">
-            {(['subtitles', 'audio', 'video'] as ControlTab[]).map((tab) => (
+        {trayTabs.length > 0 && (
+          <div className="grid grid-cols-2 gap-0.5 rounded-[8px] bg-white/[0.08] p-0.5" role="tablist" aria-label={`${trayTitle} sections`}>
+            {trayTabs.map((tab) => (
               <button
-                key={tab}
+                key={tab.id}
                 type="button"
-                onClick={() => setMediaPanelTab(tab)}
+                onClick={tab.select}
                 role="tab"
-                aria-selected={activeTab === tab}
-                className={`rounded-[6px] py-1.5 text-[13px] font-medium capitalize transition-colors ${activeTab === tab ? 'bg-white text-neutral-950' : 'text-white/70 hover:text-white'}`}
+                aria-selected={tab.selected}
+                className={`rounded-[6px] py-1.5 text-[13px] font-medium transition-colors ${tab.selected ? 'bg-white text-neutral-950' : 'text-white/70 hover:text-white'}`}
               >
-                {tab}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -330,7 +376,7 @@ export default function PlayerSettingsPanel({
                     )}
                     {playbackRate !== 1 && (
                       <button type="button" onClick={() => setPlaybackRate(1)}
-                        className="text-[11px] font-medium text-[var(--loom-accent)] transition-opacity hover:opacity-80">Reset</button>
+                        className="rounded-[6px] bg-white/10 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-white/[0.16]">Reset</button>
                     )}
                   </div>
                 </div>
@@ -371,6 +417,23 @@ export default function PlayerSettingsPanel({
                   >
                     Correct automatic skip timing
                   </button>
+                  {skipRescan && onRescanSkipMarkers && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={onRescanSkipMarkers}
+                        disabled={skipRescan.state === 'scanning'}
+                        className="w-full rounded-[8px] bg-white/[0.08] px-3 py-2 text-left text-xs font-medium text-white transition-colors hover:bg-white/15 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        {skipRescan.state === 'scanning' ? 'Scanning intro and credits…' : 'Rescan intro and credits'}
+                      </button>
+                      {(skipRescan.state === 'done' || skipRescan.state === 'error') && (
+                        <p role="status" className={`mt-1.5 text-[11px] ${skipRescan.state === 'error' ? 'text-amber-200/90' : 'text-white/60'}`}>
+                          {skipRescan.state === 'error' ? skipRescan.message : 'Markers updated on the timeline.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <section className="mt-3 border-t border-white/10 pt-3" aria-labelledby="playback-information-heading">
                     <h4 id="playback-information-heading" className="text-xs font-semibold text-white">Playback information</h4>
@@ -445,31 +508,18 @@ export default function PlayerSettingsPanel({
                 <p className="mb-2 text-xs font-semibold text-white">Audio delay</p>
                 {audioDelayAvailable ? (
                   <div className="rounded-lg bg-white/10 px-3 py-3">
-                    <div className="mb-2 flex items-center justify-between text-xs text-white/75">
-                      <span>Sync</span>
-                      <span className="text-[var(--loom-accent)]">{audioDelay.toFixed(2)}s</span>
-                    </div>
-                    <input
-                      type="range"
+                    <RulerSlider
+                      label="Sync"
                       min={-5}
                       max={5}
                       step={0.05}
                       value={audioDelay}
-                      onChange={(event) => updateAudioDelay(Number(event.target.value))}
+                      defaultValue={0}
+                      format={formatSyncOffset}
+                      onValueChange={updateAudioDelay}
                       aria-label="Audio delay"
-                      aria-valuemin={-5}
-                      aria-valuemax={5}
-                      aria-valuenow={audioDelay}
                       aria-valuetext={`${audioDelay.toFixed(2)} seconds`}
-                      className="w-full accent-[var(--loom-accent)]"
                     />
-                    <button
-                      type="button"
-                      onClick={() => updateAudioDelay(0)}
-                      className="mt-2 text-xs text-white/70 hover:text-white"
-                    >
-                      Reset delay
-                    </button>
                   </div>
                 ) : (
                   <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70">
@@ -480,7 +530,15 @@ export default function PlayerSettingsPanel({
             </div>
           )}
 
-          {activeTab === 'subtitles' && (
+          {/* Stays mounted while hidden so search results survive tab switches. */}
+          {activeTab === 'subtitles' && showOnlineTab && (
+            <div className={`space-y-5 ${subtitleSection === 'online' ? '' : 'hidden'}`}>
+              {onlineSubtitles?.(subtitleSection === 'online')}
+              {subtitleSection === 'online' && subtitleAppearance}
+            </div>
+          )}
+
+          {activeTab === 'subtitles' && (!showOnlineTab || subtitleSection === 'tracks') && (
             <div className="space-y-5">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -525,8 +583,6 @@ export default function PlayerSettingsPanel({
                 </div>
               </div>
 
-              {onlineSubtitles}
-
               {secondarySubtitlesAvailable && subtitleTracks.length > 0 && (
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
@@ -559,19 +615,7 @@ export default function PlayerSettingsPanel({
                 </div>
               )}
 
-              {subtitleStyleCompatibilityMessage ? (
-                <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.08] p-4" role="status">
-                  <p className="text-xs font-semibold text-white">Visual styling unavailable for this track</p>
-                  <p className="mt-1 text-xs leading-relaxed text-white/75">{subtitleStyleCompatibilityMessage}</p>
-                </div>
-              ) : (
-                <SubtitleAppearancePanel
-                  style={subtitleStyle}
-                  updateStyle={updateSubtitleStyle}
-                  applyPreset={applySubtitlePreset}
-                  previewImage={subtitlePreviewImage}
-                />
-              )}
+              {subtitleAppearance}
 
             </div>
           )}

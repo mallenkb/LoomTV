@@ -35,9 +35,12 @@ function mount(props: Props, overrides: Partial<typeof subtitles> = {}) {
     },
     useMemo: (compute: () => unknown) => compute(),
     useId: () => 'opensubtitles-test-id',
-    useEffect(effect: () => () => void) {
+    useEffect(effect: () => (() => void) | void) {
       const index = cursor++;
-      if (!(index in slots)) { slots[index] = true; cleanups.push(effect()); }
+      if (index in slots) return;
+      slots[index] = true;
+      const cleanup = effect();
+      if (typeof cleanup === 'function') cleanups.push(cleanup);
     },
   };
   const jsx = (type: string, elementProps: Record<string, unknown>) => ({ type, props: elementProps });
@@ -45,6 +48,8 @@ function mount(props: Props, overrides: Partial<typeof subtitles> = {}) {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'lucide-react': { Check: 'check-icon', Search: 'search-icon' },
+    '@/components/ui/ruler-slider': { RulerSlider: 'ruler-slider' },
+    './syncOffset': { formatSyncOffset: (seconds: number) => `${seconds}s` },
     '../../lib/openSubtitlesV3': { ...subtitles, ...overrides },
   };
   const exports: { default?: (props: Props) => Element } = {};

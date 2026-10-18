@@ -17,6 +17,8 @@ import {
 import { formatTime, seekAccessibilityText } from './helpers';
 import type { ControlTab } from './types';
 import SeekHoverPreview from './SeekHoverPreview';
+import { RulerSlider } from '@/components/ui/ruler-slider';
+import { skipPromptLabel, type TimelineSegmentBand } from './skipPrompt';
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 
@@ -35,6 +37,8 @@ interface PlayerControlBarProps {
   isLiveStream: boolean;
   showRemainingTime: boolean;
   progressPct: number;
+  /** Intro, recap, outro, credits and preview ranges drawn on the seek bar. */
+  timelineSegments?: TimelineSegmentBand[];
   paused: boolean;
   muted: boolean;
   volume: number;
@@ -51,7 +55,7 @@ interface PlayerControlBarProps {
   toggleTimeDisplay: () => void;
   seekTo: (seconds: number) => void;
   toggleMute: () => void;
-  handleVolume: React.ChangeEventHandler<HTMLInputElement>;
+  handleVolume: (volume: number) => void;
   handlePrevEpisode: () => void;
   handleNextEpisode: () => void;
   handlePreviousLiveChannel?: () => void;
@@ -85,6 +89,7 @@ export default function PlayerControlBar({
   isLiveStream,
   showRemainingTime,
   progressPct,
+  timelineSegments = [],
   paused,
   muted,
   volume,
@@ -165,6 +170,7 @@ export default function PlayerControlBar({
           aria-keyshortcuts={isLiveStream ? undefined : 'ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight PageUp PageDown Home End'}
           onPointerDown={isLiveStream ? undefined : handleProgressPointerDown}
           onKeyDown={isLiveStream ? undefined : handleProgressKeyDown}
+          style={{ '--loom-progress': `${progressPct}%` } as React.CSSProperties}
           className={`group relative h-6 min-w-0 flex-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isLiveStream ? 'cursor-default' : 'cursor-pointer'}`}
         >
           {!isLiveStream && duration > 0 && (
@@ -186,10 +192,36 @@ export default function PlayerControlBar({
               className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               style={{ transform: `scaleX(${isLiveStream ? 1 : progressPct / 100})`, transformOrigin: 'left center' }}
             />
+            {timelineSegments.length > 0 && (
+              <>
+                {/* Marker ranges in one pastel: soft where unplayed, solid where played. */}
+                {timelineSegments.map((band) => (
+                  <div
+                    key={band.key}
+                    title={skipPromptLabel(band.type, hasEpisodes)}
+                    className="absolute inset-y-0 bg-[var(--loom-segment-marker)] opacity-60"
+                    style={{ left: `${band.leftPct}%`, width: `${band.widthPct}%` }}
+                  />
+                ))}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0"
+                  style={{ clipPath: 'inset(0 calc(100% - var(--loom-progress, 0%)) 0 0)' }}
+                >
+                  {timelineSegments.map((band) => (
+                    <div
+                      key={band.key}
+                      className="absolute inset-y-0 bg-[var(--loom-segment-marker)]"
+                      style={{ left: `${band.leftPct}%`, width: `${band.widthPct}%` }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
           </div>
           <div
             ref={progressThumbRef}
-            className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 ${isLiveStream ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}
+            className={`pointer-events-none absolute top-1/2 h-4 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--loom-accent)] shadow-[0_1px_3px_rgba(0,0,0,0.5)] transition-opacity duration-150 ${isLiveStream ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}
             style={{ left: `${isLiveStream ? 100 : progressPct}%` }}
           />
         </div>
@@ -243,22 +275,19 @@ export default function PlayerControlBar({
           >
             {volumeIsMuted ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
           </button>
-          <input
-            type="range"
+          <RulerSlider
+            showHeader={false}
+            label="Volume"
             min={0}
             max={1}
             step={0.05}
             value={visibleVolume}
-            onChange={handleVolume}
+            format={(level) => `${Math.round(level * 100)}%${volumeIsMuted ? ' (muted)' : ''}`}
+            onValueChange={handleVolume}
             onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
-            aria-label="Volume"
-            aria-valuemin={0}
-            aria-valuemax={1}
-            aria-valuenow={visibleVolume}
-            aria-valuetext={`${Math.round(visibleVolume * 100)}%${volumeIsMuted ? ' (muted)' : ''}`}
-            style={{ '--loom-volume-pct': `${Math.round(visibleVolume * 100)}%` } as React.CSSProperties}
-            className="loom-volume-slider w-24 outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            title={`Volume ${Math.round(visibleVolume * 100)}%`}
+            className="w-28"
           />
         </div>
 
@@ -355,11 +384,11 @@ export default function PlayerControlBar({
           type="button"
           onClick={openMediaPanel}
           data-player-panel-toggle="true"
-          className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showMediaPanel && mediaPanelTab === 'video' ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
+          className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showMediaPanel && mediaPanelTab !== 'subtitles' ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
           title="Playback settings"
           aria-label="Playback settings"
-          aria-pressed={showMediaPanel && mediaPanelTab === 'video'}
-          aria-expanded={showMediaPanel && mediaPanelTab === 'video'}
+          aria-pressed={showMediaPanel && mediaPanelTab !== 'subtitles'}
+          aria-expanded={showMediaPanel && mediaPanelTab !== 'subtitles'}
         >
           <SlidersHorizontal className="h-5 w-5" strokeWidth={2.25} />
         </button>
