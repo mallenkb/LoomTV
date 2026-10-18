@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.24](docs/releases/v2.0.24.md)
+
+Moves TheIntroDB skip markers to its v4 API before the old API is retired, and speeds up release builds.
+
 ### [2.0.23](docs/releases/v2.0.23.md)
 
 Reduces libmpv memory during 4K playback and after closing, limits Chromium GPU use for paused native video, and keeps navigation available while switching profiles.
