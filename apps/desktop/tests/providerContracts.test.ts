@@ -12,11 +12,18 @@ const providerNetwork = {
 
 test('contract: TheIntroDB open credits preserve endMs null', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    tmdb_id: 1399,
-    intro: [{ start_ms: 20_000, end_ms: 110_000 }],
-    credits: [{ start_ms: 1_300_000, end_ms: null }],
-  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  let requestedUrl: URL | undefined;
+  globalThis.fetch = async (input) => {
+    requestedUrl = new URL(String(input));
+    return new Response(JSON.stringify({
+      tvdb_id: 121361,
+      type: 'tv',
+      season: 1,
+      episode: 1,
+      intro: [{ start_ms: 20_000, end_ms: 110_000 }],
+      credits: [{ start_ms: 1_300_000, end_ms: null }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
   try {
     const result = await fetchTheIntroDbSegments({
       ...providerNetwork,
@@ -25,6 +32,8 @@ test('contract: TheIntroDB open credits preserve endMs null', async () => {
       episode: 1,
       durationMs: 1_400_000,
     });
+    assert.equal(requestedUrl?.origin + requestedUrl?.pathname, 'https://api.theintrodb.org/v4/media');
+    assert.equal(requestedUrl?.searchParams.get('tmdb_id'), '1399');
     assert.equal(result.kind, 'success');
     if (result.kind === 'success') {
       assert.equal(result.segments.find((segment) => segment.type === 'credits')?.endMs, null);

@@ -93,7 +93,7 @@ export async function fetchTheIntroDbSegments(input: {
   const lookupKey = theIntroDbLookupKey(input.ids, input.season, input.episode);
   if (!lookupKey) return { kind: 'empty', segments: [] };
 
-  const url = new URL('https://api.theintrodb.org/v3/media');
+  const url = new URL('https://api.theintrodb.org/v4/media');
   if (input.ids.tmdbId) url.searchParams.set('tmdb_id', input.ids.tmdbId);
   else if (input.ids.tvdbId) url.searchParams.set('tvdb_id', input.ids.tvdbId);
   else if (input.ids.imdbId) url.searchParams.set('imdb_id', input.ids.imdbId);
