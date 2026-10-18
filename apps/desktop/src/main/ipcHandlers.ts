@@ -403,7 +403,7 @@ export interface IpcHandlerDependencies<
   settingsForRenderer: () => TSettings;
   authorizeSettingsWrite: () => void;
   saveSettings: (settings: TSettings) => void;
-  onSettingsSaved?: () => void;
+  onSettingsSaved?: (previousSettings: TSettings, nextSettings: TSettings) => void;
   getUnifiedDesktopServerState: () => IpcResult<'server:unified-state'>;
   configureUnifiedDesktopOwner: (input: IpcContract['server:configure-owner']['args'][0]) => Promise<IpcResult<'server:configure-owner'>>;
   openUnifiedDesktopAdmin: () => Promise<IpcResult<'server:open-admin'>>;
@@ -1099,11 +1099,12 @@ export function registerIpcHandlers<
 
   handle('settings:save', (_event, settings) => {
     deps.authorizeSettingsWrite();
+    const previousSettings = deps.loadSettings();
     deps.saveSettings({
-      ...deps.loadSettings(),
+      ...previousSettings,
       ...sanitizeRendererSettingsPatch(settings),
     });
-    deps.onSettingsSaved?.();
+    deps.onSettingsSaved?.(previousSettings, deps.loadSettings());
     deps.syncLanAdvertisement();
     return true;
   }, z.tuple([rendererSettingsPatchSchema]));

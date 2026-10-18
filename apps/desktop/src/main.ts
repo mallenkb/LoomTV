@@ -2448,7 +2448,10 @@ registerIpcHandlers<LibraryData, AppSettings>({
   },
   authorizeSettingsWrite: () => { requireOwner(); },
   saveSettings,
-  onSettingsSaved: () => {
+  onSettingsSaved: (previousSettings, nextSettings) => {
+    const previousOrganizeMode = previousSettings.organizeFilesAfterSync || 'auto';
+    const nextOrganizeMode = nextSettings.organizeFilesAfterSync || 'auto';
+    if (previousOrganizeMode !== 'auto' && nextOrganizeMode === 'auto') scheduleAutomaticOrganize();
     analysisCoordinator.settingsChanged();
     refreshNativePlaybackDisplaySleepTimeout();
     if (!loadSettings().localNetworkSharingEnabled) stopTranscodesForScope('lan:');

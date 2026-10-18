@@ -306,7 +306,7 @@ export interface SettingsPayload {
   /**
    * After a library sync: "ask" shows how many files can be renamed and waits
    * for review, "auto" applies every change that passes all checks, "off"
-   * does neither. Defaults to "ask".
+   * does neither. Defaults to "auto".
    */
   organizeFilesAfterSync?: 'ask' | 'auto' | 'off';
   /** Clear leftover download files and redundant subtitles on sync and launch. */
