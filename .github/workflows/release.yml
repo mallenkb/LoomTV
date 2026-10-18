@@ -208,6 +208,30 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
 
+      # Release builds restore caches that Validate saved on main but never
+      # save their own, so a tag run cannot seed what a later release reads.
+      - name: Read Electron version
+        id: electron-version
+        shell: bash
+        run: echo "version=$(node -p "require('./apps/desktop/node_modules/electron/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Electron downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron-version.outputs.version }}
+
+      - name: Restore Rust scanner build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: desktop-package
+          save-if: false
+          workspaces: |
+            apps/desktop/native/scanner -> target
+
       - name: Build macOS installers
         id: build-macos
         if: runner.os == 'macOS'
