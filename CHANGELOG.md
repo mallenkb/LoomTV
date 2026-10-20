@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.27](docs/releases/v2.0.27.md)
+
+Publishes the episode-number fix from 2.0.26, re-reads existing folders once so misfiled episodes move back, and brings back Full scan in the profile menu.
+
 ### [2.0.26](docs/releases/v2.0.26.md)
 
 Fixes episodes that showed "Not added yet" when a file's embedded tags carried the wrong episode number.
