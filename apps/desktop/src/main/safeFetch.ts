@@ -26,6 +26,12 @@ export type SafeFetchOptions = {
    * Relative references in the body (HLS playlists) resolve against it.
    */
   onFinalUrl?: (url: string) => void;
+  /**
+   * Send the request even while the host is in a skip window. For checks the
+   * user starts on purpose, such as testing a key; a response still clears
+   * the host from the skip list.
+   */
+  ignoreSkipWindow?: boolean;
 };
 
 function isPrivateIpv4(address: string): boolean {
@@ -426,7 +432,7 @@ export async function safeFetch(input: string | URL, init: RequestInit = {}, opt
   const operation = createOperation(options.operation ?? 'provider.fetch');
   const provider = options.provider ?? target.hostname;
   const host = target.hostname;
-  if ((hostHealth.get(host)?.skipUntil ?? 0) > Date.now()) {
+  if (!options.ignoreSkipWindow && (hostHealth.get(host)?.skipUntil ?? 0) > Date.now()) {
     operation.finish({
       resultCode: 'skipped_unreachable',
       cacheStatus: options.cacheStatus ?? 'not-applicable',

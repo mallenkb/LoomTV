@@ -22,7 +22,7 @@ async function testTMDBKey(value: string): Promise<MetadataKeyTestResult> {
   } else {
     url.searchParams.set('api_key', credential);
   }
-  const response = await safeFetch(url, requestInit, { allowedHosts: ['api.themoviedb.org'] });
+  const response = await safeFetch(url, requestInit, { allowedHosts: ['api.themoviedb.org'], ignoreSkipWindow: true });
   return {
     provider: 'tmdb',
     ok: response.ok,
@@ -36,7 +36,7 @@ async function testOMDbKey(value: string): Promise<MetadataKeyTestResult> {
   const url = new URL('https://www.omdbapi.com/');
   url.searchParams.set('apikey', key);
   url.searchParams.set('i', 'tt0133093');
-  const response = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'] });
+  const response = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'], ignoreSkipWindow: true });
   const json = await response.json().catch(() => ({}));
   const ok = response.ok && json?.Response !== 'False';
   return {
@@ -51,7 +51,7 @@ async function testFanartKey(value: string): Promise<MetadataKeyTestResult> {
   if (!key) return { provider: 'fanart', ok: false, message: 'Missing key.' };
   const url = new URL('https://webservice.fanart.tv/v3/movies/120');
   url.searchParams.set('api_key', key);
-  const response = await safeFetch(url, {}, { allowedHosts: ['webservice.fanart.tv'] });
+  const response = await safeFetch(url, {}, { allowedHosts: ['webservice.fanart.tv'], ignoreSkipWindow: true });
   return {
     provider: 'fanart',
     ok: response.ok,
@@ -66,7 +66,7 @@ async function testTVDBKey(value: string): Promise<MetadataKeyTestResult> {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ apikey: key }),
-  }, { allowedHosts: ['api4.thetvdb.com'] });
+  }, { allowedHosts: ['api4.thetvdb.com'], ignoreSkipWindow: true });
   const payload = await response.json().catch(() => ({}));
   const token = payload?.data?.token || payload?.token;
   const ok = response.ok && typeof token === 'string' && token.length > 0;

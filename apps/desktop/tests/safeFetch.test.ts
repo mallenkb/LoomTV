@@ -180,3 +180,29 @@ test('skip windows are saved, restored after a restart, and grow while a host st
   restoreProviderHealth({ 'bad host!': { skipUntil: 1, strikes: 1 }, 'far.example': { skipUntil: Number.MAX_SAFE_INTEGER, strikes: 1 } }, () => undefined);
   await assert.rejects(() => safeFetch('https://far.example/', {}, options), ProviderUnreachableError);
 });
+
+test('a request that ignores the skip window reaches a skipped host and clears it on a response', async (t) => {
+  const { resetProviderHealth, restoreProviderHealth, ProviderUnreachableError, UNREACHABLE_HOST_SKIP_MS } = await import('../src/main/safeFetch.ts');
+  resetProviderHealth();
+  t.after(resetProviderHealth);
+  const saves: Array<Record<string, { skipUntil: number; strikes: number }>> = [];
+  restoreProviderHealth({ 'keys.example': { skipUntil: Date.now() + UNREACHABLE_HOST_SKIP_MS, strikes: 2 } }, (state) => saves.push(state));
+  let requests = 0;
+  const options = {
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    requestImpl: async () => {
+      requests += 1;
+      return new Response('unauthorized', { status: 401 });
+    },
+  };
+  await assert.rejects(() => safeFetch('https://keys.example/a', {}, options), ProviderUnreachableError);
+  assert.equal(requests, 0);
+
+  const response = await safeFetch('https://keys.example/b', {}, { ...options, ignoreSkipWindow: true });
+  assert.equal(response.status, 401, 'any HTTP answer proves the host is up');
+  assert.equal(requests, 1);
+  assert.deepEqual(saves.at(-1), {}, 'the host is removed from the saved skip list');
+
+  await safeFetch('https://keys.example/c', {}, options);
+  assert.equal(requests, 2, 'ordinary requests reach the host again');
+});
