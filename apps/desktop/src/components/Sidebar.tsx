@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from '@/lib/navigation';
-import { Bookmark as LucideBookmark, Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
+import { Bookmark as LucideBookmark, Check, Download, LockKeyhole, Plus, RefreshCw, ScanSearch, Search, UsersRound } from 'lucide-react';
 import {
   Archive as ArchivePhosphorIcon,
 } from '@phosphor-icons/react';
@@ -310,10 +310,13 @@ function SidebarProfileSwitcher({
   compact = false,
   isScanning,
   onQuickScan,
+  onFullScan,
 }: {
   compact?: boolean;
   isScanning: boolean;
   onQuickScan: () => void;
+  /** Re-reads every file instead of reusing unchanged folders. */
+  onFullScan: () => void;
 }) {
   const { activeProfile, canCreateProfiles, canManageProfiles, openGate, profiles, selectProfile } = useProfiles();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -466,6 +469,23 @@ function SidebarProfileSwitcher({
             </span>
             {isScanning ? 'Scanning…' : 'Quick scan'}
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={isScanning}
+            onClick={() => {
+              setMenuOpen(false);
+              onFullScan();
+            }}
+            data-shared-highlight-item
+            data-shared-highlight-id="full-scan"
+            className="relative z-10 flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] disabled:cursor-default disabled:opacity-60"
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
+              <ScanSearch className="h-4 w-4" aria-hidden="true" />
+            </span>
+            Full scan
+          </button>
           <Link
             to="/settings"
             role="menuitem"
@@ -492,7 +512,7 @@ export default function Sidebar() {
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
   const { showToast } = useToast();
-  const { state, scanLibrary } = useLibrary();
+  const { state, scanLibrary, fullRescanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
   const routeState = location.state as { from?: string; fromDiscover?: boolean } | null;
   const sourceRoute = routeState?.from;
@@ -509,10 +529,10 @@ export default function Sidebar() {
   const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
   const [libraryActionError, setLibraryActionError] = useState('');
 
-  const handleScanLibrary = async () => {
+  const handleScanLibrary = async (full = false) => {
     setLibraryActionError('');
     try {
-      await scanLibrary();
+      await (full ? fullRescanLibrary() : scanLibrary());
     } catch (error) {
       const message = libraryMutationMessage(error);
       setLibraryActionError(message);
@@ -824,7 +844,7 @@ export default function Sidebar() {
             </DelayedIconTooltip>
           )}
           <div className="loom-modern-sidebar-profile">
-            <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
+            <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} onFullScan={() => { void handleScanLibrary(true); }} />
           </div>
           {/* Keep the detail page focused on its media controls. The corner
               settings/profile entry remains available on home and library
@@ -1021,7 +1041,7 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-1">
-          <SidebarProfileSwitcher isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
+          <SidebarProfileSwitcher isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} onFullScan={() => { void handleScanLibrary(true); }} />
           <button
             type="button"
             onClick={() => void handleScanLibrary()}

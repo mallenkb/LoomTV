@@ -179,14 +179,15 @@ test('symlinked directories are not traversed, Unicode replacement characters re
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test('embedded tags take precedence, Specials stay season zero, and invalid media is excluded', async () => {
+test('filename episode numbers beat embedded tags, Specials stay season zero, and invalid media is excluded', async () => {
   const root = await fixture();
   try {
     for (const engine of ['typescript', 'rust'] as const) {
       const { inventory } = await discoverLibraryRoot(root, { engine, binary });
       try {
         const episodes = await scanInventory.run(inventory, () => scanEpisodeFilesAsync(path.join(root, 'Show'), async (file) => file.includes('S02') ? {} : { season: 9, episode: 7, localMetadata: { videoCodec: 'h264' } }));
-        assert.deepEqual(episodes.map((e) => [e.season, e.episode]), [[0, 7]]);
+        // The folder keeps Season 00 and the filename keeps E01; the tag's season 9 and episode 7 are ignored.
+        assert.deepEqual(episodes.map((e) => [e.season, e.episode]), [[0, 1]]);
       } finally { inventory.close(); }
     }
   } finally { await fs.rm(root, { recursive: true, force: true }); }

@@ -487,7 +487,8 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 // 20: refresh show years using series providers and reject movie-only OMDb matches.
-const SCAN_CACHE_VERSION = 20;
+// 21: re-read episode numbers from filenames instead of embedded track tags.
+const SCAN_CACHE_VERSION = 21;
 let libraryMutationVersion = 0;
 const activeScans = new Set<AbortController>();
 let cachedLibrary: LibraryData | null = null;
