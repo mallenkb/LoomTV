@@ -8,6 +8,17 @@ import './index.css';
 // the stylesheet scope the responsive shell to the web app alone.
 document.documentElement.dataset.loomClient = window.desktopApi ? 'desktop' : 'browser';
 
+// Heroes take their height from the display, not the window, so a title page
+// looks the same windowed and in full screen. The desktop app sets this from
+// the primary display in the main process; a browser only knows its own screen.
+if (!window.desktopApi) {
+  const syncScreenHeight = () => {
+    document.documentElement.style.setProperty('--loom-screen-height', `${window.screen.height}px`);
+  };
+  syncScreenHeight();
+  window.addEventListener('resize', syncScreenHeight);
+}
+
 const container = document.getElementById('root');
 if (container) {
   const root = createRoot(container);

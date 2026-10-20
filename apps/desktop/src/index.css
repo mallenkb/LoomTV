@@ -2204,10 +2204,13 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 }
 
 @media (min-width: 641px) {
+  /* 48% of the display's height, never under the old fixed 600px. It does
+     not follow the window, so windowed and full screen match. */
   .loom-detail-page .loom-detail-cover {
-    height: 600px;
-    min-height: 600px;
-    max-height: 600px;
+    --loom-detail-cover-height: max(600px, calc(var(--loom-screen-height, 0px) * 0.48));
+    height: var(--loom-detail-cover-height);
+    min-height: var(--loom-detail-cover-height);
+    max-height: var(--loom-detail-cover-height);
   }
 }
 

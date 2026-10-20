@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { windowChromeOptions } from './windowChrome';
@@ -218,10 +218,27 @@ export function createWindow(): void {
     void mainWindow.webContents.executeJavaScript(
       `document.body.classList.add(${JSON.stringify(platformClass)})`,
     );
+    sendPrimaryDisplayHeight();
   });
+
+  // Title-page heroes take their height from the primary display, so they
+  // match windowed, in full screen, and on a secondary display.
+  const sendPrimaryDisplayHeight = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const height = screen.getPrimaryDisplay().size.height;
+    void mainWindow.webContents.executeJavaScript(
+      `document.documentElement.style.setProperty('--loom-screen-height', ${JSON.stringify(`${height}px`)})`,
+    ).catch(() => undefined);
+  };
+  screen.on('display-added', sendPrimaryDisplayHeight);
+  screen.on('display-removed', sendPrimaryDisplayHeight);
+  screen.on('display-metrics-changed', sendPrimaryDisplayHeight);
 
   const createdWindow = mainWindow;
   mainWindow.on('closed', () => {
+    screen.removeListener('display-added', sendPrimaryDisplayHeight);
+    screen.removeListener('display-removed', sendPrimaryDisplayHeight);
+    screen.removeListener('display-metrics-changed', sendPrimaryDisplayHeight);
     if (mainWindow !== createdWindow) return;
     mainWindow = null;
     mainWindowIpcIdentity = null;
