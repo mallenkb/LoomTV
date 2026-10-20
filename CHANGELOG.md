@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.26](docs/releases/v2.0.26.md)
+
+Fixes episodes that showed "Not added yet" when a file's embedded tags carried the wrong episode number.
+
 ### [2.0.25](docs/releases/v2.0.25.md)
 
 Shows intro, recap and credits on the seek bar, gives subtitles their own tray, replaces every slider with one clearer design, and adds intro and credits rescans.
