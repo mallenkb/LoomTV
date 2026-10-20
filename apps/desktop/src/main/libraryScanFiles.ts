@@ -180,7 +180,10 @@ export function scanEpisodeFiles(folderPath: string, probe: MediaFileProbe = EMP
         const season = folderSeason ?? mediaProbe.season ?? parsed.season;
         files.push({
           season,
-          episode: mediaProbe.episode ?? parsed.episode,
+          // The filename's episode number wins over embedded tags: release
+          // tags such as a stray track=1 would otherwise stack two files on
+          // one episode and leave another showing "Not added yet".
+          episode: parsed.episode,
           filePath: fullPath,
           title: mediaProbe.embeddedTitle,
           subtitles: createSubtitleRecords(directory, matchingSubtitleFilesForVideo(directory, entry.name)),
@@ -265,7 +268,7 @@ export async function scanEpisodeFilesAsync(
         const season = folderSeason ?? mediaProbe.season ?? parsed.season;
         return {
           season,
-          episode: mediaProbe.episode ?? parsed.episode,
+          episode: parsed.episode,
           filePath: fullPath,
           title: mediaProbe.embeddedTitle,
           subtitles: createSubtitleRecords(directory, subtitles),

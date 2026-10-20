@@ -135,3 +135,27 @@ test('library signatures include media assets but ignore macOS sidecars', async 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('the filename episode number wins over a stray embedded track tag', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'loomtv-episode-tag-'));
+  try {
+    const seasonOne = path.join(root, 'Season 1');
+    mkdirSync(seasonOne);
+    writeFileSync(path.join(seasonOne, "Show (2018) - S01E01 - Pilot.mkv"), 'video');
+    writeFileSync(path.join(seasonOne, "Show - S01E02.mkv"), 'video');
+
+    // A release left track=1 on the second episode; the probe reports it as an episode number.
+    const probe = (filePath: string) => ({
+      localMetadata: { videoCodec: 'hevc' },
+      ...(filePath.endsWith('S01E02.mkv') ? { episode: 1 } : {}),
+    });
+    const episodes = scanEpisodeFiles(root, probe);
+
+    assert.deepEqual(episodes.map(({ season, episode }) => ({ season, episode })).sort((a, b) => a.episode - b.episode), [
+      { season: 1, episode: 1 },
+      { season: 1, episode: 2 },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
