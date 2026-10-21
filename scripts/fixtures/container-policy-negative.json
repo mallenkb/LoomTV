@@ -18,7 +18,7 @@
     "target": "dockerfile",
     "find": "snapshot.debian.org/archive/debian/20260806T000000Z/",
     "replace": "deb.debian.org/debian",
-    "expected": "apt sources must use the debian Debian snapshot"
+    "expected": "apt must use only the two pinned Debian snapshot sources in each stage"
   },
   {
     "name": "inherited apt sources retained",
