@@ -11,6 +11,27 @@ FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0
 WORKDIR /workspace
 ENV COREPACK_HOME=/tmp/corepack
 
+# Native dependency lifecycle scripts require node-gyp, even when a package
+# ships prebuilt binaries. Keep the build toolchain out of the runtime stage.
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
+  && printf '%s\n' \
+    'Types: deb' \
+    'URIs: http://snapshot.debian.org/archive/debian/20260806T000000Z/' \
+    'Suites: bookworm bookworm-updates' \
+    'Components: main' \
+    'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+    '' \
+    'Types: deb' \
+    'URIs: http://snapshot.debian.org/archive/debian-security/20260806T000000Z/' \
+    'Suites: bookworm-security' \
+    'Components: main' \
+    'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+    > /etc/apt/sources.list.d/debian.sources \
+  && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99snapshot \
+  && apt-get update \
+  && apt-get install --no-install-recommends --yes ca-certificates python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN corepack enable
 
 # Copy manifests before source so dependency installation remains cacheable.

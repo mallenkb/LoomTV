@@ -43,19 +43,19 @@ function validateDockerfile(source, label = 'deploy/docker/Dockerfile') {
 
   const snapshotTimestamps = [];
   for (const archive of ['debian', 'debian-security']) {
-    const match = active.match(new RegExp(`snapshot\\.debian\\.org/archive/${archive}/(\\d{8}T\\d{6}Z)/`));
-    if (!match) {
+    const matches = [...active.matchAll(new RegExp(`snapshot\\.debian\\.org/archive/${archive}/(\\d{8}T\\d{6}Z)/`, 'g'))];
+    if (matches.length === 0) {
       failures.push(`${label}: apt sources must use the ${archive} Debian snapshot`);
     } else {
-      snapshotTimestamps.push(match[1]);
+      snapshotTimestamps.push(...matches.map((match) => match[1]));
     }
   }
   if (new Set(snapshotTimestamps).size > 1) {
     failures.push(`${label}: Debian and Debian security sources must use the same snapshot timestamp`);
   }
   const aptUris = [...active.matchAll(/["']URIs:\s+([^"'\s]+)["']/g)].map((match) => match[1]);
-  if (aptUris.length !== 2 || aptUris.some((uri) => !/^http:\/\/snapshot\.debian\.org\/archive\/debian(?:-security)?\/\d{8}T\d{6}Z\/$/.test(uri))) {
-    failures.push(`${label}: apt must use only the two pinned Debian snapshot sources`);
+  if (aptUris.length !== fromLines.length * 2 || aptUris.some((uri) => !/^http:\/\/snapshot\.debian\.org\/archive\/debian(?:-security)?\/\d{8}T\d{6}Z\/$/.test(uri))) {
+    failures.push(`${label}: apt must use only the two pinned Debian snapshot sources in each stage`);
   }
   if (/https?:\/\/(?:deb|security|ftp)\.debian\.org\//i.test(active)) {
     failures.push(`${label}: apt sources must not include a mutable Debian mirror`);
