@@ -60,8 +60,10 @@ function validateDockerfile(source, label = 'deploy/docker/Dockerfile') {
   if (/https?:\/\/(?:deb|security|ftp)\.debian\.org\//i.test(active)) {
     failures.push(`${label}: apt sources must not include a mutable Debian mirror`);
   }
-  if (!/rm\s+-f\s+\/etc\/apt\/sources\.list\s+\/etc\/apt\/sources\.list\.d\/\*/.test(active)) {
-    failures.push(`${label}: inherited apt sources must be cleared before configuring snapshots`);
+  const aptSourceClearPattern = /rm\s+-f\s+\/etc\/apt\/sources\.list\s+\/etc\/apt\/sources\.list\.d\/\*/g;
+  const aptSourceClears = [...active.matchAll(aptSourceClearPattern)].length;
+  if (aptSourceClears !== fromLines.length) {
+    failures.push(`${label}: inherited apt sources must be cleared before configuring snapshots in every stage`);
   }
   if (!/Acquire::Check-Valid-Until\s+["]false["]/.test(active)) {
     failures.push(`${label}: historical Debian snapshots must disable Check-Valid-Until explicitly`);
