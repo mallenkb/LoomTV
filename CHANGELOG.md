@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.29](docs/releases/v2.0.29.md)
+
+Runs on Electron 44, and the Mac app is 43 MB smaller.
+
 ### [2.0.28](docs/releases/v2.0.28.md)
 
 Keeps the title-page hero the same height windowed and in full screen.
