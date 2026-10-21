@@ -111,9 +111,10 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
         if (mounted && refreshId === refreshGeneration) { setError(failure instanceof Error ? failure.message : 'The add-on could not be loaded.'); setLoading(false); }
       }
     };
+    const onPluginsChanged = () => { void refresh(); };
     void refresh();
-    window.addEventListener('loomtv:plugins-changed', refresh);
-    return () => { mounted = false; invalidateRequests(generation); window.removeEventListener('loomtv:plugins-changed', refresh); };
+    window.addEventListener('loomtv:plugins-changed', onPluginsChanged);
+    return () => { mounted = false; invalidateRequests(generation); window.removeEventListener('loomtv:plugins-changed', onPluginsChanged); };
   }, [activeProfile?.id, addonId, revision]);
 
   useEffect(() => {

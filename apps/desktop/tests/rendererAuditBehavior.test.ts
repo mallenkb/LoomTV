@@ -141,6 +141,7 @@ test('marker loads and post-write refreshes stay with the selected episode', asy
   const streams: string[] = [];
   const panel = mountComponent('pages/SkipTimestampManager.tsx', {
     '@/components/ui/button': { Button: 'button' },
+    '@/components/settings/SettingsLayout': { SettingsNote: 'div' },
     '@/lib/desktopApi': { desktopApi: {
       getLibrary: async () => ({ movies: [], tvShows: [{ id: 'show', title: 'Show', type: 'tv', filePath: '/show', episodeFiles: [{ season: 1, episode: 1, filePath: '/one.mp4' }, { season: 1, episode: 2, filePath: '/two.mp4' }] }] }),
       setPlaybackActivity: async () => undefined,

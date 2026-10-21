@@ -54,7 +54,7 @@ export class MobileErrorBoundary extends Component<Props, State> {
 }
 
 const styles = StyleSheet.create({
-  screen: { ...StyleSheet.absoluteFillObject, zIndex: 500, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 28, backgroundColor: '#0b0b0b' },
+  screen: { ...StyleSheet.absoluteFill, zIndex: 500, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 28, backgroundColor: '#0b0b0b' },
   title: { color: '#fff', fontSize: 24, fontWeight: '700', textAlign: 'center' },
   message: { maxWidth: 520, color: '#b7b7b7', fontSize: 16, lineHeight: 23, textAlign: 'center' },
   button: { minWidth: 120, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: '#fff', paddingHorizontal: 22 },

@@ -350,6 +350,16 @@ function requireRuntimeManifest(outputPath: string, platform: string): void {
   }
 }
 
+// Package .bin folders hold symlinks to CLI scripts that point outside the
+// package. Forge 8's asar rejects them, and the app never runs those CLIs.
+function copyModuleTree(sourcePath: string, targetPath: string): void {
+  fs.cpSync(sourcePath, targetPath, {
+    recursive: true,
+    force: true,
+    filter: (source) => path.basename(source) !== '.bin',
+  });
+}
+
 function copyRuntimeModule(moduleName: string, targetNodeModules: string, copied = new Set<string>()): void {
   if (copied.has(moduleName)) return;
   copied.add(moduleName);
@@ -365,7 +375,7 @@ function copyRuntimeModule(moduleName: string, targetNodeModules: string, copied
 
   const targetPath = path.join(targetNodeModules, moduleName);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+  copyModuleTree(sourcePath, targetPath);
 
   for (const dependencyName of Object.keys(packageJson.dependencies || {})) {
     copyRuntimeModule(dependencyName, targetNodeModules, copied);
@@ -400,7 +410,27 @@ function copyDirectRuntimeModule(moduleName: string, targetNodeModules: string):
 
   const targetPath = path.join(targetNodeModules, moduleName);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+  copyModuleTree(sourcePath, targetPath);
+}
+
+/**
+ * better-sqlite3 13 ships Node-API prebuilds for every platform, which load in
+ * both Node and Electron. The app needs only the target's binary and lib/; the
+ * other prebuilds, the SQLite sources and any local node-gyp output add ~26 MB.
+ * Its nested node_modules holds only build tooling.
+ */
+function pruneBetterSqlite3(targetNodeModules: string, platform: string, arch: string): void {
+  const moduleRoot = path.join(targetNodeModules, 'better-sqlite3');
+  const binary = `${platform}-${arch}.node`;
+  if (!fs.existsSync(path.join(moduleRoot, 'prebuilds', binary))) {
+    throw new Error(`better-sqlite3 has no prebuild for ${platform}-${arch}`);
+  }
+  for (const entry of ['build', 'deps', 'src', 'node_modules', 'binding.gyp']) {
+    fs.rmSync(path.join(moduleRoot, entry), { recursive: true, force: true });
+  }
+  for (const prebuild of fs.readdirSync(path.join(moduleRoot, 'prebuilds'))) {
+    if (prebuild !== binary) fs.rmSync(path.join(moduleRoot, 'prebuilds', prebuild), { force: true });
+  }
 }
 
 const config: ForgeConfig = {
@@ -456,29 +486,22 @@ const config: ForgeConfig = {
       'src/headless/lucide-icons.svg',
     ],
     afterPrune: [
-      (buildPath, _electronVersion, platform, arch, callback) => {
-        try {
-          const directRuntimeModules = [
-            'better-sqlite3',
-            'bindings',
-            'file-uri-to-path',
-            'koffi',
-            // koffi 3 resolves its native binding from a per-platform package.
-            // Without it the FFI layer cannot load, which would take LibVLC's
-            // native window host and all three system media sessions with it.
-            koffiNativePackage(platform, arch),
-          ];
-          const targetNodeModules = path.join(buildPath, 'node_modules');
-          fs.mkdirSync(targetNodeModules, { recursive: true });
-
-          for (const moduleName of directRuntimeModules) {
-            copyDirectRuntimeModule(moduleName, targetNodeModules);
-          }
-          copyRuntimeModule('electron-updater', targetNodeModules);
-          callback();
-        } catch (error) {
-          callback(error as Error);
+      ({ buildPath, platform, arch }) => {
+        const directRuntimeModules = [
+          'better-sqlite3',
+          'koffi',
+          // koffi 3 resolves its native binding from a per-platform package.
+          // Without it the FFI layer cannot load, which would take LibVLC's
+          // native window host and all three system media sessions with it.
+          koffiNativePackage(platform, arch),
+        ];
+        const targetNodeModules = path.join(buildPath, 'node_modules');
+        fs.mkdirSync(targetNodeModules, { recursive: true });
+        for (const moduleName of directRuntimeModules) {
+          copyDirectRuntimeModule(moduleName, targetNodeModules);
         }
+        pruneBetterSqlite3(targetNodeModules, platform, arch);
+        copyRuntimeModule('electron-updater', targetNodeModules);
       },
     ],
   },

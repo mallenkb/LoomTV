@@ -1177,7 +1177,7 @@ export default function ArtworkEditorControls({
               </Button>
               <Button
                 type="button"
-                onClick={applyArtworkPreview}
+                onClick={() => void applyArtworkPreview()}
                 disabled={!artworkPreview || isSavingArtwork}
                 className="bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]"
               >
@@ -1286,7 +1286,7 @@ export default function ArtworkEditorControls({
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => applyMetadataCandidate(candidate)}
+                          onClick={() => void applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId)}
                           aria-label={`${metadataApplyLabel} ${candidate.title} from ${sourceLabel}`}
                           className="h-7 rounded-lg border border-white/20 bg-white px-2.5 text-[11px] font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:bg-white/70"
@@ -1312,7 +1312,7 @@ export default function ArtworkEditorControls({
                       <div className="mt-4 flex justify-end">
                         <Button
                           type="button"
-                          onClick={() => applyMetadataCandidate(candidate)}
+                          onClick={() => void applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId)}
                           className="h-8 rounded-lg border border-white bg-white px-3 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:border-white/40 disabled:bg-white/40 disabled:text-black/60"
                         >
@@ -1439,7 +1439,7 @@ export default function ArtworkEditorControls({
                         ) : <span />}
                         <Button
                           type="button"
-                          onClick={() => applyMetadataCandidate(candidate)}
+                          onClick={() => void applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId) || !candidateSupportsTarget}
                           className="h-8 rounded-lg border border-white bg-white px-3 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:border-white/40 disabled:bg-white/40 disabled:text-black/60"
                         >

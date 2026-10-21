@@ -1,0 +1,19 @@
+{
+  "$schema": "../../node_modules/oxlint/configuration_schema.json",
+  // Type-aware promise checks for the desktop app, run as a second pass after
+  // the root .oxlintrc.json. A rejected promise nobody handles fails without
+  // telling the user. Tests are left out because node:test already tracks the
+  // promises its test() calls return.
+  "plugins": ["typescript"],
+  "options": {
+    "typeAware": true
+  },
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {
+    "typescript/await-thenable": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error"
+  }
+}

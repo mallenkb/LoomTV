@@ -137,7 +137,7 @@ export function createWindow(): void {
     // chrome. The native host supplies the opaque player backdrop.
     backgroundColor: '#00000000',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
@@ -201,15 +201,18 @@ export function createWindow(): void {
   mainWindow.webContents.once('did-finish-load', revealWindow);
   setTimeout(revealWindow, 1500).unref();
 
+  let rendererUrl = PACKAGED_RENDERER_URL;
   if (MAIN_WINDOW_DEV_SERVER_URL) {
-    const rendererUrl = new URL(MAIN_WINDOW_DEV_SERVER_URL);
+    const devUrl = new URL(MAIN_WINDOW_DEV_SERVER_URL);
     if (process.env.LOOMTV_ONBOARDING_PREVIEW === 'connect') {
-      rendererUrl.searchParams.set('onboarding', 'connect');
+      devUrl.searchParams.set('onboarding', 'connect');
     }
-    mainWindow.loadURL(rendererUrl.toString());
-  } else {
-    mainWindow.loadURL(PACKAGED_RENDERER_URL);
+    rendererUrl = devUrl.toString();
   }
+  // A failed load also emits did-fail-load; this keeps the rejection handled.
+  mainWindow.loadURL(rendererUrl).catch((error: unknown) => {
+    console.error('[window] Could not load the renderer:', error);
+  });
 
   mainWindow.webContents.on('did-finish-load', () => {
     revealWindow();

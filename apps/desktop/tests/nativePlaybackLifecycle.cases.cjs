@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const ts = require('typescript');
+const { transform } = require('sucrase');
 const { NativeSessionLease } = require('../src/components/VideoPlayer/engines/NativeSessionLease.ts');
 
 const directory = path.resolve(__dirname, '../src/components/VideoPlayer/engines');
@@ -17,17 +17,13 @@ function deferred() {
 // libraries and Electron are deliberately not involved in these tests.
 function compile(name, dependencies) {
   const filename = path.join(directory, `${name}.ts`);
-  const result = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    fileName: filename,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-    reportDiagnostics: true,
+  // Sucrase throws on syntax errors, which fails the test with the location.
+  const { code } = transform(fs.readFileSync(filename, 'utf8'), {
+    filePath: filename,
+    transforms: ['typescript', 'imports'],
   });
-  const errors = (result.diagnostics || []).filter(d => d.category === ts.DiagnosticCategory.Error);
-  assert.equal(errors.length, 0, ts.formatDiagnosticsWithColorAndContext(errors, {
-    getCanonicalFileName: f => f, getCurrentDirectory: () => directory, getNewLine: () => '\n',
-  }));
   const module = { exports: {} };
-  const run = vm.runInThisContext(`(function(require,module,exports){${result.outputText}\n})`, { filename });
+  const run = vm.runInThisContext(`(function(require,module,exports){${code}\n})`, { filename });
   run(id => {
     if (id in dependencies) return dependencies[id];
     throw new Error(`Unexpected test dependency: ${id}`);

@@ -211,12 +211,11 @@ The normal application startup rebuilds better-sqlite3 for Electron. The process
 Latest follow-up commands from the repository root:
 
 ```sh
-node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json
-corepack pnpm --dir apps/desktop exec eslint src/main.ts src/main/artworkCache.ts src/main/database.ts src/main/databaseArtworkRepository.ts src/main/libraryProjections.ts src/main/scanning/inventory.ts src/main/scanning/typescriptDiscovery.ts src/main/scanning/discover.ts src/main/scanning/quickScanCache.ts src/main/scanning/rustScannerClient.ts scripts/benchmark-scan-pipeline.ts scripts/benchmark-scan-projection.ts scripts/verify-scanner.cjs
+node_modules/.bin/tsrs --noEmit -p apps/desktop/tsconfig.json
+corepack pnpm --dir apps/desktop exec oxlint src/main.ts src/main/artworkCache.ts src/main/database.ts src/main/databaseArtworkRepository.ts src/main/libraryProjections.ts src/main/scanning/inventory.ts src/main/scanning/typescriptDiscovery.ts src/main/scanning/discover.ts src/main/scanning/quickScanCache.ts src/main/scanning/rustScannerClient.ts scripts/benchmark-scan-pipeline.ts scripts/benchmark-scan-projection.ts scripts/verify-scanner.cjs
 node apps/desktop/scripts/benchmark-scan-pipeline.ts apps/desktop/docs/scanner-benchmarks/pipeline-native-quick-macos-arm64.json
 node apps/desktop/scripts/benchmark-scan-projection.ts apps/desktop/docs/scanner-benchmarks/projection-second-pass-macos-arm64.json
 node apps/desktop/scripts/build-scanner.cjs
 node apps/desktop/scripts/verify-scanner.cjs apps/desktop/resources/scanner/darwin-arm64/loom-scanner
-node apps/desktop/scripts/ensure-electron-natives.cjs
 corepack pnpm --dir apps/desktop run build:main
 ```

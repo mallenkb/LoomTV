@@ -412,7 +412,7 @@ function EmptyOthersState({ error, onAddFolder }: { error?: string; onAddFolder:
           Videos added here stay in Others. Loom still detects series and anime structure so every file remains easy to browse and play.
         </p>
         {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
-        <Button onClick={onAddFolder} className="mt-8 h-12 gap-2 px-5">
+        <Button onClick={() => void onAddFolder()} className="mt-8 h-12 gap-2 px-5">
           <FolderPlus className="h-4 w-4" />
           Add Others Folder
         </Button>

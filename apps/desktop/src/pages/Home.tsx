@@ -232,15 +232,15 @@ function HomeEmptyState({
         </p>
         {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <div className="mt-8 grid gap-3 sm:grid-cols-3">
-          <Button onClick={() => onAddFolder('movies')} disabled={isScanning} className="h-12 gap-2">
+          <Button onClick={() => void onAddFolder('movies')} disabled={isScanning} className="h-12 gap-2">
             <Film className="h-4 w-4" />
             Movies
           </Button>
-          <Button onClick={() => onAddFolder('tvShows')} disabled={isScanning} variant="outline" className="h-12 gap-2">
+          <Button onClick={() => void onAddFolder('tvShows')} disabled={isScanning} variant="outline" className="h-12 gap-2">
             <Tv className="h-4 w-4" />
             TV Shows
           </Button>
-          <Button onClick={() => onAddFolder('anime')} disabled={isScanning} variant="outline" className="h-12 gap-2">
+          <Button onClick={() => void onAddFolder('anime')} disabled={isScanning} variant="outline" className="h-12 gap-2">
             <FolderPlus className="h-4 w-4" />
             Anime
           </Button>

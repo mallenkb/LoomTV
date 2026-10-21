@@ -12,14 +12,6 @@
     "tests/**/*.ts",
     "vite.*.config.ts"
   ],
-  "ignoreDependencies": [
-    "@eslint/js",
-    "eslint-import-resolver-typescript",
-    "eslint-plugin-import-x",
-    "eslint-plugin-react-hooks",
-    "globals",
-    "typescript-eslint"
-  ],
   "ignoreBinaries": [
     "file",
     "which",

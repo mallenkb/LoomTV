@@ -127,7 +127,7 @@ function EmptyShowsState({
           {description}
         </p>
         {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
-        <Button onClick={onAddFolder} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">
+        <Button onClick={() => void onAddFolder()} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">
           <Icon className="h-4 w-4" />
           {buttonLabel}
         </Button>

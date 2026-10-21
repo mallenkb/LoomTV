@@ -1,0 +1,124 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "import", "react"],
+  "jsPlugins": ["./scripts/oxlint/loom-plugin.mjs"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "builtin": true,
+    "es2024": true
+  },
+  "ignorePatterns": [
+    "**/.claude/**",
+    "**/.vite/**",
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/out/**",
+    "**/.expo/**",
+    "**/android/**",
+    "**/ios/**",
+    "**/Pods/**",
+    "**/release-evidence/**",
+    "**/target/**"
+  ],
+  "rules": {
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    // Error boundaries clear their error in componentDidUpdate when resetKey changes.
+    "react/no-did-update-set-state": "off",
+    // Oxlint 1.89 adds React compiler diagnostics to correctness. Keep these
+    // visible while existing components are migrated; retain all prior errors.
+    "react/set-state-in-effect": "warn",
+    "react/refs": "warn",
+    "react/immutability": "warn",
+    "react/preserve-manual-memoization": "warn",
+    "react/purity": "warn",
+    "react/incompatible-library": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "typescript/ban-ts-comment": "error",
+        "typescript/no-empty-object-type": "error",
+        "typescript/no-explicit-any": "error",
+        "typescript/no-namespace": "error",
+        "typescript/no-require-imports": "error",
+        "typescript/no-unnecessary-type-constraint": "error",
+        "typescript/no-unsafe-function-type": "error",
+        "typescript/no-wrapper-object-types": "error",
+        "typescript/prefer-namespace-keyword": "error",
+        "typescript/triple-slash-reference": "error",
+        "no-unused-vars": ["error", {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_",
+          "caughtErrorsIgnorePattern": "^_"
+        }]
+      }
+    },
+    {
+      "files": ["apps/desktop/**/*.{ts,tsx}", "packages/**/*.{ts,tsx}"],
+      "rules": {
+        "typescript/no-non-null-assertion": "error"
+      }
+    },
+    {
+      "files": ["apps/desktop/**/*.{ts,tsx}", "apps/tv/**/*.{ts,tsx}", "apps/mobile/**/*.{ts,tsx}"],
+      "env": { "browser": true, "node": true },
+      "rules": {
+        "react/rules-of-hooks": "error",
+        "react/exhaustive-deps": "error"
+      }
+    },
+    {
+      "files": ["apps/mobile/**/*.{ts,tsx}"],
+      "globals": { "__DEV__": "readonly" }
+    },
+    {
+      "files": ["apps/desktop/**/*.{ts,tsx}"],
+      "rules": {
+        "typescript/no-empty-function": "error",
+        "import/default": "error",
+        "import/export": "error",
+        "import/named": "error",
+        "import/namespace": "error",
+        "import/no-duplicates": "warn",
+        "import/no-named-as-default": "warn",
+        "import/no-named-as-default-member": "warn"
+      }
+    },
+    {
+      "files": ["packages/**/*.{js,mjs,cjs}", "apps/server/src/**/*.{js,mjs,cjs}", "scripts/**/*.{js,mjs,cjs}"],
+      "env": { "node": true }
+    },
+    {
+      // A synchronous child process freezes the Electron main thread (and the
+      // in-process canonical server) for as long as the command runs. Use the
+      // async forms. Quit-time cleanup that genuinely must block can opt out on
+      // one line with a comment saying why.
+      "files": [
+        "apps/desktop/src/main.ts",
+        "apps/desktop/src/main/**/*.ts",
+        "apps/server/src/**/*.{js,mjs,cjs}",
+        "packages/transcode-capabilities/src/**/*.{js,mjs,cjs}"
+      ],
+      "rules": {
+        "loom/no-sync-child-process": "error",
+        "no-restricted-imports": ["error", {
+          "paths": [
+            {
+              "name": "child_process",
+              "importNames": ["execFileSync", "execSync", "spawnSync"],
+              "message": "Synchronous child processes block the main thread; use the async form."
+            },
+            {
+              "name": "node:child_process",
+              "importNames": ["execFileSync", "execSync", "spawnSync"],
+              "message": "Synchronous child processes block the main thread; use the async form."
+            }
+          ]
+        }]
+      }
+    }
+  ]
+}

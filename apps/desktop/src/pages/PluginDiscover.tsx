@@ -1634,7 +1634,7 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
     }
     const year = parseYearFromItem(enrichedItem);
     const query = `${enrichedItem.title}${year ? ` ${year}` : ''} official trailer`;
-    await desktopApi.openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
+    desktopApi.openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
   }, [pageQueryScope, enrichWithCast]);
 
   const openItemDetails = useCallback((item: StremioPluginCatalogItem) => {

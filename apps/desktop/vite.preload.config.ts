@@ -8,7 +8,8 @@ export default defineConfig({
     lib: {
       entry: 'src/preload.ts',
       formats: ['cjs'],
-      fileName: () => 'preload.js',
+      // Match Forge 8's preload output in development and packaged builds.
+      fileName: () => 'preload.cjs',
     },
     rollupOptions: {
       external: ['electron'],

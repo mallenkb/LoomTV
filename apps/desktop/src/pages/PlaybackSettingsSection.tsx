@@ -288,16 +288,16 @@ export default function PlaybackSettingsSection({
               </div>
             </SettingsRow>
             <SettingsRow title={analysisStatus?.paused ? 'Resume analysis' : 'Pause analysis'} description="Queued work waits until you resume.">
-              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
             </SettingsRow>
             <SettingsRow title="Cancel queued analysis">
-              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction('cancel')}>Cancel queued</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void onAnalysisAction('cancel')}>Cancel queued</Button>
             </SettingsRow>
             <SettingsRow title="Clear stale cache" description="Remove fingerprints for files that are gone.">
-              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction('cleanup')}>Clear</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void onAnalysisAction('cleanup')}>Clear</Button>
             </SettingsRow>
             <SettingsRow title="Rebuild automatic markers" description="Discard detected markers and detect them again. Manual markers stay.">
-              <Button type="button" variant="outline" size="sm" onClick={() => onAnalysisAction('rebuild')}>Rebuild</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void onAnalysisAction('rebuild')}>Rebuild</Button>
             </SettingsRow>
           </SettingsDisclosure>
 
@@ -307,7 +307,7 @@ export default function PlaybackSettingsSection({
                 <SkipTimestampManager
                   settings={skipAnalysis}
                   onSettingsChange={onSkipAnalysisChange}
-                  onRun={(scope) => onAnalysisAction('run', scope)}
+                  onRun={(scope) => void onAnalysisAction('run', scope)}
                   onSaveSettings={onSave}
                 />
               </div>

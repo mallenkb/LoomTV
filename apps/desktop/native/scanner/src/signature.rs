@@ -137,7 +137,14 @@ impl Signature {
             merge_records(&self.chunks, append)?;
         }
         Ok((
-            format!("inventory-v1:{}:{:x}", self.count, hash.finalize()),
+            format!(
+                "inventory-v1:{}:{}",
+                self.count,
+                hash.finalize()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
             self.count,
         ))
     }
@@ -209,7 +216,16 @@ mod tests {
         }
         assert_eq!(
             signature.finish(|| Ok(())).unwrap(),
-            (format!("inventory-v1:350:{:x}", hash.finalize()), 350)
+            (
+                format!(
+                    "inventory-v1:350:{}",
+                    hash.finalize()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                ),
+                350
+            )
         );
     }
 

@@ -3,9 +3,9 @@ const ANDROID_BUILD_POLICY = Object.freeze({
   version: '1.0.1',
   versionCode: 1,
   gradleDistributionUrl:
-    'https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip',
+    'https\\://services.gradle.org/distributions/gradle-9.4.1-bin.zip',
   gradleDistributionSha256:
-    'bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531',
+    '2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb',
   networkSecurityConfigResource: '@xml/loomtv_network_security_config',
   networkSecurityConfig: `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>

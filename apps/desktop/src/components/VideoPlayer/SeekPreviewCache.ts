@@ -58,12 +58,16 @@ export default class SeekPreviewCache {
   }
 
   private async load(frame: number): Promise<void> {
+    // Released in finally unless it moves into the cache, so a preview that
+    // finishes after dispose or fails validation drops its decoded bitmap.
+    let pending: HTMLImageElement | null = null;
     try {
       const { url } = await desktopApi.getThumbnail(this.filePath, String(frame), true);
       if (this.disposed) return;
       // An image request supports the authenticated artwork URLs in every
       // desktop mode, including origins that cannot fetch and read the bytes.
       const image = new Image();
+      pending = image;
       image.decoding = 'async';
       await new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {
@@ -86,6 +90,7 @@ export default class SeekPreviewCache {
       const bytes = image.naturalWidth * image.naturalHeight * 4;
       if (!bytes || bytes > MAX_DECODED_BYTES) throw new Error('Invalid preview dimensions.');
       this.entries.set(frame, { frame, url, image, bytes });
+      pending = null;
       let total = [...this.entries.values()].reduce((sum, entry) => sum + entry.bytes, 0);
       while (this.entries.size > MAX_ENTRIES || total > MAX_DECODED_BYTES) {
         const oldest = this.entries.entries().next().value;
@@ -102,6 +107,8 @@ export default class SeekPreviewCache {
         const oldest = this.failed.values().next().value;
         if (this.failed.size > MAX_ENTRIES && oldest !== undefined) this.failed.delete(oldest);
       }
+    } finally {
+      pending?.removeAttribute('src');
     }
   }
 

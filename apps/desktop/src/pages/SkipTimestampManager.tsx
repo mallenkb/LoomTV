@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { SettingsNote } from '@/components/settings/SettingsLayout';
 import { desktopApi, type LibraryPayload, type ManagedMediaSegment, type MediaSegmentType, type SkipAnalysisSettings } from '@/lib/desktopApi';
 
 const TYPES = ['intro', 'recap', 'outro', 'credits', 'preview'] as const;
@@ -18,6 +19,7 @@ export default function SkipTimestampManager({
   onSaveSettings: () => void | boolean | Promise<void | boolean>;
 }) {
   const [segments, setSegments] = useState<ManagedMediaSegment[]>([]);
+  const [markerError, setMarkerError] = useState('');
   const [library, setLibrary] = useState<LibraryPayload | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState('');
   const [selectedSeason, setSelectedSeason] = useState(0);
@@ -145,8 +147,18 @@ export default function SkipTimestampManager({
     if (saved === false) return;
     onRun({ mediaId: selectedMediaId, season: selectedSeason });
   };
+  const runMarkerAction = async (action: () => Promise<unknown>, failure: string) => {
+    setMarkerError('');
+    try {
+      await action();
+      await refresh();
+    } catch (error) {
+      setMarkerError(error instanceof Error ? error.message : failure);
+    }
+  };
 
   return <div className="space-y-5">
+      {markerError ? <SettingsNote role="alert" tone="error">{markerError}</SettingsNote> : null}
       <div className="grid gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4 md:grid-cols-3">
         <label className="text-xs text-[var(--loom-muted)]">Library title<select aria-label="Library title" value={selectedMediaId} onChange={(event) => setSelectedMediaId(event.target.value)} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-[var(--loom-text)]">{items.map((item) => <option key={item.id} value={item.id}>{item.type === 'movie' ? 'Movie' : item.type === 'anime' ? 'Anime' : 'TV'} · {item.title}</option>)}</select></label>
         <label className="text-xs text-[var(--loom-muted)]">Season<select aria-label="Season" value={selectedSeason} onChange={(event) => setSelectedSeason(Number(event.target.value))} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-[var(--loom-text)]">{seasons.map((season) => <option key={season} value={season}>{selectedItem?.type === 'movie' ? 'Movie' : `Season ${season}`}</option>)}</select></label>
@@ -155,7 +167,7 @@ export default function SkipTimestampManager({
           <select aria-label="Season analysis mode" value={settings.seasonOverrides[excludedKey] || 'full'} onChange={(event) => onSettingsChange({ ...settings, seasonOverrides: { ...settings.seasonOverrides, [excludedKey]: event.target.value as 'full' | 'chapter-only' | 'providers-only' } })} className="rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-xs text-[var(--loom-text)]"><option value="full">Full analysis</option><option value="chapter-only">Chapter only</option><option value="providers-only">Providers only</option></select>
           <Button type="button" variant="outline" disabled={!settings.enabled || !selectedMediaId} onClick={() => void rescanSeason()}>Save &amp; manually scan season</Button>
           <Button type="button" variant="outline" disabled={!selectedMediaId} onClick={() => onSettingsChange({ ...settings, exclusions: { ...settings.exclusions, seasons: seasonExcluded ? settings.exclusions.seasons.filter((value) => value !== excludedKey) : [...settings.exclusions.seasons, excludedKey] } })}>{seasonExcluded ? 'Include season' : 'Exclude season'}</Button>
-          <Button type="button" variant="outline" disabled={!selectedMediaId} onClick={async () => { await desktopApi.eraseManagedMediaSegments({ mediaId: selectedMediaId, season: selectedSeason }); await refresh(); }}>Erase season automatic markers</Button>
+          <Button type="button" variant="outline" disabled={!selectedMediaId} onClick={() => void runMarkerAction(() => desktopApi.eraseManagedMediaSegments({ mediaId: selectedMediaId, season: selectedSeason }), 'The automatic markers could not be erased.')}>Erase season automatic markers</Button>
         </div>
       </div>
 
@@ -179,7 +191,7 @@ export default function SkipTimestampManager({
         <select value={segment.type} disabled={segment.source === 'manual'} aria-label={`Segment type for ${segment.type}`} onChange={(event) => void updateCandidate(segment.id, { type: event.target.value as MediaSegmentType })} className="rounded bg-black px-2 py-1 disabled:opacity-60">{TYPES.map((type) => <option key={type}>{type}</option>)}</select>
         <button type="button" onClick={() => selectForEdit(segment)} className="text-left"><span>{(segment.startMs / 1000).toFixed(1)}–{segment.endMs === null ? 'end' : (segment.endMs / 1000).toFixed(1)}s</span><span className="ml-2 text-[var(--loom-muted)]">{segment.source} · {Math.round(segment.confidence * 100)}%{segment.analysisMetadata?.detector ? ` · ${segment.analysisMetadata.detector}` : ''}</span></button>
         <span className={segment.status === 'active' ? 'settings-status-available' : segment.status === 'review' ? 'settings-status-warning' : 'settings-status-error'}>{segment.status}</span>
-        <div className="flex gap-1">{segment.source !== 'manual' && <><Button type="button" variant="outline" onClick={() => void updateCandidate(segment.id, { status: 'active' })}>{segment.status === 'rejected' ? 'Restore' : 'Approve'}</Button><Button type="button" variant="outline" onClick={() => void updateCandidate(segment.id, { status: 'rejected' })}>Reject</Button></>}{segment.source === 'manual' && <Button type="button" variant="outline" onClick={async () => { await desktopApi.deleteManualMediaSegment({ candidateId: segment.id, mediaId: segment.mediaId, season: segment.season, episode: segment.episode, type: segment.type }); await refresh(); }}>Delete</Button>}</div>
+        <div className="flex gap-1">{segment.source !== 'manual' && <><Button type="button" variant="outline" onClick={() => void updateCandidate(segment.id, { status: 'active' })}>{segment.status === 'rejected' ? 'Restore' : 'Approve'}</Button><Button type="button" variant="outline" onClick={() => void updateCandidate(segment.id, { status: 'rejected' })}>Reject</Button></>}{segment.source === 'manual' && <Button type="button" variant="outline" onClick={() => void runMarkerAction(() => desktopApi.deleteManualMediaSegment({ candidateId: segment.id, mediaId: segment.mediaId, season: segment.season, episode: segment.episode, type: segment.type }), 'The marker could not be deleted.')}>Delete</Button>}</div>
       </div>)}{!visible.length && <p className="py-8 text-center text-sm text-[var(--loom-muted)]">No markers for this title, season, and episode yet. You can manually scan the season or add one above.</p>}</div>
   </div>;
 }

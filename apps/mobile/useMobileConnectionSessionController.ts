@@ -13,6 +13,13 @@ import { mobileConnectionLifecycleAction } from './mobileLifecycle';
 import { useMobileBonjourDiscovery } from './useMobileBonjourDiscovery';
 import { useMobileOfflinePersistence } from './useMobileOfflinePersistence';
 
+function currentAppState(): AppStateStatus {
+  const state = AppState.currentState;
+  return state === 'active' || state === 'inactive' || state === 'background' || state === 'extension'
+    ? state
+    : 'unknown';
+}
+
 export type MobileProfilePickerMode = 'startup' | 'lock' | 'profile-required' | 'voluntary';
 
 export function useMobileConnectionSessionController({
@@ -42,7 +49,7 @@ export function useMobileConnectionSessionController({
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
   const [offlineSnapshotSavedAt, setOfflineSnapshotSavedAt] = useState<number | null>(null);
   const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const [appState, setAppState] = useState<AppStateStatus>(currentAppState);
 
   const sessionGenerationRef = useRef(0);
   const sessionIdentity = JSON.stringify([connection?.hostDeviceId, activeProfile?.id, connection?.selectionRevision]);
@@ -64,7 +71,7 @@ export function useMobileConnectionSessionController({
   const reconnectSavedConnectionHandlerRef = useRef<(saved: SavedConnection) => Promise<boolean>>(async () => false);
   const pairWithDesktopHandlerRef = useRef<(host?: DiscoveredHost) => Promise<void>>(async () => undefined);
   const checkDesktopConnectionHandlerRef = useRef<() => Promise<void>>(async () => undefined);
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const appStateRef = useRef<AppStateStatus>(currentAppState());
 
   const showProfilePicker = profilePickerMode !== null;
   const connectionLifecycleAction = mobileConnectionLifecycleAction({

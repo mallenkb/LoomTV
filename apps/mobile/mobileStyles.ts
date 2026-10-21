@@ -46,7 +46,7 @@ export function createStyles(theme: MobileThemeColors) {
     overflow: 'hidden',
   },
   shimmerBase: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: panel2,
     overflow: 'hidden',
   },
@@ -507,10 +507,10 @@ export function createStyles(theme: MobileThemeColors) {
     position: 'relative',
   },
   heroCardImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   heroCardShade: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1,
   },
   heroCardFooter: {
@@ -1056,7 +1056,7 @@ export function createStyles(theme: MobileThemeColors) {
     backgroundColor: 'rgba(23,23,23,0.88)',
   },
   miniPlayerArtworkBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.22,
   },
   miniPlayerArtworkBackdropImage: {
@@ -1069,7 +1069,7 @@ export function createStyles(theme: MobileThemeColors) {
     flex: 1,
   },
   miniPlayerArtworkScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   miniPlayerMain: {
     alignItems: 'center',
@@ -1206,7 +1206,7 @@ export function createStyles(theme: MobileThemeColors) {
     textAlign: 'center',
   },
   posterSheetOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
     zIndex: 35,

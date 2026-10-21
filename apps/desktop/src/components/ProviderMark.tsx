@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Clapperboard } from 'lucide-react';
 import { desktopApi } from '@/lib/desktopApi';
+import { queryClient, queryScope } from '@/lib/queryClient';
 import type { OriginPlatform, StreamingProvider } from '@/shared/desktopProtocol';
 import { preferredProviderLogoUrl } from '@/shared/providerLogos';
-
-const providerCache = new Map<string, StreamingProvider[]>();
-const providerRequests = new Map<string, Promise<StreamingProvider[]>>();
 
 type ProviderMarkProps = {
   mediaId: string;
@@ -15,28 +13,11 @@ type ProviderMarkProps = {
 };
 
 function loadProviders(mediaId: string): Promise<StreamingProvider[]> {
-  const cached = providerCache.get(mediaId);
-  if (cached) return Promise.resolve(cached);
-
-  const pending = providerRequests.get(mediaId);
-  if (pending) return pending;
-
-  const request = desktopApi.getStreamingProviders(mediaId)
-    .then((providers) => {
-      const next = Array.isArray(providers) ? providers : [];
-      providerCache.set(mediaId, next);
-      return next;
-    })
-    .catch(() => {
-      providerCache.set(mediaId, []);
-      return [];
-    })
-    .finally(() => {
-      providerRequests.delete(mediaId);
-    });
-
-  providerRequests.set(mediaId, request);
-  return request;
+  // desktopApi already deduplicates reads and retains results in the bounded,
+  // profile-scoped query cache. A second cache keeps evicted results alive.
+  return desktopApi.getStreamingProviders(mediaId)
+    .then((providers) => Array.isArray(providers) ? providers : [])
+    .catch(() => []);
 }
 
 function primaryProvider(providers: readonly StreamingProvider[] | undefined): StreamingProvider | undefined {
@@ -62,7 +43,11 @@ export default function ProviderMark({ mediaId, providers, originPlatform, class
     }
 
     let cancelled = false;
-    const cached = providerCache.get(mediaId);
+    // Reuse cached results immediately, without clearing a warm logo first.
+    // Mounted marks own their displayed data even if this cache entry expires.
+    const cached = queryClient.getQueryData<StreamingProvider[]>([
+      'getStreamingProviders', ...queryScope(), mediaId,
+    ]);
     if (cached) {
       setResolvedProviders(cached);
       return undefined;

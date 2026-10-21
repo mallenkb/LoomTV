@@ -187,7 +187,7 @@ export default function App() {
       void Promise.allSettled([
         MyList, Movies, Others, TVShows, MovieDetail, TVDetail, Settings,
         PluginDiscover, LiveTv, ArchiveOrgAddon,
-      ].map((component) => component.preload?.()));
+      ].map((component) => component.preload?.() ?? Promise.resolve()));
     };
     if (typeof window.requestIdleCallback === 'function') {
       const id = window.requestIdleCallback(preload, { timeout: 2_000 });
@@ -706,7 +706,7 @@ function isRouteModuleError(error: unknown): boolean {
   return /importing a module script failed|failed to fetch dynamically imported module|loading chunk .+ failed|chunkloaderror/i.test(message);
 }
 
-function RouteErrorFallback({ error, reset }: { error: Error; reset: () => void }) {
+function RouteErrorFallback({ error, reset }: { error: unknown; reset: () => void }) {
   const moduleError = isRouteModuleError(error);
   useEffect(() => {
     if (!moduleError) return;
@@ -718,7 +718,7 @@ function RouteErrorFallback({ error, reset }: { error: Error; reset: () => void 
   }, [moduleError]);
   return (
     <div role="alert" className="p-8">
-      <p>{moduleError ? 'Reloading this page…' : error.message || 'This page could not load.'}</p>
+      <p>{moduleError ? 'Reloading this page…' : (error instanceof Error ? error.message : 'This page could not load.')}</p>
       <button type="button" onClick={moduleError ? () => window.location.reload() : reset}>
         {moduleError ? 'Reload now' : 'Retry'}
       </button>

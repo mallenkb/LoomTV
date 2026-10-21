@@ -336,13 +336,13 @@ export function LibraryList({
       )}
       columnWrapperStyle={columns > 1 ? { gap } : undefined}
       contentContainerStyle={[contentContainerStyle, { gap }]}
-      ListHeaderComponent={header}
+      ListHeaderComponent={header ?? undefined}
       ListEmptyComponent={showEmpty ? (
         <View style={styles.emptyInline}>
           <Text selectable style={styles.emptyTitle}>No local matches found</Text>
           <Text selectable style={styles.emptyCopy}>Try another search or refresh the server library.</Text>
         </View>
-      ) : null}
+      ) : undefined}
       refreshControl={refreshControl}
       // The content padding already includes the safe-area top inset; letting
       // iOS also apply automatic content insets doubles the gap under the

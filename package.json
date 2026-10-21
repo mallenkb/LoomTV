@@ -36,12 +36,17 @@
     "tv:android": "pnpm --filter @loom-media-server/tv android",
     "tv:typecheck": "pnpm --filter @loom-media-server/tv typecheck",
     "tv:test": "pnpm --filter @loom-media-server/tv test",
-    "lint": "eslint .",
+    "lint": "oxlint && pnpm --filter loom-media-server-desktop run lint:promises",
     "typecheck": "pnpm -r --if-present typecheck",
     "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs scripts/dependency-patches.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
     "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
   },
   "devDependencies": {
-    "yaml": "2.9.0"
+    "yaml": "2.9.1",
+    "tsrs": "catalog:",
+    "oxlint": "catalog:"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
   }
 }

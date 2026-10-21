@@ -432,9 +432,13 @@ export function useSettingsController(activeSection: SettingsSection | null) {
       setPlaybackDisplaySleepTimeoutMinutes(loadedDisplaySleepTimeout);
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
       setRequireNetworkApproval(Boolean(s.localNetworkRequireApproval));
+    }).catch((error: unknown) => {
+      setSettingsPersistenceError(error instanceof Error ? `Settings could not be loaded. ${error.message}` : 'Settings could not be loaded.');
     });
     if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
-      void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
+      desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus).catch((error: unknown) => {
+        console.warn('Could not refresh analysis status:', error);
+      });
     }
     const savedRemoteLibrary = parseStoredValue(
       localStorage.getItem('loomtv:last-remote-library'),
@@ -467,14 +471,15 @@ export function useSettingsController(activeSection: SettingsSection | null) {
         if (!cancelled) console.warn('Could not refresh analysis status:', error);
       } finally { pending = false; }
     };
+    const onRefresh = () => { void refresh(); };
     void refresh();
     // Poll faster while a scan is running so the progress bar tracks it.
-    const timer = window.setInterval(refresh, analysisIsActive ? 2000 : 5000);
-    document.addEventListener('visibilitychange', refresh);
+    const timer = window.setInterval(onRefresh, analysisIsActive ? 2000 : 5000);
+    document.addEventListener('visibilitychange', onRefresh);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refresh);
+      document.removeEventListener('visibilitychange', onRefresh);
     };
   }, [activeSection, analysisIsActive]);
 
@@ -690,14 +695,19 @@ export function useSettingsController(activeSection: SettingsSection | null) {
     scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
   ): Promise<{ queued: number } | undefined> => {
     let runResult: { queued: number } | undefined;
-    if (action === 'run') runResult = await desktopApi.runLocalSegmentAnalysis(scope);
-    else if (action === 'pause') await desktopApi.pauseLocalSegmentAnalysis();
-    else if (action === 'resume') await desktopApi.resumeLocalSegmentAnalysis();
-    else if (action === 'cancel') await desktopApi.cancelLocalSegmentAnalysis();
-    else if (action === 'cancel-manual') await desktopApi.cancelLocalSegmentAnalysis({ kind: 'manual' });
-    else if (action === 'cleanup') await desktopApi.cleanupLocalSegmentAnalysis();
-    else await desktopApi.rebuildLocalSegmentAnalysis();
-    setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    try {
+      if (action === 'run') runResult = await desktopApi.runLocalSegmentAnalysis(scope);
+      else if (action === 'pause') await desktopApi.pauseLocalSegmentAnalysis();
+      else if (action === 'resume') await desktopApi.resumeLocalSegmentAnalysis();
+      else if (action === 'cancel') await desktopApi.cancelLocalSegmentAnalysis();
+      else if (action === 'cancel-manual') await desktopApi.cancelLocalSegmentAnalysis({ kind: 'manual' });
+      else if (action === 'cleanup') await desktopApi.cleanupLocalSegmentAnalysis();
+      else await desktopApi.rebuildLocalSegmentAnalysis();
+      setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'The skip analysis action failed.');
+      return undefined;
+    }
     return runResult;
   };
 
@@ -1045,7 +1055,7 @@ export function useSettingsController(activeSection: SettingsSection | null) {
   const handleUpdateAction = async () => {
     if (isUpdateBusy) return;
     if (updateState?.manualDownload) {
-      await desktopApi.openExternal('https://github.com/mallenkb/LoomTV/releases/latest');
+      desktopApi.openExternal('https://github.com/mallenkb/LoomTV/releases/latest');
       return;
     }
 
@@ -1275,10 +1285,10 @@ export function useSettingsController(activeSection: SettingsSection | null) {
           setMetadataKey={setMetadataKey}
           setProviderEditing={setProviderEditing}
           toggleProviderVisibility={toggleProviderVisibility}
-          deleteMetadataKey={handleDeleteMetadataKey}
+          deleteMetadataKey={(providerId) => void handleDeleteMetadataKey(providerId)}
           setNewProviderName={setNewProviderName}
           setNewProviderKey={setNewProviderKey}
-          addMetadataKey={handleAddMetadataKey}
+          addMetadataKey={() => void handleAddMetadataKey()}
           saveApiKeys={() => void handleSaveApiKeys()}
           testApiKeys={() => void handleTestApiKeys()}
         />

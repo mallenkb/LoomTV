@@ -2089,7 +2089,9 @@ const desktopTransport = {
 
   openExternal(url: string): void {
     if (window.desktopApi?.openExternal) {
-      void window.desktopApi.openExternal(url);
+      window.desktopApi.openExternal(url).catch((error: unknown) => {
+        console.warn('Could not open the link in the browser:', error);
+      });
     } else {
       window.open(url, '_blank', 'noopener,noreferrer');
     }

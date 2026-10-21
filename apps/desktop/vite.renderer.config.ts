@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from 'vite-plus';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { z } from 'zod';
 import { VIDEO_EMBED_ORIGINS } from './src/shared/externalPlayback';
@@ -8,8 +10,11 @@ import { VIDEO_EMBED_ORIGINS } from './src/shared/externalPlayback';
 const packageJsonPayload: unknown = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const packageJson = z.object({ version: z.string().optional() }).parse(packageJsonPayload);
 const srcPath = fileURLToPath(new URL('./src', import.meta.url));
-const reactPath = (entry: string) => fileURLToPath(new URL(`../../node_modules/react-dom/node_modules/react/${entry}`, import.meta.url));
-const reactDomPath = (entry: string) => fileURLToPath(new URL(`../../node_modules/react-dom/${entry}`, import.meta.url));
+const require = createRequire(import.meta.url);
+const reactRoot = path.dirname(require.resolve('react/package.json'));
+const reactDomRoot = path.dirname(require.resolve('react-dom/package.json'));
+const reactPath = (entry: string) => path.join(reactRoot, entry);
+const reactDomPath = (entry: string) => path.join(reactDomRoot, entry);
 const requestedRendererPort = Number.parseInt(process.env.LOOMTV_RENDERER_PORT || '', 10);
 const rendererPort = Number.isInteger(requestedRendererPort) && requestedRendererPort > 0 && requestedRendererPort <= 65_535
   ? requestedRendererPort
@@ -59,9 +64,10 @@ export default defineConfig({
   base: './',
   plugins: [rendererCspPlugin(), react()],
   build: {
-    // hls.js is lazy-loaded as a self-contained playback runtime (~510 kB
-    // minified); keep the budget tight enough to catch growth elsewhere.
-    chunkSizeWarningLimit: 525,
+    // hls.js is lazy-loaded as a self-contained playback runtime (~575 kB
+    // minified in 1.7); keep the budget tight enough to catch growth elsewhere.
+    // hls.js/light would fit but drops subtitles and alternate audio.
+    chunkSizeWarningLimit: 590,
     emptyOutDir: false,
     outDir: '.vite/renderer/main_window',
     rollupOptions: {

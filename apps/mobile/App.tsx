@@ -233,7 +233,7 @@ async function waitForPairingApproval(
 
 const mobileSplashStyles = StyleSheet.create({
   screen: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     backgroundColor: '#0b0b0b',
     justifyContent: 'center',

@@ -62,13 +62,17 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
         run: corepack pnpm --filter loom-media-server-desktop lint
 
-      - name: Typecheck all workspaces
+      - name: Typecheck all workspaces with tsrs
         if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
         run: corepack pnpm typecheck
 
-      - name: Typecheck desktop app
+      - name: Typecheck desktop app with tsrs
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
         run: corepack pnpm --filter loom-media-server-desktop typecheck
+
+      - name: Build plugin protocol declarations with tsrs
+        if: github.event_name != 'pull_request' || github.event.pull_request.number != 18
+        run: corepack pnpm --filter @loom-media-server/plugin-protocol build
 
       - name: Install FFmpeg for media integration tests
         if: github.event_name != 'pull_request' || github.event.pull_request.number != 18

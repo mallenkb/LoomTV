@@ -759,11 +759,14 @@ export default function VideoPlayer({
   }, [currentEpisode, currentSeason, episodeFiles.length, episodes.length, mediaId]);
 
   useEffect(() => {
-    pauseLogoSources.slice(0, 3).forEach((source) => {
+    const images = pauseLogoSources.slice(0, 3).map((source) => {
       const image = new Image();
       image.decoding = 'async';
       image.src = source;
+      return image;
     });
+    // Stop loads still in flight for a previous title or a closed player.
+    return () => { for (const image of images) image.removeAttribute('src'); };
   }, [pauseLogoSources]);
 
   useEffect(() => {
@@ -2088,7 +2091,8 @@ export default function VideoPlayer({
 
     void stopTranscodeSession();
 
-    (async () => {
+    // The try/catch inside reports failures through setErrorMessage.
+    void (async () => {
       try {
         const isIptvStream = isIptvPlaybackReference(filePath);
         const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath)

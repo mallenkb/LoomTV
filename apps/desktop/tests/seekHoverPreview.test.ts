@@ -59,7 +59,8 @@ function mountPreview() {
   const imports: Record<string, unknown> = {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx },
-    './SeekPreviewCache': { default: Cache },
+    // __esModule keeps the default export unwrapped under TypeScript 6 interop.
+    './SeekPreviewCache': { __esModule: true, default: Cache },
     './helpers': { formatTime: (seconds: number) => `${Math.floor(seconds)}s` },
   };
   const compiled = ts.transpileModule(readFileSync(new URL('../src/components/VideoPlayer/SeekHoverPreview.tsx', import.meta.url), 'utf8'), {

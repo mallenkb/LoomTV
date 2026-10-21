@@ -103,8 +103,8 @@ function withMobileReleaseHardening(config) {
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |build_config|
       deployment_target = build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f
-      if deployment_target.positive? && deployment_target < 15.1
-        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+      if deployment_target.positive? && deployment_target < 16.4
+        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.4'
       end
     end
     target.shell_script_build_phases.each do |phase|

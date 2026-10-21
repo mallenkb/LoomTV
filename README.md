@@ -157,10 +157,18 @@ Run commands from the repository root.
 | `corepack pnpm --filter loom-media-server-desktop package` | Create an unpacked desktop build |
 | `corepack pnpm --filter loom-media-server-desktop make` | Create Electron Forge distributables |
 | `corepack pnpm --filter loom-media-server-desktop dist` | Create Electron Builder release files without publishing |
-| `corepack pnpm typecheck` | Run workspace TypeScript checks |
+| `corepack pnpm typecheck` | Run all workspace type checks with tsrs |
 | `corepack pnpm test` | Run workspace tests |
 
 Desktop build output goes to `apps/desktop/out/`. Electron Builder writes installers and archives to `apps/desktop/out/builder/`.
+
+Type checking and the plugin-protocol declaration build use tsrs, pinned in the workspace catalog. Run `corepack pnpm --filter @loom-media-server/plugin-protocol build` to emit declarations. CI runs the same compiler commands. Mobile and TV retain TypeScript 6.0.3 because Expo SDK 58 tooling loads the TypeScript JavaScript API. Desktop does not install TypeScript.
+
+Linting uses oxlint, pinned in the workspace catalog and configured in `.oxlintrc.json`. Run `corepack pnpm lint` from the root, or `corepack pnpm --filter loom-media-server-desktop lint` for desktop. `scripts/oxlint/loom-plugin.mjs` blocks synchronous child-process calls in the desktop main process and the canonical server.
+
+The pinned experimental tsrs release provides binaries for Apple Silicon macOS and Linux x64/arm64, including glibc and musl. Windows and Intel macOS cannot run compiler commands with this release. Use a supported development host or Linux CI, or supply a compatible locally built compiler through `TSRS_BINARY`. There is no automatic fallback to tsc. This compiler restriction does not change the app's runtime platform targets.
+
+The configs list Node types explicitly and load Vite client declarations for desktop CSS imports. Desktop path aliases use paths relative to the config file without the removed `baseUrl` option.
 
 ## Repository map
 

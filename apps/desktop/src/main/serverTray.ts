@@ -14,7 +14,7 @@ type ServerTrayOptions = {
   onOpen: () => void;
   onOpenWeb: () => void;
   getWebCopyUrl?: () => string;
-  onOpenAdmin?: () => void;
+  onOpenAdmin?: () => void | Promise<void>;
   onQuit: () => void;
   port: number;
   getServerInfo?: () => { port: number; adminUrl: string | null; webUrl?: string };
@@ -25,6 +25,21 @@ let trayMenuWindow: BrowserWindow | null = null;
 let trayMenuSession: ReturnType<typeof session.fromPartition> | null = null;
 let trayRefreshTimer: ReturnType<typeof setInterval> | null = null;
 const TRAY_MENU_PARTITION = 'loom-tray-menu';
+
+// Electron 44 writes the clipboard asynchronously; log a failed copy instead of
+// leaving an unhandled rejection in the main process.
+function copyText(text: string): void {
+  Promise.resolve(clipboard.writeText(text)).catch((error: unknown) => {
+    console.warn('[tray] Could not copy to the clipboard:', error);
+  });
+}
+
+function runTrayHandler(handler: (() => void | Promise<void>) | undefined): void {
+  if (!handler) return;
+  Promise.resolve(handler()).catch((error: unknown) => {
+    console.warn('[tray] A tray action failed:', error);
+  });
+}
 
 export function isServerTrayMenuWindow(window: BrowserWindow): boolean {
   return trayMenuSession !== null && window.webContents.session === trayMenuSession;
@@ -63,11 +78,11 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
   const nativeMenu = (info: ServerTrayMenuInfo) => Menu.buildFromTemplate([
     { label: 'Open Loom', click: options.onOpen },
     { label: 'Open Web', click: options.onOpenWeb },
-    ...(options.onOpenAdmin ? [{ label: 'Open Loom admin', click: options.onOpenAdmin }] : []),
+    ...(options.onOpenAdmin ? [{ label: 'Open Loom admin', click: () => runTrayHandler(options.onOpenAdmin) }] : []),
     { type: 'separator' },
-    { label: `Port: ${info.port}`, click: () => clipboard.writeText(String(info.port)) },
-    { label: `Web URL: ${info.webUrl}`, click: () => clipboard.writeText(options.getWebCopyUrl?.() ?? info.webUrl) },
-    { label: `Admin URL: ${info.adminUrl ?? 'Not configured'}`, enabled: Boolean(info.adminUrl), click: () => { if (info.adminUrl) clipboard.writeText(info.adminUrl); } },
+    { label: `Port: ${info.port}`, click: () => copyText(String(info.port)) },
+    { label: `Web URL: ${info.webUrl}`, click: () => copyText(options.getWebCopyUrl?.() ?? info.webUrl) },
+    { label: `Admin URL: ${info.adminUrl ?? 'Not configured'}`, enabled: Boolean(info.adminUrl), click: () => { if (info.adminUrl) copyText(info.adminUrl); } },
     { type: 'separator' },
     { label: 'Quit Loom', click: options.onQuit },
   ]);
@@ -77,10 +92,10 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     switch (action) {
       case 'open': options.onOpen(); break;
       case 'open-web': options.onOpenWeb(); break;
-      case 'open-admin': options.onOpenAdmin?.(); break;
-      case 'copy-port': if (info) clipboard.writeText(String(info.port)); break;
-      case 'copy-web': if (info) clipboard.writeText(options.getWebCopyUrl?.() ?? info.webUrl); break;
-      case 'copy-admin': if (info?.adminUrl) clipboard.writeText(info.adminUrl); break;
+      case 'open-admin': runTrayHandler(options.onOpenAdmin); break;
+      case 'copy-port': if (info) copyText(String(info.port)); break;
+      case 'copy-web': if (info) copyText(options.getWebCopyUrl?.() ?? info.webUrl); break;
+      case 'copy-admin': if (info?.adminUrl) copyText(info.adminUrl); break;
       case 'quit': options.onQuit(); break;
     }
   };

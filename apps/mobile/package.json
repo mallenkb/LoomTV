@@ -4,31 +4,35 @@
   "license": "MIT",
   "main": "index.ts",
   "dependencies": {
-    "@expo/vector-icons": "^15.1.1",
+    "@expo/vector-icons": "15.1.1",
     "@loom-media-server/lan-protocol": "workspace:*",
-    "expo": "~54.0.35",
-    "expo-blur": "~15.0.8",
-    "expo-brightness": "~14.0.8",
-    "expo-build-properties": "~1.0.10",
-    "expo-dev-client": "~6.0.21",
-    "expo-device": "~8.0.10",
-    "expo-file-system": "~19.0.23",
-    "expo-image": "~3.0.11",
-    "expo-screen-orientation": "~9.0.9",
-    "expo-secure-store": "~15.0.8",
-    "expo-sqlite": "~16.0.10",
-    "expo-status-bar": "~3.0.9",
-    "expo-video": "~3.0.16",
-    "react": "19.1.0",
-    "react-native": "0.81.5",
-    "react-native-safe-area-context": "~5.6.2",
-    "react-native-svg": "15.12.1",
-    "react-native-zeroconf": "^0.14.0",
-    "zod": "catalog:"
+    "expo": "58.0.16",
+    "expo-blur": "58.0.5",
+    "expo-brightness": "58.0.2",
+    "expo-build-properties": "58.0.11",
+    "expo-dev-client": "58.0.14",
+    "expo-device": "58.0.5",
+    "expo-file-system": "58.0.10",
+    "expo-image": "58.0.16",
+    "expo-screen-orientation": "58.0.3",
+    "expo-secure-store": "58.0.2",
+    "expo-sqlite": "58.0.13",
+    "expo-status-bar": "58.0.3",
+    "expo-video": "58.0.12",
+    "react": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-safe-area-context": "5.10.1",
+    "react-native-svg": "15.16.0",
+    "react-native-zeroconf": "0.17.6",
+    "zod": "catalog:",
+    "expo-system-ui": "58.0.6",
+    "expo-font": "58.0.9"
   },
   "devDependencies": {
-    "@types/react": "~19.1.10",
-    "typescript": "~5.9.2"
+    "@types/react": "19.3.0",
+    "typescript": "6.0.3",
+    "tsrs": "catalog:",
+    "oxlint": "catalog:"
   },
   "scripts": {
     "start": "expo start --dev-client",
@@ -46,8 +50,8 @@
     "build:production": "eas build --platform all --profile production",
     "submit:production": "eas submit --platform all --profile production",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "lint": "oxlint",
+    "typecheck": "tsrs --noEmit"
   },
   "private": true
 }

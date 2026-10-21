@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactElement } from 'react';
-import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View, type ViewInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Image as ExpoImage } from 'expo-image';
@@ -52,7 +52,7 @@ export function Header({
 }) {
   const { colors: { accent, faint, muted, text }, styles } = useMobileTheme();
   const canFilter = activeKind !== 'settings';
-  const searchTriggerRef = useRef<View | null>(null);
+  const searchTriggerRef = useRef<ViewInstance | null>(null);
   useMobileModalLayer({
     open: searchOpen,
     priority: 11,
@@ -311,7 +311,7 @@ export function BottomNav({
       intensity={isAndroid ? 54 : 36}
       tint={themeLabel === 'Light' ? 'light' : 'dark'}
       blurReductionFactor={isAndroid ? 1.5 : 4}
-      experimentalBlurMethod={isAndroid ? 'dimezisBlurView' : 'none'}
+      blurMethod={isAndroid ? 'dimezisBlurView' : 'none'}
       style={[
         styles.bottomNav,
         isAndroid && { backgroundColor: androidGlassBackground },
@@ -419,7 +419,7 @@ export function MiniPlayerStrip({
       style={[styles.miniPlayerWrap, { bottom: bottomOffset }]}
     >
       <BlurView
-        experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
+        blurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
         intensity={46}
         tint="dark"
         style={[styles.miniPlayerStrip, styles.miniPlayerBlur]}

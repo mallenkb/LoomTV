@@ -278,7 +278,7 @@ export interface IpcEventContract {
   'updates:state': { args: [state: UpdateState] };
   'mpv:state': { args: [state: MpvPlaybackState] };
   /** Main requests unused UI cache cleanup after playback starts or during inactivity. */
-  'app:trim-memory': { args: [] };
+  'app:trim-memory': { args: [reason: import('../main/idleMemoryTrim.ts').IdleTrimReason] };
   'library:files-organized': { args: [result: { renamed: number }] };
   'library:episode-updates-changed': { args: [] };
 }

@@ -894,14 +894,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         console.warn(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
       } finally { pending = false; }
     };
-    const intervalId = window.setInterval(refreshRemote, 30_000);
-    document.addEventListener('visibilitychange', refreshRemote);
-    window.addEventListener('focus', refreshRemote);
+    const onRefreshRemote = () => { void refreshRemote(); };
+    const intervalId = window.setInterval(onRefreshRemote, 30_000);
+    document.addEventListener('visibilitychange', onRefreshRemote);
+    window.addEventListener('focus', onRefreshRemote);
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', refreshRemote);
-      window.removeEventListener('focus', refreshRemote);
+      document.removeEventListener('visibilitychange', onRefreshRemote);
+      window.removeEventListener('focus', onRefreshRemote);
     };
   }, [activeProfile, beginLibraryMutation, loadPrimaryCatalog]);
 

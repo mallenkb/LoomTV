@@ -34,9 +34,10 @@ export function useStremioSidebarSources(): CachedSidebarPlugin[] {
         })) });
       } catch { if (mounted && generation === current) setSnapshot({ profileId, sources: [] }); }
     };
+    const onPluginsChanged = () => { void refresh(); };
     void refresh();
-    window.addEventListener('loomtv:plugins-changed', refresh);
-    return () => { mounted = false; window.removeEventListener('loomtv:plugins-changed', refresh); };
+    window.addEventListener('loomtv:plugins-changed', onPluginsChanged);
+    return () => { mounted = false; window.removeEventListener('loomtv:plugins-changed', onPluginsChanged); };
   }, [profileId]);
   return snapshot.profileId === profileId ? snapshot.sources : [];
 }

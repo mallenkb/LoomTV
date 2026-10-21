@@ -554,6 +554,9 @@ export default function Sidebar() {
         setCustomFolderNames(settings.customFolderNames || {});
         setOtherFolderGroups(normalizeOtherFolderGroups(settings.otherFolderGroups));
       }
+    }).catch((error: unknown) => {
+      // The sidebar keeps its default order and folder names.
+      console.warn('Could not load sidebar settings:', error);
     });
 
     const handleSidebarOrderChanged = (event: Event) => {
@@ -702,6 +705,9 @@ export default function Sidebar() {
     let mounted = true;
     desktopApi.getUpdateState().then((nextState) => {
       if (mounted) setUpdateState(nextState);
+    }).catch((error: unknown) => {
+      // onUpdateState still delivers the next state change.
+      console.warn('Could not load the update state:', error);
     });
     const unsubscribe = desktopApi.onUpdateState((nextState) => {
       setUpdateState(nextState);

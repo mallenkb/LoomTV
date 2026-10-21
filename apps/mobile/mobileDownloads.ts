@@ -268,7 +268,7 @@ async function commitMobileDownload(input: SaveDownloadInput): Promise<MobileDow
       throw new Error('The downloaded file is incomplete. Please retry.');
     }
     const destination = new File(directory, mobileDownloadFileName(result.headers, input.contentUrl));
-    if (destination.uri !== file.uri) file.move(destination);
+    if (destination.uri !== file.uri) await file.move(destination);
     assertCurrent();
     return await serializeDownloadPublication(async () => {
       assertCurrent();

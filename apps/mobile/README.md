@@ -116,3 +116,9 @@ Before submission, complete every platform and scenario in [`RELEASE_CHECKLIST.m
 - The app can create a scoped server download lease, stream the file into app document storage through the pinned transport, play it offline, and remove it. Complete the release checklist on physical devices before treating large or interrupted downloads as production-verified.
 - Android TV and Fire TV use the separate `apps/tv` client. Multiple saved-server switching and an Android Chromecast sender remain future client work.
 - iOS external playback is supplied by the native video stack; browser casting has an explicit canonical cast session. Receiver compatibility still requires physical AirPlay/Chromecast testing.
+
+## SDK 54 to SDK 58 upgrade plan
+
+Upgrade mobile and TV together using the SDK 58 package compatibility list. Review the SDK 55, 56, 57, and 58 migration notes, align React and React Native, and update native configuration plugins and the local secure-transport module where APIs changed. Preserve certificate pinning, cleartext restrictions, release signing policy, and device identity. Review the zeroconf patch against its new source before removing or porting it.
+
+Verify dependency peers, tsrs checks, lint, JavaScript exports, and configuration generation without launching devices. Native compilation depends on the installed Android and Xcode toolchains. Device playback, discovery, certificate pinning, and release smoke tests require separate test authorization. Do not treat a passing JavaScript build as native verification.

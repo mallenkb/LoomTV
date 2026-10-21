@@ -5,7 +5,7 @@ import {
   type FlatList,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  type ScrollView,
+  type ScrollViewInstance,
 } from 'react-native';
 
 import { useMobileModalLayer } from './mobileModalStack';
@@ -30,7 +30,7 @@ export function useMobileNavigationController() {
   const homeHeaderPinnedRef = useRef(false);
   const homeHeaderAnimation = useRef(new Animated.Value(0)).current;
   const libraryListRef = useRef<FlatList<MediaItem> | null>(null);
-  const settingsScrollRef = useRef<ScrollView | null>(null);
+  const settingsScrollRef = useRef<ScrollViewInstance | null>(null);
   const scrollOffsetsRef = useRef<Record<LibraryKind, number>>({
     home: 0,
     anime: 0,

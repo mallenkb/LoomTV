@@ -43,9 +43,10 @@ export function useLocation() {
 
 export function useNavigate() {
   const router = useRouter();
-  return useCallback((to: string | number | { pathname: string; search?: string }, options?: { replace?: boolean; state?: unknown }) => {
+  return useCallback((to: string | number | { pathname: string; search?: string }, options?: { replace?: boolean; state?: unknown }): void => {
     if (typeof to === 'number') { router.history.go(to); return; }
-    return router.navigate({ ...destination(typeof to === 'string' ? to : `${to.pathname}${to.search || ''}`), replace: options?.replace, state: options?.state as never });
+    router.navigate({ ...destination(typeof to === 'string' ? to : `${to.pathname}${to.search || ''}`), replace: options?.replace, state: options?.state as never })
+      .catch((error: unknown) => { console.warn('Navigation failed:', error); });
   }, [router]);
 }
 

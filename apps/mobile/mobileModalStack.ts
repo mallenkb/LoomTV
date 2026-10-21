@@ -24,7 +24,7 @@ let pendingFocusTarget: MobileFocusTarget | null = null;
 export function captureMobileFocus(event: { currentTarget?: unknown }): void {
   if (event.currentTarget === undefined) return;
   const node = findNodeHandle(event.currentTarget as Parameters<typeof findNodeHandle>[0]);
-  if (node !== null) pendingFocusTarget = { invoker: event.currentTarget, node };
+  if (node != null) pendingFocusTarget = { invoker: event.currentTarget, node };
 }
 
 export function clearCapturedMobileFocus(): void {
@@ -40,7 +40,7 @@ function takeMobileFocusTarget(): MobileFocusTarget | undefined {
 function focusTargetFromRef(ref?: MobileFocusableRef): MobileFocusTarget | undefined {
   if (!ref?.current) return undefined;
   const node = findNodeHandle(ref.current as Parameters<typeof findNodeHandle>[0]);
-  return node === null ? undefined : { node, ref };
+  return node == null ? undefined : { node, ref };
 }
 
 function restoreMobileFocus(target?: MobileFocusTarget): void {
@@ -53,7 +53,7 @@ function restoreMobileFocus(target?: MobileFocusTarget): void {
       : target?.ref
         ? null
         : target?.node ?? null;
-  if (node === null) return;
+  if (node == null) return;
   setTimeout(() => {
     try {
       AccessibilityInfo.setAccessibilityFocus(node);

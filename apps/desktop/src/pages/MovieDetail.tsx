@@ -574,7 +574,7 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
           {canPlayMovie && <Button
-            onClick={handlePlay}
+            onClick={() => void handlePlay()}
             aria-label={hasResumeProgress ? `Resume ${isOtherMedia ? 'video' : 'movie'}` : `Play ${isOtherMedia ? 'video' : 'movie'}`}
             className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
           >

@@ -122,7 +122,7 @@ import {
 } from './main/fileRename/matchConfirmation.ts';
 import { computeEpisodeUpdates, computeLibraryHealth } from './main/libraryInsights.ts';
 import { recordFirstSeen } from './main/libraryFirstSeen.ts';
-import { fetchCinemetaMeta } from './main/metadata/cinemeta.ts';
+import { fetchCinemetaMeta, fetchCinemetaMetadataCandidates } from './main/metadata/cinemeta.ts';
 import { createScheduleFetchers, readShowSchedules, refreshShowSchedules } from './main/showSchedule.ts';
 import { registerDefaultSessionRequestHeaderRule } from './main/requestHeaderPolicy.ts';
 import {
@@ -333,7 +333,6 @@ import {
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
 import { fetchAniListAnimeMetadata } from './main/metadata/anilist';
-import { fetchCinemetaMetadataCandidates } from './main/metadata/cinemeta';
 import {
   fetchFanartMovieArtwork,
   fetchFanartTVArtwork,
@@ -3352,7 +3351,7 @@ const idleMemoryTrimmer = createIdleMemoryTrimmer({
       if (reason !== 'playback') releaseInactiveLibrarySnapshot();
     }
     const window = getMainWindow();
-    if (window && !window.isDestroyed()) window.webContents.send('app:trim-memory');
+    if (window && !window.isDestroyed()) window.webContents.send('app:trim-memory', reason);
   },
 });
 app.on('browser-window-created', (_event, window) => {

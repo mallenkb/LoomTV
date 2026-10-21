@@ -449,10 +449,8 @@ const appFiles = exists(appAsar)
   : new Set();
 const requiredAsarEntries = [
   '/node_modules/better-sqlite3/lib/index.js',
-  '/node_modules/bindings/bindings.js',
   '/node_modules/builder-util-runtime/out/index.js',
   '/node_modules/electron-updater/out/main.js',
-  '/node_modules/file-uri-to-path/index.js',
   '/node_modules/koffi/index.cjs',
   `/node_modules/@koromix/koffi-${platform}-${arch}/index.js`,
   '/node_modules/fs-extra/lib/index.js',
@@ -469,7 +467,7 @@ for (const entry of requiredAsarEntries) {
 }
 
 const requiredUnpacked = [
-  path.join(unpacked, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+  path.join(unpacked, 'node_modules', 'better-sqlite3', 'prebuilds', `${platform}-${arch}.node`),
   // koffi's prebuilt binding. LibVLC's native window host and all three system
   // media sessions (macOS MediaPlayer, Windows SMTC, Linux MPRIS) go through it.
   path.join(

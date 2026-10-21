@@ -121,6 +121,45 @@ test('disposing during image loading cancels it and stops further preview work',
   assert.deepEqual(requests, ['10']);
 });
 
+test('a preview that finishes decoding after dispose releases its image', async () => {
+  scope.api.getThumbnail = async (_file, time) => ({ url: time });
+  MockImage.instances = [];
+  const cache = new SeekPreviewCache('/movie.mp4', 100, () => undefined);
+  cache.request(10);
+  await settle();
+  const image = MockImage.instances[0];
+  let finishDecode: () => void = () => undefined;
+  image.decode = () => new Promise<void>((resolve) => { finishDecode = resolve; });
+  image.load();
+  await settle();
+
+  cache.dispose();
+  finishDecode();
+  await settle();
+  assert.equal(image.removed, true);
+  assert.equal(cache.nearest(10), null);
+});
+
+test('a preview over the decoded byte limit is released, not retained', async () => {
+  scope.api.getThumbnail = async (_file, time) => ({ url: time });
+  MockImage.instances = [];
+  const cache = new SeekPreviewCache('/movie.mp4', 100, () => undefined);
+  try {
+    cache.request(10);
+    await settle();
+    const image = MockImage.instances[0];
+    image.naturalWidth = 4096;
+    image.naturalHeight = 4096;
+    image.load();
+    await settle();
+    await settle();
+    assert.equal(image.removed, true);
+    assert.equal(cache.nearest(10), null);
+  } finally {
+    cache.dispose();
+  }
+});
+
 test('a new drag target replaces queued frames after the active extraction finishes', async () => {
   const requests: string[] = [];
   scope.api.getThumbnail = async (_file, time) => {
