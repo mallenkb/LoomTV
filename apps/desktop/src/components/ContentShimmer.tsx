@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 
-function ShimmerBlock({ className }: { className: string }) {
+export function ShimmerBlock({ className }: { className: string }) {
   return (
     <div className={cn('relative overflow-hidden bg-[var(--loom-surface)]', className)} aria-hidden="true">
       <span className="loom-content-shimmer pointer-events-none absolute inset-0 block" />
@@ -56,4 +56,39 @@ export function ChannelGridShimmer({ count = 12 }: { count?: number }) {
       ))}
     </div>
   );
+}
+
+export function SourceListShimmer({ count = 4 }: { count?: number }) {
+  return (
+    <div role="status" aria-label="Loading sources" className="space-y-4">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index} className="grid grid-cols-[112px_minmax(0,1fr)] gap-4 px-3 py-4" aria-hidden="true">
+          <div className="space-y-2">
+            <ShimmerBlock className="h-4 w-20 rounded bg-[var(--loom-surface-2)]" />
+            <ShimmerBlock className="h-4 w-14 rounded bg-[var(--loom-surface-2)]" />
+          </div>
+          <div className="space-y-2">
+            <ShimmerBlock className="h-4 w-full rounded bg-[var(--loom-surface-2)]" />
+            <ShimmerBlock className="h-3 w-2/3 rounded bg-[var(--loom-surface-2)]" />
+            <ShimmerBlock className="h-3 w-1/3 rounded bg-[var(--loom-surface-2)]" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function PosterRailShimmer() {
+  return <div role="status" aria-label="Loading titles" className="flex gap-6 overflow-hidden">
+    {Array.from({ length: 8 }, (_, index) => <div key={index} className="w-40 shrink-0 sm:w-44"><ShimmerBlock className="aspect-[2/3] rounded-lg" /><ShimmerBlock className="mt-2 h-4 w-4/5 rounded" /><ShimmerBlock className="mt-2 h-3 w-1/2 rounded" /></div>)}
+  </div>;
+}
+
+export function MetadataShimmer() {
+  return <div role="status" aria-label="Loading title details" className="mb-8 space-y-3">
+    <ShimmerBlock className="h-5 w-28 rounded" />
+    <ShimmerBlock className="h-4 w-full rounded" />
+    <ShimmerBlock className="h-4 w-5/6 rounded" />
+    <ShimmerBlock className="h-4 w-2/3 rounded" />
+  </div>;
 }

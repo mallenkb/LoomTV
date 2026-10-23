@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
 const { test } = require('node:test')
 const { createRequire } = require('node:module')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 
 // Resolve the actual package used by each production-listed mobile build tool.
 // Missing or unapplied patches must fail CI instead of silently keeping a waiver.
@@ -66,3 +68,27 @@ for (const workspace of ['mobile', 'tv']) {
     assert.deepEqual(braces.expand(nestedAst(64)), ['a'])
   })
 }
+
+test('bittorrent-tracker formats UDP announce addresses without vulnerable ip helpers', async () => {
+  const trackerRoot = path.join(workspaceRoot, 'node_modules', 'bittorrent-tracker')
+  const trackerPackage = JSON.parse(fs.readFileSync(path.join(trackerRoot, 'package.json'), 'utf8'))
+  assert.equal(trackerPackage.dependencies.ip, undefined)
+
+  const [{ default: parseUdpRequest }, { default: common }] = await Promise.all([
+    import(pathToFileURL(path.join(trackerRoot, 'lib/server/parse-udp.js')).href),
+    import(pathToFileURL(path.join(trackerRoot, 'lib/common.js')).href),
+  ])
+  const message = Buffer.alloc(98)
+  Buffer.from(common.CONNECTION_ID).copy(message)
+  message.writeUInt32BE(common.ACTIONS.ANNOUNCE, 8)
+  message.writeUInt32BE(1, 12)
+  Buffer.alloc(20, 0x61).copy(message, 16)
+  Buffer.alloc(20, 0x62).copy(message, 36)
+  message.writeUInt32BE(common.EVENTS.started, 80)
+  message.writeUInt32BE(0x7f000001, 84)
+  message.writeUInt16BE(6881, 96)
+
+  const result = parseUdpRequest(message, { address: '192.0.2.10', port: 51413 })
+  assert.equal(result.ip, '127.0.0.1')
+  assert.equal(result.addr, '127.0.0.1:6881')
+})

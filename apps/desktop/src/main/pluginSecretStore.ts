@@ -183,6 +183,12 @@ export class PluginSecretStore {
     const field = fieldKey(fieldIdentity);
     const value = secretValue(rawValue);
     const existing = this.values(addon);
+    // Provider health saves persist the manifest endpoint again. Rewriting
+    // the same value must not rotate references or invalidate source grants.
+    if (Object.hasOwn(existing, field) && existing[field] === value) {
+      const reference = this.list(addon).find((candidate) => candidate.fieldKey === field);
+      if (reference) return reference;
+    }
     existing[field] = value;
     const reference = this.replace(addon, existing).find((candidate) => candidate.fieldKey === field);
     if (!reference) throw new PluginSecretStoreError('PLUGIN_SECRET_STORAGE_UNAVAILABLE', 'The protected configuration reference was not persisted.');

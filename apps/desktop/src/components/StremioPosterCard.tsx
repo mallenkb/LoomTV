@@ -1,5 +1,8 @@
-import { memo } from 'react';
-import { Play } from 'lucide-react';
+import { ShimmerBlock } from '@/components/ContentShimmer';
+import { memo, useEffect, useState } from 'react';
+import { cinemetaTitleMetadata } from '@/lib/cinemetaAddonMetadata';
+import { queryScope } from '@/lib/queryClient';
+import CardPlayContent, { CARD_PLAY_ACTION_CLASS, CARD_PLAY_OVERLAY_CLASS } from './CardPlayContent';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import TelevisionPlaceholder from '@/components/TelevisionPlaceholder';
@@ -16,7 +19,7 @@ const ROOT_CLASS = `loom-poster-link loom-virtual-poster-card group relative fle
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
 const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]';
 const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
-const PLAY_OVERLAY_CLASS = 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100';
+const PLAY_OVERLAY_CLASS = CARD_PLAY_OVERLAY_CLASS;
 
 function artworkSources(item: StremioPluginCatalogItem): string[] {
   return Array.from(new Set([
@@ -49,6 +52,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
   onPlay,
   playbackDisabled = false,
   playbackLabel = 'Play',
+  metadataPending = false,
 }: {
   item: StremioPluginCatalogItem;
   rank?: number;
@@ -59,8 +63,30 @@ const StremioPosterCard = memo(function StremioPosterCard({
   onPlay?: (item: StremioPluginCatalogItem) => void;
   playbackDisabled?: boolean;
   playbackLabel?: string;
+  metadataPending?: boolean;
 }) {
   const { watchedKeys, setWatched } = useProfiles();
+  const imdbId = [item.imdbId, item.providerId].find(value => value && /^tt\d{5,12}$/.test(value));
+  const ratingType = item.type === 'movie' ? 'movie' : ['tv', 'series', 'anime'].includes(item.type) ? 'series' : null;
+  const scope = JSON.stringify(queryScope());
+  const ratingKey = `${scope}:${ratingType}:${imdbId}`;
+  const [loadedRating, setLoadedRating] = useState<{ key: string; value?: number } | null>(null);
+  const hasImdbRating = Boolean(item.providerRatings?.imdb?.value);
+  const canLoadRating = Boolean(imdbId && ratingType && !hasImdbRating);
+  useEffect(() => {
+    if (!imdbId || !ratingType || hasImdbRating) return;
+    let current = true;
+    void cinemetaTitleMetadata(imdbId, ratingType).then(metadata => {
+      if (current) setLoadedRating({ key: ratingKey, value: metadata.rating > 0 && metadata.rating <= 10 ? metadata.rating : undefined });
+    }).catch(() => {
+      if (current) setLoadedRating({ key: ratingKey });
+    });
+    return () => { current = false; };
+  }, [imdbId, ratingType, hasImdbRating, ratingKey]);
+  const fetchedRating = loadedRating?.key === ratingKey ? loadedRating.value : undefined;
+  const ratingPending = canLoadRating && loadedRating?.key !== ratingKey;
+  const rating = fetchedRating || item.rating;
+  const providerRatings = fetchedRating ? { ...item.providerRatings, imdb: { value: fetchedRating, scale: 10 as const } } : item.providerRatings;
   const watchedKey = discoverWatchedKey(item);
   const watched = watchedKeys.has(watchedKey);
 
@@ -86,7 +112,11 @@ const StremioPosterCard = memo(function StremioPosterCard({
           imgClassName="object-cover"
           fallback={fallbackArtwork(item.title)}
         />
-        <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
+        {(ratingPending || metadataPending) && !rating && !providerRatings?.imdb?.value ? (
+          <span role="status" aria-label="Loading rating" className="absolute right-2 top-2 z-10 overflow-hidden rounded-full">
+            <ShimmerBlock className="h-7 w-16" />
+          </span>
+        ) : <RatingBadge rating={rating} providerRatings={providerRatings} />}
         {playbackDisabled && playbackLabel !== 'Play' ? (
           <span role="status" className="absolute bottom-2 left-2 z-20 rounded-full bg-black/80 px-2.5 py-1 text-xs font-medium text-white">{playbackLabel}</span>
         ) : null}
@@ -102,10 +132,9 @@ const StremioPosterCard = memo(function StremioPosterCard({
                 onPlay(item);
               }}
               onKeyDown={(event) => event.stopPropagation()}
-              className="loom-poster-play-action inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3.5 text-sm font-semibold text-black shadow-xl transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:cursor-default disabled:opacity-70"
+              className={CARD_PLAY_ACTION_CLASS}
             >
-              <Play className="h-4 w-4 fill-current" />
-              {playbackLabel}
+              <CardPlayContent label={playbackLabel} />
             </button>
           ) : onPlayTrailer ? (
             <button
@@ -116,12 +145,12 @@ const StremioPosterCard = memo(function StremioPosterCard({
                 onPlayTrailer();
               }}
               onKeyDown={(event) => event.stopPropagation()}
-              className="loom-poster-play-action grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl transition-transform duration-200 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              className={CARD_PLAY_ACTION_CLASS}
             >
-              <Play className="ml-0.5 h-5 w-5 fill-current" />
+              <CardPlayContent label="Trailer" />
             </button>
           ) : (
-            <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+            <span className={CARD_PLAY_ACTION_CLASS}><CardPlayContent /></span>
           )}
         </div>
       </div>

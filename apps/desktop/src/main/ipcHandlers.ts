@@ -1,6 +1,9 @@
 import type { PhotoLibraryApi } from '../shared/photoLibrary.ts';
-import { BrowserWindow, ipcMain, shell } from 'electron';
-import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue, WebContents } from 'electron';
+import { parseAddonPlaybackReference } from '../shared/addonPlaybackReference.ts';
+import type { AddonPlaybackLease } from './stremioPlayback.ts';
+import type { StremioServiceStatus, StremioTorrentPreparation } from '../shared/stremioService.ts';
+import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
+import type { DownloadItem, IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue, WebContents } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -139,9 +142,11 @@ const profilePreferencesSchema = z.object({
   appDarkTheme: z.literal('black').optional(),
   appLoaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
   appHomeStyle: z.enum(['default', 'modern']).optional(),
+  appPlayerControlStyle: z.enum(['default', 'pill']).optional(),
   appModernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
   showProviderRatingBadges: z.boolean().optional(),
   sidebarNavOrder: z.array(z.string().max(8192)).max(1024).optional(),
+  hiddenSidebarItems: z.array(z.string().max(8192)).max(256).optional(),
   autoplayNextEnabled: z.boolean().optional(),
   playbackSkipBackSeconds: finiteNumber.optional(),
   playbackRewindOnResumeSeconds: finiteNumber.int().min(0).max(30).optional(),
@@ -399,6 +404,9 @@ export interface IpcHandlerDependencies<
   libraryHealth: () => Promise<IpcResult<'library:health'>>;
   listIptvChannels: (request: IpcContract['iptv:list-channels']['args'][0]) => IpcResult<'iptv:list-channels'>;
   resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
+  openAddonBrowserPlayback?: (reference: string) => Promise<AddonPlaybackLease>;
+  openAddonPlayback?: (reference: string, consumer?: 'native' | 'browser') => AddonPlaybackLease;
+  closeAddonPlayback?: (reference: string) => void;
   loadSettings: () => TSettings;
   settingsForRenderer: () => TSettings;
   authorizeSettingsWrite: () => void;
@@ -471,7 +479,7 @@ export interface IpcHandlerDependencies<
   listAvailableStremioPlugins: () => StremioPluginSummary[];
   listOfficialStremioAddons: () => OfficialStremioAddon[];
   reviewOfficialStremioAddon: (officialId: IpcContract['plugins:stremio:review-official']['args'][0]) => Promise<StremioPluginReview>;
-  reviewStremioManifestUrl: (manifestUrl: string) => Promise<StremioPluginReview>;
+  reviewStremioManifestUrl: (manifestUrl: string, expectedAddonId?: string) => Promise<StremioPluginReview>;
   reviewInstalledStremioAddon: (addonId: string) => Promise<StremioPluginReview>;
   approveStremioAddon: (addonId: string, reviewToken: string) => Promise<StremioPluginSummary>;
   disableStremioAddon: (addonId: string) => Promise<StremioPluginSummary>;
@@ -481,11 +489,19 @@ export interface IpcHandlerDependencies<
   fetchStremioCatalog: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginCatalogResult>;
   fetchStremioMeta: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
   fetchStremioMetaByItem: (request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
-  fetchStremioStreams: (addonId: string, request: StremioStreamRequest) => Promise<StremioStreamResult>;
+  openStremioConfiguration: (addonId: string, revision: string) => Promise<boolean>;
+  stremioMagnetLink: (reference: string, required?: boolean) => string;
+  openStremioExport: (reference: string, title: string, download: boolean) => Promise<{ lease: AddonPlaybackLease; filename: string }>;
+  validateStremioPlayback: (reference: string) => boolean;
+  stremioServiceStatus: () => Promise<StremioServiceStatus>;
+  prepareStremioTorrent: (reference: string, signal: AbortSignal) => Promise<StremioTorrentPreparation>;
+  selectStremioTorrent: (reference: string, index: number) => string;
+  fetchStremioStreams: (addonId: string, request: StremioStreamRequest, signal?: AbortSignal) => Promise<StremioStreamResult>;
   fetchStremioSubtitles: (addonId: string, request: StremioStreamRequest) => Promise<StremioSubtitleListResult>;
   downloadStremioSubtitle: (token: string) => Promise<{ text: string }>;
   issueStremioItemKey: (type: string, providerId: string) => string;
   getStremioAddonConfiguration: (addonId: string) => StremioPluginConfigurationState;
+  getStremioManifestUrl: (addonId: string, revision: string) => string;
   saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginConfigurationState>;
   listStremioPluginAudit: (addonId: string, limit?: number) => readonly StremioPluginAuditEntry[];
   getLocalSegmentAnalysisStatus: () => IpcResult<'playback:analysis:status'>;
@@ -978,7 +994,20 @@ export function registerIpcHandlers<
     localAccessToken: deps.localAccessToken,
   }));
 
+  handle('plugins:stremio:stop-playback', (_event, reference) => {
+    if (!parseAddonPlaybackReference(reference)) throw new Error('Invalid addon playback reference.');
+    deps.closeAddonPlayback?.(reference);
+    return true;
+  }, z.tuple([nonEmptyString]));
+
   handle('media:get-stream-url', async (_event, filePath: string, options?: TranscodeOptions) => {
+    if (parseAddonPlaybackReference(filePath)) {
+      if (!deps.openAddonBrowserPlayback) throw new Error('Addon playback is unavailable.');
+      const lease = await deps.openAddonBrowserPlayback(filePath);
+      return { url: lease.url, contentType: lease.contentType, fileName: 'Addon stream',
+        isTranscoded: false, isRemuxed: false, playbackMode: 'direct' as const,
+        decisionReason: 'Host-authorized addon playback session.' };
+    }
     const iptvReference = parseIptvPlaybackReference(filePath);
     if (iptvReference) {
       const streamUrl = deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId);
@@ -1006,6 +1035,7 @@ export function registerIpcHandlers<
     const externalReference = parseExternalPlaybackReference(filePath);
     if (externalReference) {
       const streamUrl = externalReference.url;
+      if (!isTrustedVideoPageUrl(streamUrl)) throw new Error('Remote media requires an addon playback session.');
       let parsed: URL;
       try {
         parsed = new URL(streamUrl);
@@ -1075,7 +1105,7 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:official', () => deps.listOfficialStremioAddons(), z.tuple([]));
   handleStremio('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId), z.tuple([z.enum(['cinemeta', 'opensubtitles-v3'])]));
   // The host normalizes and validates the link so an invalid paste gets a specific message.
-  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().trim().min(1).max(8192)]));
+  handleStremio('plugins:stremio:review-url', (_event, manifestUrl, expectedAddonId) => deps.reviewStremioManifestUrl(String(manifestUrl || ''), expectedAddonId), z.tuple([z.string().trim().min(1).max(8192), nonEmptyString.optional()]));
   handleStremio('plugins:stremio:review-installed', (_event, addonId) => deps.reviewInstalledStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')), z.tuple([nonEmptyString, nonEmptyString]));
   handleStremio('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
@@ -1089,11 +1119,94 @@ export function registerIpcHandlers<
   handleStremio('plugins:stremio:catalog', (_event, addonId, request) => deps.fetchStremioCatalog(String(addonId || ''), request), z.tuple([nonEmptyString, stremioCatalogRequestSchema]));
   handleStremio('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request), z.tuple([nonEmptyString, stremioMetaRequestSchema]));
   handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request), z.tuple([stremioMetaRequestSchema]));
-  handleStremio('plugins:stremio:streams', (_event, addonId, request) => deps.fetchStremioStreams(String(addonId || ''), request), z.tuple([nonEmptyString, stremioStreamRequestSchema]));
+  handleStremio('plugins:stremio:configure', (_event, addonId, revision) => deps.openStremioConfiguration(addonId, revision), z.tuple([nonEmptyString, nonEmptyString]));
+  handleStremio('plugins:stremio:source-action', async (event, reference, action, title) => {
+    if (action === 'copy-magnet') {
+      await clipboard.writeText(deps.stremioMagnetLink(reference));
+      return true;
+    }
+    if (action === 'download') {
+      const magnet = deps.stremioMagnetLink(reference, false);
+      if (magnet) {
+        await shell.openExternal(magnet);
+        return true;
+      }
+    }
+    const { lease, filename } = await deps.openStremioExport(reference, title, action === 'download');
+    if (action === 'copy-stream') {
+      try { await clipboard.writeText(lease.url); }
+      catch (error) { lease.release(); throw error; }
+      // The copied loopback capability stays available until its normal idle expiry.
+      return true;
+    }
+    const sender = event.sender;
+    if (sender.isDestroyed()) { lease.release(); throw new Error('The source window closed.'); }
+    return new Promise<boolean>((resolve, reject) => {
+      let item: DownloadItem | undefined;
+      let finished = false;
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        sender.session.removeListener('will-download', onDownload);
+        sender.removeListener('destroyed', onClosed);
+        lease.release();
+      };
+      const onClosed = () => { item?.cancel(); cleanup(); reject(new Error('The source window closed.')); };
+      const onDownload = (_event: Electron.Event, candidate: DownloadItem, contents: WebContents) => {
+        if (contents !== sender || candidate.getURL() !== lease.url || candidate.getInitiatorOrigin()) return;
+        item = candidate;
+        clearTimeout(timer);
+        sender.session.removeListener('will-download', onDownload);
+        candidate.setSaveDialogOptions({ title: 'Download video', defaultPath: filename });
+        candidate.once('done', cleanup);
+        resolve(true);
+      };
+      const timer = setTimeout(() => { item?.cancel(); cleanup(); reject(new Error('The download could not start. Try another source.')); }, 120_000);
+      timer.unref();
+      sender.once('destroyed', onClosed);
+      sender.session.on('will-download', onDownload);
+      lease.onRevoke(() => { item?.cancel(); cleanup(); reject(new Error('Source access changed. Choose a source again.')); });
+      if (!finished) {
+        try { sender.downloadURL(lease.url); }
+        catch (error) { cleanup(); reject(error); }
+      }
+    });
+  }, z.tuple([nonEmptyString, z.enum(['copy-stream', 'copy-magnet', 'download']), z.string().trim().min(1).max(256)]));
+  handleStremio('plugins:stremio:validate-playback', (_event, reference) => deps.validateStremioPlayback(reference), z.tuple([nonEmptyString]));
+  const streamRequests = new Map<string, AbortController>();
+  handleStremio('plugins:stremio:service-status', () => deps.stremioServiceStatus(), z.tuple([]));
+  handleStremio('plugins:stremio:select-torrent', (_event, reference, index) => deps.selectStremioTorrent(reference, index), z.tuple([nonEmptyString, finiteNumber.int().min(0).max(65535)]));
+  handleStremio('plugins:stremio:prepare-torrent', async (event, reference, requestId) => {
+    const key = `${event.sender.id}:${requestId}`;
+    if (streamRequests.has(key) || streamRequests.size >= 64) throw new Error('Too many pending source requests.');
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    streamRequests.set(key, controller);
+    event.sender.once('destroyed', abort);
+    try { return await deps.prepareStremioTorrent(reference, controller.signal); }
+    finally { streamRequests.delete(key); event.sender.removeListener('destroyed', abort); }
+  }, z.tuple([nonEmptyString, z.string().uuid()]));
+  handleStremio('plugins:stremio:cancel-streams', (event, requestId) => {
+    streamRequests.get(`${event.sender.id}:${requestId}`)?.abort();
+    return true;
+  }, z.tuple([z.string().uuid()]));
+  handleStremio('plugins:stremio:streams', async (event, addonId, request, requestId) => {
+    if (!requestId) return deps.fetchStremioStreams(addonId, request);
+    const key = `${event.sender.id}:${requestId}`;
+    if (streamRequests.has(key) || streamRequests.size >= 64) throw new Error('Too many pending source requests.');
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    streamRequests.set(key, controller);
+    event.sender.once('destroyed', abort);
+    try { return await deps.fetchStremioStreams(addonId, request, controller.signal); }
+    finally { streamRequests.delete(key); event.sender.removeListener('destroyed', abort); }
+  }, z.tuple([nonEmptyString, stremioStreamRequestSchema, z.string().uuid().optional()]));
   handleStremio('plugins:stremio:subtitles', (_event, addonId, request) => deps.fetchStremioSubtitles(String(addonId || ''), request), z.tuple([nonEmptyString, stremioStreamRequestSchema]));
   handleStremio('plugins:stremio:subtitle-download', (_event, token) => deps.downloadStremioSubtitle(String(token || '')), z.tuple([z.string().uuid()]));
   handleStremio('plugins:stremio:item-key', (_event, type, providerId) => deps.issueStremioItemKey(String(type || ''), String(providerId || '')), z.tuple([z.enum(['movie', 'series']), z.string().max(32)]));
   handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')), z.tuple([nonEmptyString]));
+  handleStremio('plugins:stremio:edit-url', (_event, addonId, revision) => deps.getStremioManifestUrl(addonId, revision), z.tuple([nonEmptyString, nonEmptyString]));
   handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values), z.tuple([nonEmptyString, boundedIpcRecord(z.unknown(), 128, 262_144)]));
   handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit), z.tuple([nonEmptyString, finiteNumber.int().positive().max(1_000).optional()]));
 
@@ -1134,23 +1247,25 @@ export function registerIpcHandlers<
 
   handle('mpv:start', (event, filePath, options) => {
     const requestedPath = String(filePath || '');
-    const externalReference = parseExternalPlaybackReference(requestedPath);
-    const mediaPath = externalReference?.url || requestedPath;
-    if (externalReference) {
-      const parsedStreamUrl = new URL(mediaPath);
-      if (parsedStreamUrl.protocol !== 'https:' && parsedStreamUrl.protocol !== 'http:') {
-        throw new Error('External streams must use http or https.');
+    const addon = parseAddonPlaybackReference(requestedPath);
+    if (parseExternalPlaybackReference(requestedPath)) throw new Error('Remote media requires an addon playback session.');
+    if (addon && !deps.openAddonPlayback) throw new Error('Addon playback is unavailable.');
+    const lease = addon ? deps.openAddonPlayback?.(requestedPath) : undefined;
+    try {
+      const mediaPath = lease?.url || requestedPath;
+      if (!lease) { deps.authorizeMediaPath(mediaPath); deps.assertLocalMediaPath(mediaPath); }
+      for (const subtitleFile of options?.subtitleFiles || []) {
+        deps.authorizeMediaPath(subtitleFile.path);
+        deps.assertLocalMediaPath(subtitleFile.path);
+        deps.assertSubtitleCanAccessMediaPath?.(requestedPath, subtitleFile.path);
       }
-    } else {
-      deps.authorizeMediaPath(mediaPath);
-      deps.assertLocalMediaPath(mediaPath);
-    }
-    for (const subtitleFile of options?.subtitleFiles || []) {
-      deps.authorizeMediaPath(subtitleFile.path);
-      deps.assertLocalMediaPath(subtitleFile.path);
-      deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitleFile.path);
-    }
-    return startLibMpvPlayback(event.sender, mediaPath, options);
+      const result = startLibMpvPlayback(event.sender, mediaPath, options, { onDispose: lease?.release });
+      if (lease) {
+        if (result.ok && result.sessionId) lease.onRevoke(() => { stopLibMpvPlayback(result.sessionId); });
+        else lease.release();
+      }
+      return result;
+    } catch (error) { lease?.release(); throw error; }
   }, z.tuple([nonEmptyString, mpvStartOptionsSchema.optional()]));
 
   handle(
@@ -1167,36 +1282,36 @@ export function registerIpcHandlers<
 
   handle('libvlc:start', (event, filePath, rawOptions) => {
     const requestedPath = String(filePath || '');
+    const addon = parseAddonPlaybackReference(requestedPath);
     const iptvReference = parseIptvPlaybackReference(requestedPath);
-    const externalReference = parseExternalPlaybackReference(requestedPath);
-    const mediaPath = iptvReference
-      ? deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId)
-      : externalReference?.url || requestedPath;
-    if (!mediaPath) throw new Error('That live TV channel is no longer available.');
-    if (iptvReference || externalReference) {
-      let parsedStreamUrl: URL;
-      try {
-        parsedStreamUrl = new URL(mediaPath);
-      } catch {
-        throw new Error('That remote stream has an invalid address.');
+    if (parseExternalPlaybackReference(requestedPath)) throw new Error('Remote media requires an addon playback session.');
+    if (addon && !deps.openAddonPlayback) throw new Error('Addon playback is unavailable.');
+    const lease = addon ? deps.openAddonPlayback?.(requestedPath) : undefined;
+    try {
+      const mediaPath = lease?.url || (iptvReference
+        ? deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId) : requestedPath);
+      if (!mediaPath) throw new Error('That live TV channel is no longer available.');
+      if (iptvReference) {
+        if (new URL(mediaPath).protocol !== 'https:') throw new Error('Remote LibVLC streams must use https.');
+      } else if (!lease) {
+        deps.authorizeMediaPath(mediaPath);
+        deps.assertLocalMediaPath(mediaPath);
       }
-      if (parsedStreamUrl.protocol !== 'https:') {
-        throw new Error('Remote LibVLC streams must use https.');
+      const options = rawOptions ?? {};
+      for (const subtitleFile of options.subtitleFiles || []) {
+        deps.authorizeMediaPath(subtitleFile.path);
+        deps.assertLocalMediaPath(subtitleFile.path);
+        deps.assertSubtitleCanAccessMediaPath?.(requestedPath, subtitleFile.path);
       }
-    } else {
-      deps.authorizeMediaPath(mediaPath);
-      deps.assertLocalMediaPath(mediaPath);
-    }
-    const options = rawOptions ?? {};
-    for (const subtitleFile of options.subtitleFiles || []) {
-      const subtitlePath = String(subtitleFile?.path || '');
-      deps.authorizeMediaPath(subtitlePath);
-      deps.assertLocalMediaPath(subtitlePath);
-      deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitlePath);
-    }
-    return startLibVlcPlayback(event.sender, mediaPath, options, {
-      allowRemoteHttps: Boolean(iptvReference || externalReference),
-    });
+      const result = startLibVlcPlayback(event.sender, mediaPath, options, {
+        allowRemoteHttps: Boolean(iptvReference), addonRelay: Boolean(lease), onDispose: lease?.release,
+      });
+      if (lease) {
+        if (result.ok && result.sessionId) lease.onRevoke(() => { stopLibVlcPlayback(result.sessionId); });
+        else lease.release();
+      }
+      return result;
+    } catch (error) { lease?.release(); throw error; }
   }, z.tuple([nonEmptyString, playbackStartOptionsSchema.optional()]));
 
   handle('libvlc:command', (_event, sessionId, command) =>

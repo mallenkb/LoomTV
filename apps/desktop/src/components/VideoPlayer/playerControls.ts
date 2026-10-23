@@ -131,7 +131,7 @@ export function keepsPlayerFocus(target: EventTarget | null): boolean {
 export function isPlayerControlTarget(target: EventTarget | null): boolean {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
   return Boolean(target.closest(
-    'button, input, select, textarea, a, [role="slider"], [data-player-control], .loom-player-controls, .player-side-panel',
+    'button, input, select, textarea, a, [role="slider"], [data-player-control], summary, [contenteditable], [role="menu"], .player-side-panel',
   ));
 }
 

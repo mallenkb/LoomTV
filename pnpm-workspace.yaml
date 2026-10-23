@@ -4,16 +4,21 @@ packages:
   - .
 
 allowBuilds:
-  better-sqlite3: true
+  better-sqlite3: false
+  bufferutil: false
   electron: true
   electron-winstaller: true
   esbuild: true
   ffmpeg-static: false
   fs-xattr: true
+  ip-set: false
   koffi: true
   macos-alias: true
   msgpackr-extract: true
+  node-datachannel: true
   unrs-resolver: true
+  utf-8-validate: false
+  utp-native: false
 blockExoticSubdeps: false
 # 24 hour delay before pnpm accepts newly published package versions.
 minimumReleaseAge: 1440
@@ -65,6 +70,7 @@ peerDependencyRules:
     vite: '*'
 resolutionMode: highest
 patchedDependencies:
+  bittorrent-tracker@11.2.3: patches/bittorrent-tracker@11.2.3.patch
   braces@3.0.3: patches/braces@3.0.3.patch
   node-forge@1.4.0: patches/node-forge@1.4.0.patch
   react-native-zeroconf@0.17.6: patches/react-native-zeroconf@0.17.6.patch

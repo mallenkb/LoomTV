@@ -83,22 +83,20 @@ Torrent and peer-to-peer results are deliberately **not silently hidden**:
   `sourceKind: "peer-to-peer"`. Torrent file URLs and `fileIdx` are classified
   as `sourceKind: "torrent"`; archive/NZB/file-selection fields remain
   unsupported/rejected rather than being mislabeled as peer-to-peer.
-- The normalized result includes `availability: "consent-required"`,
-  `requiresExplicitConsent: true`, `consentPrompt.required: true`,
-  `consentPrompt.persisted: false`, a source-kind-specific reason, and a safe
-  reference where available.
-- No torrent or peer-to-peer source is playable by Loom. There is no torrent
-  engine, peer downloader, or acquisition automation in this adapter.
-- A client may pass an explicit, per-request acknowledgement such as
-  `peerToPeerConsent: { granted: true, acknowledgedSourceKind: "torrent" }`.
-  That changes the classification to `consent-granted` for that response only;
-  `consentPrompt.required` becomes false for that response, it does not persist
-  consent, and it still does not make the source playable.
+- Valid BitTorrent v1 hashes and hex-hash magnets retain a bounded host-only
+  torrent descriptor with `availability: "requires-engine"` and
+  `requiresExplicitConsent: true`. They are not counted as verified or directly
+  playable. Desktop resolves them through its managed torrent engine.
+- A valid direct HTTPS media URL takes precedence over accompanying torrent
+  metadata. Torrent-file URLs without a supported hash and other peer-to-peer
+  transports remain rejected with an explanation.
+- The protocol adapter itself never starts an engine. The desktop source picker
+  requires an explicit torrent action before the host starts peer discovery.
 
 HTTP, local-file, `data:`, `javascript:`, `ftp:`, and other unsafe or
 unsupported source URLs are returned as `sourceKind: "unsupported"` with
 `availability: "rejected"` and a reason code. A client should render the
-consent prompt only for the explicit `consent-required` classification, so a
+consent prompt only for the explicit `requires-engine` classification, so a
 user can decline or opt in with full awareness of the source type.
 
 ## Network bounds and Loom authority
@@ -145,3 +143,71 @@ No renderer, UI, playback, torrent, or LibVLC integration is implied by this
 adapter layer. A future UI integration should treat `pending-review`,
 `disabled`, `consent-required`, and `rejected` as explicit states rather than
 filtering them into an apparently empty provider result.
+
+## Desktop playback sessions (October 22, 2026)
+
+The desktop integration now exchanges `addon://stream/<opaque token>` references
+for playable addon sources, including streams embedded in metadata and the
+Archive.org resolver. Provider media URLs and supported request headers remain
+in the main process. The host binds each grant to the selected profile, profile
+selection revision, addon approval and configuration revision. Disabling,
+removing, reconfiguring or switching profiles invalidates affected grants and
+stops active playback. Reload the source list after access changes or expiry.
+
+Both native players use the existing media server's loopback-only relay. Browser
+fallback uses the same relay, with host-side detection for extensionless HLS.
+Source headers are bounded and allowlisted, and are sent only to their original
+origin. Every upstream request and redirect validates a public HTTPS destination
+and pins its resolved address. Media streams use backpressure, bounded playlist
+buffers and downstream cancellation. Provider URLs never become general-purpose
+renderer fetch targets. Arbitrary external media URLs are no longer accepted by
+the native playback IPC routes; existing external video-page actions remain.
+
+The relay handles ranged media, HLS variants, alternate renditions, initialization
+maps and identity AES-128 keys. Each supported HLS resource is rewritten to a
+session-local token. DRM, variable substitution, content steering, LL-HLS and
+unrecognized HLS extensions are rejected. It does not add transcoding or browser
+codec support. There are four concurrent sessions, a six-hour grant/session
+lifetime, a 30-minute idle timeout, a 1 MiB playlist limit, 8,192 distinct resources
+per session, twelve concurrent requests and 1,200 requests per minute. Long live
+streams can reach the resource limit and require restarting playback. Native
+engine disposal releases its lease; browser cleanup closes its source sessions.
+
+Regression cases were added for grant revocation, profile changes, session reuse,
+idle expiry and HLS rewriting. Tests and runtime/visual playback verification have
+not been run for this implementation, at the user's request. Static typechecking
+covers the desktop and protocol declarations. Earlier integration-status notes
+above describe the original adapter-only milestone.
+
+## Configuration and source selection
+
+Configurable providers now have a **Configure in browser** action. The owner-only
+host derives `/configure` from the stored manifest endpoint, preserving its path
+and query. The renderer receives no configured URL from this action. After using
+the provider page, paste its manifest link into the URL input and review it.
+The returned manifest must retain the selected addon identity and requires a new
+approval. A provider that still declares required configuration without usable
+form fields remains blocked. Existing host-rendered configuration forms remain
+available. Unknown manifest fields continue to be dropped with compatibility
+warnings; they cannot add permissions or executable behavior.
+
+The source picker shows each provider as loading, ready, empty or failed, in a
+stable order. Up to four requests run at once. Results appear as each provider
+finishes, so a slow provider does not delay usable sources. Request IDs are scoped
+to the sending renderer. Closing, refreshing, changing the target or changing the
+profile cancels pending stream requests and discards old results. Cancellation
+also reaches the existing host request queue and transport.
+
+Before selection, the picker checks the provider revision and asks the host to
+validate the playback grant. Expired grants reload the source list, including
+inline metadata streams, and ask the user to select again. Playback start still
+performs its own authorization check. An upstream 401, 403 or 410 also revokes
+the refused source, so selecting it again requests fresh sources. There is no automatic provider substitution
+or network probing while browsing the catalog.
+
+This phase was checked by static TypeScript and lint inspection. Regression cases
+were added for configured endpoints, fresh approval, request cancellation and
+expired selections. Tests, live-provider configuration and runtime/visual playback
+checks remain unrun at the user's request.
+
+Managed torrent lifecycle and current verification limits are documented in [Managed torrent playback](managed-torrent-playback.md).

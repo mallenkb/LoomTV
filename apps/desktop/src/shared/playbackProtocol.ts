@@ -28,6 +28,9 @@ type PlaybackDiagnostics = {
   frameDrops?: number;
   decoderFrameDrops?: number;
   bufferSeconds?: number;
+  /** Percent of the engine's startup/resume cache target, not the whole video. */
+  bufferingPercent?: number;
+  bufferedRanges?: Array<{ start: number; end: number }>;
   buffering?: boolean;
   videoCodec?: string;
   estimatedFps?: number;

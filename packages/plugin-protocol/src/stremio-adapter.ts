@@ -8,7 +8,7 @@ export declare const STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON: string;
 export type StremioResourceName = (typeof STREMIO_RESOURCES)[number];
 export type StremioInstallState = (typeof STREMIO_INSTALL_STATES)[number];
 export type StremioSourceKind = 'https-media' | 'hls' | 'youtube' | 'external' | 'torrent' | 'peer-to-peer' | 'unsupported';
-export type StremioSourceAvailability = 'playable' | 'external' | 'rejected';
+export type StremioSourceAvailability = 'playable' | 'external' | 'requires-engine' | 'rejected';
 export type StremioExtraValue = string | number | boolean;
 
 export interface StremioAdapterLimits {
@@ -178,12 +178,16 @@ export interface LoomStremioSourceCandidate {
   name?: string;
   description?: string;
   url?: string;
+  /** Host-only descriptor for torrent playback. */
+  torrent?: { infoHash: string; fileIdx?: number; sources: readonly string[] };
   urlRedacted?: string;
   /** Public HTTPS page for the system browser; never played or framed. */
   externalUrl?: string;
   ytId?: string;
   notWebReady?: boolean;
   requestHeadersRequired?: boolean;
+  /** Validated provider headers. Host-only; never serialize into renderer payloads. */
+  requestHeaders?: Readonly<Record<string, string>>;
   reason?: string;
   reasonCode?: string;
   reference?: string;

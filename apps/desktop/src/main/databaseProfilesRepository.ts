@@ -427,10 +427,14 @@ function normalizePreferences(value: ProfilePreferences): ProfilePreferences {
     ...(value.appDarkTheme === 'black' ? { appDarkTheme: 'black' as const } : {}),
     ...(loaders.has(String(value.appLoaderStyle)) ? { appLoaderStyle: value.appLoaderStyle } : {}),
     ...(homeStyles.has(String(value.appHomeStyle)) ? { appHomeStyle: value.appHomeStyle } : {}),
+    ...(value.appPlayerControlStyle === 'default' || value.appPlayerControlStyle === 'pill' ? { appPlayerControlStyle: value.appPlayerControlStyle } : {}),
     ...(modernHeroModes.has(String(value.appModernHeroMode)) ? { appModernHeroMode: value.appModernHeroMode } : {}),
     ...(typeof value.showProviderRatingBadges === 'boolean' ? { showProviderRatingBadges: value.showProviderRatingBadges } : {}),
     ...(Array.isArray(value.sidebarNavOrder) ? {
       sidebarNavOrder: [...new Set(value.sidebarNavOrder.map(String).map((item) => item.trim()).filter(Boolean))].slice(0, 256),
+    } : {}),
+    ...(Array.isArray(value.hiddenSidebarItems) ? {
+      hiddenSidebarItems: [...new Set(value.hiddenSidebarItems.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(item => Boolean(item) && item !== 'home' && item !== 'settings'))].slice(0, 256),
     } : {}),
     ...(typeof value.autoplayNextEnabled === 'boolean' ? { autoplayNextEnabled: value.autoplayNextEnabled } : {}),
     ...(typeof value.playbackRewindOnResumeSeconds === 'number' && Number.isFinite(value.playbackRewindOnResumeSeconds) ? { playbackRewindOnResumeSeconds: Math.min(30, Math.max(0, Math.round(value.playbackRewindOnResumeSeconds))) } : {}),

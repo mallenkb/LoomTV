@@ -141,7 +141,11 @@ async function scheduledRead<T>(read: () => Promise<T>, signal: AbortSignal): Pr
 }
 
 export async function cachedDesktopRead<T>(family: string, args: readonly unknown[], read: () => Promise<T>, staleTime = 60_000): Promise<T> {
-  const expensive = family === 'getThumbnail' || family === 'requestMetadataProvider' || family === 'getMediaSegments';
+  // Interactive catalog navigation must not queue behind metadata enrichment.
+  const request = args[0] as { provider?: string; path?: string } | undefined;
+  const interactiveCatalog = family === 'requestMetadataProvider' && request?.provider === 'cinemeta'
+    && request.path?.startsWith('catalog/');
+  const expensive = family === 'getThumbnail' || (family === 'requestMetadataProvider' && !interactiveCatalog) || family === 'getMediaSegments';
   const recoverCancellation = family === 'requestMetadataProvider' || family === 'addon-browse' || family.startsWith('discover-');
   const scope = queryScope();
   const identity = JSON.stringify(scope);

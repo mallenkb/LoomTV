@@ -82,29 +82,29 @@ export function SettingsGroup({ title, description, action, children, className,
   };
 
   const list = (
-    <div className="settings-group divide-y divide-[var(--loom-settings-divider)] overflow-hidden rounded-xl">
+    <div className={cn('divide-y divide-[var(--loom-settings-divider)] overflow-hidden', !collapsible && 'settings-group rounded-xl')}>
       {children}
     </div>
   );
 
   if (collapsible) {
     return (
-      <section className={cn('settings-group-section', className)} data-settings-title={titleText(title)} data-open={open || undefined}>
-        <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
+      <section className={cn('settings-group-section settings-group overflow-hidden', className)} data-settings-title={titleText(title)} data-open={open || undefined}>
+        <div className="flex min-h-[60px] items-center justify-between">
           <button
             type="button"
             aria-expanded={open}
             aria-controls={panelId}
             onClick={toggle}
-            className="settings-group-toggle group -mx-1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--loom-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            className="settings-group-toggle settings-row-button group flex min-h-[60px] min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[var(--loom-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
           >
-            <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-[var(--loom-muted)] transition-transform duration-200', open && 'rotate-90 text-[var(--loom-text)]')} aria-hidden="true" />
-            <span className="min-w-0">
-              <span className="block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--loom-muted)] group-hover:text-[var(--loom-text)]">{title}</span>
-              {description && !open ? <span className="mt-0.5 block text-xs normal-case tracking-normal text-[var(--loom-faint)]">{description}</span> : null}
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--loom-text)]">{title}</span>
+              {description ? <span className="mt-0.5 block text-xs leading-5 text-[var(--loom-muted)]">{description}</span> : null}
             </span>
+            <ChevronRight className={cn('h-4 w-4 shrink-0 text-[var(--loom-muted)] transition-transform duration-200', open && 'rotate-90 text-[var(--loom-text)]')} aria-hidden="true" />
           </button>
-          {action && open ? <div className="settings-group-action flex min-h-9 shrink-0 items-center gap-2">{action}</div> : null}
+          {action && open ? <div className="settings-group-action flex min-h-9 shrink-0 items-center gap-2 pr-4">{action}</div> : null}
         </div>
         <AnimatePresence initial={false}>
           {open ? (
@@ -117,7 +117,6 @@ export function SettingsGroup({ title, description, action, children, className,
               transition={{ duration: 0.22, ease: EASE }}
               className="overflow-hidden"
             >
-              {description ? <p className="mb-2 px-1 text-xs text-[var(--loom-faint)]">{description}</p> : null}
               {list}
             </motion.div>
           ) : null}
@@ -129,12 +128,12 @@ export function SettingsGroup({ title, description, action, children, className,
   return (
     <section className={cn('settings-group-section', className)} data-settings-title={titleText(title)}>
       {title || action ? (
-        <div className="mb-2 flex min-h-9 items-center justify-between gap-3 px-1">
+        <div className="mb-2 flex min-h-9 flex-wrap items-center justify-between gap-3 px-1">
           <div className="min-w-0">
             {title ? <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--loom-muted)]">{title}</h2> : null}
             {description ? <p className="mt-1 text-xs text-[var(--loom-faint)]">{description}</p> : null}
           </div>
-          {action ? <div className="settings-group-action flex min-h-9 shrink-0 items-center gap-2">{action}</div> : null}
+          {action ? <div className="settings-group-action flex min-h-9 shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
         </div>
       ) : null}
       {list}

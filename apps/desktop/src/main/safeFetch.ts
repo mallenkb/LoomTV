@@ -143,12 +143,14 @@ async function assertSafeUrl(
   lookup: LookupImplementation,
 ): Promise<string> {
   if (url.protocol !== 'https:') throw new Error('Only HTTPS provider URLs are allowed.');
+  if (url.username || url.password || url.hash) throw new Error('Provider URLs cannot contain user information or fragments.');
   if (!hostAllowed(url.hostname, allowedHosts)) throw new Error(`Provider host is not allowed: ${url.hostname}`);
-  if (net.isIP(url.hostname)) {
-    if (isPrivateAddress(url.hostname)) throw new Error('Private network provider addresses are not allowed.');
-    return url.hostname;
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (net.isIP(hostname)) {
+    if (isPrivateAddress(hostname)) throw new Error('Private network provider addresses are not allowed.');
+    return hostname;
   }
-  const addresses = await lookup(url.hostname, { all: true, verbatim: true });
+  const addresses = await lookup(hostname, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new Error('Provider host resolved to a private or invalid address.');
   }
@@ -156,6 +158,11 @@ async function assertSafeUrl(
   // must use this exact public address; resolving once and then letting the
   // HTTP client perform a second lookup leaves a DNS-rebinding window.
   return addresses[0].address;
+}
+
+/** Shared destination policy for bounded JSON and streaming media transports. */
+export function resolveSafeProviderAddress(url: URL): Promise<string> {
+  return assertSafeUrl(url, undefined, dns.lookup as LookupImplementation);
 }
 
 async function pinnedHttpsRequest(url: URL, init: RequestInit, address: string, maxBytes: number): Promise<Response> {

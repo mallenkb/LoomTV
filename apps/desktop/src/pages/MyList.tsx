@@ -15,11 +15,16 @@ import {
   getCachedWatchedDiscoverItem,
   isLocalItemWatched,
   parseDiscoverWatchedKey,
+  discoverWatchedKey,
 } from '@/lib/watched';
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { EpisodeUpdatesProvider } from '@/contexts/EpisodeUpdatesContext';
 import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
+import { useAddonBookmarks, type AddonBookmark } from '@/lib/addonBookmarks';
+import { useAddonTitles } from '@/lib/addonTitles';
+import { addonDetailRoute } from '@/lib/addonPlayback';
+import { addonProgressKey, readAddonWatchHistory } from '@/lib/addonWatchHistory';
 
 export default function MyList() {
   return <EpisodeUpdatesProvider><MyListContent /></EpisodeUpdatesProvider>;
@@ -27,7 +32,9 @@ export default function MyList() {
 
 function MyListContent() {
   const { state } = useLibrary();
-  const { lists, watchedKeys } = useProfiles();
+  const { lists, watchedKeys, activeProfile } = useProfiles();
+  const { bookmarks } = useAddonBookmarks();
+  const addonTitles = useAddonTitles();
   const location = useLocation();
   const navigate = useNavigate();
   const currentRoute = `${location.pathname}${location.search}`;
@@ -81,10 +88,34 @@ function MyListContent() {
       })
       .map((record) => record.item);
   }, [lists, normalizedQuery]);
+  const addonHistory = activeProfile ? readAddonWatchHistory(activeProfile.id) : [];
+  const savedCount = savedItems.length + bookmarks.length;
+  const filteredBookmarks = bookmarks.filter(({ key, item }) => {
+    if (normalizedQuery && !item.title.toLowerCase().includes(normalizedQuery)) return false;
+    const watched = watchedKeys.has(discoverWatchedKey(item));
+    switch (activeFilter) {
+      case 'favorites': return listState.favoriteIds.has(key);
+      case 'watched': return watched;
+      case 'unwatched': return !watched;
+      case 'in-progress': return addonHistory.some(({ target }) => {
+        if (target.detailId !== item.id) return false;
+        const stored = progress[addonProgressKey(target)];
+        return stored && stored.position > 10 && !stored.watched && (stored.duration <= 0 || stored.position / stored.duration < 0.9);
+      });
+      case 'missing-artwork': return !item.posterUrl && !item.artwork?.poster;
+      case 'missing-metadata': return !item.description;
+      default: return true;
+    }
+  });
+  const openBookmark = ({ item, addonId, streamAddonId }: AddonBookmark) => {
+    cacheDiscoverReturnRoute(currentRoute);
+    cacheExploreItem(item);
+    navigate(addonDetailRoute(item), { state: { from: currentRoute, stremioCatalogItem: item, addonId, streamAddonId } });
+  };
   const watchedCount = watchedLocalItems.length + watchedDiscoverItems.length;
   const [chosenTab, setChosenTab] = useState<'saved' | 'watched' | null>(null);
   // Open on whichever list has titles until the viewer picks one.
-  const tab = chosenTab ?? (savedItems.length === 0 && watchedCount > 0 ? 'watched' : 'saved');
+  const tab = chosenTab ?? (savedCount === 0 && watchedCount > 0 ? 'watched' : 'saved');
   const openDiscoverItem = (item: StremioPluginCatalogItem) => {
     const from = currentRoute;
     cacheDiscoverReturnRoute(from);
@@ -93,10 +124,10 @@ function MyListContent() {
     navigate(detailPath, { state: { from, stremioCatalogItem: item } });
   };
 
-  const hasAnything = savedItems.length > 0 || watchedCount > 0;
+  const hasAnything = savedCount > 0 || watchedCount > 0;
   const tabs = (
     <div role="tablist" aria-label="My List" className="inline-flex gap-1 rounded-[var(--loom-control-radius,0.5rem)] bg-[var(--loom-surface-2)] p-1">
-      {([['saved', 'Saved', savedItems.length], ['watched', 'Watched', watchedCount]] as const).map(([id, label, count]) => {
+      {([['saved', 'Saved', savedCount], ['watched', 'Watched', watchedCount]] as const).map(([id, label, count]) => {
         const selected = tab === id;
         return (
           <button
@@ -133,16 +164,17 @@ function MyListContent() {
             <div key={index} className="h-[300px] w-full max-w-[200px] animate-pulse rounded-lg bg-[var(--loom-surface)]" />
           ))}
         </div>
-      ) : savedItems.length === 0 && watchedCount === 0 ? (
+      ) : savedCount === 0 && watchedCount === 0 ? (
         <EmptyMyListState />
       ) : (
         <>
           <div id="my-list-panel" role="tabpanel" aria-labelledby={`my-list-tab-${tab}`} className="space-y-6">
             {tab === 'saved' ? (
-              savedItems.length === 0 ? (
+              savedCount === 0 ? (
                 <p className="py-16 text-center text-sm text-[var(--loom-muted)]">Nothing saved yet. Use the bookmark button on a title to save it here.</p>
-              ) : filteredItems.length > 0 ? (
-                <VirtualPosterGrid
+              ) : filteredItems.length > 0 || filteredBookmarks.length > 0 ? (
+                <>
+                {filteredItems.length > 0 && <VirtualPosterGrid
                   items={filteredItems}
                   renderItem={(item) => (
                     <MediaPosterCard
@@ -152,7 +184,18 @@ function MyListContent() {
                       metaLine={mediaMetaLine(item)}
                     />
                   )}
-                />
+                />}
+                {filteredBookmarks.length > 0 && <VirtualPosterGrid
+                  items={filteredBookmarks.map(record => ({ ...record, id: record.key }))}
+                  renderItem={(record) => (
+                    <StremioPosterCard
+                      item={record.item}
+                      metaLine={[record.item.releaseInfo, (record.addonId && addonTitles[record.addonId]) || record.addonName || record.item.source].filter(Boolean).join(' · ')}
+                      onSelect={() => openBookmark(record)}
+                    />
+                  )}
+                />}
+                </>
               ) : (
                 <p className="py-16 text-center text-sm text-[var(--loom-muted)]">
                   {activeFilter === 'all' ? 'No saved titles match your search' : 'No saved titles match this filter'}

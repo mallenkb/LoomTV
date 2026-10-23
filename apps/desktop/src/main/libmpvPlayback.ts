@@ -459,6 +459,16 @@ class LibMpvSession {
     else if (message.name === 'frame-drop-count') this.updateDiagnostics({ frameDrops: finiteNumber(message.data) });
     else if (message.name === 'decoder-frame-drop-count') this.updateDiagnostics({ decoderFrameDrops: finiteNumber(message.data) });
     else if (message.name === 'demuxer-cache-duration') this.updateDiagnostics({ bufferSeconds: finiteNumber(message.data) });
+    else if (message.name === 'demuxer-cache-state') {
+      const cache = message.data as { 'seekable-ranges'?: unknown } | null;
+      const ranges = cache?.['seekable-ranges'];
+      this.updateDiagnostics({ bufferedRanges: Array.isArray(ranges) ? ranges.flatMap(range => {
+        if (!range || typeof range.start !== 'number' || typeof range.end !== 'number'
+          || !Number.isFinite(range.start) || !Number.isFinite(range.end) || range.end <= range.start) return [];
+        return [{ start: Math.max(0, range.start), end: range.end }];
+      }) : [] });
+    }
+    else if (message.name === 'cache-buffering-state') this.updateDiagnostics({ bufferingPercent: finiteNumber(message.data) });
     else if (message.name === 'paused-for-cache') this.updateDiagnostics({ buffering: mpvFlag(message.data) });
     else if (message.name === 'video-codec') this.updateDiagnostics({ videoCodec: typeof message.data === 'string' ? message.data : undefined });
     else if (message.name === 'estimated-vf-fps') this.updateDiagnostics({ estimatedFps: finiteNumber(message.data) });
@@ -656,7 +666,7 @@ class LibMpvSession {
 
 let currentSession: LibMpvSession | null = null;
 
-export function startLibMpvPlayback(owner: WebContents, source: string, options: MpvStartOptions = {}) {
+export function startLibMpvPlayback(owner: WebContents, source: string, options: MpvStartOptions = {}, lifecycle: { onDispose?: () => void } = {}) {
   if (shutdown) return { ok: false, error: 'libmpv is shutting down.' };
   if (disabled()) return { ok: false, error: libMpvAvailability().reason };
   const runtime = loadRuntime();
@@ -667,6 +677,7 @@ export function startLibMpvPlayback(owner: WebContents, source: string, options:
   try {
     const session = new LibMpvSession(runtime, owner, ownerWindow, source, options, (stopped) => {
       if (currentSession === stopped) currentSession = null;
+      lifecycle.onDispose?.();
     });
     currentSession = session;
     return { ok: true, sessionId: session.id, surface: 'composited-window' as const };

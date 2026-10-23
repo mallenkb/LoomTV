@@ -11,6 +11,7 @@ type UpdatePlaybackSnapshot = (
 ) => void;
 
 type EpisodeNavigationOptions = {
+  saveProgress?: typeof savePlaybackProgress;
   autoplayNextEnabled: boolean;
   /** Asked before an episode that ended on its own starts the next; false holds it. */
   allowAutomaticNext?: () => boolean;
@@ -36,6 +37,7 @@ type EpisodeNavigationOptions = {
 };
 
 export function useEpisodeNavigation({
+  saveProgress = savePlaybackProgress,
   autoplayNextEnabled,
   allowAutomaticNext,
   currentEpisode,
@@ -105,11 +107,12 @@ export function useEpisodeNavigation({
     const completeDuration = duration || playbackDurationRef.current || probedDurationRef.current || videoDuration;
     if (completeDuration <= 0) return;
     updatePlaybackSnapshot(completeDuration, completeDuration, { forceReact: true });
-    void savePlaybackProgress(filePath, completeDuration, completeDuration);
+    void saveProgress(filePath, completeDuration, completeDuration);
     setProgressRevision((revision) => revision + 1);
   }, [
     duration,
     filePath,
+    saveProgress,
     playbackDurationRef,
     probedDurationRef,
     setProgressRevision,

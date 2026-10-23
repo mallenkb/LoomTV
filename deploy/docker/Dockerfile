@@ -3,10 +3,10 @@
 # The headless runtime is deliberately kept independent from Electron.  The
 # server package currently ships JavaScript directly, so this image does not
 # need a desktop build or a display server.
-# Docker Hub multi-platform OCI index for node:22-bookworm-slim, resolved
-# 2026-08-08. Refresh both FROM lines and the 20260806T000000Z Debian snapshot
+# Docker Hub multi-platform OCI index for node:22.23.4-bookworm-slim, resolved
+# 2026-10-23. Refresh both FROM lines and the 20261022T000000Z Debian snapshot
 # together so amd64 and arm64 select platform manifests from the same index.
-FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS dependencies
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS dependencies
 
 WORKDIR /workspace
 ENV COREPACK_HOME=/tmp/corepack
@@ -16,13 +16,13 @@ ENV COREPACK_HOME=/tmp/corepack
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
   && printf '%s\n' \
     'Types: deb' \
-    'URIs: http://snapshot.debian.org/archive/debian/20260806T000000Z/' \
+    'URIs: http://snapshot.debian.org/archive/debian/20261022T000000Z/' \
     'Suites: bookworm bookworm-updates' \
     'Components: main' \
     'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
     '' \
     'Types: deb' \
-    'URIs: http://snapshot.debian.org/archive/debian-security/20260806T000000Z/' \
+    'URIs: http://snapshot.debian.org/archive/debian-security/20261022T000000Z/' \
     'Suites: bookworm-security' \
     'Components: main' \
     'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
@@ -55,7 +55,7 @@ COPY packages/video-contracts/src packages/video-contracts/src
 RUN pnpm install --filter ./apps/server... --prod --frozen-lockfile
 RUN pnpm --config.inject-workspace-packages=true --filter ./apps/server deploy --prod /opt/loomtv
 
-FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS runtime
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS runtime
 
 ARG LOOMTV_UID=1000
 ARG LOOMTV_GID=1000
@@ -75,13 +75,13 @@ RUN if [ "${LOOMTV_UID}" = '0' ] || [ "${LOOMTV_GID}" = '0' ]; then echo 'LOOMTV
   && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
   && printf '%s\n' \
     'Types: deb' \
-    'URIs: http://snapshot.debian.org/archive/debian/20260806T000000Z/' \
+    'URIs: http://snapshot.debian.org/archive/debian/20261022T000000Z/' \
     'Suites: bookworm bookworm-updates' \
     'Components: main' \
     'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
     '' \
     'Types: deb' \
-    'URIs: http://snapshot.debian.org/archive/debian-security/20260806T000000Z/' \
+    'URIs: http://snapshot.debian.org/archive/debian-security/20261022T000000Z/' \
     'Suites: bookworm-security' \
     'Components: main' \
     'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \

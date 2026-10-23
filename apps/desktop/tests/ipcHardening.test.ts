@@ -133,7 +133,7 @@ test('handler wiring retains sender checks and validates local access before pro
   assert.ok(thumbnail.indexOf('deps.authorizeMediaPath(filePath)') < thumbnail.indexOf('deps.assertLocalMediaPath(filePath)'));
   assert.ok(thumbnail.indexOf('deps.assertLocalMediaPath(filePath)') < thumbnail.indexOf('new URLSearchParams'));
   const mpv = source.slice(source.indexOf("handle('mpv:start'"), source.indexOf("'mpv:command'"));
-  assert.match(mpv, /assertSubtitleCanAccessMediaPath\?\.\(mediaPath, subtitleFile.path\)/);
+  assert.match(mpv, /assertSubtitleCanAccessMediaPath\?\.\(requestedPath, subtitleFile.path\)/);
   const reveal = source.slice(source.indexOf('const openFolderPath ='), source.indexOf("handle('shell:open-folder-path'"));
   assert.ok(reveal.indexOf('authorizeFolderReveal(resolvedTarget') < reveal.indexOf('fs.existsSync'));
   assert.ok(reveal.indexOf('authorizeFolderReveal(parent') < reveal.indexOf('existingTarget = parent'));

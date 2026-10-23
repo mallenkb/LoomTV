@@ -1,20 +1,21 @@
+import AddonKeepWatching from '@/components/AddonKeepWatching';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { DiscoverHeader, DiscoverPosterGrid, discoverFilterChipClass } from '@/components/DiscoverCatalogLayout';
 import DiscoverDropdown from '@/components/DiscoverDropdown';
 import { PosterGridShimmer } from '@/components/ContentShimmer';
-import AddonSourcePicker, { type AddonStreamSelection } from '@/components/AddonSourcePicker';
 import { desktopApi, type StremioPluginCatalogItem, type StremioPluginSummary } from '@/lib/desktopApi';
 import { useNavigate } from '@/lib/navigation';
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import { isCancelledError } from '@tanstack/react-query';
 import { cachedDesktopRead } from '@/lib/queryClient';
 import {
-  addonDetailRoute, addonPlaybackOptions, addonPlaybackTarget, invalidateRequests, isSeriesLikeType, loadAddonMeta,
-  type AddonStreamPlayer, type AddonVideoTarget,
+  addonDetailRoute, addonPlaybackTarget, invalidateRequests, isSeriesLikeType, loadAddonMeta,
+  type AddonStreamPlayer,
 } from '@/lib/addonPlayback';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import StremioStreamAddon from './StremioStreamAddon';
 
 const PAGE_SIZE = 30;
 const TYPE_LABELS: Record<string, string> = { movie: 'Movies', series: 'TV Shows', anime: 'Anime', channel: 'Channels', tv: 'Live TV', other: 'Other' };
@@ -69,7 +70,6 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
   const [error, setError] = useState('');
   const [scrolled, setScrolled] = useState(false);
   const [openingId, setOpeningId] = useState('');
-  const [sourceTarget, setSourceTarget] = useState<{ target: AddonVideoTarget; item: StremioPluginCatalogItem } | null>(null);
   const [revision, setRevision] = useState(0);
   const [facets, setFacets] = useState<Record<string, { genres: string[]; years: string[] }>>({});
   const generation = useRef(0);
@@ -94,7 +94,7 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
     let refreshGeneration = 0;
     const refresh = async () => {
       const refreshId = ++refreshGeneration;
-      setLoading(true); setSource(null); setItems([]); setError(''); setOpeningId(''); setFacets({}); setSourceTarget(null);
+      setLoading(true); setSource(null); setItems([]); setError(''); setOpeningId(''); setFacets({});
       generation.current++;
       try {
         const available = await desktopApi.listAvailableStremioPlugins();
@@ -169,8 +169,8 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
   const openDetails = useCallback((item: StremioPluginCatalogItem) => {
     const from = `/addons/stremio/${encodeURIComponent(addonId)}`;
     cacheDiscoverReturnRoute(from); cacheExploreItem(item);
-    navigate(addonDetailRoute(item), { state: { from, fromDiscover: true, stremioCatalogItem: item } });
-  }, [addonId, navigate]);
+    navigate(addonDetailRoute(item), { state: { from, addonId, streamAddonId: source?.resources.includes('stream') ? addonId : undefined, stremioCatalogItem: item } });
+  }, [addonId, navigate, source?.resources]);
 
   // Play resolves sources for this title only now, after loading its metadata.
   const play = useCallback(async (item: StremioPluginCatalogItem) => {
@@ -183,18 +183,12 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
       if (current !== generation.current) return;
       const target = addonPlaybackTarget(meta);
       if (!target) throw new Error('This title does not name a video to play.');
-      setSourceTarget({ target, item: meta });
+      const poster = meta.artwork?.poster || meta.posterUrl || '';
+      onPlay('', target.title, { poster, backdrop: meta.artwork?.background || meta.backgroundUrl || poster }, { addonTarget: { ...target, sourceAddonId: source?.resources.includes('stream') ? addonId : undefined } });
     } catch (failure) {
       if (current === generation.current) setError(failure instanceof Error ? failure.message : 'This title could not be opened.');
     } finally { if (current === generation.current) setOpeningId(''); }
-  }, [openDetails, openingId]);
-
-  const playChosen = useCallback(({ target, url, stream, addonName }: AddonStreamSelection) => {
-    const item = sourceTarget?.item;
-    setSourceTarget(null);
-    const poster = item?.artwork?.poster || item?.posterUrl || '';
-    onPlay(url, target.title, { poster, backdrop: item?.artwork?.background || item?.backgroundUrl || poster }, addonPlaybackOptions(target, stream, addonName));
-  }, [onPlay, sourceTarget]);
+  }, [addonId, openDetails, openingId, source?.resources, onPlay]);
 
   const genreExtra = catalog?.extra.find(extra => isGenreExtra(extra.name));
   const yearExtra = catalog?.extra.find(extra => isYearExtra(extra.name));
@@ -207,6 +201,10 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
   const types = [...new Set(source?.catalogs.map(entry => entry.type) || [])];
   const isModern = theme.homeStyle === 'modern';
   const choose = (next: Partial<typeof selection>) => setSelection(current => ({ ...current, ...next }));
+
+  if (source && source.catalogs.length === 0 && source.resources.includes('stream')) {
+    return <StremioStreamAddon key={`${source.addonId}:${activeProfile?.id}`} source={source} onPlay={onPlay} />;
+  }
 
   return (
     <div className="loom-page loom-library-page h-full overflow-y-auto" onScroll={event => setScrolled(event.currentTarget.scrollTop > 4)}>
@@ -238,6 +236,7 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
             <button type="button" className={discoverFilterChipClass(false)} onClick={() => setRevision(current => current + 1)}>Refresh</button>
           </div>
         </DiscoverHeader>
+        <AddonKeepWatching addonId={addonId} onPlay={onPlay} />
         {error ? <p role="alert" className="mb-6 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p> : null}
         {entries.length ? (
           <DiscoverPosterGrid entries={entries} metaLine={item => item.releaseInfo || item.released?.slice(0, 4) || ''} onSelect={openDetails} onPlay={item => { void play(item); }} playbackStatus={openingId ? item => item.id === openingId ? 'Opening' : 'Play' : undefined} />
@@ -250,7 +249,6 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
           <button type="button" disabled={page >= pageCount} aria-label="Next page" onClick={() => setPage(current => current + 1)} className={discoverFilterChipClass(false)}><ChevronRight className="h-4 w-4" /></button>
         </nav> : null}
       </div>
-      <AddonSourcePicker target={sourceTarget?.target || null} onClose={() => setSourceTarget(null)} onPlay={playChosen} />
     </div>
   );
 }

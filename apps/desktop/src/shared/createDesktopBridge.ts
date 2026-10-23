@@ -206,8 +206,10 @@ const desktopApi = {
   listOfficialStremioAddons: () => ipcRenderer.invoke('plugins:stremio:official'),
   reviewOfficialStremioAddon: (officialId: OfficialStremioAddon['id']) =>
     ipcRenderer.invoke('plugins:stremio:review-official', officialId),
-  reviewStremioManifestUrl: (manifestUrl: string) =>
-    ipcRenderer.invoke('plugins:stremio:review-url', manifestUrl),
+  reviewStremioManifestUrl: (manifestUrl: string, expectedAddonId?: string) =>
+    expectedAddonId === undefined
+      ? ipcRenderer.invoke('plugins:stremio:review-url', manifestUrl)
+      : ipcRenderer.invoke('plugins:stremio:review-url', manifestUrl, expectedAddonId),
   reviewInstalledStremioAddon: (addonId: string) =>
     ipcRenderer.invoke('plugins:stremio:review-installed', addonId),
   approveStremioAddon: (addonId: string, reviewToken: string) =>
@@ -226,8 +228,22 @@ const desktopApi = {
     ipcRenderer.invoke('plugins:stremio:meta', addonId, request),
   getStremioMetaByItem: (request: StremioPluginMetaRequest) =>
     ipcRenderer.invoke('plugins:stremio:meta-item', request),
-  getStremioStreams: (addonId: string, request: import('./desktopProtocol.ts').StremioStreamRequest) =>
-    ipcRenderer.invoke('plugins:stremio:streams', addonId, request),
+  openStremioConfiguration: (addonId: string, revision: string) => ipcRenderer.invoke('plugins:stremio:configure', addonId, revision),
+  getStremioManifestUrl: (addonId: string, revision: string) => ipcRenderer.invoke('plugins:stremio:edit-url', addonId, revision),
+  cancelStremioStreams: (requestId: string) => ipcRenderer.invoke('plugins:stremio:cancel-streams', requestId),
+  stremioSourceAction: (reference: string, action: 'copy-stream' | 'copy-magnet' | 'download', title: string) => ipcRenderer.invoke('plugins:stremio:source-action', reference, action, title),
+  validateStremioPlayback: (reference: string) => ipcRenderer.invoke('plugins:stremio:validate-playback', reference),
+  getStremioServiceStatus: () => ipcRenderer.invoke('plugins:stremio:service-status'),
+  prepareStremioTorrent: (reference: string, requestId: string) => ipcRenderer.invoke('plugins:stremio:prepare-torrent', reference, requestId),
+  selectStremioTorrent: (reference: string, index: number) => ipcRenderer.invoke('plugins:stremio:select-torrent', reference, index),
+  stopStremioPlayback: (reference: string) => ipcRenderer.invoke('plugins:stremio:stop-playback', reference),
+  onStremioPlaybackRevoked: (callback) => {
+    const handler = (_event: unknown, reference: string) => callback(reference);
+    ipcRenderer.on('plugins:stremio:playback-revoked', handler);
+    return () => ipcRenderer.removeListener('plugins:stremio:playback-revoked', handler);
+  },
+  getStremioStreams: (addonId: string, request: import('./desktopProtocol.ts').StremioStreamRequest, requestId?: string) =>
+    ipcRenderer.invoke('plugins:stremio:streams', addonId, request, requestId),
   getStremioSubtitles: (addonId: string, request: import('./desktopProtocol.ts').StremioStreamRequest) =>
     ipcRenderer.invoke('plugins:stremio:subtitles', addonId, request),
   downloadStremioSubtitle: (token: string) =>

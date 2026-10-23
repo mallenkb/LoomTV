@@ -169,7 +169,7 @@ export function saveProgress(
   const safeDuration = Number.isFinite(duration) ? Math.max(0, duration) : 0;
   const watched = safeDuration > 0 && safePosition / safeDuration >= 0.9;
   const stored: StoredProgress = {
-    position: watched ? safeDuration : safePosition,
+    position: watched && !filePath.startsWith('addon-video:') ? safeDuration : safePosition,
     duration: safeDuration,
     updatedAt: Date.now(),
     watched,

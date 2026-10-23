@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bookmark, Eye, MoreHorizontal, Play } from 'lucide-react';
+import { Bookmark, Eye, MoreHorizontal, Play, Tv } from 'lucide-react';
 import WatchedToggle from '@/components/WatchedToggle';
 import { useToast } from '@/components/ToastProvider';
 import {
@@ -15,6 +15,7 @@ type DetailHeroActionsProps = {
   inMyList: boolean;
   watched: boolean;
   onPlayTrailer?: () => void;
+  onWhereToWatch?: () => void;
   onToggleList: () => void;
   onToggleWatched: () => void;
 };
@@ -24,6 +25,7 @@ export default function DetailHeroActions({
   inMyList,
   watched,
   onPlayTrailer,
+  onWhereToWatch,
   onToggleList,
   onToggleWatched,
 }: DetailHeroActionsProps) {
@@ -78,6 +80,16 @@ export default function DetailHeroActions({
             <span className={HERO_ACTION_DIVIDER_CLASS} />
           </>
         )}
+        {onWhereToWatch && (
+          <>
+            <button type="button" onClick={onWhereToWatch}
+              className={`flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white ${onPlayTrailer ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}>
+              <Tv aria-hidden="true" className="h-5 w-5" />
+              <span>Where to watch</span>
+            </button>
+            <span className={HERO_ACTION_DIVIDER_CLASS} />
+          </>
+        )}
         {canBookmark && (
           <>
             <button
@@ -85,7 +97,7 @@ export default function DetailHeroActions({
               aria-label={inMyList ? 'Remove from My List' : 'Add to My List'}
               aria-pressed={inMyList}
               onClick={onToggleList}
-              className={`loom-detail-bookmark grid h-14 w-14 place-items-center text-white ${onPlayTrailer ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
+              className={`loom-detail-bookmark grid h-14 w-14 place-items-center text-white ${onPlayTrailer || onWhereToWatch ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
               title={inMyList ? 'Remove from My List' : 'Add to My List'}
             >
               <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
@@ -132,6 +144,13 @@ export default function DetailHeroActions({
               >
                 <Play className="h-4 w-4 fill-current" />
                 Play trailer
+              </button>
+            )}
+            {onWhereToWatch && (
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onWhereToWatch(); }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]">
+                <Tv aria-hidden="true" className="h-4 w-4" />
+                Where to watch
               </button>
             )}
             {canBookmark && (

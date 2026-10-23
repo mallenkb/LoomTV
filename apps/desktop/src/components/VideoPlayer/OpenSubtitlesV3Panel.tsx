@@ -19,11 +19,13 @@ export type SubtitlePanelProvider<T extends PanelSubtitle> = {
   download: (subtitle: T, signal: AbortSignal) => Promise<string>;
 };
 
-export default function OpenSubtitlesV3Panel<T extends PanelSubtitle = OnlineSubtitle>({ resolveVideo, provider, selectedId, onSelect, autoSearch = false }: {
+export default function OpenSubtitlesV3Panel<T extends PanelSubtitle = OnlineSubtitle>({ resolveVideo, provider, selectedId, onSelect, autoSearch = false, onOff, offSelected = false }: {
   resolveVideo?: (signal: AbortSignal) => Promise<SubtitleVideo>;
   /** Replaces OpenSubtitles v3 with another source; listing and download stay on request. */
   provider?: SubtitlePanelProvider<T>;
   selectedId?: string;
+  onOff?: () => void;
+  offSelected?: boolean;
   onSelect: (subtitle: T, text: string, signal: AbortSignal) => Promise<void>;
   /** Runs the search once, the first time this becomes true (the Online tab opening). */
   autoSearch?: boolean;
@@ -128,6 +130,10 @@ export default function OpenSubtitlesV3Panel<T extends PanelSubtitle = OnlineSub
         </div>
       </div>
       <div className="overflow-hidden rounded-lg bg-white/10">
+        {onOff ? <button type="button" aria-pressed={offSelected} onClick={onOff}
+          className={`flex w-full items-center gap-2 border-b border-white/10 px-3 py-2.5 text-left text-xs transition-colors ${offSelected ? 'bg-[var(--loom-accent)]/25 text-white' : 'text-white/70 hover:bg-white/10'}`}>
+          <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${offSelected ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />Off
+        </button> : null}
         <div className="space-y-2 p-3">
           <div className="flex items-center gap-2">
             <label className="flex min-w-0 flex-1 items-center gap-2 rounded-[8px] bg-black/25 px-3 py-2 transition-colors focus-within:bg-black/40">

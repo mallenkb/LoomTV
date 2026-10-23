@@ -8,9 +8,12 @@ const tmdbProviderSchema = z.object({
 });
 
 const tmdbWatchProviderRegionSchema = z.object({
+  link: z.string().optional(),
   flatrate: z.array(tmdbProviderSchema).optional(),
   ads: z.array(tmdbProviderSchema).optional(),
   free: z.array(tmdbProviderSchema).optional(),
+  rent: z.array(tmdbProviderSchema).optional(),
+  buy: z.array(tmdbProviderSchema).optional(),
 });
 
 export const tmdbWatchProviderDetailSchema = z.object({
@@ -107,3 +110,8 @@ export type TmdbDetailResponse = z.infer<typeof tmdbDetailResponseSchema>;
 export type TmdbListResult = z.infer<typeof tmdbListResultSchema>;
 export type TmdbProvider = z.infer<typeof tmdbProviderSchema>;
 export type TmdbVideo = NonNullable<z.infer<typeof tmdbVideosSchema>['results']>[number];
+
+export const tmdbFindResponseSchema = z.object({
+  movie_results: z.array(z.object({ id: z.number().int().positive() })).optional(),
+  tv_results: z.array(z.object({ id: z.number().int().positive() })).optional(),
+});

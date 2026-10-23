@@ -29,6 +29,7 @@ export type LibraryScanMode = 'quick' | 'metadata' | 'full';
 export type MetadataApiKeys = Record<string, string>;
 export type MetadataProviderRequest =
   | { provider: 'cinemeta'; path: string }
+  | { provider: 'mdblist'; imdbId: string; type: 'movie' | 'series' }
   | { provider: 'omdb'; query: Record<string, string | number | boolean> }
   | { provider: 'tmdb'; path: string; query?: Record<string, string | number | boolean> }
   | { provider: 'anilist'; query: string; variables?: Record<string, unknown> }
@@ -151,6 +152,9 @@ export type MpvPlaybackDiagnostics = {
   frameDrops?: number;
   decoderFrameDrops?: number;
   bufferSeconds?: number;
+  /** Percent of the engine's startup/resume cache target, not the whole video. */
+  bufferingPercent?: number;
+  bufferedRanges?: Array<{ start: number; end: number }>;
   buffering?: boolean;
   videoCodec?: string;
   estimatedFps?: number;
@@ -757,6 +761,7 @@ export interface StremioPluginSummary {
   state: StremioPluginState;
   trusted: boolean;
   configurationRequired: boolean;
+  configurable?: boolean;
   configuration: readonly StremioPluginConfigurationField[];
   configured: boolean;
   configurationRevision: number;
@@ -914,10 +919,11 @@ export interface StremioSubtitleListResult {
  */
 export interface StremioStreamDescriptor {
   id: string;
-  transport: 'media' | 'hls' | 'youtube' | 'external' | 'peer-to-peer' | 'unsupported';
+  transport: 'media' | 'hls' | 'torrent' | 'youtube' | 'external' | 'peer-to-peer' | 'unsupported';
   name?: string;
   description?: string;
-  url?: string;
+  /** Opaque host grant. Provider media URLs and headers never cross IPC. */
+  playbackReference?: string;
   externalUrl?: string;
   ytId?: string;
   reason?: string;

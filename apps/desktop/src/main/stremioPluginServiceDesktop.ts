@@ -45,6 +45,7 @@ const desktopSafeFetch: StremioFetchImplementation = async (url, init) => {
 };
 
 export type DesktopStremioPluginServiceOptions = {
+  onStateChanged?: () => void;
   fetchImpl?: StremioFetchImplementation;
   maxConcurrentProviderRequests?: number;
   maxQueuedProviderRequests?: number;
@@ -56,6 +57,7 @@ export function createDesktopStremioPluginService(
   options: DesktopStremioPluginServiceOptions = {},
 ): StremioPluginService {
   return createStremioPluginService({
+    onStateChanged: options.onStateChanged,
     loadState: loadStremioAddonState,
     saveState: saveStremioAddonState,
     getProfile,

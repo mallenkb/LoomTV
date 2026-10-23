@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from '@/lib/navigation';
-import { Play } from 'lucide-react';
+import CardPlayContent, { CARD_PLAY_ACTION_CLASS, CARD_PLAY_OVERLAY_CLASS } from './CardPlayContent';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
@@ -44,7 +44,7 @@ const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
 const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]';
 const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
-const PLAY_OVERLAY_CLASS = 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100';
+const PLAY_OVERLAY_CLASS = CARD_PLAY_OVERLAY_CLASS;
 
 function fileNameForItem(item: MediaItem): string {
   const filePath = firstPlayableMediaPath(item);
@@ -162,8 +162,8 @@ const MediaPosterCard = memo(function MediaPosterCard({
               {/* Matches the Discover card's hover mark. It stays a span rather
                   than a button because the whole card is already a link, and a
                   nested button would be invalid inside it. */}
-              <span className="loom-poster-play-action grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl transition-transform duration-200 group-hover:scale-110">
-                <Play className="ml-0.5 h-5 w-5 fill-current" />
+              <span className={CARD_PLAY_ACTION_CLASS}>
+                <CardPlayContent />
               </span>
             </div>
           </>

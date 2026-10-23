@@ -23,6 +23,9 @@ import {
 import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
 import { assignOtherFolderToGroup, createOtherFolderGroup, normalizeOtherFolderGroups, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import AboutSettingsSection from './AboutSettingsSection';
+import SidebarSettingsSection from './SidebarSettingsSection';
+import { queryScope } from '@/lib/queryClient';
+import { readSidebarVisibility, rememberSidebarVisibility } from '@/lib/sidebarVisibility';
 import LibrarySettingsSection from './LibrarySettingsSection';
 import MetadataSettingsSection from './MetadataSettingsSection';
 import NetworkSettingsSection from './NetworkSettingsSection';
@@ -146,6 +149,21 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
       ),
     },
     {
+      id: 'mdblist',
+      label: 'MDBList API Key',
+      badge: 'Ratings fallback',
+      placeholder: 'MDBList API key',
+      description: (
+        <>
+          Fills missing Rotten Tomatoes and Metacritic ratings when OMDb is unavailable. Get a key at{' '}
+          <button type="button" onClick={() => openExternal('https://mdblist.com/preferences/')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5">
+            mdblist.com <ExternalLink className="w-3 h-3" />
+          </button>.
+        </>
+      ),
+    },
+    {
       id: 'omdb',
       label: 'OMDb API Key',
       badge: 'Movies + completed',
@@ -189,6 +207,8 @@ export function useSettingsController(activeSection: SettingsSection | null) {
   const [libvlcAvailability, setLibvlcAvailability] = useState<LibVlcAvailability | null>(null);
   const [mpvAvailability, setMpvAvailability] = useState<MpvAvailability | null>(null);
   const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
+  const [hiddenSidebarItems, setHiddenSidebarItems] = useState<string[]>([]);
+  const [isSavingSidebarVisibility, setIsSavingSidebarVisibility] = useState(false);
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
   const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
@@ -415,6 +435,7 @@ export function useSettingsController(activeSection: SettingsSection | null) {
         ),
       );
       setSidebarNavOrder(normalizeSidebarNavOrder(profilePreferences.sidebarNavOrder ?? s.sidebarNavOrder));
+      setHiddenSidebarItems(readSidebarVisibility(activeProfile?.id, profilePreferences.hiddenSidebarItems));
       setCustomFolderNames(s.customFolderNames || {});
       setOtherFolderGroups(normalizeOtherFolderGroups(s.otherFolderGroups));
       setOtherFolderIcon(normalizeOtherFolderIcon(s.otherFolderIcon));
@@ -720,6 +741,22 @@ export function useSettingsController(activeSection: SettingsSection | null) {
       return;
     }
     window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: nextOrder }));
+  };
+
+  const setSidebarItemVisible = async (itemId: string, visible: boolean) => {
+    if (isSavingSidebarVisibility || itemId === 'home' || itemId === 'settings') return;
+    const next = visible ? hiddenSidebarItems.filter(id => id !== itemId) : [...new Set([...hiddenSidebarItems, itemId])];
+    const scope = JSON.stringify(queryScope());
+    setIsSavingSidebarVisibility(true);
+    try {
+      const saved = await desktopApi.saveProfilePreferences({ hiddenSidebarItems: next }, activeProfile?.id);
+      if (scope !== JSON.stringify(queryScope())) return;
+      rememberSidebarVisibility(activeProfile?.id, next, saved.hiddenSidebarItems);
+      setHiddenSidebarItems(next);
+      window.dispatchEvent(new CustomEvent('loomtv:sidebar-visibility-changed', { detail: next }));
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save sidebar visibility.');
+    } finally { setIsSavingSidebarVisibility(false); }
   };
 
   const handleSidebarOrderDrop = (targetId: SidebarNavItemId, position: 'before' | 'after') => {
@@ -1202,6 +1239,7 @@ export function useSettingsController(activeSection: SettingsSection | null) {
 
       {section === 'library' && (
         <LibrarySettingsSection
+            navigationSettings={<SidebarSettingsSection controller={{ sidebarOrderItems, moveSidebarItem, draggedSidebarItem, setDraggedSidebarItem, onSidebarOrderDrop: handleSidebarOrderDrop, hiddenSidebarItems, setSidebarItemVisible, isSavingSidebarVisibility }} />}
             folderSections={folderSections}
             folderStatuses={libraryFolderStatuses}
             addLibraryFolder={handleAddLibraryFolder}
@@ -1301,8 +1339,6 @@ export function useSettingsController(activeSection: SettingsSection | null) {
             setTheme,
             showProviderRatingBadges,
             setShowProviderRatingBadges,
-            sidebarOrderItems,
-            moveSidebarItem,
           }}
         />
       )}
@@ -1417,6 +1453,9 @@ export function useSettingsController(activeSection: SettingsSection | null) {
     editFolder,
     otherFolderIcon,
     sidebarOrderItems,
+    hiddenSidebarItems,
+    setSidebarItemVisible,
+    isSavingSidebarVisibility,
     draggedSidebarItem,
     setDraggedSidebarItem,
     onSidebarOrderDrop: handleSidebarOrderDrop,

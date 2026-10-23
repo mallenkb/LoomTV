@@ -244,9 +244,11 @@ export type LanProfilePreferences = {
   appDarkTheme?: 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   appHomeStyle?: 'default' | 'modern';
+  appPlayerControlStyle?: 'default' | 'pill';
   appModernHeroMode?: 'continue-watching' | 'featured';
   showProviderRatingBadges?: boolean;
   sidebarNavOrder?: string[];
+  hiddenSidebarItems?: string[];
   autoplayNextEnabled?: boolean;
   playbackSkipBackSeconds?: number;
   playbackRewindOnResumeSeconds?: number;

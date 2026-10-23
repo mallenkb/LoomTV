@@ -103,7 +103,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     if (trayMenuWindow && !trayMenuWindow.isDestroyed()) return trayMenuWindow;
     trayMenuSession ??= session.fromPartition(TRAY_MENU_PARTITION);
     const window = new BrowserWindow({
-      width: 480,
+      width: 320,
       height: serverTrayMenuHeight(hasAdminAction),
       show: false,
       frame: false,
@@ -145,6 +145,36 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     window.on('closed', () => { if (trayMenuWindow === window) trayMenuWindow = null; });
     return window;
   };
+  const fitMenuWindow = async (window: BrowserWindow) => {
+    // Measure the rendered font and row layout, including the copy-icon column.
+    const measuredWidth: number = await window.webContents.executeJavaScript(`
+      document.fonts.ready.then(() => {
+        const menu = document.querySelector('.menu');
+        if (!menu) throw new Error('Missing tray menu');
+        const probe = menu.cloneNode(true);
+        Object.assign(probe.style, {
+          position: 'fixed', visibility: 'hidden', width: 'max-content',
+          minWidth: '0', maxWidth: 'none', height: 'auto', overflow: 'visible',
+        });
+        probe.querySelectorAll('.value').forEach(value => {
+          Object.assign(value.style, { flex: '0 0 auto', overflow: 'visible' });
+        });
+        document.body.appendChild(probe);
+        const width = Math.ceil(probe.getBoundingClientRect().width);
+        probe.remove();
+        return width;
+      })
+    `);
+    if (!serverTray || serverTray.isDestroyed() || window.isDestroyed()) return;
+    const anchor = serverTray.getBounds();
+    const area = screen.getDisplayMatching(anchor).workArea;
+    const width = Math.min(Math.max(160, measuredWidth), area.width - 16);
+    const height = Math.min(serverTrayMenuHeight(hasAdminAction), area.height - 16);
+    const x = Math.max(area.x + 8, Math.min(Math.round(anchor.x + anchor.width / 2 - width / 2), area.x + area.width - width - 8));
+    const preferredY = anchor.y > area.y + area.height / 2 ? anchor.y - height - 4 : anchor.y + anchor.height + 4;
+    const y = Math.max(area.y + 8, Math.min(preferredY, area.y + area.height - height - 8));
+    window.setBounds({ x, y, width, height });
+  };
   const refreshMenu = () => {
     if (!serverTray || serverTray.isDestroyed()) return;
     const info = readInfo();
@@ -155,8 +185,11 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     if (!trayMenuWindow || trayMenuWindow.isDestroyed()) return;
     const window = trayMenuWindow;
     const html = serverTrayMenuHtml(info, hasAdminAction, randomUUID());
-    pendingLoad = window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).then(() => {
-      if (trayMenuWindow === window) displayedInfo = info;
+    pendingLoad = window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).then(async () => {
+      if (trayMenuWindow === window) {
+        displayedInfo = info;
+        if (window.isVisible()) await fitMenuWindow(window);
+      }
     }).catch(() => {
       previousServerInfo = '';
       throw new Error('The tray menu could not load.');
@@ -173,14 +206,8 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
       refreshMenu();
       await pendingLoad;
       if (!serverTray || serverTray.isDestroyed() || window.isDestroyed()) return;
-      const anchor = serverTray.getBounds();
-      const area = screen.getDisplayMatching(anchor).workArea;
-      const width = Math.min(480, area.width - 16);
-      const height = Math.min(serverTrayMenuHeight(hasAdminAction), area.height - 16);
-      const x = Math.max(area.x + 8, Math.min(Math.round(anchor.x + anchor.width / 2 - width / 2), area.x + area.width - width - 8));
-      const preferredY = anchor.y > area.y + area.height / 2 ? anchor.y - height - 4 : anchor.y + anchor.height + 4;
-      const y = Math.max(area.y + 8, Math.min(preferredY, area.y + area.height - height - 8));
-      window.setBounds({ x, y, width, height });
+      await fitMenuWindow(window);
+      if (window.isDestroyed()) return;
       window.show();
       window.focus();
     } catch {

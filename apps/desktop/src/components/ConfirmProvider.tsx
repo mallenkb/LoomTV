@@ -56,7 +56,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         contentClassName="loom-settings-dialog-surface w-[min(420px,calc(100vw-32px))] max-w-none border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)]"
       >
         {request && (
-          <DialogContent className="px-5 pb-[18px] pt-[18px]">
+          <DialogContent className="px-5 pb-5 pt-5">
             <DialogHeader className="flex items-start gap-3 text-left">
               {request.destructive && (
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-500/15 text-red-400" aria-hidden="true">

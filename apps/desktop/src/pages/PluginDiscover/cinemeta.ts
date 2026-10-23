@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { desktopApi, type StremioPluginCatalogItem } from '@/lib/desktopApi';
-import { cachedDesktopRead } from '@/lib/queryClient';
+import { cachedDesktopRead, queryClient, queryScope } from '@/lib/queryClient';
 import type { DiscoverSection } from './discoverState';
 
 const manifestSchema = z.object({ catalogs: z.array(z.object({
@@ -22,6 +22,10 @@ export function cinemetaGenres(type: 'movie' | 'tv') {
     const genres = manifest.catalogs.find(c => c.type === (type === 'tv' ? 'series' : 'movie') && c.id === 'top')?.genres || [];
     return genres.map(genre => ({ label: genre, value: genre.toLowerCase() }));
   });
+}
+
+export function cachedCinemetaCatalog(type: 'movie' | 'tv', section: DiscoverSection, search: string, genre: string, year: string) {
+  return queryClient.getQueryData<StremioPluginCatalogItem[]>(['cinemeta-catalog', ...queryScope(), type, section, search, genre, year]);
 }
 
 export function cinemetaCatalog(type: 'movie' | 'tv', section: DiscoverSection, search: string, genre: string, year: string) {
@@ -46,6 +50,7 @@ export function cinemetaCatalog(type: 'movie' | 'tv', section: DiscoverSection, 
           posterUrl: meta.poster || '', backgroundUrl: meta.background || '', logoUrl: meta.logo || '',
           releaseInfo: meta.releaseInfo || meta.released?.slice(0, 4) || '', released: meta.released || '',
           rating: meta.imdbRating != null && Number.isFinite(rating) ? rating : undefined,
+          providerRatings: rating > 0 && rating <= 10 ? { imdb: { value: rating, scale: 10 } } : undefined,
           runtime: meta.runtime || undefined,
           cast: (meta.cast || []).map(name => ({ name, character: '', image: '' })),
         });
@@ -55,5 +60,5 @@ export function cinemetaCatalog(type: 'movie' | 'tv', section: DiscoverSection, 
       (!selected.length || item.genres.some(g => selected.some(s => s.toLowerCase() === g.toLowerCase())))
       && (!year || (item.releaseInfo || '').slice(0, 4) === year),
     ).slice(0, 30);
-  });
+  }, 5 * 60_000);
 }

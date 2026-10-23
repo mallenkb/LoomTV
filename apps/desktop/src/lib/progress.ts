@@ -33,14 +33,14 @@ const pendingWrites = new Set<Promise<void>>();
 let dispatchingInternalProgressEvent = false;
 let progressRefreshSubscription: ReturnType<typeof createProgressRefreshSubscription> | null = null;
 
-function normalizeProgress(value: LegacyProgress | StoredProgress | null | undefined): StoredProgress | null {
+function normalizeProgress(value: LegacyProgress | StoredProgress | null | undefined, preservePosition = false): StoredProgress | null {
   if (value == null) return null;
   const position = typeof value === 'number' ? value : Number(value.position || 0);
   const duration = typeof value === 'object' ? Number(value.duration || 0) : 0;
   const updatedAt = typeof value === 'object' && value.updatedAt ? Number(value.updatedAt) : 0;
   const watched = duration > 0 && position / duration >= WATCHED_THRESHOLD;
   return {
-    position: watched ? duration : position,
+    position: watched && !preservePosition ? duration : position,
     duration,
     updatedAt,
     watched,
@@ -50,7 +50,7 @@ function normalizeProgress(value: LegacyProgress | StoredProgress | null | undef
 function readLocalProgress(): Record<string, StoredProgress> {
   const raw = parseStoredValue(localStorage.getItem(PROGRESS_KEY), legacyProgressSchema, {});
   return Object.fromEntries(Object.entries(raw)
-    .map(([filePath, value]) => [filePath, normalizeProgress(value)] as const)
+    .map(([filePath, value]) => [filePath, normalizeProgress(value, filePath.startsWith('addon-video:'))] as const)
     .filter((entry): entry is readonly [string, StoredProgress] => Boolean(entry[1])));
 }
 
@@ -220,6 +220,11 @@ export function getProgressState(filePath: string | null, durationHint = 0) {
 
 export function getPlayableStartPosition(filePath: string, durationHint = 0): number {
   const progress = getProgressState(filePath, durationHint);
+  // Add-on sources share the title/episode timeline, including after the watched threshold.
+  if (filePath.startsWith('addon-video:')) {
+    if (progress.position <= 0 || (progress.duration > 0 && progress.duration - progress.position <= REPLAY_FROM_START_REMAINING_SECONDS)) return 0;
+    return progress.position;
+  }
   if (!progress.position || progress.position <= 10) return 0;
   if (!progress.duration || progress.duration <= 0) return progress.position;
 
@@ -237,8 +242,8 @@ export function isWatched(filePath: string, duration?: number): boolean {
 }
 
 export async function saveProgress(filePath: string, position: number, duration: number): Promise<void> {
-  const local = normalizeProgress({ position, duration, updatedAt: Date.now() });
-  if (!local || local.position <= 10 || local.duration <= 0) return;
+  const local = normalizeProgress({ position, duration, updatedAt: Date.now() }, filePath.startsWith('addon-video:'));
+  if (!local || local.position <= (filePath.startsWith('addon-video:') ? 0 : 10) || local.duration <= 0) return;
   writeRevision += 1;
   progressCache = { ...progressCache, [filePath]: local };
   writeLocalProgress();
