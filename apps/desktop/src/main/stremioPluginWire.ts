@@ -130,7 +130,7 @@ function uniqueWarnings(record: StremioInstallRecord, reviewWarnings: readonly s
   return [...new Set([
     ...record.manifest.compatibilityWarnings.map(({ message }) => message),
     ...(record.manifest.peerToPeerDeclared
-      ? ['Peer-to-peer and torrent sources are visible for review but are not playable in LoomTV.']
+      ? ['Supported torrents require explicit selection and a native player. Other peer-to-peer sources are unsupported.']
       : []),
     ...reviewWarnings,
   ])];
@@ -170,8 +170,9 @@ export function stremioPluginSummary(record: StremioInstallRecord, configuration
     state: record.state,
     trusted: record.trusted,
     configurationRequired,
+    configurable: record.manifest.behaviorHints.configurable || configurationRequired,
     configuration,
-    configured: configurationState?.configured ?? !configurationRequired,
+    configured: !(configurationRequired && configuration.length === 0) && (configurationState?.configured ?? !configurationRequired),
     configurationRevision: configurationState?.revision ?? 0,
     revision: stremioSourceRevision(record, configurationState),
     resources: record.manifest.resources.map(({ name }) => name),
@@ -253,11 +254,14 @@ export type StremioWireOptions = {
   /** `stremioSourceRevision` of the add-on when the request started. */
   sourceRevision?: string;
   subtitleToken?: StremioSubtitleTokenIssuer;
+  playbackReference?: (source: StremioSourceCandidate) => string;
 };
 
 /** Keep each validated stream's structure so the renderer can pick the right action. */
-export function stremioStreamDescriptor(source: StremioSourceCandidate, subtitleToken?: StremioSubtitleTokenIssuer): StremioStreamDescriptor {
-  const transport: StremioStreamDescriptor['transport'] = source.playableByLoom && source.url
+export function stremioStreamDescriptor(source: StremioSourceCandidate, subtitleToken?: StremioSubtitleTokenIssuer, playbackReference?: StremioWireOptions['playbackReference']): StremioStreamDescriptor {
+  const unsupportedHeaders = source.requestHeadersRequired && !source.requestHeaders;
+  const transport: StremioStreamDescriptor['transport'] = source.torrent && playbackReference ? 'torrent'
+    : source.playableByLoom && source.url && playbackReference && !unsupportedHeaders
     ? source.sourceKind === 'hls' ? 'hls' : 'media'
     : source.sourceKind === 'youtube' && source.ytId ? 'youtube'
       : source.sourceKind === 'external' && source.externalUrl ? 'external'
@@ -272,24 +276,25 @@ export function stremioStreamDescriptor(source: StremioSourceCandidate, subtitle
     transport,
     ...(source.name ? { name: source.name } : {}),
     ...(source.description ? { description: source.description } : {}),
-    ...(transport === 'media' || transport === 'hls' ? { url: source.url } : {}),
+    ...(transport === 'media' || transport === 'hls' || transport === 'torrent' ? { playbackReference: playbackReference?.(source) } : {}),
     ...(transport === 'external' ? { externalUrl: source.externalUrl } : {}),
     ...(transport === 'youtube' ? { ytId: source.ytId } : {}),
     ...(transport === 'peer-to-peer' || transport === 'unsupported'
-      ? { reason: source.reason || 'LoomTV cannot play this source type.' }
+      ? { reason: unsupportedHeaders ? 'This source requires request headers LoomTV does not support.' : source.reason || 'LoomTV cannot play this source type.' }
       : {}),
     ...(source.notWebReady ? { notWebReady: true } : {}),
-    ...(source.requestHeadersRequired ? { requestHeadersRequired: true } : {}),
+    ...(unsupportedHeaders ? { requestHeadersRequired: true } : {}),
     ...(subtitles.length ? { subtitles } : {}),
   };
 }
 
 export function stremioStreamResult(result: StremioStreamResult, options: StremioWireOptions = {}): ClientStremioStreamResult {
+  const streams = result.sources.map((source) => stremioStreamDescriptor(source, options.subtitleToken, options.playbackReference));
   return {
     addonId: result.source.addonId,
     ...(options.sourceRevision ? { sourceRevision: options.sourceRevision } : {}),
-    streams: result.sources.map((source) => stremioStreamDescriptor(source, options.subtitleToken)),
-    playableCount: result.playableCount,
+    streams,
+    playableCount: streams.filter(source => source.transport === 'media' || source.transport === 'hls').length,
     unsupportedPeerToPeerCount: result.unsupportedPeerToPeerCount,
     rejectedCount: result.rejectedCount,
   };
@@ -313,6 +318,7 @@ function stremioVideos(
   item: StremioCatalogResult['items'][number],
   artworkDeliveryUrl?: ArtworkDeliveryUrl,
   subtitleToken?: StremioSubtitleTokenIssuer,
+  playbackReference?: StremioWireOptions['playbackReference'],
 ): StremioPluginVideo[] | undefined {
   if (!item.videos?.length) return undefined;
   return item.videos.map((video) => {
@@ -320,7 +326,7 @@ function stremioVideos(
     // Stremio semantics: a defined streams array, even an empty one, replaces
     // the stream request for this video. Absent means "ask stream add-ons".
     const streams = video.embeddedSources
-      ? video.embeddedSources.map((source) => stremioStreamDescriptor(source, subtitleToken))
+      ? video.embeddedSources.map((source) => stremioStreamDescriptor(source, subtitleToken, playbackReference))
       : derivedYouTubeStreams(addonId, video.id);
     return {
       id: video.id,
@@ -345,7 +351,7 @@ function stremioCatalogItem(
   const artwork = artworkReferences(item, artworkDeliveryUrl);
   const cast = castReferences(item, artworkDeliveryUrl);
   const format = item.type === 'movie' ? 'Movie' : item.type === 'series' ? 'TV' : undefined;
-  const videos = stremioVideos(addonId, item, artworkDeliveryUrl, options.subtitleToken);
+  const videos = stremioVideos(addonId, item, artworkDeliveryUrl, options.subtitleToken, options.playbackReference);
   return {
     id: stremioItemId(addonId, item.type, item.id),
     type: item.type,

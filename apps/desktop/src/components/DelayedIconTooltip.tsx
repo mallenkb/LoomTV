@@ -27,9 +27,21 @@ export default function DelayedIconTooltip({
     setVisible(true);
   };
 
-  const hide = () => {
+  const clearShowTimer = () => {
     if (showTimer.current) clearTimeout(showTimer.current);
     showTimer.current = null;
+  };
+
+  const showOnHover = () => {
+    clearShowTimer();
+    showTimer.current = setTimeout(() => {
+      showTimer.current = null;
+      show();
+    }, 150);
+  };
+
+  const hide = () => {
+    clearShowTimer();
     setVisible(false);
   };
 
@@ -52,17 +64,10 @@ export default function DelayedIconTooltip({
     <span
       ref={trigger}
       className={cn('relative inline-flex shrink-0', className)}
-      onMouseEnter={() => {
-        if (showTimer.current) clearTimeout(showTimer.current);
-        showTimer.current = setTimeout(() => {
-          showTimer.current = null;
-          show();
-        }, 650);
-      }}
+      onMouseEnter={showOnHover}
       onMouseLeave={hide}
       onFocusCapture={() => {
-        if (showTimer.current) clearTimeout(showTimer.current);
-        showTimer.current = null;
+        clearShowTimer();
         show();
       }}
       onBlurCapture={hide}

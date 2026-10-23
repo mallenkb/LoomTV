@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type KeyboardEventHandler } from 'react';
 import { ArrowDown, ArrowUp, ChevronRight, CornerDownLeft, Info, KeyRound, Library, Palette, Play, Puzzle, Radio, Search, Users, Wifi } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
@@ -82,19 +82,9 @@ export default function SettingsSearch({ open, onOpenChange, visibleSections, on
 
   let index = -1;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} contentClassName="loom-settings-search w-[min(560px,calc(100vw-32px))] max-w-none overflow-hidden border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
-      <DialogContent>
-        <DialogHeader className="sr-only">
-          <DialogTitle>Search settings</DialogTitle>
-          <DialogDescription>Type to find a setting, then press Return to open it.</DialogDescription>
-        </DialogHeader>
-        <div className="flex h-12 items-center gap-2.5 border-b border-[color-mix(in_srgb,var(--loom-text)_8%,transparent)] px-3.5">
-          <Search className="h-4 w-4 shrink-0 text-[var(--loom-muted)]" aria-hidden="true" />
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
+    <SearchPaletteFrame open={open} onOpenChange={onOpenChange} title="Search settings" description="Type to find a setting, then press Return to open it." query={query} onQueryChange={setQuery}
+      controls="settings-search-results" activeDescendant={items[active] ? `settings-search-${active}` : undefined}
+onKeyDown={(event) => {
               if (event.key === 'ArrowDown') {
                 event.preventDefault();
                 setActive((current) => Math.min(items.length - 1, current + 1));
@@ -105,15 +95,7 @@ export default function SettingsSearch({ open, onOpenChange, visibleSections, on
                 event.preventDefault();
                 choose(items[active]);
               }
-            }}
-            placeholder="Search settings"
-            aria-label="Search settings"
-            aria-controls="settings-search-results"
-            aria-activedescendant={items[active] ? `settings-search-${active}` : undefined}
-            className="h-full min-w-0 flex-1 !rounded-none !border-0 bg-transparent !p-0 text-[15px] text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] [&::-webkit-search-cancel-button]:hidden"
-          />
-        </div>
-
+            }}>
         <div ref={listRef} id="settings-search-results" role="listbox" aria-label="Settings" className="max-h-[min(380px,55vh)] overflow-y-auto overscroll-contain p-1.5">
           {searching && items.length === 0 ? (
             <p role="status" className="px-2.5 py-5 text-center text-[13px] text-[var(--loom-muted)]">No settings match "{query.trim()}"</p>
@@ -161,11 +143,31 @@ export default function SettingsSearch({ open, onOpenChange, visibleSections, on
           <span className="flex items-center gap-1"><Kbd>esc</Kbd>Close</span>
           {searching ? <span className="ml-auto tabular-nums">{items.length} {items.length === 1 ? 'result' : 'results'}</span> : null}
         </div>
-      </DialogContent>
-    </Dialog>
+    </SearchPaletteFrame>
   );
 }
 
 function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="grid h-[18px] min-w-[18px] place-items-center rounded border border-[color-mix(in_srgb,var(--loom-text)_10%,transparent)] px-1 font-sans text-[10px] text-[var(--loom-muted)]" aria-hidden="true">{children}</kbd>;
+}
+
+/** Shared search presentation for settings and catalog searches. */
+export function SearchPaletteFrame({ open, onOpenChange, title, description, query, onQueryChange, onKeyDown, controls, activeDescendant, children, wide = false, popupRole }: {
+  open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string;
+  query: string; onQueryChange: (query: string) => void; onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
+  controls: string; activeDescendant?: string; children: ReactNode; wide?: boolean; popupRole?: 'grid' | 'listbox';
+}) {
+  return <Dialog open={open} onOpenChange={onOpenChange} contentClassName={cn("loom-settings-search max-w-none overflow-hidden border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-[0_24px_80px_rgba(0,0,0,0.55)]", wide ? "loom-title-search w-[min(1040px,calc(100vw-32px))]" : "w-[min(560px,calc(100vw-32px))]")}>
+    <DialogContent>
+      <DialogHeader className="sr-only"><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
+      <div className="flex h-12 items-center gap-2.5 border-b border-[color-mix(in_srgb,var(--loom-text)_8%,transparent)] px-3.5">
+        <Search className="h-4 w-4 shrink-0 text-[var(--loom-muted)]" aria-hidden="true" />
+        <input type="search" value={query} onChange={event => onQueryChange(event.target.value)} onKeyDown={onKeyDown}
+          placeholder={title} aria-label={title} aria-controls={controls} aria-activedescendant={activeDescendant}
+          role={popupRole ? "combobox" : undefined} aria-haspopup={popupRole} aria-expanded={popupRole ? open : undefined} aria-autocomplete={popupRole ? "list" : undefined}
+          className="h-full min-w-0 flex-1 !rounded-none !border-0 bg-transparent !p-0 text-[15px] text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)] [&::-webkit-search-cancel-button]:hidden" />
+      </div>
+      {children}
+    </DialogContent>
+  </Dialog>;
 }

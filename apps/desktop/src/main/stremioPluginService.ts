@@ -109,6 +109,7 @@ export type StremioHostProfile = {
 };
 
 export interface StremioPluginServiceDependencies {
+  onStateChanged?: () => void;
   loadState: () => unknown | null;
   saveState: (snapshot: StremioAddonStateSnapshot, audit?: {
     addonId: string;
@@ -287,6 +288,9 @@ export class StremioPluginService {
     this.deps = deps;
     this.registryOptions = {
       fetchImpl: deps.fetchImpl,
+      // Match the desktop transport deadline instead of aborting at the
+      // adapter's shorter default while a provider is still finding sources.
+      timeoutMs: 30_000,
       isAddonConfigured: deps.isAddonConfigured,
       getConfiguration: deps.getAddonConfiguration,
     };
@@ -316,24 +320,31 @@ export class StremioPluginService {
   // Host startup only. Keep default installation separate from owner-managed
   // plugin changes, and preserve existing installs and prior removal choices.
   installDefaultCinemeta(): Promise<void> {
+    return this.installDefaultAddon('com.linvo.cinemeta', 'https://v3-cinemeta.strem.io/manifest.json', 'system:default-cinemeta');
+  }
+
+  installDefaultWatchHub(): Promise<void> {
+    return this.installDefaultAddon('org.stremio.watchhub', 'https://watchhub.strem.io/manifest.json', 'system:default-watchhub');
+  }
+
+  private installDefaultAddon(addonId: string, manifestUrl: string, actor: string): Promise<void> {
     return this.enqueueMutation(async () => {
-      const addonId = 'com.linvo.cinemeta';
       const registry = this.getRegistry();
       if (registry.get(addonId) || this.deps.listAudit?.(addonId, 1).length) return;
       const previous = registry.toJSON();
       try {
-        const review = await registry.reviewManifestUrl('https://v3-cinemeta.strem.io/manifest.json');
+        const review = await registry.reviewManifestUrl(manifestUrl);
         if (review.addonId !== addonId) {
           throw new StremioPluginServiceError(
             'STREMIO_PLUGIN_OFFICIAL_ID_MISMATCH',
-            'The official add-on endpoint returned an unexpected manifest identity.',
+            'The add-on endpoint returned an unexpected manifest identity.',
           );
         }
         registry.approve(addonId, { confirmed: true, reviewToken: review.reviewToken });
         this.deps.saveState(registry.toJSON(), {
           addonId,
           eventType: 'addon_approved',
-          actor: 'system:default-cinemeta',
+          actor,
         });
       } catch (error) {
         this.restoreRegistry(previous);
@@ -396,7 +407,7 @@ export class StremioPluginService {
       if (expectedAddonId && review.addonId !== expectedAddonId) {
         throw new StremioPluginServiceError(
           'STREMIO_PLUGIN_OFFICIAL_ID_MISMATCH',
-          'The official add-on endpoint returned an unexpected manifest identity.',
+          'The add-on endpoint returned an unexpected manifest identity.',
         );
       }
       // Throwing here restores the registry, so a pasted link cannot move a
@@ -427,6 +438,17 @@ export class StremioPluginService {
         'The Stremio add-on is not installed.',
       );
     }
+    return this.reviewManifestUrl(this.storedManifestUrl(record), record.addonId);
+  }
+
+  manifestUrlForEditing(addonId: string): string {
+    this.deps.authorizeManagement();
+    const record = this.getRegistry().get(addonId);
+    if (!record) throw new StremioPluginServiceError('STREMIO_PLUGIN_NOT_FOUND', 'The Stremio add-on is not installed.');
+    return this.storedManifestUrl(record);
+  }
+
+  private storedManifestUrl(record: StremioInstallRecord): string {
     const persisted = this.deps.loadState();
     const persistedRecord = persisted && typeof persisted === 'object' && 'addons' in persisted
       && Array.isArray(persisted.addons)
@@ -445,7 +467,22 @@ export class StremioPluginService {
         'The stored add-on endpoint is unavailable.',
       );
     }
-    return this.reviewManifestUrl(persistedRecord.manifestUrl, record.addonId);
+    return persistedRecord.manifestUrl;
+  }
+
+  /** Opened by the host only; configured path and query may contain secrets. */
+  configurationUrl(addonId: string): string {
+    this.deps.authorizeManagement();
+    const record = this.getRegistry().get(addonId);
+    if (!record || !(record.manifest.behaviorHints.configurable || record.manifest.behaviorHints.configurationRequired)) {
+      throw new StremioPluginServiceError('STREMIO_PLUGIN_ACCESS_DENIED', 'This addon does not offer browser configuration.');
+    }
+    const url = new URL(this.storedManifestUrl(record));
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || !url.pathname.endsWith('/manifest.json')) {
+      throw new StremioPluginServiceError('STREMIO_PLUGIN_ACCESS_DENIED', 'This addon has no supported configuration address.');
+    }
+    url.pathname = url.pathname.slice(0, -'manifest.json'.length) + 'configure';
+    return url.toString();
   }
 
   approve(addonId: string, reviewToken: string): Promise<StremioInstallRecord> {
@@ -596,10 +633,10 @@ export class StremioPluginService {
     return this.runProviderRequest(profileId, addonId, (registry, signal) => registry.fetchMeta(addonId, request, signal));
   }
 
-  fetchStreams(profileId: string, addonId: string, request: StremioVideoRequest): Promise<StremioStreamResult> {
+  fetchStreams(profileId: string, addonId: string, request: StremioVideoRequest, signal?: AbortSignal): Promise<StremioStreamResult> {
     // The protocol adapter permanently rejects peer-to-peer/torrent candidates;
     // this host method can only return HTTPS media sources as playable.
-    return this.runProviderRequest(profileId, addonId, (registry, signal) => registry.fetchStreams(addonId, request, signal));
+    return this.runProviderRequest(profileId, addonId, (registry, requestSignal) => registry.fetchStreams(addonId, request, requestSignal), signal);
   }
 
   fetchSubtitles(profileId: string, addonId: string, request: StremioVideoRequest): Promise<StremioSubtitleResult> {
@@ -636,7 +673,10 @@ export class StremioPluginService {
   }
 
   private enqueueMutation<T>(operation: () => T | Promise<T>): Promise<T> {
-    const queued = this.mutationQueue.then(operation, operation);
+    const queued = this.mutationQueue.then(operation, operation).then(result => {
+      this.deps.onStateChanged?.();
+      return result;
+    });
     this.mutationQueue = queued.then(() => undefined, () => undefined);
     return queued;
   }
@@ -769,7 +809,14 @@ export class StremioPluginService {
           eventType: record.state === 'broken' ? 'addon_broken' : 'provider_request_failed',
           actor: 'host:provider',
           outcome: 'failure',
-          detail: { failureCount: record.failureCount, nextRetryAt: record.nextRetryAt },
+          detail: {
+            failureCount: record.failureCount,
+            nextRetryAt: record.nextRetryAt,
+            // Persist fixed error codes only. Exception messages and request
+            // URLs can contain private add-on configuration or credentials.
+            errorCode: error instanceof StremioAdapterError || error instanceof StremioPluginServiceError
+              ? error.code : 'PROVIDER_REQUEST_FAILED',
+          },
         });
       } catch { /* preserve the provider error */ }
     });

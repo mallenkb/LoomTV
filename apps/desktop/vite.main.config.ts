@@ -1,10 +1,13 @@
 import { defineConfig } from 'vite-plus';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig(({ mode }) => ({
   plugins: [{
     name: 'loomtv-main-entry',
+    buildStart() { this.addWatchFile(fileURLToPath(new URL('./src/main/torrent-worker.mjs', import.meta.url))); },
     generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'torrent-worker.mjs', source: fs.readFileSync(new URL('./src/main/torrent-worker.mjs', import.meta.url), 'utf8') });
       this.emitFile({
         type: 'asset',
         fileName: 'main.js',

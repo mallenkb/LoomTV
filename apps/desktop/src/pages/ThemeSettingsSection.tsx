@@ -1,24 +1,67 @@
-import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { Captions, Check, Maximize, Play, RotateCcw, RotateCw, SlidersHorizontal, Volume2 } from 'lucide-react';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
-import { Button } from '@/components/ui/button';
 import { SettingsGroup, SettingsPageHeader, SettingsRow, SettingsSegmented, SettingsSelect, SettingsSwitch } from '@/components/settings/SettingsLayout';
-import { THEME_COLORS, type AppThemeColor } from '@/lib/theme';
+import { THEME_COLORS, type AppPlayerControlStyle, type AppThemeColor } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { LOADER_OPTIONS } from './Settings.helpers';
 import type { SettingsController } from './useSettingsController';
 import AnimeCastCardPreview from './AnimeCastCardPreview';
+import SafeArtwork from '@/components/SafeArtwork';
+import { useLibrary } from '@/contexts/LibraryContext';
+import { backdropSources } from '@/lib/artwork';
 
 export type AppearanceController = Pick<SettingsController,
   | 'theme'
   | 'setTheme'
   | 'showProviderRatingBadges'
   | 'setShowProviderRatingBadges'
-  | 'sidebarOrderItems'
-  | 'moveSidebarItem'
 >;
 
+function PlayerControlPreview({ style }: { style: AppPlayerControlStyle }) {
+  const { state } = useLibrary();
+  const hasBackdrop = (item: (typeof state.movies)[number]) => Boolean(item.backdrop || item.backdropCandidates?.length);
+  const previewItem = state.movies.find(hasBackdrop)
+    || state.tvShows.find(hasBackdrop)
+    || state.animeShows.find(hasBackdrop)
+    || state.movies[0] || state.tvShows[0] || state.animeShows[0];
+  const pill = style === 'pill';
+  const time = <span className={cn('whitespace-nowrap text-[10px] tabular-nums text-white/85', pill && 'inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/55 backdrop-blur-xl px-2 py-0')}>23:51 <span className="text-white/50">/ 53:27</span></span>;
+  const group = pill ? 'h-7 rounded-full bg-black/55 backdrop-blur-xl px-2 py-0' : '';
+  return (
+    <figure className="min-w-0 w-full md:w-[70%]">
+      <div role="img" aria-label={pill ? 'Pill controls with rounded backgrounds, time after Play, and a full-width timeline.' : 'Default controls with time beside the timeline and buttons on a plain background.'}
+        className="relative h-64 overflow-hidden rounded-xl bg-black text-white sm:h-80">
+        {previewItem && (
+          <SafeArtwork
+            src={backdropSources(previewItem)}
+            alt=""
+            className="absolute inset-0 h-full w-full"
+            imgClassName="h-full w-full object-cover"
+          />
+        )}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
+        <div aria-hidden="true" className="absolute inset-x-3 bottom-3 space-y-2">
+          <div className="flex items-center gap-2">
+            {!pill && time}
+            <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/20"><div className="h-full w-[45%] rounded-full bg-[var(--loom-accent)]" /></div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2" style={pill ? { zoom: 1.3 } : undefined}>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className={cn('grid shrink-0 place-items-center', pill && 'h-7 w-7 rounded-full bg-black/55 backdrop-blur-xl')}><Play className={cn('h-4 w-4', !pill && 'fill-current')} /></span>
+              {pill && time}
+              <span className={cn('flex shrink-0 items-center gap-2', group)}><RotateCcw className="h-3 w-3" /><RotateCw className="h-3 w-3" /></span>
+              <span className={cn('flex shrink-0 items-center gap-1.5', group)}><Volume2 className="h-3 w-3" />{!pill && <span className="h-1 w-6 rounded-full bg-[var(--loom-accent)]" />}</span>
+            </div>
+            <span className={cn('flex shrink-0 items-center gap-2', group)}><Captions className="h-3 w-3" /><SlidersHorizontal className="h-3 w-3" /><Maximize className="h-3 w-3" /></span>
+          </div>
+        </div>
+      </div>
+    </figure>
+  );
+}
+
 export default function ThemeSettingsSection({ controller }: { controller: AppearanceController }) {
-  const { theme, sidebarOrderItems: order } = controller;
+  const { theme } = controller;
   const modern = theme.homeStyle === 'modern';
 
   return (
@@ -70,6 +113,22 @@ export default function ThemeSettingsSection({ controller }: { controller: Appea
             options={LOADER_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
             onChange={(loaderStyle) => void controller.setTheme({ loaderStyle })}
           />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Player">
+        <SettingsRow title="Player control style" description="Pill uses frosted rounded backgrounds, a full-width timeline, and volume that expands on hover.">
+          <SettingsSegmented
+            label="Player control style"
+            value={theme.playerControlStyle}
+            options={[{ value: 'default', label: 'Default' }, { value: 'pill', label: 'Pill' }]}
+            onChange={(playerControlStyle) => void controller.setTheme({ playerControlStyle })}
+          />
+        </SettingsRow>
+        <SettingsRow title="Preview" stacked>
+          <div className="w-full">
+            <PlayerControlPreview style={theme.playerControlStyle} />
+          </div>
         </SettingsRow>
       </SettingsGroup>
 
@@ -126,20 +185,7 @@ export default function ThemeSettingsSection({ controller }: { controller: Appea
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Sidebar order" description="Move pages up or down in the sidebar." collapsible storageKey="theme-sidebar-order">
-        {order.map((item, index) => (
-          <SettingsRow key={item.id} title={item.label}>
-            <span className="flex items-center gap-1">
-              <Button type="button" variant="ghost" size="icon" className="h-9 w-9" disabled={index === 0} aria-label={`Move ${item.label} up`} title="Move up" onClick={() => controller.moveSidebarItem(item.id, -1)}>
-                <ChevronUp className="h-4 w-4" aria-hidden="true" />
-              </Button>
-              <Button type="button" variant="ghost" size="icon" className="h-9 w-9" disabled={index === order.length - 1} aria-label={`Move ${item.label} down`} title="Move down" onClick={() => controller.moveSidebarItem(item.id, 1)}>
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </span>
-          </SettingsRow>
-        ))}
-      </SettingsGroup>
+
     </div>
   );
 }

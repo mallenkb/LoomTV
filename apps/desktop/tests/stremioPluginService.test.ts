@@ -142,3 +142,46 @@ test('a cleared app reloads add-on state instead of keeping the cached registry'
   service.discardCachedState();
   assert.deepEqual(service.listManaged(), []);
 });
+
+test('browser configuration keeps the configured endpoint in the host and requires a new approval', async () => {
+  let configurationRequired = true;
+  const { service } = fixture(async url => jsonResponse(url, {
+    ...manifest, behaviorHints: { configurable: true, configurationRequired },
+  }));
+  const endpoint = 'https://catalog.example/user%2Fsecret/manifest.json?token=private';
+  const review = await service.reviewManifestUrl(endpoint);
+  assert.equal(service.configurationUrl(addonId), 'https://catalog.example/user%2Fsecret/configure?token=private');
+  assert.ok(!JSON.stringify(review).includes('token=private'));
+  await assert.rejects(() => service.approve(addonId, review.reviewToken));
+  configurationRequired = false;
+  const configured = await service.reviewManifestUrl(endpoint, addonId);
+  await assert.rejects(() => service.approve(addonId, review.reviewToken));
+  const enabled = await service.approve(addonId, configured.reviewToken);
+  assert.equal(enabled.state, 'enabled');
+});
+
+test('closing a source request aborts its transport without recording a provider failure', async () => {
+  let fetchSignal: AbortSignal | undefined;
+  let finishFetch: (() => void) | undefined;
+  let notifyStarted = () => { throw new Error('Start notification is unavailable.'); };
+  const started = new Promise<void>(resolve => { notifyStarted = resolve; });
+  const { service } = fixture(async (url, init) => {
+    if (url.endsWith('/manifest.json')) return jsonResponse(url, { ...manifest, resources: ['stream'], catalogs: [] });
+    fetchSignal = (init as { signal: AbortSignal }).signal;
+    return new Promise(resolve => {
+      finishFetch = () => resolve(jsonResponse(url, { streams: [] }));
+      notifyStarted();
+    });
+  });
+  const review = await service.reviewManifestUrl('https://catalog.example/manifest.json');
+  await service.approve(addonId, review.reviewToken);
+  const controller = new AbortController();
+  const pending = service.fetchStreams('owner', addonId, { type: 'movie', videoId: 'tt123' }, controller.signal);
+  const rejected = assert.rejects(pending, error => error instanceof StremioPluginServiceError && error.code === 'STREMIO_PLUGIN_REQUEST_CANCELLED');
+  await started;
+  controller.abort();
+  assert.equal(fetchSignal?.aborted, true);
+  finishFetch?.();
+  await rejected;
+  assert.equal(service.listManaged()[0].failureCount || 0, 0);
+});

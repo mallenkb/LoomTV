@@ -98,6 +98,7 @@ function SegmentedSetting<T extends string | number>({
 export type SkipRescanState = { state: 'idle' | 'scanning' | 'done' } | { state: 'error'; message: string };
 
 interface PlayerSettingsPanelProps {
+  onlineSubtitlesOnly?: boolean;
   videoOnly?: boolean;
   mediaPanelWidth: number;
   setMediaPanelWidth: React.Dispatch<React.SetStateAction<number>>;
@@ -168,6 +169,7 @@ interface PlayerSettingsPanelProps {
 }
 
 export default function PlayerSettingsPanel({
+  onlineSubtitlesOnly = false,
   videoOnly = false,
   mediaPanelWidth,
   setMediaPanelWidth,
@@ -221,13 +223,14 @@ export default function PlayerSettingsPanel({
   const activeTab: ControlTab = videoOnly ? 'video' : mediaPanelTab;
   // Subtitles open as their own tray; Audio and Video share the other one.
   const subtitlesTray = activeTab === 'subtitles';
-  const trayTitle = videoOnly ? 'Video settings' : subtitlesTray ? 'Subtitles' : 'Playback settings';
+  const trayTitle = videoOnly ? 'Video settings' : subtitlesTray ? onlineSubtitlesOnly ? 'Open Subtitles' : 'Subtitles' : 'Playback settings';
   // The subtitles tray splits local tracks and styling from the online search.
   const [subtitleSection, setSubtitleSection] = useState<'tracks' | 'online'>('tracks');
+  const onlineSectionActive = onlineSubtitlesOnly || subtitleSection === 'online';
   const showOnlineTab = subtitlesTray && Boolean(onlineSubtitles);
   const trayTabs: { id: string; label: string; selected: boolean; select: () => void }[] = videoOnly ? []
     : subtitlesTray
-      ? showOnlineTab
+      ? showOnlineTab && !onlineSubtitlesOnly
         ? [
           { id: 'tracks', label: 'Subtitles', selected: subtitleSection === 'tracks', select: () => setSubtitleSection('tracks') },
           { id: 'online', label: 'Open Subtitles', selected: subtitleSection === 'online', select: () => setSubtitleSection('online') },
@@ -532,13 +535,13 @@ export default function PlayerSettingsPanel({
 
           {/* Stays mounted while hidden so search results survive tab switches. */}
           {activeTab === 'subtitles' && showOnlineTab && (
-            <div className={`space-y-5 ${subtitleSection === 'online' ? '' : 'hidden'}`}>
-              {onlineSubtitles?.(subtitleSection === 'online')}
-              {subtitleSection === 'online' && subtitleAppearance}
+            <div className={`space-y-5 ${onlineSectionActive ? '' : 'hidden'}`}>
+              {onlineSubtitles?.(onlineSectionActive)}
+              {onlineSectionActive && subtitleAppearance}
             </div>
           )}
 
-          {activeTab === 'subtitles' && (!showOnlineTab || subtitleSection === 'tracks') && (
+          {activeTab === 'subtitles' && !onlineSubtitlesOnly && (!showOnlineTab || subtitleSection === 'tracks') && (
             <div className="space-y-5">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">

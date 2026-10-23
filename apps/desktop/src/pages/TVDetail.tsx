@@ -1,3 +1,5 @@
+import DetailTitleLogo from '@/components/DetailTitleLogo';
+import { MetadataShimmer } from '@/components/ContentShimmer';
 import { useParams } from '@tanstack/react-router';
 import { queryClient, queryScope } from '@/lib/queryClient';
 import VirtualEpisodeList from '@/components/VirtualEpisodeList';
@@ -5,23 +7,26 @@ import ShowUpdatesPanel from '@/components/ShowUpdatesPanel';
 import { useEpisodeUpdates } from '@/lib/useEpisodeUpdates';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from '@/lib/navigation';
-import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
+import { Check, Play, Star, UserRound, ChevronRight, ChevronDown, ListVideo } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
-import AddonSourcePicker, { type AddonStreamSelection } from '@/components/AddonSourcePicker';
 import {
-  addonEpisodes, addonIdentityForItem, addonPlaybackOptions, addonVideoTarget, loadAddonMeta,
-  type AddonStreamPlayer, type AddonVideoTarget,
+  addonEpisodes, addonIdentityForItem, addonVideoTarget, loadAddonMeta,
+  type AddonStreamPlayer,
 } from '@/lib/addonPlayback';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
+import DetailCastRail from '@/components/DetailCastRail';
 import { WatchedSolidIcon } from '@/components/LoomIcons';
 import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { artworkVariant } from '@/lib/artworkVariants';
-import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
+import { addonProgressKey, readAddonWatchHistory } from '@/lib/addonWatchHistory';
+import { formatTime as formatPlaybackTime } from '@/components/VideoPlayer/helpers';
+import { addonContinueTarget, playableAddonEpisodes } from '@/lib/addonEpisodeNavigation';
+import { getPlayableStartPosition, getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { cleanEpisodeTitleForDisplay, episodeCode, episodeTitleFromFilePath } from '@/lib/episodeTitles';
@@ -30,10 +35,14 @@ import SharedListHighlight from '@/components/SharedListHighlight';
 import { EXPLORE_ITEM_UPDATED_EVENT, getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
+import WatchHubDialog from '@/components/WatchHubDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import { normalizeAnimeCast } from '@/shared/animeCast';
 import SeasonActionsMenu from '@/components/SeasonActionsMenu';
 import DetailHeroActions from '@/components/DetailHeroActions';
+import DetailWhereToWatch from '@/components/DetailWhereToWatch';
+import { useAddonBookmarks } from '@/lib/addonBookmarks';
+import { useToast } from '@/components/ToastProvider';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localEpisodeWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
 import { useArtworkSuspended } from '@/contexts/ArtworkSuspensionContext';
@@ -141,6 +150,7 @@ type TVDetailRouteState = {
   from?: string;
   fromDiscover?: boolean;
   addonId?: string;
+  streamAddonId?: string;
   stremioCatalogItem?: StremioPluginCatalogItem;
   artwork?: RouteArtworkState;
 };
@@ -421,8 +431,10 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
-  const { canManageProfiles, lists, setListEntry, watchedKeys, setWatchedEntries } = useProfiles();
+  const { activeProfile, canManageProfiles, lists, setListEntry, watchedKeys, setWatchedEntries } = useProfiles();
   const { theme } = useTheme();
+  const addonBookmarks = useAddonBookmarks();
+  const { showToast } = useToast();
   const [show, setShow] = useState<TVShow | null>(() => {
     const initialRoute = location.state as TVDetailRouteState | null;
     if (initialRoute?.stremioCatalogItem) return showFromStremioCatalogItem(kind, initialRoute.stremioCatalogItem);
@@ -438,10 +450,12 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
+  const [addonMetadataPending, setAddonMetadataPending] = useState(false);
   const [addonItem, setAddonItem] = useState<StremioPluginCatalogItem | null>(null);
-  const [sourceTarget, setSourceTarget] = useState<AddonVideoTarget | null>(null);
   const [detailsReady, setDetailsReady] = useState(false);
   const [trailerOpen, setTrailerOpen] = useState(false);
+  const [watchHubOpen, setWatchHubOpen] = useState(false);
+  const [watchHubAnchor, setWatchHubAnchor] = useState<HTMLElement | null>(null);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const routeState = (location.state as TVDetailRouteState | null) || null;
   // Explore/remote records use a provider-owned ID and artwork contract.
@@ -481,20 +495,21 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
 
   useEffect(() => {
     setAddonItem(null);
-    setSourceTarget(null);
+    setAddonMetadataPending(Boolean(routeCatalogItem));
     if (!routeCatalogItem) return;
     let cancelled = false;
     // Add-on items load their own metadata. A Discover series with an IMDb ID
     // gets a host key first, so add-ons that describe `tt` series list its episodes.
     void addonIdentityForItem(routeCatalogItem)
-      .then((item) => (item.providerId ? loadAddonMeta(item) : null))
+      .then((item) => (item.providerId ? loadAddonMeta(item, metadata => { if (!cancelled) setAddonItem(metadata); }) : null))
       .then((item) => {
-        if (!cancelled && item?.videos) setAddonItem(item);
+        if (!cancelled && item) setAddonItem(item);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setAddonMetadataPending(false); });
     return () => { cancelled = true; };
   }, [routeCatalogItem]);
-  const addonEpisodeList = useMemo(() => addonEpisodes(addonItem?.videos), [addonItem?.videos]);
+  const addonEpisodeList = useMemo(() => isRemoteDetailRoute ? addonEpisodes(addonItem?.videos) : [], [addonItem?.videos, isRemoteDetailRoute]);
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioShow, setIsRemoteStremioShow] = useState(Boolean(routeState?.stremioCatalogItem));
   const routeAddonType = kind === 'anime'
@@ -737,7 +752,7 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
   }, [location.pathname, location.search, location.state, navigate, refreshLibrary]);
 
-  const sourceRoute = routeState?.from?.startsWith('/discover')
+  const sourceRoute = routeState?.from?.startsWith('/discover') || routeState?.from?.startsWith('/addons/stremio/')
     ? routeState.from
     : routeState?.fromDiscover || isRemoteStremioShow
       ? getCachedDiscoverReturnRoute()
@@ -871,10 +886,32 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     ?.find((file) => !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
 
   const heroEpisode = resumeEpisode || nextEpisode || firstPlayableEpisode || null;
-  // An add-on show starts at its first regular episode, as listed by the provider.
-  const addonHeroEpisode = heroEpisode ? undefined : addonEpisodeList.find((entry) => entry.season > 0) || addonEpisodeList[0];
-  const canPlayShow = Boolean(onPlay && heroEpisode?.filePath) || Boolean(onPlayStream && addonHeroEpisode);
-  const inMyList = lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
+  const addonEpisodeProgress = addonEpisodeList.map(entry => {
+    const key = addonProgressKey({ type: addonItem?.type || 'series', videoId: entry.video.id, title: show.title });
+    return { entry, key, progress: getProgressState(key) };
+  });
+  const addonResumeEpisode = addonEpisodeProgress.filter(candidate => candidate.progress.inProgress)
+    .sort((a, b) => b.progress.updatedAt - a.progress.updatedAt)[0];
+  const playableAddonList = playableAddonEpisodes(addonItem || undefined);
+  const latestAddonEpisode = addonEpisodeProgress.filter(candidate => candidate.progress.updatedAt > 0)
+    .sort((a, b) => b.progress.updatedAt - a.progress.updatedAt)[0];
+  const continueAddonTarget = addonItem && latestAddonEpisode ? addonContinueTarget(addonVideoTarget(
+    addonItem, latestAddonEpisode.entry.video.id, show.title, latestAddonEpisode.entry.video,
+    { season: latestAddonEpisode.entry.season, episode: latestAddonEpisode.entry.number },
+  )) : null;
+  const nextAddonEntry = continueAddonTarget ? playableAddonList.find(entry => entry.video.id === continueAddonTarget.videoId) : undefined;
+  const addonHeroEpisode = heroEpisode ? undefined : addonResumeEpisode?.entry || nextAddonEntry
+    || playableAddonList.find(entry => entry.season > 0 && !getProgressState(addonProgressKey({ type: addonItem?.type || 'series', videoId: entry.video.id, title: show.title })).watched)
+    || playableAddonList.find(entry => entry.season > 0) || playableAddonList[0];
+  const previousAddonTarget = !heroEpisode && !addonHeroEpisode && isRemoteDetailRoute && activeProfile
+    ? readAddonWatchHistory(activeProfile.id).find(entry => entry.target.detailId === mediaId
+      && entry.target.type !== 'movie' && (!routeState?.streamAddonId || entry.target.sourceAddonId === routeState.streamAddonId))?.target
+    : undefined;
+  const previousAddonKey = previousAddonTarget ? addonProgressKey(previousAddonTarget) : null;
+  const canPlayShow = Boolean(onPlay && heroEpisode?.filePath) || Boolean(onPlayStream && (addonHeroEpisode || previousAddonTarget));
+  const inMyList = routeCatalogItem
+    ? addonBookmarks.isSaved(routeCatalogItem, routeAddonId)
+    : lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
   const isRemoteContent = isRemoteStremioShow || Boolean(routeCatalogItem);
   const watchedEntryKeys = isRemoteContent
     ? [discoverWatchedKey({ id: show.id, type: routeCatalogItem?.type || (kind === 'anime' ? 'anime' : 'tv'), source: routeCatalogItem?.source })]
@@ -884,13 +921,14 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     && episodeFiles.length > 0
     && episodeFiles.every((file) => getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
   const isWatched = watchedByProgress || (watchedEntryKeys.length > 0 && watchedEntryKeys.every((key) => watchedKeys.has(key)));
-  const heroIsResume = Boolean(resumeEpisode);
+  const heroIsResume = Boolean(resumeEpisode || (!heroEpisode && addonResumeEpisode) || (previousAddonKey && getPlayableStartPosition(previousAddonKey) > 0));
   const heroProgress = heroEpisode
     ? getProgressState(heroEpisode.filePath, heroEpisode.localMetadata?.durationSeconds)
-    : { position: 0, duration: 0, fraction: 0, watched: false, inProgress: false };
+    : addonResumeEpisode?.progress || (previousAddonKey ? getProgressState(previousAddonKey) : null) || { position: 0, duration: 0, fraction: 0, watched: false, inProgress: false };
   const heroProgressPercent = Math.min(100, Math.max(0, heroProgress.fraction * 100));
   const heroEpisodeLabel = heroEpisode ? epCode(heroEpisode.season, heroEpisode.episode)
-    : addonHeroEpisode ? epCode(addonHeroEpisode.season, addonHeroEpisode.number) : '';
+    : addonHeroEpisode ? epCode(addonHeroEpisode.season, addonHeroEpisode.number)
+      : previousAddonTarget?.season !== undefined && previousAddonTarget.episode !== undefined ? epCode(previousAddonTarget.season, previousAddonTarget.episode) : '';
   const heroProgressCopy = heroProgress.duration > 0
     ? `${formatShortMinutes(heroProgress.position)} of ${formatShortMinutes(heroProgress.duration)}`
     : '';
@@ -938,17 +976,13 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     rating: show.rating,
   };
   // Selecting an add-on episode asks for that episode's sources only.
-  const openAddonEpisode = (season: number, episode: number): boolean => {
-    const entry = addonEpisodeList.find((candidate) => candidate.season === season && candidate.number === episode);
+  const openAddonEpisode = (season: number, episode: number, chooseSource = false): boolean => {
+    const entry = playableAddonList.find((candidate) => candidate.season === season && candidate.number === episode);
     if (!entry || !addonItem) return false;
     // The exact chosen video, with its inline streams (even an empty list) bound to their source.
-    setSourceTarget(addonVideoTarget(addonItem, entry.video.id, `${show.title} · ${epCode(season, episode)}`, entry.video, { season, episode }));
+    const target = { ...addonVideoTarget(addonItem, entry.video.id, `${show.title} · ${epCode(season, episode)}`, entry.video, { season, episode }), sourceAddonId: chooseSource ? undefined : routeState?.streamAddonId, sourceRestriction: chooseSource ? undefined : routeState?.streamAddonId };
+    onPlayStream?.('', target.title, playerArtwork, { addonTarget: target, resumeLastSource: !chooseSource && getProgressState(addonProgressKey(target)).inProgress });
     return true;
-  };
-
-  const handleSourceChosen = ({ target, url, stream, addonName }: AddonStreamSelection) => {
-    setSourceTarget(null);
-    onPlayStream?.(url, target.title, playerArtwork, addonPlaybackOptions(target, stream, addonName));
   };
 
   const handlePlayEpisode = (season: number, episode: number) => {
@@ -962,6 +996,10 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
   };
 
   const handlePlayShow = () => {
+    if (previousAddonTarget && onPlayStream) {
+      onPlayStream('', previousAddonTarget.title, playerArtwork, { addonTarget: previousAddonTarget, resumeLastSource: true });
+      return;
+    }
     if (!heroEpisode && addonHeroEpisode) { handlePlayEpisode(addonHeroEpisode.season, addonHeroEpisode.number); return; }
     if (!heroEpisode || !onPlay) return;
     onPlay(
@@ -1069,6 +1107,7 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
           <ChevronRight className="w-5 h-5 rotate-180" />
           <span className="loom-detail-back-label">Back</span>
         </button>
+        {routeCatalogItem && <DetailWhereToWatch open={watchHubOpen} onClick={event => { setWatchHubAnchor(event.currentTarget); setWatchHubOpen(value => !value); }} />}
 
         <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
           <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
@@ -1089,8 +1128,10 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
             }
           />
           <div className="loom-detail-hero-info min-w-0 flex-1">
-            <h1 className="text-4xl font-semibold text-white">{show.title}</h1>
-            <HeroMetadata item={show} />
+            {routeCatalogItem ? <DetailTitleLogo title={show.title} sources={playerLogoArtwork} /> : <h1 className="text-4xl font-semibold text-white">{show.title}</h1>}
+            <HeroMetadata item={show} providersOpen={watchHubOpen} onOpenProviders={routeCatalogItem ? event => {
+              setWatchHubAnchor(event.currentTarget); setWatchHubOpen(true);
+            } : undefined} />
           </div>
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
@@ -1118,14 +1159,18 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
             </Button>
           )}
             <DetailHeroActions
-              canBookmark={!isRemoteContent}
+              canBookmark={!isRemoteContent || Boolean(routeCatalogItem)}
               inMyList={inMyList}
               watched={isWatched}
               onPlayTrailer={isRemoteContent && show.trailerUrl ? () => setTrailerOpen(true) : undefined}
               onToggleList={() => void (async () => {
+                if (routeCatalogItem) {
+                  await addonBookmarks.toggle(addonItem?.id === routeCatalogItem.id ? addonItem : routeCatalogItem, routeAddonId, routeState?.streamAddonId);
+                  return;
+                }
                 await setListEntry(show.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(show.id, 'favorite', false);
-              })()}
+              })().catch(() => showToast({ title: 'Could not update My List. Try again.', tone: 'error' }))}
               onToggleWatched={() => {
                 if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
                 const present = !isWatched;
@@ -1268,11 +1313,14 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
                             ep={episode}
                             seriesTitle={show.title}
                             filePath={findEpisodeFile(season.number, episode.number)}
+                            progressKey={addonEpisodeProgress.find(candidate => candidate.entry.season === season.number && candidate.entry.number === episode.number)?.key}
                             seasonNum={season.number}
                             progressTick={progressTick}
                             durationHint={show.episodeFiles?.find((file) => file.season === season.number && file.episode === episode.number)?.localMetadata?.durationSeconds}
                             isNew={newEpisodeKeys.has(`${season.number}:${episode.number}`) && !watchedKeys.has(localEpisodeWatchedKey(show.id, season.number, episode.number))}
                             onPlay={() => handlePlayEpisode(season.number, episode.number)}
+                            onChooseSource={onPlayStream && playableAddonList.some(entry => entry.season === season.number && entry.number === episode.number)
+                              ? () => { openAddonEpisode(season.number, episode.number, true); } : undefined}
                           />
                         )) : show.episodeFiles
                           ?.filter((file) => file.season === season.number)
@@ -1309,7 +1357,8 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
             aria-labelledby={shouldOpenDetailsFirst ? undefined : 'detail-tab-details'}
             className="space-y-8"
           >
-            {show.summary && (
+            {!show.summary && addonMetadataPending && <MetadataShimmer />}
+        {show.summary && (
               <section className="loom-detail-summary">
                 <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Summary</h3>
                 <p className="whitespace-pre-line text-[var(--loom-muted)] leading-relaxed">{show.summary}</p>
@@ -1322,17 +1371,7 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
                 {kind === 'anime' ? (
                   <AnimeCreditRows credits={show.cast.slice(0, 20)} style={theme.castCardStyle} />
                 ) : (
-                  <div className="flex gap-4 overflow-x-auto pb-2">
-                    {show.cast.slice(0, 12).map((actor) => (
-                      <div key={actor.name} className="w-20 flex-shrink-0 text-center">
-                        <Avatar className="mx-auto mb-2 h-16 w-16">
-                          {actor.image ? <AvatarImage src={actor.image} alt={actor.name} /> : <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{actor.name.charAt(0)}</AvatarFallback>}
-                        </Avatar>
-                        <p className="truncate text-xs text-[var(--loom-text)]">{actor.name}</p>
-                        <p className="truncate text-xs text-[var(--loom-muted)]">{actor.character}</p>
-                      </div>
-                    ))}
-                  </div>
+                  <DetailCastRail cast={show.cast} />
                 )}
               </section>
             )}
@@ -1340,13 +1379,20 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
         )}
       </div>
       </div>
+      {watchHubOpen && routeCatalogItem ? (
+        <WatchHubDialog
+          key={routeCatalogItem.id}
+          item={addonItem?.id === routeCatalogItem.id ? addonItem : routeCatalogItem}
+          anchorElement={watchHubAnchor}
+          onClose={() => setWatchHubOpen(false)}
+        />
+      ) : null}
       <TrailerDialog
         open={trailerOpen}
         title={show.title}
         trailerUrl={show.trailerUrl}
         onClose={() => setTrailerOpen(false)}
       />
-      <AddonSourcePicker target={sourceTarget} onClose={() => setSourceTarget(null)} onPlay={handleSourceChosen} />
     </div>
   );
 }
@@ -1391,18 +1437,22 @@ function EpisodeRow({
   seriesTitle,
   filePath,
   onPlay,
+  onChooseSource,
   seasonNum = 1,
   durationHint = 0,
   progressTick,
+  progressKey,
   isNew = false,
 }: {
   ep: EpisodeMeta;
   seriesTitle: string;
   filePath: string | null;
   onPlay: () => void;
+  onChooseSource?: () => void;
   seasonNum?: number;
   durationHint?: number;
   progressTick: number;
+  progressKey?: string;
   isNew?: boolean;
 }) {
   const artworkSuspended = useArtworkSuspended();
@@ -1457,7 +1507,7 @@ function EpisodeRow({
   const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number, filePath || undefined);
   const episodeAirDate = formatEpisodeAirDate(ep.airDate);
   const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
-  const progress = getProgressState(filePath, durationHint);
+  const progress = getProgressState(progressKey || filePath, durationHint);
   const showNewBadge = isNew && progress.position <= 0 && !progress.watched;
   const isResumable = progress.inProgress && !progress.watched;
   const remainingCopy = progress.duration > 0
@@ -1468,17 +1518,18 @@ function EpisodeRow({
   const watchStatusCopy = progress.watched
     ? 'Watched'
     : isResumable
-      ? `Partly watched${remainingCopy ? `, ${remainingCopy} left` : ''}`
+      ? `Resume at ${formatPlaybackTime(progress.position)}${remainingCopy ? `, ${remainingCopy} left` : ''}`
       : '';
   void progressTick;
 
   return (
+    <div className="relative flex items-center">
     <button
       type="button"
       ref={rowRef}
       data-shared-highlight-item
       data-shared-highlight-id={`${seasonNum}-${ep.number}`}
-      className="group relative z-10 flex w-full items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
+      className="group relative z-10 flex min-w-0 flex-1 items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
       onClick={onPlay}
       aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${showNewBadge ? '. New episode' : ''}${episodeAirDate ? `. Released ${episodeAirDate}` : ''}${episodeRating > 0 ? `. Rating ${episodeRating.toFixed(1)} out of 10` : ''}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
     >
@@ -1564,5 +1615,13 @@ function EpisodeRow({
         </div>
       </div>
     </button>
+    {onChooseSource ? <button type="button" onClick={onChooseSource}
+      aria-label={`Choose source for ${epLabel}: ${displayTitle}`}
+      title="Choose a different source"
+      className="relative z-10 mr-3 flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border border-[var(--loom-border)] px-3 text-xs text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]">
+      <ListVideo aria-hidden="true" className="h-4 w-4" />
+      <span className="hidden sm:inline">Sources</span>
+    </button> : null}
+    </div>
   );
 }

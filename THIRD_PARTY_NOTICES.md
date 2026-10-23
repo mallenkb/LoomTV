@@ -1,8 +1,11 @@
 # LoomTV third-party notices
 
 LoomTV source code remains available under the MIT License in `LICENSE`.
-These notices apply to third-party libraries, services, artwork, and native
-runtime payloads. Their terms do not change the license for LoomTV source code.
+These notices identify third-party libraries, services, artwork, and native
+runtime payloads. LoomTV-authored files retain their MIT license; distributing
+them together with GPL-covered components can impose additional obligations
+on the combined distribution. This inventory is not a grant of rights to
+provider data or trademarks.
 
 ## Desktop application
 
@@ -15,6 +18,9 @@ The desktop application uses these direct runtime dependencies:
 | Electron Updater | MIT | <https://github.com/electron-userland/electron-builder> |
 | React and React DOM | MIT | <https://react.dev/> |
 | TanStack Router (`@tanstack/react-router`) | MIT | <https://tanstack.com/router> |
+| TanStack Query and Virtual | MIT | <https://tanstack.com/> |
+| WebTorrent | MIT | <https://github.com/webtorrent/webtorrent> |
+| Sharp | Apache-2.0 | <https://sharp.pixelplumbing.com/>; libvips and its bundled dependencies retain separate licenses |
 | Vite | MIT | <https://vite.dev/> |
 | TypeScript | Apache-2.0 | <https://www.typescriptlang.org/> |
 | Tailwind CSS and tailwind-merge | MIT | <https://tailwindcss.com/> and <https://github.com/dcastil/tailwind-merge> |
@@ -24,7 +30,7 @@ The desktop application uses these direct runtime dependencies:
 | clsx | MIT | <https://github.com/lukeed/clsx> |
 | hls.js | Apache-2.0 | <https://github.com/video-dev/hls.js> |
 | Koffi | MIT | <https://github.com/Koromix/koffi> |
-| Lucide React | ISC | <https://lucide.dev/> |
+| Lucide React | ISC, with MIT notices for Feather-derived icons | <https://lucide.dev/license> |
 | Motion | MIT | <https://motion.dev/> |
 | Phosphor Icons React | MIT | <https://phosphoricons.com/> |
 | Zod | MIT | <https://github.com/colinhacks/zod> |
@@ -32,6 +38,17 @@ The desktop application uses these direct runtime dependencies:
 
 The application also includes component patterns inspired by shadcn/ui,
 licensed under the MIT License: <https://ui.shadcn.com/>.
+
+Local license-text snapshots for direct desktop runtime dependencies are in
+`apps/desktop/resources/licenses/`. The inventory there records the installed
+versions and files copied. These snapshots do not replace the transitive and
+native-component inventory required for a release.
+
+The Stremio official add-on registry is copyright 2019 SmartCode OOD and is
+MIT licensed. Its license is included in
+`apps/desktop/resources/licenses/stremio-official-addons.LICENSE.md`.
+That source-code license does not grant unrestricted rights to Stremio-hosted
+services, subtitle files, movie metadata, artwork or third-party brands.
 
 ## Bundled native runtimes
 
@@ -93,6 +110,35 @@ terms, attribution rules, rate limits, and privacy policies remain separate:
 - Jikan / MyAnimeList: <https://jikan.moe/>
 - OMDb API: <https://www.omdbapi.com/>
 - Fanart.tv: <https://fanart.tv/>
+- AniList: <https://anilist.co/>
+- TheTVDB: <https://thetvdb.com/>
+- MDBList: <https://mdblist.com/> and <https://mdblist.com/static/legal.html>
+- Cinemeta, WatchHub and OpenSubtitles v3, through Stremio:
+  <https://github.com/Stremio/stremio-official-addons>
+- TheIntroDB: <https://theintrodb.org/>
+- AniSkip: <https://aniskip.com/>
+- SkipDB: <https://skipdb.tv/>
+
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+TMDB requires an approved logo and attribution in the application; commercial
+use requires the applicable agreement. See <https://developer.themoviedb.org/docs/faq>.
+
+Cinemeta and WatchHub are installed by default when metadata offline mode is
+off, subject to existing installations and previous removal choices. Online
+subtitle search and downloads use `opensubtitles-v3.strem.io` and Stremio's
+subtitle delivery hosts on request. This is not a direct integration with the
+OpenSubtitles.com REST API.
+
+MDBList fills missing add-on ratings when OMDb is unavailable or has no score.
+IMDb, Rotten Tomatoes and Metacritic are the original rating brands, not the
+same entities as the API aggregators. An aggregator API response does not by
+itself establish permission to redistribute branding or data. Rotten Tomatoes
+publishes permission, attribution, linking and score-icon requirements at
+<https://www.rottentomatoes.com/help_desk/licensing>.
+
+The rating SVGs under `apps/desktop/src/assets/ratings/` are third-party brand
+assets, not LoomTV artwork covered by the project's MIT license. Permission
+and source records for these assets still need verification before release.
 
 LoomTV is not affiliated with or endorsed by these providers.
 

@@ -170,7 +170,6 @@ export default function LiveTvSettingsOverview() {
         size="lg"
         title={manager === null ? 'Live TV source' : manager.kind === 'add' ? 'Add a live TV source' : `Edit ${iptvSourceDisplayName(manager.source.name)}`}
         description="Playlist URL, optional guide URL, and sidebar icon."
-        hideHeader
       >
         {manager !== null ? (
           <div className="loom-settings-page loom-settings-dialog-body min-w-0">

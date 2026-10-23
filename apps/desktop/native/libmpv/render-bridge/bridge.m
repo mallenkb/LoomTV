@@ -236,7 +236,7 @@ LM_EXPORT void *loom_mpv_create(const char *path, char *error, size_t capacity) 
         const char *properties[] = {
             "time-pos", "duration", "pause", "volume", "mute", "speed", "track-list",
             "video-params", "hwdec-current", "frame-drop-count", "decoder-frame-drop-count",
-            "demuxer-cache-duration", "paused-for-cache", "video-codec", "estimated-vf-fps",
+            "demuxer-cache-duration", "demuxer-cache-state", "cache-buffering-state", "paused-for-cache", "video-codec", "estimated-vf-fps",
             "eof-reached", "current-ao"
         };
         for (size_t i = 0; i < sizeof(properties) / sizeof(properties[0]); ++i) {

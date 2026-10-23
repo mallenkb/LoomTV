@@ -19,16 +19,6 @@ const documentSchema = z.object({
   downloads: z.union([z.number(), z.string()]).optional(), licenseurl: textField,
 }).passthrough();
 const searchSchema = z.object({ response: z.object({ numFound: z.number().nonnegative(), docs: z.array(documentSchema) }) });
-const fileSchema = z.object({
-  name: z.string(), format: z.string().optional(), source: z.string().optional(),
-  size: z.union([z.string(), z.number()]).optional(), private: z.union([z.boolean(), z.string()]).optional(),
-}).passthrough();
-const metadataSchema = z.object({
-  files: z.array(fileSchema).default([]),
-  is_dark: z.boolean().optional(),
-  metadata: z.object({ title: textField, description: textField, licenseurl: textField, access_restricted: textField }).passthrough().optional(),
-}).passthrough();
-
 export type ArchiveDocument = z.output<typeof documentSchema>;
 export type ArchiveCatalogItem = StremioPluginCatalogItem & {
   identifier: string;
@@ -83,35 +73,12 @@ export async function archiveCatalog(query: string, page: number, order: string,
   return parsed.data.response;
 }
 
-function videoPriority(file: z.output<typeof fileSchema>): number {
-  const name = file.name.toLowerCase();
-  if (file.private === true || file.private === 'true' || /(?:^|[_. -])(sample|trailer|preview|thumb)(?:[_. -]|$)/i.test(name)) return -1;
-  if (Number(file.size) === 0) return -1;
-  if (/\.mp4$/.test(name)) return /512kb|lowres/.test(name) ? 70 : 100;
-  if (/\.m4v$/.test(name)) return 95;
-  if (/\.webm$/.test(name)) return 90;
-  if (/\.og[gv]$/.test(name)) return 80;
-  if (/\.(mkv|mov|avi|mpg|mpeg|flv|ts)$/.test(name)) return 60;
-  return -1;
-}
-
-/** Read the item record at Play and return its best video file. */
+/** Resolve media in the host and return its opaque playback reference. */
 export async function resolveArchiveStream(identifier: string): Promise<string> {
-  return cachedDesktopRead('archive-media', [identifier], async () => {
-    const response = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, {
-      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20_000),
-    });
-    if (!response.ok) throw new Error(`Archive.org returned ${response.status}.`);
-    const parsed = metadataSchema.safeParse(await response.json());
-    if (!parsed.success) throw new Error('Archive.org returned an unreadable media record.');
-    const metadata = parsed.data;
-    if (metadata.is_dark || text(metadata.metadata?.access_restricted) === 'true') throw new Error('Archive.org restricts access to this item.');
-    const files = metadata.files.filter(file => videoPriority(file) >= 0);
-    files.sort((a, b) => videoPriority(b) - videoPriority(a) || Number(b.size || 0) - Number(a.size || 0));
-    const selected = files[0];
-    if (!selected) throw new Error('Archive.org no longer lists a playable video file for this item.');
-    return `https://archive.org/download/${encodeURIComponent(identifier)}/${selected.name.split('/').map(encodeURIComponent).join('/')}`;
-  });
+  const result = await desktopApi.getStremioStreams(ARCHIVE_ADDON_ID, { type: 'movie', id: `archive:${identifier}` });
+  const reference = result.streams.find(stream => stream.transport === 'media')?.playbackReference;
+  if (!reference) throw new Error('Archive.org no longer lists a playable video file for this item.');
+  return reference;
 }
 
 function normalizedTitle(value: string): string {

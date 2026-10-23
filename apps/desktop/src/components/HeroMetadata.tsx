@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, type MouseEventHandler } from 'react';
 import { Star } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
@@ -11,6 +11,8 @@ import { useTheme } from '@/components/ThemeProvider';
 type HeroMetadataProps = {
   item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'providerRatings' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'originPlatform' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
   isOther?: boolean;
+  onOpenProviders?: MouseEventHandler<HTMLButtonElement>;
+  providersOpen?: boolean;
 };
 
 function formatDuration(seconds?: number): string {
@@ -34,7 +36,7 @@ function episodeCountFromRuntime(runtime?: string): number {
   return match ? Number(match[1]) : 0;
 }
 
-export default function HeroMetadata({ item, isOther = false }: HeroMetadataProps) {
+export default function HeroMetadata({ item, isOther = false, onOpenProviders, providersOpen }: HeroMetadataProps) {
   const { showProviderRatingBadges } = useTheme();
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
   const mediaType = isOther ? 'Other' : item.type === 'anime' ? 'Anime' : item.type === 'tv' ? 'TV Show' : 'Movie';
@@ -89,7 +91,7 @@ export default function HeroMetadata({ item, isOther = false }: HeroMetadataProp
       ? {
           label: 'Tomatometer',
           value: `${item.providerRatings.rottenTomatoes.value.toFixed(0)}%`,
-          title: 'Rotten Tomatoes Tomatometer score supplied by OMDb',
+          title: 'Rotten Tomatoes Tomatometer score',
           provider: 'tomatometer' as const,
           logoClassName: 'h-5 w-5 object-contain',
         }
@@ -107,7 +109,7 @@ export default function HeroMetadata({ item, isOther = false }: HeroMetadataProp
       ? {
           label: 'Metacritic',
           value: item.providerRatings.metacritic.value.toFixed(0),
-          title: 'Metacritic score supplied by OMDb',
+          title: 'Metacritic score',
           provider: 'metacritic' as const,
           logoClassName: 'h-5 w-5 object-contain',
         }
@@ -126,15 +128,17 @@ export default function HeroMetadata({ item, isOther = false }: HeroMetadataProp
         <span className="inline-flex items-center gap-2">
           <ProviderMark
             mediaId={item.id}
+            onOpenProviders={onOpenProviders}
+            providersOpen={providersOpen}
             providers={item.streamingProviders}
             originPlatform={item.originPlatform}
           />
           <span>{[mediaType, ...item.genres.slice(0, 2)].join(' · ')}</span>
         </span>
-        <ContentRatingBadge
+        {mediaFormat.toLowerCase() !== mediaType.toLowerCase() && <ContentRatingBadge
           rating={mediaFormat}
           className="border-white/75 bg-white/10 text-white"
-        />
+        />}
         {contentRating && <ContentRatingBadge rating={contentRating} className="border-white/75 bg-white/10 text-white" />}
       </div>
 

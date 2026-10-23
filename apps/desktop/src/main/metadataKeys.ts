@@ -59,6 +59,19 @@ async function testFanartKey(value: string): Promise<MetadataKeyTestResult> {
   };
 }
 
+async function testMDBListKey(value: string): Promise<MetadataKeyTestResult> {
+  const key = value.trim();
+  if (!key) return { provider: 'mdblist', ok: false, message: 'Missing key.' };
+  const url = new URL('https://api.mdblist.com/user');
+  url.searchParams.set('apikey', key);
+  const response = await safeFetch(url, { headers: { accept: 'application/json' } }, {
+    allowedHosts: ['api.mdblist.com'], ignoreSkipWindow: true, retries: 0, timeoutMs: 10_000,
+  });
+  const payload = await response.json().catch(() => null);
+  const ok = response.ok && Boolean(payload) && !payload.error;
+  return { provider: 'mdblist', ok, message: ok ? 'MDBList key works.' : `MDBList rejected the key or request (${response.status}).` };
+}
+
 async function testTVDBKey(value: string): Promise<MetadataKeyTestResult> {
   const key = value.trim();
   if (!key) return { provider: 'tvdb', ok: false, message: 'Missing key.' };
@@ -90,6 +103,7 @@ export async function testMetadataKeys(keys: Record<string, string>): Promise<Me
     try {
       if (provider === 'tmdb') return await testTMDBKey(value);
       if (provider === 'omdb') return await testOMDbKey(value);
+      if (provider === 'mdblist') return await testMDBListKey(value);
       if (provider === 'fanart') return await testFanartKey(value);
       if (provider === 'tvdb') return await testTVDBKey(value);
       return { provider, ok: false, message: 'No built-in test for this provider.' };

@@ -1,4 +1,6 @@
 import {
+  Download,
+  LoaderCircle,
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
@@ -14,15 +16,18 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { isPlayerControlTarget } from './playerControls';
 import { formatTime, seekAccessibilityText } from './helpers';
 import type { ControlTab } from './types';
 import SeekHoverPreview from './SeekHoverPreview';
 import { RulerSlider } from '@/components/ui/ruler-slider';
 import { skipPromptLabel, type TimelineSegmentBand } from './skipPrompt';
+import type { AppPlayerControlStyle } from '@/lib/theme';
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 
 interface PlayerControlBarProps {
+  controlStyle?: AppPlayerControlStyle;
   filePath: string;
   showControls: boolean;
   seekSliderRef: React.RefObject<HTMLDivElement | null>;
@@ -37,6 +42,7 @@ interface PlayerControlBarProps {
   isLiveStream: boolean;
   showRemainingTime: boolean;
   progressPct: number;
+  bufferedRanges?: Array<{ start: number; end: number }>;
   /** Intro, recap, outro, credits and preview ranges drawn on the seek bar. */
   timelineSegments?: TimelineSegmentBand[];
   paused: boolean;
@@ -72,9 +78,12 @@ interface PlayerControlBarProps {
   openSubtitlesPanel: () => void;
   openMediaPanel: () => void;
   toggleFullscreen: () => void;
+  downloadVideo?: () => void;
+  downloadBusy?: boolean;
 }
 
 export default function PlayerControlBar({
+  controlStyle = 'default',
   filePath,
   showControls,
   seekSliderRef,
@@ -90,6 +99,7 @@ export default function PlayerControlBar({
   showRemainingTime,
   progressPct,
   timelineSegments = [],
+  bufferedRanges = [],
   paused,
   muted,
   volume,
@@ -120,38 +130,51 @@ export default function PlayerControlBar({
   openSubtitlesPanel,
   openMediaPanel,
   toggleFullscreen,
+  downloadVideo,
+  downloadBusy = false,
 }: PlayerControlBarProps) {
   const engineVolume = clampVolume(volume);
   const volumeIsMuted = muted || engineVolume === 0;
   const visibleVolume = volumeIsMuted ? 0 : engineVolume;
+  const pillControls = controlStyle === 'pill';
+  const downloadButton = (
+    downloadVideo ? <button type="button" onClick={downloadVideo} disabled={downloadBusy}
+          aria-label={downloadBusy ? 'Starting download' : 'Download video'} title="Download video"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:opacity-50">
+          {downloadBusy ? <LoaderCircle aria-hidden="true" className="h-5 w-5 motion-safe:animate-spin" /> : <Download aria-hidden="true" className="h-5 w-5" strokeWidth={2.25} />}
+        </button> : null
+  );
+  const timeDisplay = (
+    <button
+      type="button"
+      onClick={toggleTimeDisplay}
+      className="loom-player-time min-w-[6.75rem] shrink-0 select-none rounded px-1 text-left text-sm font-medium tabular-nums text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] sm:text-base"
+      title={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
+      aria-label={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
+      aria-pressed={showRemainingTime}
+      aria-live="off"
+    >
+      <span ref={currentTimeTextRef} className="text-white">{showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)}</span>
+      <span className="mx-1.5 text-white/45">/</span>
+      <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
+    </button>
+  );
 
   return (
     <div
-      className={`loom-player-controls absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-6 pb-0 pt-10 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+      className={`loom-player-controls absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-6 pb-3 pt-10 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
       aria-hidden={!showControls}
       inert={!showControls}
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={(e) => { if (isPlayerControlTarget(e.target)) e.stopPropagation(); }}
+      onDoubleClick={(e) => { if (isPlayerControlTarget(e.target)) e.stopPropagation(); }}
     >
-      <div className="mb-2 flex items-center gap-3">
+      <div className="loom-player-timeline-row mb-2 flex items-center gap-3">
         {isLiveStream ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
             {liveNowPlaying}
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={toggleTimeDisplay}
-            className="min-w-[6.75rem] shrink-0 select-none rounded px-1 text-left text-sm font-medium tabular-nums text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] sm:text-base"
-            title={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
-            aria-label={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
-            aria-pressed={showRemainingTime}
-            aria-live="off"
-          >
-            <span ref={currentTimeTextRef} className="text-white">{showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)}</span>
-            <span className="mx-1.5 text-white/45">/</span>
-            <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
-          </button>
+          !pillControls && timeDisplay
         )}
 
         {/* Progress bar. A live stream has no timeline to show or seek. */}
@@ -186,10 +209,16 @@ export default function PlayerControlBar({
               {formatTime(position)} / {formatTime(duration)}
             </div>
           )}
-          <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
+          <div className="loom-player-timeline-track absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/15 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
+            {!isLiveStream && duration > 0 && bufferedRanges.map((range, index) => {
+              const start = Math.max(0, Math.min(duration, range.start));
+              const end = Math.max(start, Math.min(duration, range.end));
+              return <div key={index} aria-hidden="true" className="pointer-events-none absolute inset-y-0 rounded-full bg-white/70"
+                style={{ left: `${start / duration * 100}%`, width: `${(end - start) / duration * 100}%` }} />;
+            })}
             <div
               ref={progressFillRef}
-              className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+              className="loom-player-timeline-fill relative h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               style={{ transform: `scaleX(${isLiveStream ? 1 : progressPct / 100})`, transformOrigin: 'left center' }}
             />
             {timelineSegments.length > 0 && (
@@ -221,18 +250,19 @@ export default function PlayerControlBar({
           </div>
           <div
             ref={progressThumbRef}
-            className={`pointer-events-none absolute top-1/2 h-4 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--loom-accent)] shadow-[0_1px_3px_rgba(0,0,0,0.5)] transition-opacity duration-150 ${isLiveStream ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}
+            className={`loom-player-timeline-thumb pointer-events-none absolute top-1/2 h-4 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--loom-accent)] shadow-[0_1px_3px_rgba(0,0,0,0.5)] transition-opacity duration-150 ${isLiveStream ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}
             style={{ left: `${isLiveStream ? 100 : progressPct}%` }}
           />
         </div>
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="loom-player-button-row flex items-center gap-2">
+        <div className="loom-player-primary-controls">
         <button
           type="button"
           onClick={togglePlay}
-          className="grid h-14 w-14 shrink-0 place-items-center rounded-full text-white outline-none transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)] focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+          className="loom-player-play grid h-14 w-14 shrink-0 place-items-center rounded-full text-white outline-none transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)] focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
           title={paused ? 'Play (Space)' : 'Pause (Space)'}
           aria-label={paused ? 'Play' : 'Pause'}
           aria-keyshortcuts="Space"
@@ -240,8 +270,10 @@ export default function PlayerControlBar({
           {paused ? <Play className="h-8 w-8 fill-current" /> : <Pause className="h-8 w-8 fill-current" />}
         </button>
 
+        {pillControls && !isLiveStream ? timeDisplay : null}
+
         {!isLiveStream && (
-          <>
+          <div className="loom-player-skip-controls">
             <button
               type="button"
               onClick={() => seekTo(playbackPositionRef.current - skipBackSeconds)}
@@ -261,10 +293,10 @@ export default function PlayerControlBar({
             >
               <RotateCw className="h-5 w-5" strokeWidth={2.25} />
             </button>
-          </>
+          </div>
         )}
 
-        <div className="flex items-center gap-2">
+        <div className="loom-player-volume flex items-center gap-2">
           <button
             type="button"
             onClick={toggleMute}
@@ -287,14 +319,16 @@ export default function PlayerControlBar({
             onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
             title={`Volume ${Math.round(visibleVolume * 100)}%`}
-            className="w-28"
+            className="loom-player-volume-slider w-28"
           />
         </div>
+        </div>
+        <div className="loom-player-controls-spacer flex-1" />
+        <div className="loom-player-secondary-controls">
 
-        <div className="flex-1" />
-
-        {(hasEpisodes || (isLiveStream && handlePreviousLiveChannel && handleNextLiveChannel)) && (
-          <div className="mr-1 flex items-center gap-1">
+        {(hasEpisodes || (pillControls && downloadVideo) || (isLiveStream && handlePreviousLiveChannel && handleNextLiveChannel)) && (
+          <div className="loom-player-navigation mr-1 flex items-center gap-1">
+            {(hasEpisodes || (isLiveStream && handlePreviousLiveChannel && handleNextLiveChannel)) && <>
             <button
               type="button"
               onClick={isLiveStream ? handlePreviousLiveChannel : handlePrevEpisode}
@@ -313,11 +347,17 @@ export default function PlayerControlBar({
             >
               <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
             </button>
+            </>}
+            {pillControls ? downloadButton : null}
           </div>
         )}
 
-        <div className="mx-1 hidden h-7 w-px bg-white/20 sm:block" aria-hidden="true" />
 
+        {!pillControls ? downloadButton : null}
+
+        <div className="loom-player-controls-divider mx-1 hidden h-7 w-px bg-white/20 sm:block" aria-hidden="true" />
+
+        <div className="loom-player-options">
         {isLiveStream && openChannelList && (
           <button
             type="button"
@@ -367,6 +407,8 @@ export default function PlayerControlBar({
           </button>
         )}
 
+
+
         {!isLiveStream && <button
           type="button"
           onClick={openSubtitlesPanel}
@@ -404,6 +446,8 @@ export default function PlayerControlBar({
         >
           {fullscreen ? <Minimize className="h-5 w-5" strokeWidth={2.25} /> : <Maximize className="h-5 w-5" strokeWidth={2.25} />}
         </button>
+        </div>
+        </div>
       </div>
     </div>
   );

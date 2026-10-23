@@ -1,3 +1,6 @@
+import AddonSourcePicker from './AddonSourcePicker';
+import PlaybackLoadingProgress from './VideoPlayer/PlaybackLoadingProgress';
+import { addonProgressKey, rememberAddonVideo } from '@/lib/addonWatchHistory';
 import { DEFAULT_RESUME_REWIND_SECONDS, normalizeResumeRewind, resumeRewindTarget } from '@/shared/resumeRewind';
 /**
  * VideoPlayer — native-first player with browser and transcode fallback.
@@ -10,7 +13,7 @@ import { Volume2, VolumeX } from 'lucide-react';
 import { usePlaybackProgressDisplay } from './VideoPlayer/usePlaybackProgressDisplay';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
-import LoomLoader from '@/components/LoomLoader';
+import { useToast } from '@/components/ToastProvider';
 import { useTheme } from '@/components/ThemeProvider';
 import { useModalLayer } from '@/components/ui/dialog';
 import { useLibrary, type LocalMediaDetails } from '@/contexts/LibraryContext';
@@ -24,6 +27,7 @@ import {
 import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
 import { isIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 import { isTrustedVideoPageUrl, parseExternalPlaybackReference, videoPageEmbedUrl } from '../shared/externalPlayback.ts';
+import { parseAddonPlaybackReference } from '../shared/addonPlaybackReference.ts';
 import { cleanEpisodeTitleForDisplay, looksLikeGenericEpisodeTitle } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
@@ -103,7 +107,7 @@ import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
 import PlayerSettingsPanel, { type SkipRescanState } from './VideoPlayer/PlayerSettingsPanel';
 import OpenSubtitlesV3Panel, { type PanelSubtitle } from './VideoPlayer/OpenSubtitlesV3Panel';
 import { findAddonSubtitles, type AddonSubtitleOption } from '../lib/addonPlayback';
-import type { SubtitleVideo } from '../lib/openSubtitlesV3';
+import { findOnlineSubtitles, downloadOnlineSubtitle, subtitleLanguageLabel, type SubtitleVideo } from '../lib/openSubtitlesV3';
 import { hasSubtitleImdbId, resolveOnlineSubtitleVideo } from '../lib/subtitleVideoResolver';
 import { cachedDesktopRead } from '@/lib/queryClient';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
@@ -209,19 +213,48 @@ export default function VideoPlayer({
   currentEpisode = 1,
   startPosition,
   isLiveStream = false,
+  preparingAddonSource = false,
   onlineSubtitleVideo,
   addonSubtitles,
+  addonTarget,
+  onRefreshAddonSources,
+  onAddonSourceChange,
   onPlayLiveChannel,
   onClose,
   onEpisodeChange,
 }: VideoPlayerProps) {
+  const torrentSubtitlesOnly = addonSubtitles?.opensubtitlesOnly === true;
+  const torrentSubtitlesOnlyRef = useRef(torrentSubtitlesOnly);
+  torrentSubtitlesOnlyRef.current = torrentSubtitlesOnly;
   const { activeProfile, openGate } = useProfiles();
   const isLiveStreamRef = useRef(isLiveStream);
   isLiveStreamRef.current = isLiveStream;
   const playbackPositionRef = useRef(0);
   const playbackDurationRef = useRef(0);
   const { clockEvents, position, duration, showRemainingTime, toggleTimeDisplay, updatePlaybackSnapshot, seekSliderRef, progressFillRef, progressThumbRef, scrubTimeHudRef, currentTimeTextRef, durationTimeTextRef } = usePlaybackProgressDisplay(isLiveStreamRef, playbackPositionRef, playbackDurationRef);
+  const pendingAddonRelease = useRef<{ path: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  useEffect(() => {
+    // The grant belongs to the selected source, not to a decoder attempt.
+    // StrictMode's immediate effect replay must not revoke that same grant.
+    if (pendingAddonRelease.current?.path === filePath) {
+      clearTimeout(pendingAddonRelease.current.timer);
+      pendingAddonRelease.current = null;
+    }
+    if (!parseAddonPlaybackReference(filePath)) return;
+    return () => {
+      const timer = setTimeout(() => {
+        void desktopApi.stopStremioPlayback(filePath).catch(() => { /* Host may already be closed. */ });
+        if (pendingAddonRelease.current?.timer === timer) pendingAddonRelease.current = null;
+      }, 0);
+      pendingAddonRelease.current = { path: filePath, timer };
+    };
+  }, [filePath]);
   const lastProgressWriteRef = useRef<{ profileId: string | undefined; path: string; position: number; duration: number; request: Promise<void> } | null>(null);
+  const confirmedAddonPlaybackRef = useRef<string | null>(null);
+  const rememberedAddonPlaybackRef = useRef<string | null>(null);
+  const [showAddonSources, setShowAddonSources] = useState(false);
+  const addonSourcePickerTarget = useMemo(() => addonTarget && addonTarget.inlineStreams === undefined
+    ? { ...addonTarget, sourceAddonId: undefined, sourceRestriction: undefined } : addonTarget, [addonTarget]);
   // Every progress write in this component goes through here so a live channel
   // cannot leave a resume point behind, whichever engine reported the position.
   const savePlaybackProgress = useCallback(
@@ -229,19 +262,25 @@ export default function VideoPlayer({
       if (isLiveStreamRef.current) return Promise.resolve();
       const previous = lastProgressWriteRef.current;
       if (previous?.profileId === activeProfile?.id && previous?.path === path && previous.position === position && previous.duration === duration) return previous.request;
-      const request = saveResumeProgress(path, position, duration).catch(error => {
+      const progressPath = addonTarget ? addonProgressKey(addonTarget) : path;
+      if (addonTarget && activeProfile?.id && position > 10 && duration > 0
+        && confirmedAddonPlaybackRef.current === path && rememberedAddonPlaybackRef.current !== path) {
+        rememberAddonVideo(activeProfile.id, addonTarget, artwork);
+        rememberedAddonPlaybackRef.current = path;
+      }
+      const request = saveResumeProgress(progressPath, position, duration).catch(error => {
         if (lastProgressWriteRef.current?.request === request) lastProgressWriteRef.current = null;
         throw error;
       });
       lastProgressWriteRef.current = { profileId: activeProfile?.id, path, position, duration, request };
       return request;
     },
-    [activeProfile?.id],
+    [activeProfile?.id, addonTarget, artwork],
   );
   const playableStartPosition = useCallback(
     (path: string, probedDuration: number): number =>
-      isLiveStreamRef.current ? 0 : getPlayableStartPosition(path, probedDuration),
-    [],
+      isLiveStreamRef.current ? 0 : getPlayableStartPosition(addonTarget ? addonProgressKey(addonTarget) : path, probedDuration),
+    [addonTarget],
   );
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -261,6 +300,7 @@ export default function VideoPlayer({
   const episodePanelDialogRef = useRef<HTMLDivElement>(null);
   const markerDialogRef = useRef<HTMLElement>(null);
   const surfaceDoubleClickGuardUntilMsRef = useRef(0);
+  const surfaceSingleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const transcodeSessionIdRef = useRef<string | null>(null);
   const pendingSourceSwapRef = useRef<{
@@ -277,6 +317,7 @@ export default function VideoPlayer({
   } | null>(null);
   const trackChangeGenerationRef = useRef(0);
   const loadTokenRef = useRef(0);
+  const addonRevokedRef = useRef(false);
   // Native engines tried for the current load token. Each playback request
   // tries each engine at most once, so two engines that both fail after
   // startup end in the browser fallback instead of swapping forever.
@@ -320,7 +361,7 @@ export default function VideoPlayer({
   const audioReapplyAttemptsRef = useRef(0);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitleSelectionExplicitRef = useRef(false);
-  const [initialSubtitlesDefaultEnabled] = useState(loadSubtitlesDefaultEnabled);
+  const [initialSubtitlesDefaultEnabled] = useState(() => !torrentSubtitlesOnly && loadSubtitlesDefaultEnabled());
   const subtitlesDefaultEnabledRef = useRef(initialSubtitlesDefaultEnabled);
   const [initialSubtitleStyle] = useState(loadSubtitleStyle);
   const subtitleStyleRef = useRef<SubtitleStyleSettings>(initialSubtitleStyle);
@@ -331,6 +372,9 @@ export default function VideoPlayer({
   const loadedFilePathRef = useRef('');
   const isScrubbingRef = useRef(false);
   const nativeSeekGuardRef = useRef<{ target: number; expiresAt: number } | null>(null);
+  const nativeSeekLoadingRef = useRef<{ target: number; landedPosition?: number } | null>(null);
+  const [seekLoading, setSeekLoading] = useState(false);
+  useEffect(() => { nativeSeekLoadingRef.current = null; setSeekLoading(false); }, [filePath]);
   const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTranscodeSeekRef = useRef<number | null>(null);
   const transcodeSeekActiveRef = useRef(false);
@@ -361,14 +405,34 @@ export default function VideoPlayer({
   const applyResolvedNativePreferencesRef = useRef<(preferences: PlaybackTrackPreferences) => void>(() => undefined);
 
   const resetSurfaceDoubleClickGuard = useCallback((preserveDoubleClickGuard = false) => {
+    if (surfaceSingleClickTimerRef.current) clearTimeout(surfaceSingleClickTimerRef.current);
+    surfaceSingleClickTimerRef.current = null;
     if (!preserveDoubleClickGuard) surfaceDoubleClickGuardUntilMsRef.current = 0;
   }, []);
 
+  const [bufferingPercent, setBufferingPercent] = useState<number | null>(null);
+  const [bufferedRanges, setBufferedRanges] = useState<Array<{ start: number; end: number }>>([]);
+  const bufferSessionRef = useRef<string | null>(null);
+  useEffect(() => { bufferSessionRef.current = null; setBufferedRanges([]); setBufferingPercent(null); }, [filePath]);
+  useEffect(() => () => resetSurfaceDoubleClickGuard(), [filePath, resetSurfaceDoubleClickGuard]);
+  const { showToast } = useToast();
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const downloadCurrentVideo = useCallback(async () => {
+    if (downloadBusy || !parseAddonPlaybackReference(filePath)) return;
+    setDownloadBusy(true);
+    try {
+      await desktopApi.stremioSourceAction(filePath, 'download', title.slice(0, 256));
+      showToast({ title: 'Download requested', description: 'Torrent sources open in your default torrent app; direct videos use the save dialog.', tone: 'success' });
+    } catch (error) {
+      showToast({ title: 'Could not start download', description: error instanceof Error ? error.message : 'Try another source.', tone: 'error' });
+    } finally { setDownloadBusy(false); }
+  }, [downloadBusy, filePath, title, showToast]);
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
   const [playerState, setPlayerState] = useState<PlayerState>('loading');
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const expiredAddonSource = Boolean(addonTarget && /addon source expired|access changed|source.*expired/i.test(errorMessage || ''));
   const [externalIframeUrl, setExternalIframeUrl] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [nativePlaybackActive, setNativePlaybackActive] = useState(false);
@@ -456,6 +520,20 @@ export default function VideoPlayer({
   }, [logPlaybackTiming]);
 
   const [paused, setPaused] = useState(true);
+  const addonPlaybackSampleRef = useRef<{ path: string; position: number; at: number } | null>(null);
+  useEffect(() => {
+    const previous = addonPlaybackSampleRef.current;
+    const at = performance.now();
+    if (confirmedAddonPlaybackRef.current !== filePath) confirmedAddonPlaybackRef.current = null;
+    // A loaded file or optimistic seek position is not proof it played.
+    // Require the playback clock to advance while the engine is playing.
+    if (addonTarget && !paused && playerState === 'ready' && previous?.path === filePath
+      && at - previous.at >= 250 && position > previous.position
+      && position - previous.position <= Math.max(1, (at - previous.at) / 1000 * 3)) {
+      confirmedAddonPlaybackRef.current = filePath;
+    }
+    addonPlaybackSampleRef.current = !paused && playerState === 'ready' ? { path: filePath, position, at } : null;
+  }, [addonTarget, filePath, paused, playerState, position]);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [volumeIndicatorVisible, setVolumeIndicatorVisible] = useState(false);
@@ -1132,10 +1210,10 @@ export default function VideoPlayer({
     const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
     const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
     const firstAudio = preferredAudio ?? firstTrackIndex(nextTracks, 'audio');
-    const firstSubtitle = preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(nextTracks) : -1);
-    const subtitlesEnabled = hasSubtitlePreference
+    const firstSubtitle = torrentSubtitlesOnlyRef.current ? -1 : preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(nextTracks) : -1);
+    const subtitlesEnabled = !torrentSubtitlesOnlyRef.current && (hasSubtitlePreference
       ? firstSubtitle !== -1
-      : subtitlesDefaultEnabledRef.current;
+      : subtitlesDefaultEnabledRef.current);
 
     probedDurationRef.current = nextDuration;
     probeTracksRef.current = nextTracks;
@@ -1174,7 +1252,7 @@ export default function VideoPlayer({
 
     if (preferences.subtitle === undefined) return;
     const preferredSubtitle = preferredTrackIndex(tracks, 'subtitle', preferences.subtitle);
-    const selectedSubtitle = preferredSubtitle
+    const selectedSubtitle = torrentSubtitlesOnlyRef.current ? -1 : preferredSubtitle
       ?? (preferences.subtitle.enabled ? firstSubtitleTrackIndex(tracks) : -1);
     const subtitlesEnabled = selectedSubtitle >= 0 || selectedSubtitle <= -1000;
     selectedSubtitleTrackIndexRef.current = selectedSubtitle;
@@ -1262,6 +1340,7 @@ export default function VideoPlayer({
     playNextEpisodeNow,
     scheduleNextEpisode,
   } = useEpisodeNavigation({
+    saveProgress: savePlaybackProgress,
     allowAutomaticNext,
     autoplayNextEnabled,
     currentEpisode,
@@ -1542,6 +1621,7 @@ export default function VideoPlayer({
   }, [clearHls, filePath, logPlaybackTiming, onClose, openGate, startTranscodedFallback, stopTranscodeSession]);
 
   const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
+    if (addonRevokedRef.current) return;
     if (!playerActiveRef.current) return;
     if (state.sessionId) setNativeSessionId(state.sessionId);
     if (state.videoWidth && state.videoHeight) {
@@ -1549,7 +1629,18 @@ export default function VideoPlayer({
       const height = state.videoHeight;
       setPlayingVideoSize((previous) => previous?.width === width && previous.height === height ? previous : { width, height });
     }
+    if (bufferSessionRef.current !== state.sessionId) {
+      bufferSessionRef.current = state.sessionId;
+      setBufferedRanges([]);
+      setBufferingPercent(null);
+    }
+    const ranges = state.diagnostics?.bufferedRanges;
+    if (ranges) setBufferedRanges(previous => previous.length === ranges.length
+      && previous.every((range, index) => range.start === ranges[index].start && range.end === ranges[index].end) ? previous : ranges);
     if (state.diagnostics) {
+      const reportedPercent = state.diagnostics.bufferingPercent;
+      setBufferingPercent(state.diagnostics.buffering === true && typeof reportedPercent === 'number' && Number.isFinite(reportedPercent)
+        ? Math.max(0, Math.min(100, reportedPercent)) : null);
       const hardware = state.diagnostics.hardwareDecode;
       const name = state.diagnostics.hardwareDecoder;
       setNativeDecoder((previous) => previous?.sessionId === state.sessionId
@@ -1677,7 +1768,7 @@ export default function VideoPlayer({
         const engineSelectedSubtitle = selectedSubtitleTrack
           ? selectedSubtitleTrack.streamIndex ?? selectedSubtitleTrack.id
           : firstSubtitleTrackIndex(nextTracks);
-        const selectedSubtitle = preferredSubtitle
+        const selectedSubtitle = torrentSubtitlesOnlyRef.current ? -1 : preferredSubtitle
           ?? (subtitlesDefaultEnabledRef.current ? engineSelectedSubtitle : -1);
 
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
@@ -1770,7 +1861,7 @@ export default function VideoPlayer({
         // SPU IDs live in a different namespace. Do not let recurring LibVLC
         // state snapshots overwrite the renderer-overlay selection with the
         // native fallback track (or "off").
-        if (playbackEngineRef.current?.kind !== 'libvlc' && !assDialogueSelectionRef.current) {
+        if (!torrentSubtitlesOnlyRef.current && playbackEngineRef.current?.kind !== 'libvlc' && !assDialogueSelectionRef.current) {
           const selectedSubtitleTrack = state.tracks.find((track) => track.type === 'subtitle' && track.selected);
           const selectedSubtitle = selectedSubtitleTrack
             ? selectedSubtitleTrack.streamIndex ?? selectedSubtitleTrack.id
@@ -1781,10 +1872,28 @@ export default function VideoPlayer({
       }
     }
 
-    if (!suppressSeekSnapshot && (state.status === 'starting' || state.status === 'loading')) {
+    const pendingSeek = nativeSeekLoadingRef.current;
+    if (pendingSeek && state.status === 'ready' && reportedPosition !== null && !state.diagnostics?.buffering) {
+      const landed = Math.abs(reportedPosition - pendingSeek.target) <= NATIVE_SEEK_LANDING_TOLERANCE_SECONDS;
+      if (landed && (userPausedRef.current || (pendingSeek.landedPosition !== undefined && reportedPosition > pendingSeek.landedPosition + 0.05))) {
+        nativeSeekLoadingRef.current = null;
+        setSeekLoading(false);
+      } else if (landed && pendingSeek.landedPosition === undefined) {
+        // An engine can acknowledge the seek before a torrent has delivered its data.
+        // Wait for its playback clock to advance before dismissing the loader.
+        pendingSeek.landedPosition = reportedPosition;
+      }
+    }
+    const awaitingSeekData = Boolean(nativeSeekLoadingRef.current);
+    if (['ended', 'error', 'closed'].includes(state.status)) {
+      nativeSeekLoadingRef.current = null;
+      setSeekLoading(false);
+    }
+
+    if ((awaitingSeekData && state.status === 'ready') || ((!suppressSeekSnapshot || Boolean(nativeSeekGuardRef.current)) && (state.status === 'starting' || state.status === 'loading'))) {
       setPlayerState('loading');
-      setStatusMessage('Opening with native player...');
-      setPaused(true);
+      setStatusMessage(awaitingSeekData ? 'Seeking...' : nativeSeekGuardRef.current ? 'Buffering...' : 'Opening with native player...');
+      if (!suppressSeekSnapshot && !awaitingSeekData) setPaused(true);
     } else if (!suppressSeekSnapshot && state.status === 'ready') {
       reportFirstFrame(playbackEngineRef.current?.kind || 'libvlc');
       setPlayerState('ready');
@@ -1945,10 +2054,10 @@ export default function VideoPlayer({
     setMediaTracks(externalSubtitleTracks);
     const preferences = sharedTrackPreferencesRef.current;
     const preferredExternalSubtitle = preferredTrackIndex(externalSubtitleTracks, 'subtitle', preferences.subtitle);
-    const firstExternalSubtitle = preferredExternalSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(externalSubtitleTracks) : -1);
-    const externalSubtitlesEnabled = preferences.subtitle !== undefined
+    const firstExternalSubtitle = torrentSubtitlesOnlyRef.current ? -1 : preferredExternalSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(externalSubtitleTracks) : -1);
+    const externalSubtitlesEnabled = !torrentSubtitlesOnlyRef.current && (preferences.subtitle !== undefined
       ? firstExternalSubtitle !== -1
-      : subtitlesDefaultEnabledRef.current;
+      : subtitlesDefaultEnabledRef.current);
     subtitlesDefaultEnabledRef.current = externalSubtitlesEnabled;
     selectedSubtitleTrackIndexRef.current = firstExternalSubtitle;
     setSelectedSubtitleTrackIndex(firstExternalSubtitle);
@@ -1958,6 +2067,7 @@ export default function VideoPlayer({
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
+    if (!filePath) return;
     resetSurfaceDoubleClickGuard();
     const loadToken = ++loadTokenRef.current;
     let nativeMetadataTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2006,6 +2116,7 @@ export default function VideoPlayer({
     if (!isReloadingSameFile) libVlcSubtitleFallbackRef.current = false;
     initialResumePositionRef.current = requestedStartPosition;
     playerActiveRef.current = true;
+    addonRevokedRef.current = false;
     userPausedRef.current = false;
     didTryTranscodeRef.current = false;
     transcodeStartSecondsRef.current = 0;
@@ -2044,6 +2155,7 @@ export default function VideoPlayer({
     setErrorMessage(null);
     setStreamUrl('');
 
+    const addonReference = parseAddonPlaybackReference(filePath);
     const externalRef = parseExternalPlaybackReference(filePath);
     if (externalRef) {
       // Only known video-site pages are framed, and only through their embed
@@ -2098,7 +2210,7 @@ export default function VideoPlayer({
         const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath)
           && !isMediaProtocolUrl(filePath)
           && !isIptvStream
-          && !externalRef;
+          && !externalRef && !addonReference;
         const preferencesPromise = trackPreferencesLoadRef.current.then((loadedPreferences) => {
           // Preserve a selection made during this player session if the saved
           // preference request finishes after playback has already started.
@@ -2131,7 +2243,7 @@ export default function VideoPlayer({
             ? [LibVlcPlaybackEngine]
             // An add-on's direct media (MKV, HEVC, …) needs the native engines;
             // the main process revalidates the URL before either opens it.
-            : externalRef
+            : addonReference
               ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
               : [];
         for (const NativePlaybackEngine of nativeEngineFactories) {
@@ -2162,9 +2274,9 @@ export default function VideoPlayer({
               // Start with SPU support available. Once LibVLC reports native
               // track IDs, Loom keeps ASS, SSA, and bitmap tracks native while
               // SRT and WebVTT can use the styled Loom overlay.
-              nativeSubtitles: engine.kind === 'libvlc'
+              nativeSubtitles: !torrentSubtitlesOnlyRef.current && (engine.kind === 'libvlc'
                 ? subtitlesDefaultEnabledRef.current
-                : subtitlesDefaultEnabledRef.current && selectedSubtitleTrackIndexRef.current !== -1,
+                : subtitlesDefaultEnabledRef.current && selectedSubtitleTrackIndexRef.current !== -1),
             });
           } catch (error) {
             logPlaybackTiming('fallback_started', {
@@ -2271,6 +2383,27 @@ export default function VideoPlayer({
     updatePlaybackSnapshot,
     visibleSubtitles,
   ]);
+
+  useEffect(() => desktopApi.onStremioPlaybackRevoked(reference => {
+    if (reference !== filePath) return;
+    addonRevokedRef.current = true;
+    loadTokenRef.current += 1;
+    browserStreamGenerationRef.current += 1;
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    const video = videoRef.current;
+    if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+    const engine = playbackEngineRef.current;
+    playbackEngineRef.current = null;
+    void engine?.destroy();
+    setStreamUrl('');
+    setNativePlaybackActive(false);
+    setNativeEngineKind(null);
+    setPlayerState('error');
+    setStatusMessage('');
+    setErrorMessage('Addon playback access changed. Close the player and choose a source again.');
+    document.documentElement.classList.remove('loom-native-active');
+  }), [filePath]);
 
   // ─── Player binding, events, and fallback ────────────────────────────────
   useEffect(() => {
@@ -2479,7 +2612,8 @@ export default function VideoPlayer({
     const onWaiting = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
       if (pendingSwap) return;
-      if (hasPlayableDataRef.current || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
+      // Having played earlier does not mean the new seek position is buffered.
+      if (!video.seeking && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
       setPlayerState('loading');
       setStatusMessage('Buffering...');
     };
@@ -2564,8 +2698,22 @@ export default function VideoPlayer({
       }
     };
 
-    const onPlayable = () => {
+    const onSeeking = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
+      setSeekLoading(true);
+      setPlayerState('loading');
+      setStatusMessage('Seeking...');
+    };
+    const onSeeked = () => {
+      if (sourceToken !== sourceLoadTokenRef.current || video.seeking) return;
+      const required = video.paused ? HTMLMediaElement.HAVE_CURRENT_DATA : HTMLMediaElement.HAVE_FUTURE_DATA;
+      if (video.readyState >= required) onPlayable();
+    };
+    const onPlayable = () => {
+      if (sourceToken !== sourceLoadTokenRef.current || video.seeking) return;
+      const required = video.paused ? HTMLMediaElement.HAVE_CURRENT_DATA : HTMLMediaElement.HAVE_FUTURE_DATA;
+      if (video.readyState < required) return;
+      setSeekLoading(false);
       const timingAttempt = playbackTimingAttemptRef.current;
       if (timingAttempt && !timingAttempt.sourceOpenedReported) {
         timingAttempt.sourceOpenedReported = true;
@@ -2582,7 +2730,8 @@ export default function VideoPlayer({
     };
 
     const onPlaying = () => {
-      if (sourceToken !== sourceLoadTokenRef.current) return;
+      if (sourceToken !== sourceLoadTokenRef.current || video.seeking) return;
+      setSeekLoading(false);
       hlsRecoveryAttemptsRef.current = 0;
       hasPlayableDataRef.current = true;
       transcodeSeekActiveRef.current = false;
@@ -2666,8 +2815,24 @@ export default function VideoPlayer({
       setErrorMessage(mediaErrorMessage(video.error));
     };
 
+    const onBufferProgress = () => {
+      if (sourceToken !== sourceLoadTokenRef.current) return;
+      const offset = streamIsTranscoded && !streamIsSeekableRef.current ? transcodeStartSecondsRef.current : 0;
+      const ranges = Array.from({ length: video.buffered.length }, (_, index) => ({
+        start: video.buffered.start(index) + offset, end: video.buffered.end(index) + offset,
+      }));
+      setBufferedRanges(previous => previous.length === ranges.length
+        && previous.every((range, index) => range.start === ranges[index].start && range.end === ranges[index].end) ? previous : ranges);
+    };
+    setBufferedRanges([]);
+    onBufferProgress();
+    video.addEventListener('progress', onBufferProgress);
+    video.addEventListener('timeupdate', onBufferProgress);
+    video.addEventListener('emptied', onBufferProgress);
     video.addEventListener('loadstart', onLoadStart);
     video.addEventListener('waiting', onWaiting);
+    video.addEventListener('seeking', onSeeking);
+    video.addEventListener('seeked', onSeeked);
     video.addEventListener('loadeddata', onPlayable);
     video.addEventListener('canplay', onPlayable);
     video.addEventListener('playing', onPlaying);
@@ -2693,8 +2858,13 @@ export default function VideoPlayer({
     return () => {
       sourceLoadTokenRef.current += 1;
       video.autoplay = false;
+      video.removeEventListener('progress', onBufferProgress);
+      video.removeEventListener('timeupdate', onBufferProgress);
+      video.removeEventListener('emptied', onBufferProgress);
       video.removeEventListener('loadstart', onLoadStart);
       video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('seeking', onSeeking);
+      video.removeEventListener('seeked', onSeeked);
       video.removeEventListener('loadeddata', onPlayable);
       video.removeEventListener('canplay', onPlayable);
       video.removeEventListener('playing', onPlaying);
@@ -2812,7 +2982,7 @@ export default function VideoPlayer({
     if (playbackEngineRef.current) {
       const snapshotPosition = playbackPositionRef.current;
       const snapshotDuration = playbackDurationRef.current || probedDurationRef.current;
-      if (snapshotPosition > 10 && snapshotDuration > 0) {
+      if (snapshotPosition > (addonTarget ? 0 : 10) && snapshotDuration > 0) {
         await savePlaybackProgress(filePath, snapshotPosition, snapshotDuration);
       }
       return;
@@ -2827,10 +2997,10 @@ export default function VideoPlayer({
       snapshotDuration: playbackDurationRef.current,
       videoDuration: video?.duration ?? 0,
     });
-    if (snapshot.position <= 10 || snapshot.duration <= 0) return;
+    if (snapshot.position <= (addonTarget ? 0 : 10) || snapshot.duration <= 0) return;
     updatePlaybackSnapshot(snapshot.position, snapshot.duration, { forceReact: true });
     await savePlaybackProgress(filePath, snapshot.position, snapshot.duration);
-  }, [filePath, savePlaybackProgress, streamIsTranscoded, updatePlaybackSnapshot]);
+  }, [addonTarget, filePath, savePlaybackProgress, streamIsTranscoded, updatePlaybackSnapshot]);
 
   const shutdownPlayback = useCallback((): Promise<void> => {
     if (shutdownPromiseRef.current) return shutdownPromiseRef.current;
@@ -2915,7 +3085,7 @@ export default function VideoPlayer({
     void handleBack();
   }, [fullscreen, handleBack, showLiveGuide, showMarkerEditor, showMediaPanel, showSidebar, toggleFullscreen]);
 
-  useModalLayer({ contentRef: containerRef, onEscape: handlePlayerEscape });
+  useModalLayer({ contentRef: containerRef, onEscape: handlePlayerEscape, priority: -1 });
   useModalLayer({
     open: playerState === 'error',
     contentRef: errorDialogRef,
@@ -3081,8 +3251,19 @@ export default function VideoPlayer({
         expiresAt: performance.now() + NATIVE_SEEK_GUARD_TIMEOUT_MS,
       };
       nativeSeekGuardRef.current = seekGuard;
+      nativeSeekLoadingRef.current = { target: nextPosition };
+      setBufferingPercent(null);
+      setSeekLoading(true);
+      setPlayerState('loading');
+      setStatusMessage('Buffering...');
       void playbackEngineRef.current.seek(nextPosition).catch(() => {
-        if (nativeSeekGuardRef.current === seekGuard) nativeSeekGuardRef.current = null;
+        if (nativeSeekGuardRef.current === seekGuard) {
+          nativeSeekGuardRef.current = null;
+          nativeSeekLoadingRef.current = null;
+          setSeekLoading(false);
+          setPlayerState('ready');
+          setStatusMessage('');
+        }
       });
       return;
     }
@@ -3091,6 +3272,9 @@ export default function VideoPlayer({
 
     const video = videoRef.current;
     if (!video) return;
+    setSeekLoading(true);
+    setPlayerState('loading');
+    setStatusMessage('Seeking...');
     const shouldResumeAfterSeek = !video.paused && !userPausedRef.current;
     suppressPauseIntentUntilMsRef.current = performance.now() + 1500;
     const seekGeneration = ++transcodeSeekGenerationRef.current;
@@ -3461,6 +3645,7 @@ export default function VideoPlayer({
   }, [restartForTrackChange, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number, temporary = false, onFailure?: () => void) => {
+    if (torrentSubtitlesOnlyRef.current && trackIndex !== -1) return;
     setSubtitleSelectionRevision(++subtitleSelectionRevisionRef.current);
     setOnlineCaption(null);
     if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
@@ -3589,7 +3774,7 @@ export default function VideoPlayer({
     // Some macOS/Electron input paths report the second press through the
     // click count but do not deliver a reliable `dblclick` event over the
     // transparent native-video composition. Suppress the following dblclick
-    // so fullscreen toggles exactly once. Single clicks never change playback.
+    // so fullscreen toggles exactly once. Delay single clicks until that window closes.
     if (event.detail > 1) {
       resetSurfaceDoubleClickGuard();
       if (event.detail === 2) {
@@ -3600,7 +3785,11 @@ export default function VideoPlayer({
     }
 
     resetSurfaceDoubleClickGuard();
-  }, [resetSurfaceDoubleClickGuard, playerState, showMediaPanel, showSidebar, toggleFullscreen]);
+    surfaceSingleClickTimerRef.current = setTimeout(() => {
+      surfaceSingleClickTimerRef.current = null;
+      togglePlay();
+    }, SURFACE_DOUBLE_CLICK_WINDOW_MS);
+  }, [resetSurfaceDoubleClickGuard, playerState, showMediaPanel, showSidebar, toggleFullscreen, togglePlay]);
 
   const handleSurfaceDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (isPlayerControlTarget(event.target)) {
@@ -4074,9 +4263,49 @@ export default function VideoPlayer({
     setOnlineSubtitleDelay(0);
     setOnlineCaption({ key: onlinePlaybackKey, provider, subtitle, cues });
   };
+  const applyOnlineCaptionRef = useRef(applyOnlineCaption);
+  useEffect(() => { applyOnlineCaptionRef.current = applyOnlineCaption; });
+  const automaticSubtitleAttemptRef = useRef<string | null>(null);
+  const [automaticSubtitleError, setAutomaticSubtitleError] = useState('');
+  useEffect(() => { setAutomaticSubtitleError(''); }, [onlinePlaybackKey]);
+  useEffect(() => {
+    if (!torrentSubtitlesOnly || playerState !== 'ready' || !onlineSubtitleVideo
+      || activeOnlineCaption || automaticSubtitleAttemptRef.current === onlinePlaybackKey) return;
+    const controller = new AbortController();
+    const revision = subtitleSelectionRevisionRef.current;
+    automaticSubtitleAttemptRef.current = onlinePlaybackKey;
+    let finished = false;
+    void (async () => {
+      try {
+        const results = await findOnlineSubtitles(onlineSubtitleVideo, controller.signal);
+        const english = results.filter(subtitle => /^English(?: \(|$)/.test(subtitleLanguageLabel(subtitle.language)));
+        if (!english.length) throw new Error('No English subtitles are available. Choose another language below.');
+        for (const [index, subtitle] of english.slice(0, 3).entries()) {
+          controller.signal.throwIfAborted();
+          if (subtitleSelectionRevisionRef.current !== revision) return;
+          try {
+            const text = await downloadOnlineSubtitle(subtitle, controller.signal);
+            if (controller.signal.aborted || subtitleSelectionRevisionRef.current !== revision) return;
+            await applyOnlineCaptionRef.current('opensubtitles', subtitle, text, controller.signal);
+            return;
+          } catch (error) {
+            if (controller.signal.aborted || index === Math.min(english.length, 3) - 1) throw error;
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted && subtitleSelectionRevisionRef.current === revision) {
+          setAutomaticSubtitleError('English subtitles could not be loaded. Choose a subtitle below or refresh the list.');
+        }
+      } finally { finished = true; }
+    })();
+    return () => {
+      controller.abort();
+      if (!finished && automaticSubtitleAttemptRef.current === onlinePlaybackKey) automaticSubtitleAttemptRef.current = null;
+    };
+  }, [torrentSubtitlesOnly, onlinePlaybackKey, onlineSubtitleVideo, playerState, activeOnlineCaption]);
   return (
     <div
-      className={`loom-player-root fixed inset-0 z-[90] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''}`}
+      className={`loom-player-root fixed inset-0 z-[90] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''} ${theme.playerControlStyle === 'pill' ? 'loom-player-pill' : ''}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="loom-player-title"
@@ -4084,6 +4313,8 @@ export default function VideoPlayer({
       tabIndex={-1}
       data-modal-layer="video-player"
       onPointerDownCapture={handleRootPointerDownCapture}
+      onClick={handleSurfaceClick}
+      onDoubleClickCapture={handleSurfaceDoubleClickCapture}
       onFocusCapture={handleRootFocusCapture}
       // Reveal the chrome from anywhere in the player, not just the video
       // surface. The surface excludes the letterboxed margins and sits under
@@ -4103,8 +4334,8 @@ export default function VideoPlayer({
           font-weight: ${subtitleStyle.backgroundEnabled ? 700 : 600};
           text-shadow: ${subtitleCueShadow};
         }
-        .loom-player-root *:focus:not(input):not(select):not(textarea),
-        .loom-player-root *:focus-visible:not(input):not(select):not(textarea) {
+        .loom-player-root *:focus:not(input):not(select):not(textarea):not([contenteditable]):not([role="slider"]),
+        .loom-player-root *:focus-visible:not(input):not(select):not(textarea):not([contenteditable]):not([role="slider"]) {
           outline: none !important;
           box-shadow: none !important;
         }`}
@@ -4112,8 +4343,6 @@ export default function VideoPlayer({
       <div
         className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden ${nativePlaybackActive ? 'bg-transparent' : 'bg-black'} ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
         onPointerMove={handlePointerMove}
-        onClick={handleSurfaceClick}
-        onDoubleClickCapture={handleSurfaceDoubleClickCapture}
       >
         <div className="loom-player-drag-region" aria-hidden="true" />
 
@@ -4137,11 +4366,19 @@ export default function VideoPlayer({
         </div>
 
         <TopPlayerControls
-          visible={showTopControls && playerState !== 'error'}
+          visible={!filePath || (showTopControls && (playerState !== 'error' || Boolean(addonTarget)))}
           label={activeIframeUrl ? title : (currentEpLabel ?? title)}
           live={isLiveStream}
-          actionLabel={activeIframeUrl && hasEpisodes ? 'Sources' : undefined}
-          onAction={activeIframeUrl && hasEpisodes ? openEpisodePanel : undefined}
+          actionLabel={addonTarget && onAddonSourceChange ? 'Sources' : activeIframeUrl && hasEpisodes ? 'Sources' : undefined}
+          onAction={addonTarget && onAddonSourceChange ? () => {
+            userPausedRef.current = true;
+            if (playbackEngineRef.current) void playbackEngineRef.current.pause().catch(() => undefined);
+            videoRef.current?.pause();
+            setPaused(true);
+            setShowSidebar(false);
+            setShowMediaPanel(false);
+            setShowAddonSources(true);
+          } : activeIframeUrl && hasEpisodes ? openEpisodePanel : undefined}
           fullscreen={fullscreen}
           onToggleFullscreen={activeIframeUrl ? toggleFullscreen : undefined}
           onBack={handleBack}
@@ -4215,7 +4452,8 @@ export default function VideoPlayer({
         </div>
 
         <PauseOverlay
-          visible={paused && playerState !== 'error' && (nativePlaybackActive || playerState === 'ready')}
+          centered={Boolean(addonTarget)}
+          visible={paused && !seekLoading && playerState === 'ready'}
           title={title}
           logoSources={pauseLogoSources}
           hasEpisodes={hasEpisodes}
@@ -4226,23 +4464,18 @@ export default function VideoPlayer({
           isLiveStream={isLiveStream}
         />
 
-        {playerState === 'loading' && (
+        {(preparingAddonSource || (playerState === 'loading' && Boolean(filePath))) && (
           <div
-            role="status"
-            aria-atomic="true"
-            aria-busy="true"
-            aria-live="polite"
             className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center"
           >
-            <span aria-hidden="true">
-              <LoomLoader
-                style={theme.loaderStyle}
-                className="text-white/85"
-                markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-6 w-auto' : 'h-10 w-10'}
-                color="currentColor"
-              />
-            </span>
-            <p className="text-sm text-white/80">{statusMessage || 'Loading...'}</p>
+            {addonTarget && position === 0 && artwork?.backdrop ? <img src={artwork.backdrop} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover brightness-[.3]" /> : null}
+            <PlaybackLoadingProgress
+              title={title}
+              logoSources={addonTarget || seekLoading ? pauseLogoSources : undefined}
+              progressPercent={preparingAddonSource ? null : bufferingPercent}
+              status={preparingAddonSource ? 'Finding a playback source...' : statusMessage || 'Buffering video...'}
+
+            />
           </div>
         )}
 
@@ -4274,15 +4507,15 @@ export default function VideoPlayer({
             className="loom-modal-surface absolute inset-0 z-20 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center"
           >
             <p id="loom-player-error-title" className="text-sm text-white/90">Playback failed</p>
-            <p id="loom-player-error-description" className="text-xs text-white/70 max-w-xl">{errorMessage || 'Unable to play this file.'}</p>
+            <p id="loom-player-error-description" className="text-xs text-white/70 max-w-xl">{expiredAddonSource ? 'This source is no longer available. Refresh the sources to continue.' : errorMessage?.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') || 'Unable to play this file.'}</p>
             <div className="flex gap-3">
               <button
                 ref={errorRetryButtonRef}
                 type="button"
-                onClick={handleRetry}
+                onClick={expiredAddonSource && onRefreshAddonSources ? onRefreshAddonSources : handleRetry}
                 className="px-3 py-1.5 rounded bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] text-sm hover:bg-[var(--loom-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
-                Retry
+                {expiredAddonSource && onRefreshAddonSources ? 'Refresh sources' : 'Retry'}
               </button>
               <button
                 ref={errorCloseButtonRef}
@@ -4405,8 +4638,9 @@ export default function VideoPlayer({
 
         {/* Controls overlay */}
         <PlayerControlBar
+          controlStyle={theme.playerControlStyle}
           filePath={filePath}
-          showControls={showControls && playerState !== 'error' && !activeIframeUrl}
+          showControls={(showControls || !filePath) && (playerState !== 'error' || Boolean(addonTarget)) && !activeIframeUrl}
           seekSliderRef={seekSliderRef}
           progressFillRef={progressFillRef}
           progressThumbRef={progressThumbRef}
@@ -4420,6 +4654,9 @@ export default function VideoPlayer({
           showRemainingTime={showRemainingTime}
           progressPct={progressPct}
           timelineSegments={timelineSegments}
+          bufferedRanges={bufferedRanges}
+          downloadVideo={addonTarget && !isLiveStream && parseAddonPlaybackReference(filePath) ? () => void downloadCurrentVideo() : undefined}
+          downloadBusy={downloadBusy}
           paused={paused}
           muted={muted}
           volume={volume}
@@ -4457,17 +4694,30 @@ export default function VideoPlayer({
         />
       </div>
 
+      {showAddonSources && addonSourcePickerTarget && onAddonSourceChange ? <AddonSourcePicker
+        target={addonSourcePickerTarget} compactRows
+        onClose={() => setShowAddonSources(false)}
+        onPlay={selection => {
+          const position = playbackPositionRef.current;
+          setShowAddonSources(false);
+          void persistFinalPlaybackProgress().then(
+            () => onAddonSourceChange(selection, position),
+            () => onAddonSourceChange(selection, position),
+          );
+        }} /> : null}
+
       {showMediaPanel && (
         <div
           ref={mediaPanelDialogRef}
           role="dialog"
           aria-modal="true"
-          aria-label={mediaPanelTab === 'subtitles' ? 'Subtitles' : 'Playback settings'}
+          aria-label={mediaPanelTab === 'subtitles' ? torrentSubtitlesOnly ? 'Open Subtitles' : 'Subtitles' : 'Playback settings'}
           tabIndex={-1}
           data-modal-layer="playback-settings"
           className="contents"
         >
           <PlayerSettingsPanel
+            onlineSubtitlesOnly={torrentSubtitlesOnly}
             videoOnly={isLiveStream}
             mediaPanelWidth={mediaPanelWidth}
             setMediaPanelWidth={setMediaPanelWidth}
@@ -4507,7 +4757,8 @@ export default function VideoPlayer({
             onlineSubtitleTiming={activeOnlineCaption ? { delay: onlineSubtitleDelay, setDelay: setOnlineSubtitleDelay } : undefined}
             onlineSubtitles={isLiveStream ? undefined : (onlineTabActive) => (
               <div className="space-y-2">
-                {addonSubtitles && (
+                {torrentSubtitlesOnly && automaticSubtitleError && !activeOnlineCaption && <p role="status" className="text-xs text-white/70">{automaticSubtitleError}</p>}
+                {addonSubtitles && !torrentSubtitlesOnly && (
                   <OpenSubtitlesV3Panel<AddonSubtitleOption>
                     key={`addon:${onlinePlaybackKey}`}
                     autoSearch={onlineTabActive}
@@ -4534,6 +4785,8 @@ export default function VideoPlayer({
                 )}
                 <OpenSubtitlesV3Panel
                   key={onlinePlaybackKey}
+                  onOff={torrentSubtitlesOnly ? () => selectSubtitleTrack(-1, true) : undefined}
+                  offSelected={!activeOnlineCaption}
                   autoSearch={onlineTabActive}
                   selectedId={activeOnlineCaption?.provider === 'opensubtitles' ? activeOnlineCaption.subtitle.id : undefined}
                   resolveVideo={async (signal): Promise<SubtitleVideo> => {

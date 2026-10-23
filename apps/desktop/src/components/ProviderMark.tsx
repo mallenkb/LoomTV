@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEventHandler } from 'react';
+import { WATCH_PROVIDERS_PANEL_ID } from '@/components/DetailWhereToWatch';
 import { Clapperboard } from 'lucide-react';
 import { desktopApi } from '@/lib/desktopApi';
 import { queryClient, queryScope } from '@/lib/queryClient';
@@ -7,6 +8,8 @@ import { preferredProviderLogoUrl } from '@/shared/providerLogos';
 
 type ProviderMarkProps = {
   mediaId: string;
+  onOpenProviders?: MouseEventHandler<HTMLButtonElement>;
+  providersOpen?: boolean;
   providers?: readonly StreamingProvider[];
   originPlatform?: OriginPlatform;
   className?: string;
@@ -29,7 +32,7 @@ function primaryProvider(providers: readonly StreamingProvider[] | undefined): S
   )) || providers[0];
 }
 
-export default function ProviderMark({ mediaId, providers, originPlatform, className = 'h-8 w-8' }: ProviderMarkProps) {
+export default function ProviderMark({ mediaId, providers, originPlatform, onOpenProviders, providersOpen = false, className = 'h-8 w-8' }: ProviderMarkProps) {
   const [resolvedProviders, setResolvedProviders] = useState<readonly StreamingProvider[] | undefined>(providers);
   const [logoFailed, setLogoFailed] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -100,9 +103,11 @@ export default function ProviderMark({ mediaId, providers, originPlatform, class
       <button
         type="button"
         className={`grid ${className} shrink-0 place-items-center text-white shadow-lg outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-white/80 ${hasLogo ? 'overflow-hidden rounded-xl border border-white/30 bg-black/70' : 'rounded-full border border-white/80 bg-black/45'}`}
-        aria-label={provider || originPlatform ? providerLabel : 'Streaming provider unavailable'}
-        aria-expanded={tooltipOpen}
-        onClick={() => setTooltipOpen((open) => !open)}
+        aria-label={onOpenProviders ? 'Where to watch' : provider || originPlatform ? providerLabel : 'Streaming provider unavailable'}
+        aria-haspopup={onOpenProviders ? 'dialog' : undefined}
+        aria-controls={onOpenProviders && providersOpen ? WATCH_PROVIDERS_PANEL_ID : undefined}
+        aria-expanded={onOpenProviders ? providersOpen : tooltipOpen}
+        onClick={onOpenProviders || (() => setTooltipOpen((open) => !open))}
       >
         {providerLogoUrl ? (
           <img
@@ -117,7 +122,7 @@ export default function ProviderMark({ mediaId, providers, originPlatform, class
           <Clapperboard className="h-4 w-4" aria-hidden="true" />
         )}
       </button>
-      {tooltipOpen && (
+      {tooltipOpen && !onOpenProviders && (
         <span
           role="tooltip"
           className="loom-provider-tooltip pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--loom-surface-3)] px-2.5 py-1 text-xs font-medium text-[var(--loom-text)] shadow-lg ring-1 ring-white/10"

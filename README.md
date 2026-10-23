@@ -117,7 +117,7 @@ The Discover page shows titles from public catalogs so you can find something to
 Two kinds of source can play from Discover:
 
 - The built-in Internet Archive catalog, limited to its Feature Films collection with adult content filtered out. The Internet Archive hosts these films for free public viewing.
-- Stremio-compatible add-ons you install yourself by manifest URL in Settings. Loom plays their HTTPS and HLS streams and always refuses torrent and peer-to-peer sources.
+- Stremio-compatible add-ons you install by manifest URL in Settings. Loom supports HTTPS and HLS streams, plus supported torrent sources through a local Stremio Service or its bundled engine. Torrent playback uses host-controlled sessions and a local relay. Cinemeta and WatchHub are installed by default when metadata offline mode is off; previous removal choices are preserved. Online subtitles use Stremio's OpenSubtitles v3 service on request.
 
 Loom ships no add-on that provides commercial films or series. An add-on you install decides what it streams, so install only add-ons whose sources you are allowed to watch.
 

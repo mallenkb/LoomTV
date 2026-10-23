@@ -1,3 +1,4 @@
+import AddonSourcePicker from './components/AddonSourcePicker';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -47,9 +48,11 @@ import {
 import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
 import { ArtworkSuspensionContext, useWindowHiddenFor } from './contexts/ArtworkSuspensionContext';
 import { isIptvPlaybackReference } from './shared/iptvPlayback.ts';
-import { buildExternalPlaybackReference } from './shared/externalPlayback.ts';
-import type { AddonStreamPlayer, AddonSubtitleContext } from './lib/addonPlayback';
+import { parseAddonPlaybackReference } from './shared/addonPlaybackReference.ts';
+import { addonPlaybackOptions, type AddonVideoTarget, type AddonStreamPlayer, type AddonSubtitleContext } from './lib/addonPlayback';
 import type { SubtitleVideo } from './lib/openSubtitlesV3';
+import { addonEpisodeTarget, addonPlayerEpisodeList } from './lib/addonEpisodeNavigation';
+import { addonProgressKey } from './lib/addonWatchHistory';
 
 interface NowPlaying {
   playbackRequestId: string;
@@ -77,6 +80,7 @@ interface NowPlaying {
   subtitleVideo?: SubtitleVideo;
   /** The add-on video being played, for add-on subtitle search. */
   addonSubtitles?: AddonSubtitleContext;
+  addonTarget?: AddonVideoTarget;
 }
 
 function isRemotePlaybackSource(filePath: string): boolean {
@@ -406,6 +410,7 @@ function AppShell({
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [pendingAddon, setPendingAddon] = useState<{ target: AddonVideoTarget; artwork: Parameters<AddonStreamPlayer>[2]; resumeLastSource?: boolean } | null>(null);
   // Playback and a long-hidden window both release library artwork.
   const windowHiddenLong = useWindowHiddenFor();
   const artworkSuspended = Boolean(nowPlaying) || windowHiddenLong;
@@ -473,7 +478,7 @@ function AppShell({
     mediaId?: string,
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
-    options?: { isLiveStream?: boolean; subtitleVideo?: SubtitleVideo; addonSubtitles?: AddonSubtitleContext },
+    options?: { isLiveStream?: boolean; subtitleVideo?: SubtitleVideo; addonSubtitles?: AddonSubtitleContext; addonTarget?: AddonVideoTarget },
   ) => {
     const openPlayer = async () => {
       // The profile gate and the media IPC handler read the same persisted
@@ -512,6 +517,7 @@ function AppShell({
         isLiveStream: options?.isLiveStream === true,
         subtitleVideo: options?.subtitleVideo,
         addonSubtitles: options?.addonSubtitles,
+        addonTarget: options?.addonTarget,
       });
     };
     void openPlayer();
@@ -537,25 +543,39 @@ function AppShell({
     );
   }, [handlePlayMedia]);
 
-  /** A stream chosen from an add-on source. It has no library item or episode list. */
+  /** A fresh host playback reference, with the provider episode list when available. */
   const handlePlayAddonStream = useCallback<AddonStreamPlayer>((streamUrl, title, artwork, options) => {
+    if (streamUrl === '' && options?.addonTarget) {
+      setPendingAddon({ target: options.addonTarget, artwork, resumeLastSource: options.resumeLastSource });
+      return;
+    }
+    if (!parseAddonPlaybackReference(streamUrl)) throw new Error('This addon source must be refreshed before playback.');
+    const episodeList = options?.addonTarget ? addonPlayerEpisodeList(options.addonTarget) : undefined;
     handlePlayMedia(
-      buildExternalPlaybackReference(streamUrl),
-      title,
+      streamUrl,
+      episodeList ? options?.addonTarget?.metaItem?.title || title : title,
       undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      episodeList?.episodes,
+      episodeList?.episodeFiles,
+      episodeList?.currentSeason,
+      episodeList?.currentEpisode,
       undefined,
       artwork,
       undefined,
-      { subtitleVideo: options?.subtitleVideo, addonSubtitles: options?.addonSubtitles },
+      { subtitleVideo: options?.subtitleVideo, addonSubtitles: options?.addonSubtitles, addonTarget: options?.addonTarget },
     );
   }, [handlePlayMedia]);
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {
+    if (nowPlaying?.addonTarget) {
+      const target = addonEpisodeTarget(nowPlaying.addonTarget, season, episode);
+      if (!target || addonProgressKey(target) !== filePath || target.videoId === nowPlaying.addonTarget.videoId) return;
+      // Close the current lease before preparing a fresh source for another video.
+      setNowPlaying(null);
+      setPendingAddon({ target, artwork: nowPlaying.artwork, resumeLastSource: true });
+      return;
+    }
     setNowPlaying((prev) => {
       if (!prev) return null;
       const belongsToCurrentSeries = prev.episodeFiles?.some((item) =>
@@ -576,11 +596,12 @@ function AppShell({
         startPosition: undefined,
       };
     });
-  }, []);
+  }, [nowPlaying]);
 
   const handleClose = useCallback(() => {
     setNowPlaying(null);
   }, []);
+  const nowPlayingAddonTarget = nowPlaying?.addonTarget;
 
   return (
     <LibraryFilterVisibilityContext.Provider value={showLibraryFilter}>
@@ -625,6 +646,17 @@ function AppShell({
       </main>
       </div>
       </ArtworkSuspensionContext.Provider>
+      {pendingAddon?.resumeLastSource && !nowPlaying && <VideoPlayer filePath="" preparingAddonSource
+        title={pendingAddon.target.title} artwork={pendingAddon.artwork} addonTarget={pendingAddon.target}
+        onClose={() => setPendingAddon(null)} />}
+      {pendingAddon && <AddonSourcePicker target={pendingAddon.target} compactRows resumeLastSource={pendingAddon.resumeLastSource} hideResumeLoader
+        onClose={() => setPendingAddon(null)}
+        onPlay={selection => {
+          const artwork = pendingAddon.artwork;
+          setPendingAddon(null);
+          handlePlayAddonStream(selection.url, selection.target.title, artwork,
+            addonPlaybackOptions({ ...selection.target, sourceAddonId: selection.addonId }, selection.stream, selection.addonName));
+        }} />}
       {nowPlaying && (
         <ErrorBoundary
           title="Playback stopped unexpectedly"
@@ -637,7 +669,7 @@ function AppShell({
             // Browser fullscreen belongs to this DOM tree. Keep the live player
             // mounted while its channel changes, and keep an episode player
             // mounted while it advances through a series.
-            key={nowPlaying.isLiveStream
+            key={nowPlaying.addonTarget ? `addon:${nowPlaying.addonTarget.type}:${nowPlaying.addonTarget.videoId}` : nowPlaying.isLiveStream
               ? 'live'
               : nowPlaying.mediaId
                 ? `media:${nowPlaying.mediaId}`
@@ -659,6 +691,20 @@ function AppShell({
             isLiveStream={nowPlaying.isLiveStream}
             onlineSubtitleVideo={nowPlaying.subtitleVideo}
             addonSubtitles={nowPlaying.addonSubtitles}
+            addonTarget={nowPlaying.addonTarget}
+            onRefreshAddonSources={nowPlayingAddonTarget ? () => {
+              const target = nowPlayingAddonTarget;
+              const artwork = nowPlaying.artwork;
+              handleClose();
+              setPendingAddon({ target, artwork });
+            } : undefined}
+            onAddonSourceChange={(selection, position) => setNowPlaying(current => {
+              if (!current?.addonTarget || current.addonTarget.videoId !== selection.target.videoId || current.addonTarget.type !== selection.target.type) return current;
+              const options = addonPlaybackOptions({ ...selection.target, sourceAddonId: selection.addonId }, selection.stream, selection.addonName);
+              return { ...current, filePath: selection.url, startPosition: position, addonTarget: options.addonTarget,
+                addonSubtitles: options.addonSubtitles, subtitleVideo: options.subtitleVideo,
+                playbackRequestId: crypto.randomUUID(), playRequestedAtMs: performance.now() };
+            })}
             onPlayLiveChannel={handlePlayLiveChannel}
             onEpisodeChange={handleEpisodeSelect}
             onClose={handleClose}

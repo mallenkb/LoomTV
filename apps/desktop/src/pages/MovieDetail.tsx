@@ -1,30 +1,36 @@
+import DetailTitleLogo from '@/components/DetailTitleLogo';
+import { MetadataShimmer } from '@/components/ContentShimmer';
 import { useParams } from '@tanstack/react-router';
 import { queryClient, queryScope } from '@/lib/queryClient';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from '@/lib/navigation';
 import { Play, ArrowLeft } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import DetailCastRail from '@/components/DetailCastRail';
 import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { artworkVariant } from '@/lib/artworkVariants';
-import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
+import { addonProgressKey, readAddonWatchHistory } from '@/lib/addonWatchHistory';
+import { getPlayableStartPosition, getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { EXPLORE_ITEM_UPDATED_EVENT, getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { useTheme } from '@/components/ThemeProvider';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
+import WatchHubDialog from '@/components/WatchHubDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import DetailHeroActions from '@/components/DetailHeroActions';
-import AddonSourcePicker, { type AddonStreamSelection } from '@/components/AddonSourcePicker';
+import DetailWhereToWatch from '@/components/DetailWhereToWatch';
+import { useAddonBookmarks } from '@/lib/addonBookmarks';
+import { useToast } from '@/components/ToastProvider';
 import {
-  addonPlaybackOptions, addonPlaybackTarget, isSeriesLikeType, loadAddonMeta, requireUsableSource,
-  type AddonStreamPlayer, type AddonVideoTarget,
+  addonPlaybackTarget, isSeriesLikeType, loadAddonMeta, requireUsableSource,
+  type AddonStreamPlayer,
 } from '@/lib/addonPlayback';
 import { ARCHIVE_ADDON_ID, resolveArchiveStream } from '@/lib/archiveCatalog';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKey } from '@/lib/watched';
@@ -33,6 +39,7 @@ type MovieDetailRouteState = {
   from?: string;
   fromDiscover?: boolean;
   addonId?: string;
+  streamAddonId?: string;
   stremioCatalogItem?: StremioPluginCatalogItem;
   artwork?: RouteArtworkState;
 };
@@ -161,8 +168,10 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
-  const { canManageProfiles, lists, setListEntry, watchedKeys, setWatched } = useProfiles();
+  const { activeProfile, canManageProfiles, lists, setListEntry, watchedKeys, setWatched } = useProfiles();
   const { theme } = useTheme();
+  const addonBookmarks = useAddonBookmarks();
+  const { showToast } = useToast();
   const [movie, setMovie] = useState<MediaItem | null>(() => {
     const initialRoute = location.state as MovieDetailRouteState | null;
     if (initialRoute?.stremioCatalogItem) return mediaFromStremioCatalogItem(initialRoute.stremioCatalogItem);
@@ -175,14 +184,17 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
   const progressTick = useProgressRefreshRevision();
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
+  const detailPanelId = useId();
   const [detailsReady, setDetailsReady] = useState(false);
   const [trailerOpen, setTrailerOpen] = useState(false);
+  const [watchHubOpen, setWatchHubOpen] = useState(false);
+  const [watchHubAnchor, setWatchHubAnchor] = useState<HTMLElement | null>(null);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const metadataFetchKeyRef = useRef('');
   const playbackRequest = useRef(0);
   useEffect(() => () => { playbackRequest.current++; }, [mediaId]);
+  const [addonMetadataPending, setAddonMetadataPending] = useState(false);
   const [addonItem, setAddonItem] = useState<StremioPluginCatalogItem | null>(null);
-  const [sourceTarget, setSourceTarget] = useState<AddonVideoTarget | null>(null);
   const routeState = (location.state as MovieDetailRouteState | null) || null;
   // The Explore cache is a remote-provider detail bridge.  Never consult it
   // for an ordinary library route: local IDs are opaque and can legitimately
@@ -214,19 +226,35 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
     [addonItem, routeCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
+  const profileId = activeProfile?.id;
   const [isRemoteStremioMovie, setIsRemoteStremioMovie] = useState(Boolean(routeState?.stremioCatalogItem));
 
-  // Selecting a title loads its metadata. Streams are requested only at Play.
+  // Resolve the title's video identity before asking stream add-ons.
   useEffect(() => {
-    setAddonItem(routeCatalogItem);
-    setSourceTarget(null);
-    if (!routeCatalogItem?.providerId) return;
+    setAddonItem(null);
+    setAddonMetadataPending(Boolean(routeCatalogItem));
+    if (!routeCatalogItem) { setAddonItem(null); return; }
     let cancelled = false;
-    void loadAddonMeta(routeCatalogItem).then((item) => {
+    void loadAddonMeta(routeCatalogItem, item => { if (!cancelled) setAddonItem(item); }).then((item) => {
       if (!cancelled) setAddonItem(item);
-    }).catch(() => undefined);
+    }).catch(() => { if (!cancelled) setAddonItem(routeCatalogItem); })
+      .finally(() => { if (!cancelled) setAddonMetadataPending(false); });
     return () => { cancelled = true; };
   }, [routeCatalogItem]);
+
+  // Keep the target stable during progress updates and never show the last
+  // movie's sources while a new route is loading.
+  const playTarget = useMemo(
+    () => {
+      // Refresh watch history from storage when the progress revision changes.
+      void progressTick;
+      const target = isRemoteDetailRoute && routeAddonId && addonItem?.id === routeCatalogItem?.id ? addonPlaybackTarget(addonItem) : null;
+      const previous = isRemoteDetailRoute && profileId ? readAddonWatchHistory(profileId).find(entry => entry.target.detailId === mediaId
+        && entry.target.type === 'movie' && (!routeState?.streamAddonId || entry.target.sourceAddonId === routeState.streamAddonId))?.target : undefined;
+      return target ? { ...target, sourceAddonId: routeState?.streamAddonId } : previous || null;
+    },
+    [addonItem, isRemoteDetailRoute, routeAddonId, routeCatalogItem?.id, routeState?.streamAddonId, profileId, mediaId, progressTick],
+  );
 
   useEffect(() => {
     if (!isRemoteDetailRoute) return;
@@ -377,7 +405,7 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
     navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
   }, [location.pathname, location.search, location.state, navigate, refreshLibrary]);
 
-  const sourceRoute = routeState?.from?.startsWith('/discover')
+  const sourceRoute = routeState?.from?.startsWith('/discover') || routeState?.from?.startsWith('/addons/stremio/')
     ? routeState.from
     : routeState?.fromDiscover || isRemoteStremioMovie
       ? getCachedDiscoverReturnRoute()
@@ -413,12 +441,15 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
     );
   }
 
-  const inMyList = lists.some((entry) => entry.mediaId === movie.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
+  const inMyList = routeCatalogItem
+    ? addonBookmarks.isSaved(routeCatalogItem, routeAddonId)
+    : lists.some((entry) => entry.mediaId === movie.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
   const isRemoteContent = isRemoteStremioMovie || Boolean(routeCatalogItem);
   const watchedKey = isRemoteContent
     ? discoverWatchedKey({ id: movie.id, type: 'movie', source: routeCatalogItem?.source })
     : localWatchedKey(movie.id);
-  const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
+  const progressPath = playTarget ? addonProgressKey(playTarget) : movie.filePath;
+  const progress = getProgressState(progressPath, movie.localMetadata?.durationSeconds);
   const watchedByProgress = !isRemoteContent && progress.watched;
   const isWatched = watchedByProgress || watchedKeys.has(watchedKey);
   const sourceArtwork = routeState?.artwork;
@@ -443,19 +474,16 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
     backdropCandidates: heroArtwork,
     rating: movie.rating,
   };
-  const hasResumeProgress = progress.inProgress;
+  const hasResumeProgress = playTarget ? getPlayableStartPosition(progressPath) > 0 : progress.inProgress;
   const progressPercent = Math.min(100, Math.max(0, progress.fraction * 100));
   const progressCopy = progress.duration > 0
     ? `${formatShortMinutes(progress.position)} of ${formatShortMinutes(progress.duration)}`
     : null;
   const archiveIdentifier = routeCatalogItem?.source === 'archive.org' && routeCatalogItem.id.startsWith('archive:')
     ? routeCatalogItem.id.slice('archive:'.length) : '';
-  const playTarget = addonPlaybackTarget(addonItem);
-  // A playable identity always gets Play, so "no sources" is explained in the picker.
+  // Sources are requested only after the user opens the picker.
   const canPlayAddon = Boolean(onPlayStream && (playTarget || archiveIdentifier));
   const canPlayMovie = Boolean(onPlay && movie.filePath) || canPlayAddon;
-  void progressTick;
-
   const handlePlay = async () => {
     setLibraryActionError('');
     if (archiveIdentifier && onPlayStream) {
@@ -474,17 +502,12 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
       return;
     }
     if (playTarget && onPlayStream) {
-      setSourceTarget(playTarget);
+      onPlayStream('', movie.title, playerArtwork, { addonTarget: playTarget, resumeLastSource: hasResumeProgress });
       return;
     }
     if (canPlayMovie && onPlay) {
       onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, isRemoteContent ? undefined : movie.id, playerArtwork);
     }
-  };
-
-  const handleSourceChosen = ({ target, url, stream, addonName }: AddonStreamSelection) => {
-    setSourceTarget(null);
-    onPlayStream?.(url, movie.title, playerArtwork, addonPlaybackOptions(target, stream, addonName));
   };
 
   const handleBack = () => {
@@ -507,7 +530,7 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
 
   return (
     <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
-      <div className="loom-detail-cover relative h-[50vh] w-full overflow-hidden">
+      <div className="loom-detail-cover relative h-[45vh] w-full overflow-hidden">
         <div className="loom-detail-cover-image absolute inset-y-0 left-0 right-0 mx-auto w-full max-w-[var(--loom-frame-max-width)]">
           <SafeArtwork
             key={heroKey}
@@ -547,6 +570,7 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
           <ArrowLeft className="w-5 h-5" />
           <span className="loom-detail-back-label">Back</span>
         </button>
+        {routeCatalogItem && <DetailWhereToWatch open={watchHubOpen} onClick={event => { setWatchHubAnchor(event.currentTarget); setWatchHubOpen(value => !value); }} />}
 
         <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
           <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
@@ -568,8 +592,10 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
             }
           />
           <div className="loom-detail-hero-info min-w-0 flex-1">
-            <h1 className="text-4xl font-bold text-white">{movie.title}</h1>
-            <HeroMetadata item={movie} isOther={isOtherMedia} />
+            {routeCatalogItem ? <DetailTitleLogo title={movie.title} sources={playerLogoArtwork} /> : <h1 className="text-4xl font-bold text-white">{movie.title}</h1>}
+            <HeroMetadata item={movie} isOther={isOtherMedia} providersOpen={watchHubOpen} onOpenProviders={routeCatalogItem ? event => {
+              setWatchHubAnchor(event.currentTarget); setWatchHubOpen(true);
+            } : undefined} />
           </div>
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
@@ -595,14 +621,18 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
             </span>
           </Button>}
             <DetailHeroActions
-              canBookmark={!isRemoteContent}
+              canBookmark={!isRemoteContent || Boolean(routeCatalogItem)}
               inMyList={inMyList}
               watched={isWatched}
               onPlayTrailer={isRemoteContent && movie.trailerUrl ? () => setTrailerOpen(true) : undefined}
               onToggleList={() => void (async () => {
+                if (routeCatalogItem) {
+                  await addonBookmarks.toggle(addonItem?.id === routeCatalogItem.id ? addonItem : routeCatalogItem, routeAddonId, routeState?.streamAddonId);
+                  return;
+                }
                 await setListEntry(movie.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(movie.id, 'favorite', false);
-              })()}
+              })().catch(() => showToast({ title: 'Could not update My List. Try again.', tone: 'error' }))}
               onToggleWatched={() => {
                 if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
                 const present = !isWatched;
@@ -616,7 +646,14 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
       </div>
 
       <div className="loom-detail-body loom-frame">
-      <div className="page-bottom-safe-lg p-8">
+      <div className="loom-detail-content page-bottom-safe-lg p-8">
+        <div className="mb-6 border-b border-[var(--loom-panel-border)]" role="tablist" aria-label="Title information">
+          <div className="loom-detail-tabs flex items-center gap-8">
+            <button id={`${detailPanelId}-tab`} type="button" role="tab" aria-selected="true" aria-controls={detailPanelId}
+              className="-mb-px border-b-2 border-[var(--loom-text)] pb-3 pt-1 text-sm font-semibold uppercase tracking-[0.16em] text-[var(--loom-text)]">Details</button>
+          </div>
+        </div>
+        <div id={detailPanelId} role="tabpanel" aria-labelledby={`${detailPanelId}-tab`}>
         {archiveIdentifier && (
           <a
             href={`https://archive.org/details/${encodeURIComponent(archiveIdentifier)}`}
@@ -627,16 +664,17 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
             View source and rights information
           </a>
         )}
+        {!movie.summary && addonMetadataPending && <MetadataShimmer />}
         {movie.summary && (
           <section className="loom-detail-summary mb-8">
-            <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
+            <h3 className="text-lg font-semibold text-[var(--loom-text)] mb-3">Summary</h3>
             <p className="whitespace-pre-line text-[var(--loom-muted)] leading-relaxed">{movie.summary}</p>
           </section>
         )}
 
         {movie.localMetadata && (
           <section className="mb-8">
-            <h3 className="text-lg font-semibold text-white mb-3">Local Media Info</h3>
+            <h3 className="text-lg font-semibold text-[var(--loom-text)] mb-3">Local Media Info</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {movie.localMetadata.width && movie.localMetadata.height && (
                 <div className="rounded-lg bg-[var(--loom-panel)] p-3">
@@ -671,35 +709,27 @@ export default function MovieDetail({ onPlay, onPlayStream }: MovieDetailProps) 
 
         {detailsReady && movie.cast.length > 0 && (
           <section>
-            <h3 className="text-lg font-semibold text-white mb-3">Cast</h3>
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {movie.cast.slice(0, 8).map((actor) => (
-                <div key={actor.name} className="flex-shrink-0 w-20 text-center">
-                  <Avatar className="w-16 h-16 mx-auto mb-2">
-                    {actor.image ? (
-                      <AvatarImage src={actor.image} alt={actor.name} />
-                    ) : (
-                      <AvatarFallback className="bg-[var(--loom-surface-3)] text-white text-xs">
-                        {actor.name.charAt(0)}
-                      </AvatarFallback>
-                    )}
-                  </Avatar>
-                  <p className="text-xs text-white truncate">{actor.name}</p>
-                  <p className="text-xs text-[var(--loom-muted)] truncate">{actor.character}</p>
-                </div>
-              ))}
-            </div>
+            <h3 className="text-lg font-semibold text-[var(--loom-text)] mb-3">Cast</h3>
+            <DetailCastRail cast={movie.cast} />
           </section>
         )}
       </div>
       </div>
+      </div>
+      {watchHubOpen && routeCatalogItem ? (
+        <WatchHubDialog
+          key={routeCatalogItem.id}
+          item={addonItem?.id === routeCatalogItem.id ? addonItem : routeCatalogItem}
+          anchorElement={watchHubAnchor}
+          onClose={() => setWatchHubOpen(false)}
+        />
+      ) : null}
       <TrailerDialog
         open={trailerOpen}
         title={movie.title}
         trailerUrl={movie.trailerUrl}
         onClose={() => setTrailerOpen(false)}
       />
-      <AddonSourcePicker target={sourceTarget} onClose={() => setSourceTarget(null)} onPlay={handleSourceChosen} />
     </div>
   );
 }

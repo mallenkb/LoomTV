@@ -1063,7 +1063,7 @@ async function enrichAnimeCatalogMetadata(
   return enrichedItems;
 }
 
-function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '', credential = '') {
+export function discoverAnime(query: string, section: DiscoverSection, genre = '', year = '', credential = '') {
   return cachedDesktopRead('discover-anime', [query.trim(), section, genre, year, Boolean(credential)], () =>
     fetchAnimeCatalog(query, section, genre, year).catch(error => {
       return fetchJikanAnimeCatalog(query, section, genre, year).catch(() => {

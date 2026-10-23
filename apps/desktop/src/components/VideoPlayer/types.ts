@@ -1,5 +1,6 @@
+import type { AddonStreamSelection } from '../AddonSourcePicker';
 import type { SubtitleVideo } from '../../lib/openSubtitlesV3';
-import type { AddonSubtitleContext } from '../../lib/addonPlayback';
+import type { AddonSubtitleContext, AddonVideoTarget } from '../../lib/addonPlayback';
 
 export type PlayerState = 'loading' | 'ready' | 'error';
 export type ControlTab = 'video' | 'audio' | 'subtitles';
@@ -81,6 +82,7 @@ export interface EpisodeFile {
 }
 
 export interface VideoPlayerProps {
+  preparingAddonSource?: boolean;
   playbackRequestId?: string;
   playRequestedAtMs?: number;
   mediaId?: string;
@@ -116,6 +118,9 @@ export interface VideoPlayerProps {
   onlineSubtitleVideo?: SubtitleVideo;
   /** The add-on video being played; its stream and installed subtitle add-ons are searched on request. */
   addonSubtitles?: AddonSubtitleContext;
+  addonTarget?: AddonVideoTarget;
+  onRefreshAddonSources?: () => void;
+  onAddonSourceChange?: (selection: AddonStreamSelection, position: number) => void;
   /** Switch to another live channel (channel up/down, last channel). */
   onPlayLiveChannel?: (reference: string, name: string, logoUrl?: string) => void;
   onClose: () => void;

@@ -24,6 +24,10 @@ import { liveTvSourceIconPair } from '@/components/LiveTvSourceIcons';
 import { DEFAULT_SIDEBAR_NAV_ORDER, MEDIA_SIDEBAR_NAV_ITEM_IDS, normalizeSidebarNavOrder } from '@/lib/sidebarNavOrder';
 import { isBrowsableStremioSource } from '@/lib/stremioPluginSidebarCache';
 import { useStremioSidebarSources } from '@/lib/stremioSourceNavigation';
+import { useAddonIcons } from '@/lib/addonIcons';
+import { addonSourceIconPair } from '@/components/AddonSourceIcons';
+import { useAddonTitles } from '@/lib/addonTitles';
+import { readSidebarVisibility } from '@/lib/sidebarVisibility';
 
 type LibrarySidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | 'my-list' | 'discover' | LibrarySidebarNavItemId | 'settings';
@@ -112,7 +116,7 @@ function DiscoverActiveIcon({ className }: { className?: string }) {
   );
 }
 
-function DiscoverIcon({ className }: { className?: string }) {
+export function DiscoverIcon({ className }: { className?: string }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -243,6 +247,7 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
 }
 
 function ModernCategoryPill({ pathname }: { pathname: string }) {
+  const navigate = useNavigate();
   const { state } = useLibrary();
   const isRemoteLibrary = desktopApi.isRemoteLibraryMode();
   const visibleCategories = modernVideoCategoryItems.filter((category) => {
@@ -257,7 +262,7 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
     : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
 
   return (
-    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-6 z-50 flex h-12 items-center justify-center px-5">
+    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-6 z-50 flex h-12 items-center justify-center gap-3 px-5">
       <Link to="/" className="loom-modern-mobile-brand" aria-label="Loom home">
         <LoomLogo className="h-8 w-auto" />
       </Link>
@@ -302,6 +307,15 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
           })}
         </div>
       </nav>
+      <button
+        type="button"
+        aria-label="Search library"
+        title="Search library"
+        onClick={() => navigate('/', { replace: pathname === '/', state: { openLibrarySearch: true } })}
+        className="loom-modern-category-pill loom-modern-category-idle loom-no-drag grid h-12 w-12 shrink-0 place-items-center rounded-full border backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+      >
+        <Search aria-hidden="true" className="h-4 w-4" />
+      </button>
     </header>
   );
 }
@@ -378,7 +392,7 @@ function SidebarProfileSwitcher({
           role="menu"
           aria-label="Profiles"
           className={cn(
-            'absolute z-50 isolate w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-surface)] p-1 text-[var(--loom-text)] shadow-[0_20px_60px_rgba(0,0,0,0.62)]',
+            'loom-profile-menu absolute z-50 isolate w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-surface)] p-1 text-[var(--loom-text)] shadow-[0_20px_60px_rgba(0,0,0,0.62)]',
             'bottom-full left-0 mb-2',
           )}
         >
@@ -514,7 +528,7 @@ export default function Sidebar() {
   const { showToast } = useToast();
   const { state, scanLibrary, fullRescanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
-  const routeState = location.state as { from?: string; fromDiscover?: boolean } | null;
+  const routeState = location.state as { from?: string; fromDiscover?: boolean; addonId?: string; streamAddonId?: string } | null;
   const sourceRoute = routeState?.from;
   const isDetailRoute = location.pathname.startsWith('/movie/')
     || location.pathname.startsWith('/tv/')
@@ -524,6 +538,7 @@ export default function Sidebar() {
     || sourceRoute?.startsWith('/discover') === true;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<string[]>(DEFAULT_SIDEBAR_NAV_ORDER);
+  const [hiddenItems, setHiddenItems] = useState<string[]>([]);
   const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
@@ -550,6 +565,7 @@ export default function Sidebar() {
     Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()]).then(([settings, preferences]) => {
       if (mounted) {
         setNavOrder(normalizeSidebarNavOrder(preferences.sidebarNavOrder ?? settings.sidebarNavOrder));
+        setHiddenItems(readSidebarVisibility(activeProfile?.id, preferences.hiddenSidebarItems));
         setOtherFolderIcon(normalizeOtherFolderIcon(settings.otherFolderIcon));
         setCustomFolderNames(settings.customFolderNames || {});
         setOtherFolderGroups(normalizeOtherFolderGroups(settings.otherFolderGroups));
@@ -565,6 +581,8 @@ export default function Sidebar() {
     };
 
     window.addEventListener('loomtv:sidebar-order-changed', handleSidebarOrderChanged);
+    const handleVisibilityChanged = (event: Event) => setHiddenItems((event as CustomEvent<string[]>).detail || []);
+    window.addEventListener('loomtv:sidebar-visibility-changed', handleVisibilityChanged);
     const handleOtherFolderIconChanged = (event: Event) => {
       setOtherFolderIcon(normalizeOtherFolderIcon((event as CustomEvent<string>).detail));
     };
@@ -581,6 +599,7 @@ export default function Sidebar() {
     return () => {
       mounted = false;
       window.removeEventListener('loomtv:sidebar-order-changed', handleSidebarOrderChanged);
+      window.removeEventListener('loomtv:sidebar-visibility-changed', handleVisibilityChanged);
       window.removeEventListener('loomtv:other-folder-icon-changed', handleOtherFolderIconChanged);
       window.removeEventListener('loomtv:custom-folder-names-changed', handleCustomFolderNamesChanged);
       window.removeEventListener('loomtv:other-folder-groups-changed', handleOtherFolderGroupsChanged);
@@ -635,6 +654,8 @@ export default function Sidebar() {
   }, [customFolderNames, libraryFolderGroups.others, otherFolderGroups, otherFolderIcon]);
   const { sources: iptvSources } = useIptvSources();
   const stremioPlugins = useStremioSidebarSources();
+  const addonIcons = useAddonIcons();
+  const addonTitles = useAddonTitles();
 
   // Each added playlist is its own destination, the way Discover is: a tab in
   // the sidebar pointing at a page that belongs to that source alone.
@@ -654,20 +675,26 @@ export default function Sidebar() {
   const stremioNavItems = useMemo(
     () => stremioPlugins
       .filter(isBrowsableStremioSource)
-      .map((plugin) => ({
-        id: `stremio:${plugin.addonId}`,
-        label: plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on',
-        path: `/addons/stremio/${encodeURIComponent(plugin.addonId)}`,
-        icon: plugin.addonId === 'org.archive.clean' ? archiveIcons.regular : compassIcons.regular,
-        activeIcon: plugin.addonId === 'org.archive.clean' ? archiveIcons.fill : compassIcons.fill,
-      })),
-    [stremioPlugins],
+      .map((plugin) => {
+        const selectedIcon = addonIcons[plugin.addonId];
+        const custom = selectedIcon && selectedIcon !== 'default' ? addonSourceIconPair(selectedIcon) : null;
+        return {
+          id: `stremio:${plugin.addonId}`,
+          label: addonTitles[plugin.addonId] || plugin.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on',
+          path: `/addons/stremio/${encodeURIComponent(plugin.addonId)}`,
+          icon: custom?.outline || (plugin.addonId === 'org.archive.clean' ? archiveIcons.regular : compassIcons.regular),
+          activeIcon: custom?.solid || (plugin.addonId === 'org.archive.clean' ? archiveIcons.fill : compassIcons.fill),
+        };
+      }),
+    [stremioPlugins, addonIcons, addonTitles],
   );
   const selectedLiveTvItem = location.pathname.startsWith('/live/')
     ? `live:${decodeURIComponent(location.pathname.slice('/live/'.length))}`
     : '';
-  const selectedStremioItem = location.pathname.startsWith('/addons/stremio/')
-    ? `stremio:${decodeURIComponent(location.pathname.slice('/addons/stremio/'.length))}`
+  const addonSourcePath = location.pathname.startsWith('/addons/stremio/') ? location.pathname
+    : isDetailRoute && sourceRoute?.startsWith('/addons/stremio/') ? sourceRoute : '';
+  const selectedStremioItem = addonSourcePath
+    ? `stremio:${decodeURIComponent(addonSourcePath.slice('/addons/stremio/'.length))}`
     : '';
   const selectedOtherItem = location.pathname === '/others'
     ? (() => {
@@ -693,8 +720,8 @@ export default function Sidebar() {
     return normalizeSidebarNavOrder(
       navOrder,
       reorderableSidebarItems.map((item) => item.id),
-    ).map((id) => itemById.get(id)).filter((item): item is SidebarNavItem => Boolean(item));
-  }, [navOrder, reorderableSidebarItems]);
+    ).filter(id => !hiddenItems.includes(id)).map((id) => itemById.get(id)).filter((item): item is SidebarNavItem => Boolean(item));
+  }, [navOrder, reorderableSidebarItems, hiddenItems]);
   const activeSidebarItemId = selectedLiveTvItem || selectedStremioItem || selectedOtherItem || activeNavItemId;
   const sidebarHighlightActiveId = activeSidebarItemId;
   const isSidebarItemActive = (itemId: string) => activeSidebarItemId === itemId;
@@ -870,7 +897,7 @@ export default function Sidebar() {
           )}
           <nav className="loom-modern-mobile-nav" aria-label="Mobile navigation">
             <SharedListHighlight activeId={activeNavItemId} followPointer={false} className="flex items-center">
-              {[homeNavItem, discoverNavItem, myListNavItem].map((item) => {
+              {[homeNavItem, discoverNavItem, myListNavItem].filter(item => !hiddenItems.includes(item.id)).map((item) => {
                 const isActive = activeNavItemId === item.id;
                 const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
                 return (
@@ -902,6 +929,7 @@ export default function Sidebar() {
           && !location.pathname.startsWith('/live/')
           && !location.pathname.startsWith('/addons/stremio/')
           && !MEDIA_SIDEBAR_NAV_ITEM_IDS.some((id) => location.pathname === `/${id}`)
+          && !(isDetailRoute && (routeState?.addonId || routeState?.streamAddonId || sourceRoute?.startsWith('/addons/stremio/')))
           && !isExploreContext && (
           <ModernCategoryPill pathname={location.pathname} />
         )}

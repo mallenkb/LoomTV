@@ -11,6 +11,7 @@ import * as platform from '../src/main/libvlcPlatform.ts';
 import * as sessionState from '../src/main/libvlcSessionState.ts';
 import { restoreOffscreenTrack } from '../src/main/offscreenVideoRestore.ts';
 import * as resumeRewind from '../src/shared/resumeRewind.ts';
+import { isAddonRelayUrl } from '../src/shared/addonPlaybackReference.ts';
 
 function loadModule(name: string, dependencies: Record<string, unknown>, globals: Record<string, unknown> = {}, extra = '') {
   const source = fs.readFileSync(new URL(`../src/main/${name}.ts`, import.meta.url), 'utf8')
@@ -178,6 +179,7 @@ function fixture(sharedInstance: number | null = null) {
     };
   `) as typeof import('../src/main/libvlcWarmup.ts');
   const playback = loadModule('libvlcPlayback', {
+    '../shared/addonPlaybackReference.ts': { isAddonRelayUrl },
     electron: { BrowserWindow: { fromWebContents: () => window } },
     'node:module': { createRequire: () => () => ({}) },
     'node:crypto': { randomUUID: () => `session-${++handle}` },
@@ -698,6 +700,8 @@ function quitFixture(f: ReturnType<typeof fixture>) {
   const noop = () => undefined;
   vm.runInNewContext(code, {
     app, console, activeScans: [], isAppShuttingDown: false,
+    stremioPlayback: { dispose: () => undefined },
+    torrentEngine: { dispose: () => undefined },
     stopAllLibVlcPlayback: () => f.playback.stopAllLibVlcPlayback(15),
     hasScannerProcesses: () => false, stopScannerProcesses: () => Promise.resolve(),
     releaseAllMediaSessions: noop, flushPairedDeviceTouches: noop, clearAllGuestProfiles: noop,

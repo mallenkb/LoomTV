@@ -14,6 +14,7 @@ type PauseOverlayProps = {
   episodeTitle: string;
   rating: number;
   isLiveStream?: boolean;
+  centered?: boolean;
 };
 
 function PauseOverlay({
@@ -26,6 +27,7 @@ function PauseOverlay({
   episodeTitle,
   rating,
   isLiveStream = false,
+  centered = false,
 }: PauseOverlayProps) {
   const [logoIndex, setLogoIndex] = useState(0);
   const logoSourceKey = logoSources.join('\n');
@@ -55,7 +57,7 @@ function PauseOverlay({
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
           />
           <motion.div
-            className="absolute bottom-32 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-36"
+            className={centered ? 'absolute inset-0 flex flex-col items-center justify-center px-6 py-32 text-center text-white' : 'absolute bottom-32 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-36'}
             initial={{ opacity: 0, y: 18, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.995 }}
@@ -68,7 +70,7 @@ function PauseOverlay({
                 alt={title}
                 decoding="async"
                 referrerPolicy="no-referrer"
-                className={`${isLiveStream ? 'mb-3 h-[6.2rem] max-h-[20vh]' : 'mb-4 h-40 max-h-[28vh]'} w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]`}
+                className={`${centered ? 'mb-2 h-auto max-h-32 w-[min(28rem,70vw)]' : `${isLiveStream ? 'mb-3 h-[6.2rem] max-h-[20vh]' : 'mb-4 h-40 max-h-[28vh]'} w-[min(48rem,84vw)]`} object-contain ${centered ? 'object-center' : 'object-left-bottom'} drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]`}
                 onError={(event) => {
                   event.currentTarget.style.display = 'none';
                   setLogoIndex((index) => index + 1);
@@ -84,7 +86,7 @@ function PauseOverlay({
                 {title}
               </h2>
             ) : null}
-            {!hasEpisodes && !isLiveStream && logoSource && (
+            {!centered && !hasEpisodes && !isLiveStream && logoSource && (
               <h2 className="mb-2 max-w-[min(46rem,84vw)] text-2xl font-semibold leading-tight drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-3xl">
                 {title}
               </h2>
@@ -110,7 +112,7 @@ function PauseOverlay({
               </div>
             )}
             {rating > 0 && !hasEpisodes && !episodeTitle && (
-              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--loom-rating-surface)] px-3 py-1 text-sm font-bold text-[var(--loom-rating)] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+              <span className={`${centered ? '' : 'mt-3'} inline-flex items-center gap-1.5 rounded-full bg-[var(--loom-rating-surface)] px-3 py-1 text-sm font-bold text-[var(--loom-rating)] shadow-[0_4px_16px_rgba(0,0,0,0.35)]`}>
                 <Star className="h-4 w-4 fill-current" />
                 {rating.toFixed(1)}
               </span>

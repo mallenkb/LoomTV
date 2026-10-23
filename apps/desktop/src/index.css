@@ -10,9 +10,35 @@
   animation: loom-content-shimmer-slide 1.5s linear infinite;
 }
 
+.loom-player-title-fill {
+  transition: clip-path 120ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loom-player-title-fill { transition: none; }
+}
+
+@keyframes loom-player-title-loading {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+
+.loom-player-loading-title {
+  color: transparent;
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, .3) 35%, #fff 50%, rgba(255, 255, 255, .3) 65%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: loom-player-title-loading 2.4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .loom-content-shimmer {
     animation: none;
+  }
+  .loom-player-loading-title {
+    animation: none;
+    background: none;
+    color: rgba(255, 255, 255, .85);
   }
 }
 
@@ -403,6 +429,233 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   border-radius: 9999px;
 }
 
+/* The alternative shares the playback handlers and timeline with Default. */
+.loom-player-primary-controls,
+.loom-player-secondary-controls,
+.loom-player-skip-controls,
+.loom-player-options {
+  display: contents;
+}
+
+.loom-player-pill {
+  --loom-player-control-bg: rgb(0 0 0 / 55%);
+}
+
+.loom-player-pill .loom-player-controls {
+  padding: 32px 12px 12px;
+}
+
+.loom-player-pill .loom-player-timeline-row {
+  margin-bottom: 2px;
+}
+
+.loom-player-pill .loom-player-timeline-track {
+  height: 5px;
+  box-shadow: none;
+  --tw-ring-shadow: 0 0 #0000;
+}
+
+.loom-player-pill .loom-player-timeline-fill {
+  box-shadow: none;
+}
+
+.loom-player-pill .loom-player-timeline-thumb {
+  width: 12px;
+  height: 12px;
+  box-shadow: none;
+}
+
+.loom-player-pill .loom-player-button-row {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.loom-player-pill .loom-player-primary-controls,
+.loom-player-pill .loom-player-secondary-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.loom-player-pill .loom-player-skip-controls,
+.loom-player-pill .loom-player-options,
+.loom-player-pill .loom-player-navigation,
+.loom-player-pill .loom-player-volume {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 999px;
+  background: var(--loom-player-control-bg);
+}
+
+.loom-player-pill .loom-player-navigation {
+  margin: 0;
+}
+
+.loom-player-pill .loom-player-play,
+.loom-player-pill .loom-player-time {
+  background: var(--loom-player-control-bg);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.loom-player-pill .loom-player-skip-controls,
+.loom-player-pill .loom-player-options,
+.loom-player-pill .loom-player-navigation,
+.loom-player-pill .loom-player-volume,
+.loom-player-pill .loom-player-play,
+.loom-player-pill .loom-player-time {
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(24px) saturate(130%);
+}
+
+.loom-player-pill .loom-player-controls button {
+  height: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.loom-player-pill .loom-player-controls button:not(.loom-player-time) {
+  width: 40px;
+  min-width: 40px;
+  padding: 0 10px;
+}
+
+.loom-player-pill .loom-player-controls button[data-player-panel-toggle] {
+  width: auto;
+}
+
+.loom-player-pill .loom-player-controls button[data-player-panel-toggle]:has(svg:only-child) {
+  width: 40px;
+}
+
+.loom-player-pill .loom-player-controls button:hover {
+  background-color: rgb(255 255 255 / 10%);
+  color: white;
+}
+
+.loom-player-pill .loom-player-volume > button,
+.loom-player-pill .loom-player-volume > button:hover {
+  background-color: transparent;
+}
+
+.loom-player-pill .loom-player-controls button[data-player-panel-toggle] {
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.loom-player-pill .loom-player-controls button[aria-expanded='true'] {
+  background-color: rgb(255 255 255 / 15%);
+}
+
+.loom-player-pill .loom-player-time {
+  min-width: 0;
+  padding: 0 14px;
+  font-size: 12px;
+}
+
+.loom-player-pill .loom-player-play svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.loom-player-pill .loom-player-controls button:not(.loom-player-play) svg {
+  stroke-width: 1.8;
+}
+
+.loom-player-pill .loom-player-volume-slider {
+  width: 0;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: width 180ms ease-out, margin 180ms ease-out, opacity 120ms ease-out;
+}
+
+.loom-player-pill .loom-player-volume:hover .loom-player-volume-slider,
+.loom-player-pill .loom-player-volume:focus-within .loom-player-volume-slider {
+  width: 65px;
+  margin-left: 4px;
+  margin-right: 14px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.loom-player-pill .loom-player-volume-slider:focus-within {
+  outline: 2px solid var(--loom-accent);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+.loom-player-pill .loom-player-volume-slider [aria-hidden='true']:not([data-ruler-guides]) {
+  height: 5px;
+}
+
+.loom-player-pill .loom-player-volume-slider .pointer-events-none[aria-hidden='true']:not([data-ruler-guides]) {
+  height: 12px;
+  width: 12px;
+  box-shadow: none;
+}
+
+.loom-player-pill .loom-player-controls-divider {
+  height: 26px;
+  margin: 0 2px;
+}
+
+@media (max-width: 900px) {
+  .loom-player-pill .loom-player-options button > span {
+    display: none;
+  }
+  .loom-player-pill .loom-player-options button {
+    width: 40px;
+  }
+}
+
+@media (max-width: 600px) {
+  .loom-player-pill .loom-player-controls-spacer {
+    display: none;
+  }
+  .loom-player-pill .loom-player-button-row {
+    justify-content: flex-end;
+  }
+  .loom-player-pill .loom-player-primary-controls {
+    margin-right: auto;
+  }
+  .loom-player-pill .loom-player-secondary-controls {
+    justify-content: flex-end;
+    width: 100%;
+  }
+}
+
+@media (hover: none) {
+  .loom-player-pill .loom-player-volume .loom-player-volume-slider {
+    width: 65px;
+    margin-left: 4px;
+    margin-right: 14px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  .loom-player-pill .loom-player-controls button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loom-player-pill .loom-player-volume-slider {
+    transition: none;
+  }
+}
+
 /* Keep every top-player surface frosted even when the utility class is not
    emitted by the desktop stylesheet. */
 .loom-player-top-controls .loom-player-top-control {
@@ -413,7 +666,13 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
    Retina render targets when paused controls stay visible, without blurring
    the video. Keep their translucent backgrounds without the extra targets. */
 .loom-player-native .loom-player-top-controls .loom-player-top-control,
-.loom-player-native .loom-player-controls [class*='backdrop-blur-'] {
+.loom-player-native .loom-player-controls [class*='backdrop-blur-'],
+.loom-player-native.loom-player-pill .loom-player-skip-controls,
+.loom-player-native.loom-player-pill .loom-player-options,
+.loom-player-native.loom-player-pill .loom-player-navigation,
+.loom-player-native.loom-player-pill .loom-player-volume,
+.loom-player-native.loom-player-pill .loom-player-play,
+.loom-player-native.loom-player-pill .loom-player-time {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -689,6 +948,29 @@ body.platform-darwin .loom-photo-viewer-header {
   background-color: var(--loom-surface) !important;
   background-image: none !important;
   backdrop-filter: none !important;
+}
+
+/* The dialog remains a focus target for trapping/restoration, but its outer
+   surface is not a control. Keep focus indicators on the controls inside it. */
+.loom-modal-surface[role="dialog"]:focus,
+.loom-modal-surface[role="dialog"]:focus-visible {
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-inset-ring-shadow: 0 0 #0000 !important;
+}
+
+/* The surface owns the 20px inset. Nested content must not add it again.
+   Sectioned settings dialogs apply their inset to their header/body/footer. */
+.loom-modal-surface:not(.loom-settings-dialog-surface):not(.loom-settings-search) > .loom-dialog-content {
+  padding: 0 !important;
+}
+
+.loom-profile-menu {
+  --loom-surface-2: color-mix(in srgb, var(--loom-surface) 94%, var(--loom-text));
+  --loom-active-bg: color-mix(in srgb, var(--loom-surface) 86%, var(--loom-text));
+  background-color: color-mix(in srgb, var(--loom-surface) 96%, var(--loom-text));
+  border: 1px solid color-mix(in srgb, var(--loom-text) 10%, transparent);
 }
 
 .loom-modal-surface :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select) {
@@ -2556,6 +2838,12 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   color: #b45309;
 }
 
+/* Settings sections embedded in a dialog reuse the page styles, but the dialog
+   surface already supplies the background and the 20px inset. */
+:root .loom-settings-page.loom-settings-dialog-body {
+  background: transparent;
+}
+
 .loom-settings-dialog-body .settings-panel,
 .loom-settings-dialog-body .settings-panel-soft {
   border: 0 !important;
@@ -2563,6 +2851,18 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   background: transparent !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
+}
+
+.loom-settings-dialog-body :is(.settings-panel, .settings-panel-soft) > * {
+  padding: 0 !important;
+}
+
+.loom-settings-dialog-body :is(.settings-panel, .settings-panel-soft) > * + * {
+  margin-top: 16px;
+}
+
+.loom-modal-surface .loom-dialog-content .loom-dialog-content {
+  padding: 0 !important;
 }
 
 /* Content scrolls under the floating tab bar; this band fades it out so the
@@ -2604,7 +2904,11 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   max-height: min(520px, 80dvh);
   padding: 0 !important;
   border-radius: 16px !important;
-  background-color: var(--loom-panel) !important;
+  background-color: var(--loom-surface) !important;
+}
+
+.loom-settings-search.loom-title-search.loom-modal-surface {
+  max-height: 80dvh;
 }
 
 :root .loom-settings-search.loom-modal-surface[role="dialog"] button[role="option"] {
@@ -2614,7 +2918,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 .loom-settings-dialog-surface.loom-modal-surface {
   padding: 0 !important;
   border-radius: 16px !important;
-  background-color: var(--loom-panel) !important;
+  background-color: var(--loom-surface) !important;
 }
 
 @keyframes loom-settings-found {
@@ -3140,7 +3444,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 /* Applies in both appearances. This was previously scoped to the light theme,
    which left dark mode with no keyboard focus indicator on any control that
    sets `outline-none` — the majority of the custom buttons in the app. */
-.loom-app-shell :focus-visible:not(input):not(select):not(textarea) {
+.loom-app-shell :focus-visible:not(input):not(select):not(textarea):not([role="dialog"]) {
   outline: 2px solid var(--loom-focus-ring);
   outline-offset: 2px;
 }
@@ -4569,4 +4873,31 @@ input[type="color"]::-webkit-color-swatch {
 input[type="color"]::-moz-color-swatch {
   border: 0;
   border-radius: inherit;
+}
+
+
+
+/* Match the Back control's height and vertical position on the opposite edge. */
+.loom-detail-where-to-watch {
+  top: 1.5rem;
+  right: calc(max(0px, (100vw - var(--loom-sidebar-width) - var(--loom-frame-max-width)) / 2) + 1rem);
+}
+.loom-detail-page-modern .loom-detail-where-to-watch {
+  top: calc(1.5rem + 0.25rem);
+  right: var(--loom-detail-frame-end);
+}
+@media (max-width: 1024px) {
+  :root[data-loom-client="browser"] .loom-detail-page-modern .loom-detail-where-to-watch {
+    top: var(--loom-mobile-header-top);
+    right: var(--loom-mobile-gutter);
+  }
+}
+
+/* Focus still works for navigation; editing controls retain their active styling. */
+:root :is(button, a, summary, [tabindex], [role="dialog"], [role="button"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):is(:focus, :focus-visible):not(input):not(textarea):not(select):not([contenteditable]):not([role="combobox"]):not([role="slider"]),
+:root .loom-poster-link:focus-visible .loom-poster-frame {
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-inset-ring-shadow: 0 0 #0000 !important;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { DotsSixVertical } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  ScanSearch,
   Trash2,
   X,
 } from 'lucide-react';
@@ -59,6 +60,7 @@ const LIBRARY_SIDEBAR_IDS: Partial<Record<LibraryKind, SidebarNavItemId>> = {
 };
 
 type LibrarySettingsSectionProps = {
+  navigationSettings?: ReactNode;
   folderSections: LibraryFolderSection[];
   folderStatuses: LibraryFolderStatus[];
   addLibraryFolder: (kind: LibraryFolderSection['key']) => void;
@@ -83,7 +85,7 @@ type LibrarySettingsSectionProps = {
   animeCount: number;
   scanLibrary: () => void;
   refreshMetadata: () => void;
-  fullRescanLibrary: () => void;
+  fullRescanLibrary: () => void | Promise<void>;
   autoSyncIntervalHours: number;
   setAutoSyncIntervalHours: (hours: number) => void | Promise<void>;
   backupStatus: string;
@@ -255,6 +257,7 @@ export default function LibrarySettingsPanel({
   setDraggedSidebarItem,
   onSidebarOrderDrop,
   moveSidebarItem,
+  navigationSettings,
   isScanning,
   scanProgress,
   movieCount,
@@ -552,6 +555,7 @@ export default function LibrarySettingsPanel({
   };
 
   const anyScanning = isScanning || mediaLibraries.scanning || photoLibrary.roots.some((root) => root.scanning);
+  const hasVideoFolders = libraries.some(library => library.folders.some(folder => folder.source === 'legacy'));
   const configuredCount = libraries.filter((library) => library.folders.length > 0).length;
   const totalItemCount = libraries.reduce((total, library) => total + (library.itemCount || 0), 0);
 
@@ -591,18 +595,6 @@ export default function LibrarySettingsPanel({
         title="Libraries"
         action={(
           <>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => void scanAllLibraries()}
-              disabled={anyScanning || scanningAll || configuredCount === 0}
-              aria-label={anyScanning || scanningAll ? 'Scanning libraries' : 'Scan all libraries'}
-              title={anyScanning || scanningAll ? 'Scanning libraries' : 'Scan all libraries'}
-              className="h-9 w-9"
-            >
-              <RefreshCw className={`h-4 w-4 ${anyScanning || scanningAll ? 'animate-spin' : ''}`} aria-hidden="true" />
-            </Button>
             <Button type="button" variant="default" size="sm" onClick={() => setWizardOpen(true)} className="gap-1.5">
               <Plus className="h-4 w-4" aria-hidden="true" />
               New library
@@ -624,7 +616,7 @@ export default function LibrarySettingsPanel({
         {filteredLibraries.map((library) => {
           const expanded = accordion.openId === `library:${library.kind}`;
           const busy = busyKind === library.kind;
-          const sidebarItemId = LIBRARY_SIDEBAR_IDS[library.kind];
+          const sidebarItemId = navigationSettings ? undefined : LIBRARY_SIDEBAR_IDS[library.kind];
           const isDraggingCard = Boolean(sidebarItemId && draggedSidebarItem === sidebarItemId);
           const showDropLine = Boolean(
             sidebarDropTarget
@@ -724,9 +716,9 @@ export default function LibrarySettingsPanel({
                   >
                     <DotsSixVertical className="h-4 w-4" weight="bold" aria-hidden="true" />
                   </button>
-                ) : (
+                ) : !navigationSettings ? (
                   <span className="h-10 w-4 shrink-0" aria-hidden="true" />
-                )}
+                ) : null}
                 <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] ${expanded ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-muted)]'}`}>
                   <LibraryTypeIcon kind={library.kind} active={expanded} className="h-5 w-5" />
                 </span>
@@ -788,7 +780,10 @@ export default function LibrarySettingsPanel({
                           ))}
                         </ul>
                       ) : (
-                        <p className="py-2 pl-[76px] text-sm text-[var(--loom-muted)]">No folders yet. Use Add folder to choose one from this computer or a mounted NAS share.</p>
+                        <div className="flex flex-col items-center justify-center gap-3 px-4 py-6 text-center text-[var(--loom-muted)]">
+                          <FolderOpen className="h-8 w-8 text-[var(--loom-faint)]" aria-hidden="true" />
+                          <p className="max-w-md text-sm">No folders yet. Use Add folder to choose one from this computer or a mounted NAS share.</p>
+                        </div>
                       )}
                     </div>
                   </motion.div>
@@ -821,10 +816,19 @@ export default function LibrarySettingsPanel({
         title="Sync and organise"
         description={`${configuredCount} ${configuredCount === 1 ? 'library' : 'libraries'} · ${totalItemCount.toLocaleString()} items`}
         action={(
-          <Button type="button" variant="outline" size="sm" onClick={() => void runAction('movies', async () => { scanLibrary(); await refreshLibrary(); })} disabled={anyScanning} className="gap-1.5">
-            <RefreshCw className={`h-3.5 w-3.5 ${isScanning ? 'animate-spin' : ''}`} aria-hidden="true" />
-            {isScanning ? 'Syncing…' : 'Quick sync'}
-          </Button>
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => void scanAllLibraries()}
+              disabled={anyScanning || scanningAll || busyKind !== null || configuredCount === 0} className="gap-2">
+              <RefreshCw className={`h-4 w-4 ${anyScanning || scanningAll ? 'animate-spin' : ''}`} aria-hidden="true" />
+              {anyScanning || scanningAll ? 'Syncing…' : 'Quick sync'}
+            </Button>
+            <Button type="button" size="sm" className="gap-2"
+              onClick={() => void runAction('movies', async () => { await fullRescanLibrary(); await refreshLibrary(); })}
+              disabled={anyScanning || scanningAll || busyKind !== null || !hasVideoFolders}
+              title="Re-read every movie, TV, anime, and other video file">
+              <ScanSearch className="h-4 w-4" aria-hidden="true" />Full scan
+            </Button>
+          </>
         )}
       >
         {anyScanning ? (
@@ -844,11 +848,10 @@ export default function LibrarySettingsPanel({
         <SettingsRow title="Refresh metadata" description="Download titles, artwork, and ratings again for every item.">
           <Button type="button" variant="outline" size="sm" onClick={() => void runAction('movies', async () => { refreshMetadata(); await refreshLibrary(); })} disabled={anyScanning}>Refresh</Button>
         </SettingsRow>
-        <SettingsRow title="Full rescan" description="Re-read every file from scratch. Slower than a quick sync.">
-          <Button type="button" variant="outline" size="sm" onClick={() => void runAction('movies', async () => { fullRescanLibrary(); await refreshLibrary(); })} disabled={anyScanning}>Rescan</Button>
-        </SettingsRow>
         <OrganizeFilesSection disabled={anyScanning} />
       </SettingsGroup>
+
+      {navigationSettings}
 
       <SettingsGroup
         title="Advanced"

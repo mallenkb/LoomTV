@@ -1,5 +1,5 @@
 import { Link } from '@/lib/navigation';
-import { Play } from 'lucide-react';
+import CardPlayContent, { CARD_PLAY_ACTION_CLASS, CARD_PLAY_OVERLAY_CLASS } from './CardPlayContent';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import RatingBadge from '@/components/RatingBadge';
@@ -64,9 +64,9 @@ export default function ContinueWatchingCard({
           imgClassName="object-cover transition-transform duration-500 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[var(--loom-media-scrim-strong)] via-transparent to-transparent" />
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl">
-            <Play className="ml-0.5 h-5 w-5 fill-current" />
+        <div className={CARD_PLAY_OVERLAY_CLASS}>
+          <span className={CARD_PLAY_ACTION_CLASS}>
+            <CardPlayContent />
           </span>
         </div>
         <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />

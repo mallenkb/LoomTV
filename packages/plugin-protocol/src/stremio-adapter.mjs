@@ -103,6 +103,22 @@ function addIssueIfInvalidString(value, path, issues, {
   return text;
 }
 
+function streamRequestHeaders(value) {
+  if (!isRecord(value) || Object.keys(value).length > 8) return undefined;
+  const allowed = new Set(['user-agent', 'referer', 'origin', 'authorization', 'cookie', 'accept-language', 'x-api-key', 'x-auth-token']);
+  const headers = {};
+  let size = 0;
+  for (const [key, content] of Object.entries(value)) {
+    const name = key.toLowerCase();
+    if (!allowed.has(name) || Object.hasOwn(headers, name) || typeof content !== 'string'
+      || content.length > 4096 || /[^\x20-\x7e]/.test(content)) return undefined;
+    size += name.length + content.length;
+    if (size > 8192) return undefined;
+    headers[name] = content;
+  }
+  return headers;
+}
+
 function responseString(value, maxLength = 512) {
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
@@ -810,8 +826,47 @@ function inspectP2pSource(stream) {
   return null;
 }
 
+// Preserve only the torrent fields the host's torrent engine accepts.
+// Never forward arbitrary engine options, web seeds, filesystem paths or URLs.
+function torrentDescriptor(stream) {
+  let hash = typeof stream.infoHash === 'string' ? stream.infoHash.trim().toLowerCase() : '';
+  let trackers = Array.isArray(stream.sources) ? stream.sources : [];
+  const magnet = [stream.url, stream.magnet, stream.magnetUrl, stream.torrentUrl]
+    .find(value => typeof value === 'string' && /^magnet:/i.test(value.trim()));
+  if (magnet) {
+    if (magnet.length > 8192) return null;
+    try {
+      const parsed = new URL(magnet);
+      const xt = parsed.searchParams.getAll('xt').find(value => /^urn:btih:[a-f0-9]{40}$/i.test(value));
+      const magnetHash = xt?.slice(9).toLowerCase();
+      if (!magnetHash || (hash && hash !== magnetHash)) return null;
+      hash = magnetHash;
+      trackers = [...trackers, ...parsed.searchParams.getAll('tr').map(value => `tracker:${value}`)];
+    } catch { return null; }
+  }
+  if (!/^[a-f0-9]{40}$/.test(hash)) return null;
+  if (stream.fileIdx !== undefined && (!Number.isInteger(stream.fileIdx) || stream.fileIdx < 0 || stream.fileIdx > 65535)) return null;
+  const sources = [...new Set(trackers.filter(value => {
+    if (typeof value !== 'string' || value.length > 2048) return false;
+    if (value === `dht:${hash}`) return true;
+    if (!/^tracker:(?:https?|udp):\/\//i.test(value)) return false;
+    // Use the existing public-address syntax checks for all tracker protocols.
+    return inspectRemoteHttpsUrl(value.slice(8).replace(/^(?:http|udp):/i, 'https:')).ok;
+  }))].slice(0, 16);
+  return { infoHash: hash, ...(stream.fileIdx === undefined ? {} : { fileIdx: stream.fileIdx }), sources };
+}
+
+function streamDisplayText(value, maxLength = 512) {
+  if (typeof value !== 'string') return undefined;
+  // Stream labels commonly contain line breaks (provider, quality, file,
+  // seeders). Allow display whitespace without relaxing identifier/URL rules.
+  const text = value.replace(/\r\n?/g, '\n').trim();
+  if (!text || text.length > maxLength || controlCharacterPattern.test(text.replace(/[\n\t]/g, ''))) return undefined;
+  return text;
+}
+
 function streamLabel(stream) {
-  return responseString(stream.name) || responseString(stream.title) || responseString(stream.description);
+  return streamDisplayText(stream.name) || streamDisplayText(stream.title) || streamDisplayText(stream.description);
 }
 
 function normalizeSubtitleCandidate(value, context, index, limits) {
@@ -971,7 +1026,7 @@ function normalizeStreamCandidate(value, context, limits, path = 'stream') {
     });
   }
   const label = streamLabel(value);
-  const description = responseString(value.description, 1_000) || responseString(value.title, 1_000);
+  const description = streamDisplayText(value.description, 1_000) || streamDisplayText(value.title, 1_000);
   const base = {
     id: `${context.addonId}:${context.itemId || 'item'}:${context.sourceIndex ?? 0}`,
     source: context,
@@ -979,15 +1034,26 @@ function normalizeStreamCandidate(value, context, limits, path = 'stream') {
     ...(label === undefined ? {} : { name: label }),
     ...(description === undefined || description === label ? {} : { description }),
   };
-  const p2p = inspectP2pSource(value);
+  // Direct media wins over informational torrent fields returned by debrid providers.
+  const directCheck = typeof value.url === 'string'
+    ? inspectRemoteHttpsUrl(value.url.trim(), { maxLength: limits.maxUrlLength }) : null;
+  const directUrl = directCheck?.ok && !/\.torrent$/i.test(new URL(directCheck.url).pathname);
+  const p2p = directUrl ? null : inspectP2pSource(value);
   if (p2p) {
+    const torrent = torrentDescriptor(value);
+    if (torrent) return {
+      ...base, sourceKind: 'torrent', availability: 'requires-engine', playableByLoom: false,
+      requiresExplicitConsent: true, torrent,
+      reason: 'Requires LoomTV torrent playback and a native player.',
+      reasonCode: 'TORRENT_ENGINE_REQUIRED',
+    };
     return {
       ...base,
       sourceKind: p2p.sourceKind,
       availability: 'rejected',
       playableByLoom: false,
       requiresExplicitConsent: false,
-      reason: STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON,
+      reason: 'This torrent reference is unsupported. Use an add-on source with a valid BitTorrent v1 hash or magnet link.',
       reasonCode: 'P2P_UNSUPPORTED',
       reference: p2p.reference,
     };
@@ -1005,8 +1071,11 @@ function normalizeStreamCandidate(value, context, limits, path = 'stream') {
       return {
         ...base,
         ...(hints.notWebReady === true ? { notWebReady: true } : {}),
-        // LoomTV does not forward provider-chosen request headers.
-        ...(isRecord(hints.proxyHeaders) ? { requestHeadersRequired: true } : {}),
+        // Headers remain host-only and are scoped to the selected media origin.
+        ...(isRecord(hints.proxyHeaders) ? {
+          requestHeadersRequired: true,
+          requestHeaders: streamRequestHeaders(hints.proxyHeaders.request ?? {}),
+        } : {}),
         sourceKind: isHls ? 'hls' : 'https-media',
         availability: 'playable',
         playableByLoom: true,
@@ -1449,7 +1518,7 @@ export class StremioAddonRegistry {
       approvalRequired: true,
       reviewWarnings: Object.freeze([
         ...manifest.compatibilityWarnings.map((warning) => warning.message),
-        ...(manifest.peerToPeerDeclared ? [STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON] : []),
+        ...(manifest.peerToPeerDeclared ? ['Torrent sources require explicit selection and a native player. Other peer-to-peer transports remain unsupported.'] : []),
         ...(manifest.behaviorHints.configurationRequired ? ['This add-on declares required host configuration; provide its fields before enabling it.'] : []),
       ]),
     });

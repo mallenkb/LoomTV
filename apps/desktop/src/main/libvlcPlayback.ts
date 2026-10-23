@@ -1,3 +1,4 @@
+import { isAddonRelayUrl } from '../shared/addonPlaybackReference.ts';
 import { normalizeResumeRewind, resumeRewindTarget } from '../shared/resumeRewind.ts';
 import { restoreOffscreenTrack } from './offscreenVideoRestore.ts';
 import { BrowserWindow, type WebContents } from 'electron';
@@ -1125,7 +1126,7 @@ class LibVlcPlaybackSession {
     this.instance = sharedInstance ?? createLibVlcInstance(runtime);
     this.ownsInstance = sharedInstance === null;
     if (!this.instance) throw new Error('LibVLC could not create a media instance.');
-    const isRemoteLocation = /^https:\/\//i.test(filePath);
+    const isRemoteLocation = /^https?:\/\//i.test(filePath);
     let media: NativeHandle;
     try {
       media = nativeHandle(isRemoteLocation
@@ -2130,12 +2131,13 @@ export function startLibVlcPlayback(
   owner: WebContents,
   filePath: string,
   options: LibVlcStartOptions = {},
-  sourcePolicy: { allowRemoteHttps?: boolean } = {},
+  sourcePolicy: { allowRemoteHttps?: boolean; addonRelay?: boolean; onDispose?: () => void } = {},
 ): { ok: boolean; sessionId?: string; surface?: LibVlcSurface; error?: string } {
   if (shutdown) return { ok: false, surface: 'unavailable', error: 'LibVLC is shutting down.' };
   if (!libVlcConfiguredEnabled() || libVlcKillSwitchEnabled() || !libVlcCompositionGateEnabled()) return { ok: false, surface: 'unavailable', error: disabledReason() };
   const isRemoteHttps = /^https:\/\//i.test(filePath);
-  if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) && !(isRemoteHttps && sourcePolicy.allowRemoteHttps)) || /^\\\\/.test(filePath)) {
+  const isLocalRelay = sourcePolicy.addonRelay === true && isAddonRelayUrl(filePath);
+  if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) && !(isLocalRelay || (isRemoteHttps && sourcePolicy.allowRemoteHttps))) || /^\\\\/.test(filePath)) {
     return { ok: false, surface: 'unavailable', error: 'LibVLC only accepts an authorized local file.' };
   }
   const cached = cachedRuntime();
@@ -2146,6 +2148,7 @@ export function startLibVlcPlayback(
     currentSession?.stop();
     const session = new LibVlcPlaybackSession(cached.runtime, owner, ownerWindow, filePath, options, (terminated) => {
       if (currentSession === terminated) currentSession = null;
+      sourcePolicy.onDispose?.();
     });
     currentSession = session;
     return { ok: true, sessionId: session.id, surface: 'composited-window' };

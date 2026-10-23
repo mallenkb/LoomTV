@@ -468,6 +468,9 @@ const config: ForgeConfig = {
     icon: 'resources/icon',
     executableName: 'LoomTV',
     extraResource: [
+      '../../LICENSE',
+      '../../THIRD_PARTY_NOTICES.md',
+      'resources/licenses',
       'resources/scanner',
       'resources/ffmpeg',
       'resources/fpcalc',
@@ -502,6 +505,7 @@ const config: ForgeConfig = {
         }
         pruneBetterSqlite3(targetNodeModules, platform, arch);
         copyRuntimeModule('electron-updater', targetNodeModules);
+        copyRuntimeModule('webtorrent', targetNodeModules);
       },
     ],
   },

@@ -153,7 +153,7 @@ test('enabled catalogs use the declared Stremio route and normalized response sh
   assert.deepEqual(result.items.map(({ id, title }) => [id, title]), [['tt123', 'Movie']]);
 });
 
-test('torrent and peer-to-peer stream candidates are always returned as rejected', async () => {
+test('invalid torrent hashes remain rejected', async () => {
   const registry = registryFor((url) => url.endsWith('/manifest.json')
     ? manifest
     : { streams: [{ name: 'Torrent source', infoHash: 'abc123', fileIdx: 0 }] });
@@ -165,6 +165,40 @@ test('torrent and peer-to-peer stream candidates are always returned as rejected
   assert.equal(result.playableCount, 0);
   assert.equal(result.unsupportedPeerToPeerCount, 1);
   assert.equal(result.sources[0].reasonCode, 'P2P_UNSUPPORTED');
+});
+
+test('direct media wins over torrent metadata while torrent-only sources require an engine', async () => {
+  const hash = 'a'.repeat(40);
+  const registry = registryFor(url => url.endsWith('/manifest.json') ? manifest : { streams: [
+    { url: 'https://media.example/video.mp4', infoHash: hash, fileIdx: 7 },
+    { infoHash: hash, fileIdx: 7, sources: ['tracker:https://tracker.example/announce', 'tracker:http://127.0.0.1/secret'] },
+    { url: `magnet:?xt=urn:btih:${hash}` },
+    { url: 'https://media.example/movie.torrent' },
+    { infoHash: hash, fileIdx: -1 },
+  ] });
+  const review = await registry.reviewManifestUrl('https://catalog.example/manifest.json');
+  registry.approve(review.addonId, { confirmed: true, reviewToken: review.reviewToken });
+  const result = await registry.fetchStreams(review.addonId, { type: 'movie', videoId: 'tt123' });
+  assert.equal(result.playableCount, 1);
+  assert.equal(result.sources[0].sourceKind, 'https-media');
+  assert.equal(result.sources[0].torrent, undefined);
+  assert.equal(result.sources[1].availability, 'requires-engine');
+  assert.equal(result.sources[1].requiresExplicitConsent, true);
+  assert.deepEqual(result.sources[1].torrent, { infoHash: hash, fileIdx: 7, sources: ['tracker:https://tracker.example/announce'] });
+  assert.equal(result.sources[2].torrent.infoHash, hash);
+  assert.equal(result.sources[3].availability, 'rejected');
+  assert.equal(result.sources[4].availability, 'rejected');
+});
+
+test('a torrent filename in a media query does not override a valid direct URL', async () => {
+  const registry = registryFor(url => url.endsWith('/manifest.json') ? manifest : { streams: [
+    { url: 'https://media.example/play?filename=movie.torrent', infoHash: 'a'.repeat(40), fileIdx: 1 },
+  ] });
+  const review = await registry.reviewManifestUrl('https://catalog.example/manifest.json');
+  registry.approve(review.addonId, { confirmed: true, reviewToken: review.reviewToken });
+  const result = await registry.fetchStreams(review.addonId, { type: 'movie', videoId: 'tt123' });
+  assert.equal(result.sources[0].sourceKind, 'https-media');
+  assert.equal(result.sources[0].torrent, undefined);
 });
 
 test('private, local, credentialed, and non-HTTPS manifests are rejected before fetch', async () => {

@@ -302,7 +302,7 @@ export type DesktopBridgeApi = {
       listAvailableStremioPlugins?: () => Promise<StremioPluginIpcResult<StremioPluginSummary[]>>;
       listOfficialStremioAddons?: () => Promise<StremioPluginIpcResult<OfficialStremioAddon[]>>;
       reviewOfficialStremioAddon?: (officialId: OfficialStremioAddon['id']) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
-      reviewStremioManifestUrl?: (manifestUrl: string) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
+      reviewStremioManifestUrl?: (manifestUrl: string, expectedAddonId?: string) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
       reviewInstalledStremioAddon?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginReview>>;
       approveStremioAddon?: (addonId: string, reviewToken: string) => Promise<StremioPluginIpcResult<StremioPluginSummary>>;
       disableStremioAddon?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginSummary>>;
@@ -312,8 +312,18 @@ export type DesktopBridgeApi = {
       getStremioCatalog?: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginIpcResult<StremioPluginCatalogResult>>;
       getStremioMeta?: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
       getStremioMetaByItem?: (request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
-      getStremioStreams?: (addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<import('../shared/desktopProtocol.ts').StremioStreamResult>>;
+      getStremioStreams?: (addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest, requestId?: string) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<import('../shared/desktopProtocol.ts').StremioStreamResult>>;
       getStremioSubtitles?: (addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<import('../shared/desktopProtocol.ts').StremioSubtitleListResult>>;
+      openStremioConfiguration?: (addonId: string, revision: string) => Promise<StremioPluginIpcResult<boolean>>;
+      getStremioManifestUrl?: (addonId: string, revision: string) => Promise<StremioPluginIpcResult<string>>;
+      cancelStremioStreams?: (requestId: string) => Promise<StremioPluginIpcResult<boolean>>;
+      stremioSourceAction?: (reference: string, action: 'copy-stream' | 'copy-magnet' | 'download', title: string) => Promise<StremioPluginIpcResult<boolean>>;
+      validateStremioPlayback?: (reference: string) => Promise<StremioPluginIpcResult<boolean>>;
+      getStremioServiceStatus?: () => Promise<StremioPluginIpcResult<import('../shared/stremioService.ts').StremioServiceStatus>>;
+      prepareStremioTorrent?: (reference: string, requestId: string) => Promise<StremioPluginIpcResult<import('../shared/stremioService.ts').StremioTorrentPreparation>>;
+      selectStremioTorrent?: (reference: string, index: number) => Promise<StremioPluginIpcResult<string>>;
+      stopStremioPlayback?: (reference: string) => Promise<boolean>;
+      onStremioPlaybackRevoked?: (callback: (reference: string) => void) => () => void;
       downloadStremioSubtitle?: (token: string) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<{ text: string }>>;
       issueStremioItemKey?: (type: 'movie' | 'series', providerId: string) => Promise<import('../shared/desktopProtocol.ts').StremioPluginIpcResult<string>>;
       getStremioAddonConfiguration?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
@@ -1572,8 +1582,8 @@ const desktopTransport = {
     throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
   },
 
-  async reviewStremioManifestUrl(manifestUrl: string): Promise<StremioPluginReview> {
-    if (window.desktopApi?.reviewStremioManifestUrl) return unwrapStremioPluginResult(await window.desktopApi.reviewStremioManifestUrl(manifestUrl));
+  async reviewStremioManifestUrl(manifestUrl: string, expectedAddonId?: string): Promise<StremioPluginReview> {
+    if (window.desktopApi?.reviewStremioManifestUrl) return unwrapStremioPluginResult(await window.desktopApi.reviewStremioManifestUrl(manifestUrl, expectedAddonId));
     throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
   },
 
@@ -1622,8 +1632,64 @@ const desktopTransport = {
     throw new Error('Stremio metadata is currently available only in the LoomTV desktop app.');
   },
 
-  async getStremioStreams(addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest): Promise<import('../shared/desktopProtocol.ts').StremioStreamResult> {
-    if (window.desktopApi?.getStremioStreams) return unwrapStremioPluginResult(await window.desktopApi.getStremioStreams(addonId, request));
+  async stremioSourceAction(reference: string, action: 'copy-stream' | 'copy-magnet' | 'download', title: string): Promise<boolean> {
+    if (!window.desktopApi?.stremioSourceAction) throw new Error('Source actions require LoomTV desktop. Restart the app after updating.');
+    return unwrapStremioPluginResult(await window.desktopApi.stremioSourceAction(reference, action, title));
+  },
+
+  async stopStremioPlayback(reference: string): Promise<void> {
+    await window.desktopApi?.stopStremioPlayback?.(reference);
+  },
+
+  onStremioPlaybackRevoked(callback: (reference: string) => void): () => void {
+    return window.desktopApi?.onStremioPlaybackRevoked?.(callback) || (() => undefined);
+  },
+
+  async openStremioConfiguration(addonId: string, revision: string): Promise<boolean> {
+    if (window.desktopApi?.openStremioConfiguration) return unwrapStremioPluginResult(await window.desktopApi.openStremioConfiguration(addonId, revision));
+    throw new Error('Provider configuration requires the desktop app.');
+  },
+
+  async validateStremioPlayback(reference: string): Promise<boolean> {
+    if (window.desktopApi?.validateStremioPlayback) return unwrapStremioPluginResult(await window.desktopApi.validateStremioPlayback(reference));
+    return false;
+  },
+
+  async getStremioServiceStatus(): Promise<import('../shared/stremioService.ts').StremioServiceStatus> {
+    if (!window.desktopApi?.getStremioServiceStatus) return { available: false, message: 'Stremio Service playback requires LoomTV desktop.' };
+    return unwrapStremioPluginResult(await window.desktopApi.getStremioServiceStatus());
+  },
+
+  async prepareStremioTorrent(reference: string, signal: AbortSignal): Promise<import('../shared/stremioService.ts').StremioTorrentPreparation> {
+    signal.throwIfAborted();
+    if (!window.desktopApi?.prepareStremioTorrent) throw new Error('Torrent playback requires LoomTV desktop.');
+    const requestId = crypto.randomUUID();
+    const abort = () => { void window.desktopApi?.cancelStremioStreams?.(requestId).catch(() => { /* Host teardown cancels requests. */ }); };
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      const result = await window.desktopApi.prepareStremioTorrent(reference, requestId);
+      signal.throwIfAborted();
+      return unwrapStremioPluginResult(result);
+    } finally { signal.removeEventListener('abort', abort); }
+  },
+
+  async selectStremioTorrent(reference: string, index: number): Promise<string> {
+    if (!window.desktopApi?.selectStremioTorrent) throw new Error('Torrent playback requires LoomTV desktop.');
+    return unwrapStremioPluginResult(await window.desktopApi.selectStremioTorrent(reference, index));
+  },
+
+  async getStremioStreams(addonId: string, request: import('../shared/desktopProtocol.ts').StremioStreamRequest, signal?: AbortSignal): Promise<import('../shared/desktopProtocol.ts').StremioStreamResult> {
+    signal?.throwIfAborted();
+    if (window.desktopApi?.getStremioStreams) {
+      const requestId = crypto.randomUUID();
+      const abort = () => { void window.desktopApi?.cancelStremioStreams?.(requestId).catch(() => { /* Host shutdown also cancels pending work. */ }); };
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        const result = await window.desktopApi.getStremioStreams(addonId, request, requestId);
+        signal?.throwIfAborted();
+        return unwrapStremioPluginResult(result);
+      } finally { signal?.removeEventListener('abort', abort); }
+    }
     throw new Error('Stremio streams are currently available only in the LoomTV desktop app.');
   },
 
@@ -1642,6 +1708,18 @@ const desktopTransport = {
   async issueStremioItemKey(type: 'movie' | 'series', providerId: string): Promise<string> {
     if (window.desktopApi?.issueStremioItemKey) return unwrapStremioPluginResult(await window.desktopApi.issueStremioItemKey(type, providerId));
     throw new Error('Stremio metadata is currently available only in the LoomTV desktop app.');
+  },
+
+  async getStremioManifestUrl(addonId: string, revision: string): Promise<string> {
+    if (!window.desktopApi?.getStremioManifestUrl) throw new Error('Restart LoomTV to load the URL editor, then reopen Manage.');
+    try {
+      return unwrapStremioPluginResult(await window.desktopApi.getStremioManifestUrl(addonId, revision));
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.includes('No handler registered')) {
+        throw new Error('Restart LoomTV to load the URL editor, then reopen Manage.');
+      }
+      throw cause;
+    }
   },
 
   async getStremioAddonConfiguration(addonId: string): Promise<StremioPluginConfigurationState> {

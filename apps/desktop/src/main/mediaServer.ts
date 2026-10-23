@@ -133,6 +133,7 @@ import type {
 } from '../shared/desktopProtocol.ts';
 
 export interface MediaServerDependencies {
+  serveAddonPlayback?: (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => Promise<void>;
   ALLOWED_CORS_ORIGINS: ReadonlySet<string>;
   LOCAL_ACCESS_HEADER: string;
   // The raw local access token is deliberately absent. The HTTP server
@@ -305,6 +306,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       }
 
       const reqUrl = new URL(req.url || '/', `http://127.0.0.1:${mediaServerPort}`);
+      // A relay URL is a scoped playback credential, never the renderer's
+      // general local-access token. It is accepted only on this loopback listener.
+      if (reqUrl.pathname.startsWith('/addon-media/')) {
+        if (!loopbackRequest || !corsAllowed || !deps.serveAddonPlayback) {
+          res.writeHead(403); res.end(); return;
+        }
+        await deps.serveAddonPlayback(req, res, reqUrl);
+        return;
+      }
       const routeAccess = mediaServerRouteAccess(reqUrl.pathname, req.method || 'GET');
       // The paired device behind this request, when LAN-authorized. Local
       // desktop requests keep null and resolve to the desktop's profile.
@@ -1267,6 +1277,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           appDarkTheme: preferences.appDarkTheme ?? settings.appDarkTheme,
           appLoaderStyle: preferences.appLoaderStyle ?? settings.appLoaderStyle,
           appHomeStyle: preferences.appHomeStyle,
+          appPlayerControlStyle: preferences.appPlayerControlStyle,
           appModernHeroMode: preferences.appModernHeroMode,
           playbackSkipBackSeconds: preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds,
           playbackSkipForwardSeconds: preferences.playbackSkipForwardSeconds ?? settings.playbackSkipForwardSeconds,

@@ -1,6 +1,9 @@
 import { desktopApi, type StremioPluginCatalogItem, type StremioPluginSummary } from '@/lib/desktopApi';
-import { cachedDesktopRead } from '@/lib/queryClient';
+import { cachedDesktopRead, invalidateDesktopData } from '@/lib/queryClient';
 import { subtitleLanguageLabel, type SubtitleVideo } from '@/lib/openSubtitlesV3';
+import { enrichWithCinemeta } from './cinemetaAddonMetadata';
+import { sourceFingerprint } from './addonSourceHistory';
+import { sourceResolution, type AddonResolution } from './addonSourcePreferences';
 import type { StremioPluginVideo, StremioStreamDescriptor, StremioStreamSubtitle } from '@/shared/desktopProtocol';
 
 export type AddonStreamArtwork = {
@@ -15,6 +18,7 @@ export type AddonStreamArtwork = {
 
 /** The video a chosen add-on stream belongs to, for subtitle lookups in the player. */
 export type AddonSubtitleContext = {
+  opensubtitlesOnly?: boolean;
   type: string;
   videoId: string;
   /** Subtitles the chosen stream listed, by host token. */
@@ -22,6 +26,8 @@ export type AddonSubtitleContext = {
 };
 
 export type AddonPlaybackOptions = {
+  resumeLastSource?: boolean;
+  addonTarget?: AddonVideoTarget;
   subtitleVideo?: SubtitleVideo;
   addonSubtitles?: AddonSubtitleContext;
 };
@@ -35,7 +41,7 @@ export function invalidateRequests(counter: { current: number }): void {
 }
 
 /** Types whose titles open the episode list rather than a single video. */
-const SERIES_LIKE_TYPES = new Set(['series', 'anime', 'channel']);
+const SERIES_LIKE_TYPES = new Set(['series', 'tv', 'anime', 'channel']);
 
 export function isSeriesLikeType(type: string): boolean {
   return SERIES_LIKE_TYPES.has(type);
@@ -100,16 +106,16 @@ export async function addonIdentityForItem(item: StremioPluginCatalogItem): Prom
  * The result keeps the item's identity, catalog source, and provider ID.
  * A Discover title keeps its own details and takes only the video list.
  */
-export async function loadAddonMeta(item: StremioPluginCatalogItem): Promise<StremioPluginCatalogItem> {
+export async function loadAddonMeta(item: StremioPluginCatalogItem, onMetadata?: (item: StremioPluginCatalogItem) => void): Promise<StremioPluginCatalogItem> {
   const providerId = item.providerId;
-  if (!providerId) return item;
+  if (!providerId) return enrichWithCinemeta(item, onMetadata);
   const sources = await desktopApi.listAvailableStremioPlugins();
   const candidates = sources
     .filter(source => supportsAddonResource(source, 'meta', item.type, providerId))
     .sort((a, b) => Number(b.addonId === item.source) - Number(a.addonId === item.source));
   const revisions = candidates.map(source => [source.addonId, source.revision]);
   const key = item.metaKey || item.id;
-  return cachedDesktopRead('addon-meta', [key, item.type, revisions], async () => {
+  const resolved = await cachedDesktopRead('addon-meta', [key, item.type, revisions], async () => {
     for (const source of candidates) {
       try {
         const result = await desktopApi.getStremioMeta(source.addonId, { type: item.type, id: key });
@@ -139,6 +145,7 @@ export async function loadAddonMeta(item: StremioPluginCatalogItem): Promise<Str
     }
     return item;
   }, 5 * 60_000);
+  return enrichWithCinemeta(resolved, onMetadata);
 }
 
 /**
@@ -152,9 +159,18 @@ export function defaultAddonVideo(item: StremioPluginCatalogItem): { id: string;
 }
 
 export type AddonVideoTarget = {
+  selectedSourceFingerprint?: string;
+  preferredSource?: { addonId: string; resolution: AddonResolution };
+  /** A source explicitly chosen by a dedicated add-on route, rather than a last-used preference. */
+  sourceRestriction?: string;
+  metadataNeedsRefresh?: boolean;
+  detailId?: string;
+  detailType?: StremioPluginCatalogItem['type'];
   type: string;
   videoId: string;
   title: string;
+  /** A dedicated add-on page requests playback only from its selected source. */
+  sourceAddonId?: string;
   season?: number;
   episode?: number;
   /**
@@ -173,8 +189,11 @@ export type AddonVideoTarget = {
 export function addonVideoTarget(item: StremioPluginCatalogItem, videoId: string, title: string, video?: StremioPluginVideo, position?: { season: number; episode: number }): AddonVideoTarget {
   return {
     type: item.type,
+    detailId: item.id,
+    detailType: item.type,
     videoId,
     title,
+    ...(position ? { metaItem: item } : {}),
     ...(position ? { season: position.season, episode: position.episode } : {}),
     ...(video?.streams !== undefined ? {
       inlineStreams: video.streams,
@@ -193,7 +212,7 @@ export function addonPlaybackTarget(item: StremioPluginCatalogItem | null | unde
     return video ? addonVideoTarget(item, video.id, item.title, video.video) : null;
   }
   return item.type === 'movie' && item.imdbId && /^tt\d{5,12}$/.test(item.imdbId)
-    ? { type: 'movie', videoId: item.imdbId, title: item.title }
+    ? { type: 'movie', videoId: item.imdbId, title: item.title, detailId: item.id, detailType: item.type }
     : null;
 }
 
@@ -235,7 +254,7 @@ export type AddonSourceGroup = {
   addonName: string;
   /** Revision of the add-on when these streams were fetched. */
   revision?: string;
-  status: 'ready' | 'error';
+  status: 'loading' | 'ready' | 'empty' | 'error';
   streams: readonly StremioStreamDescriptor[];
   error?: string;
 };
@@ -243,10 +262,12 @@ export type AddonSourceGroup = {
 /** Reload a title's metadata under the current revisions and rebuild the target for the same video. */
 async function refreshInlineTarget(target: AddonVideoTarget): Promise<AddonVideoTarget> {
   if (!target.metaItem) throw new StaleAddonSourceError('This title’s details changed. Open it again to load current sources.');
+  invalidateDesktopData(['addon-meta']);
   const item = await loadAddonMeta(target.metaItem);
+  if (item === target.metaItem) throw new Error('Current inline sources could not be loaded. Try refreshing again.');
   const video = item.videos?.find(candidate => candidate.id === target.videoId);
   const { inlineStreams: _streams, inlineSource: _source, inlineRevision: _revision, metaItem: _item, ...base } = target;
-  return video?.streams !== undefined ? { ...base, ...addonVideoTarget(item, target.videoId, target.title, video), season: target.season, episode: target.episode } : base;
+  return video?.streams !== undefined ? { ...base, ...addonVideoTarget(item, target.videoId, target.title, video), season: target.season, episode: target.episode } : { ...base, metaItem: item };
 }
 
 /**
@@ -255,14 +276,32 @@ async function refreshInlineTarget(target: AddonVideoTarget): Promise<AddonVideo
  * that declares `stream` for this type and ID is asked in parallel, and a
  * failure stays inside its own group.
  */
-export async function loadAddonSources(initial: AddonVideoTarget): Promise<{ target: AddonVideoTarget; groups: AddonSourceGroup[] }> {
+export async function loadAddonSources(initial: AddonVideoTarget, options: {
+  signal?: AbortSignal;
+  refreshInline?: boolean;
+  onUpdate?: (result: { target: AddonVideoTarget; groups: AddonSourceGroup[] }) => void;
+} = {}): Promise<{ target: AddonVideoTarget; groups: AddonSourceGroup[] }> {
   let target = initial;
+  if (target.metadataNeedsRefresh && target.metaItem) {
+    const metadata = await loadAddonMeta(await addonIdentityForItem(target.metaItem));
+    options.signal?.throwIfAborted();
+    const video = metadata.videos?.find(candidate => candidate.id === target.videoId);
+    target = {
+      ...target, metaItem: metadata, metadataNeedsRefresh: false,
+      ...(video?.streams !== undefined ? {
+        inlineStreams: video.streams, inlineSource: metadata.metaSource || metadata.source,
+        inlineRevision: metadata.metaSourceRevision,
+      } : {}),
+    };
+  }
   let sources = await desktopApi.listAvailableStremioPlugins();
-  if (target.inlineStreams !== undefined) {
+  options.signal?.throwIfAborted();
+  if (target.inlineStreams !== undefined && (!target.sourceAddonId || target.sourceAddonId === target.inlineSource)) {
     let owner = sources.find(source => source.addonId === target.inlineSource && usable(source));
     if (!owner) throw new Error('The source that listed this video is no longer enabled for this profile.');
-    if (owner.revision !== target.inlineRevision) {
+    if (options.refreshInline || owner.revision !== target.inlineRevision) {
       target = await refreshInlineTarget(target);
+      options.signal?.throwIfAborted();
       sources = await desktopApi.listAvailableStremioPlugins();
       owner = sources.find(source => source.addonId === target.inlineSource && usable(source));
     }
@@ -272,20 +311,36 @@ export async function loadAddonSources(initial: AddonVideoTarget): Promise<{ tar
     }
   }
   const current = target;
-  const providers = sources.filter(source => supportsAddonResource(source, 'stream', current.type, current.videoId));
-  const settled = await Promise.allSettled(providers.map(source => desktopApi.getStremioStreams(source.addonId, {
-    type: current.type,
-    id: current.videoId,
-  })));
-  return {
-    target,
-    groups: providers.map((source, index) => {
-      const result = settled[index];
-      return result.status === 'fulfilled'
-        ? { addonId: source.addonId, addonName: source.name, revision: result.value.sourceRevision, status: 'ready', streams: result.value.streams }
-        : { addonId: source.addonId, addonName: source.name, status: 'error', streams: [], error: errorText(result.reason, 'This source did not respond.') };
-    }),
+  const providers = sources.filter(source => (!current.sourceAddonId || source.addonId === current.sourceAddonId)
+    && supportsAddonResource(source, 'stream', current.type, current.videoId));
+  const groups: AddonSourceGroup[] = providers.map(source => ({
+    addonId: source.addonId, addonName: source.name, revision: source.revision, status: 'loading', streams: [],
+  }));
+  const emit = () => {
+    options.signal?.throwIfAborted();
+    options.onUpdate?.({ target, groups: [...groups] });
   };
+  emit();
+  let next = 0;
+  // Match the host's bounded concurrency without filling its queue with every addon.
+  await Promise.all(Array.from({ length: Math.min(4, providers.length) }, async () => {
+    while (next < providers.length) {
+      options.signal?.throwIfAborted();
+      const index = next++;
+      const source = providers[index];
+      try {
+        const result = await desktopApi.getStremioStreams(source.addonId, { type: current.type, id: current.videoId }, options.signal);
+        if (result.sourceRevision !== source.revision) throw new StaleAddonSourceError('This addon changed. Refresh the sources.');
+        groups[index] = { addonId: source.addonId, addonName: source.name, revision: result.sourceRevision,
+          status: result.streams.length ? 'ready' : 'empty', streams: result.streams };
+      } catch (failure) {
+        options.signal?.throwIfAborted();
+        groups[index] = { addonId: source.addonId, addonName: source.name, status: 'error', streams: [], error: errorText(failure, 'This source did not respond.') };
+      }
+      emit();
+    }
+  }));
+  return { target, groups };
 }
 
 /** OpenSubtitles needs an IMDb title, and an episode for series. */
@@ -299,8 +354,11 @@ export function addonSubtitleVideo(target: AddonVideoTarget): SubtitleVideo | un
 /** Player options for a chosen stream: OpenSubtitles identity and add-on subtitle context. */
 export function addonPlaybackOptions(target: AddonVideoTarget, stream: StremioStreamDescriptor, sourceName: string): AddonPlaybackOptions {
   return {
+    addonTarget: { ...target, selectedSourceFingerprint: target.sourceAddonId ? sourceFingerprint(target.sourceAddonId, stream) : undefined,
+      preferredSource: target.sourceAddonId ? { addonId: target.sourceAddonId, resolution: sourceResolution(stream) } : target.preferredSource },
     subtitleVideo: addonSubtitleVideo(target),
     addonSubtitles: {
+      opensubtitlesOnly: stream.transport === 'torrent',
       type: target.type,
       videoId: target.videoId,
       embedded: (stream.subtitles || []).map(subtitle => ({ ...subtitle, sourceName })),

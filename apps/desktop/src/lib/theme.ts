@@ -7,6 +7,7 @@ export type AppThemeColor = 'red' | 'blue' | 'orange' | 'yellow' | 'twitch';
 export type AppDarkTheme = 'black';
 export type AppLoaderStyle = 'play-mark' | 'logo-mark' | 'horizontal-logo';
 export type AppHomeStyle = 'default' | 'modern';
+export type AppPlayerControlStyle = 'default' | 'pill';
 type AppModernHeroMode = 'continue-watching' | 'featured';
 export type AppCastCardStyle = 'standard' | 'compact';
 
@@ -16,6 +17,7 @@ export type AppThemeSettings = {
   darkTheme: AppDarkTheme;
   loaderStyle: AppLoaderStyle;
   homeStyle: AppHomeStyle;
+  playerControlStyle: AppPlayerControlStyle;
   modernHeroMode: AppModernHeroMode;
   castCardStyle: AppCastCardStyle;
 };
@@ -26,6 +28,7 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   darkTheme: 'black',
   loaderStyle: 'play-mark',
   homeStyle: 'modern',
+  playerControlStyle: 'default',
   modernHeroMode: 'continue-watching',
   castCardStyle: 'compact',
 };
@@ -37,6 +40,7 @@ const cachedThemeSchema = z.object({
   darkTheme: z.literal('black').optional(),
   loaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
   homeStyle: z.enum(['default', 'modern']).optional(),
+  playerControlStyle: z.enum(['default', 'pill']).optional(),
   modernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
   castCardStyle: z.enum(['standard', 'compact']).optional(),
 });
@@ -150,6 +154,7 @@ export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {})
     darkTheme: normalizeDarkTheme(settings.darkTheme),
     loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
     homeStyle,
+    playerControlStyle: settings.playerControlStyle === 'pill' ? 'pill' : 'default',
     modernHeroMode: normalizeModernHeroMode(settings.modernHeroMode),
     castCardStyle: normalizeCastCardStyle(settings.castCardStyle),
   };

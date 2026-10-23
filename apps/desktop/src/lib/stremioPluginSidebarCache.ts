@@ -20,7 +20,7 @@ const EMBEDDED_ADDON_IDS = new Set(['com.linvo.cinemeta', 'org.stremio.opensubti
 export function isBrowsableStremioSource(plugin: CachedSidebarPlugin): boolean {
   return !EMBEDDED_ADDON_IDS.has(plugin.addonId)
     && plugin.state === 'enabled' && plugin.trusted && plugin.configured !== false
-    && (Boolean(plugin.catalogCount && plugin.catalogCount > 0) || plugin.addonId === 'org.archive.clean');
+    && (Boolean(plugin.catalogCount && plugin.catalogCount > 0) || plugin.resources?.includes('stream') === true || plugin.addonId === 'org.archive.clean');
 }
 
 function cachedSidebarPlugin(value: unknown): CachedSidebarPlugin | null {

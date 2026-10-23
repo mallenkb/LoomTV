@@ -1,4 +1,5 @@
 import type { PhotoLibraryApi, PhotoBrowseRequest } from './photoLibrary.ts';
+import type { StremioServiceStatus, StremioTorrentPreparation } from './stremioService.ts';
 import type { LibVlcAvailability, LibVlcPlaybackState, LibVlcStartResult } from '../lib/desktopApi';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackViewport } from './playbackProtocol';
 import type {
@@ -237,7 +238,15 @@ export interface IpcContract {
   'plugins:stremio:available': { args: []; result: StremioPluginIpcResult<StremioPluginSummary[]> };
   'plugins:stremio:official': { args: []; result: StremioPluginIpcResult<OfficialStremioAddon[]> };
   'plugins:stremio:review-official': { args: [officialId: OfficialStremioAddon['id']]; result: StremioPluginIpcResult<StremioPluginReview> };
-  'plugins:stremio:review-url': { args: [manifestUrl: string]; result: StremioPluginIpcResult<StremioPluginReview> };
+  'plugins:stremio:review-url': { args: [manifestUrl: string, expectedAddonId?: string]; result: StremioPluginIpcResult<StremioPluginReview> };
+  'plugins:stremio:configure': { args: [addonId: string, revision: string]; result: StremioPluginIpcResult<boolean> };
+  'plugins:stremio:edit-url': { args: [addonId: string, revision: string]; result: StremioPluginIpcResult<string> };
+  'plugins:stremio:cancel-streams': { args: [requestId: string]; result: StremioPluginIpcResult<boolean> };
+  'plugins:stremio:source-action': { args: [reference: string, action: 'copy-stream' | 'copy-magnet' | 'download', title: string]; result: StremioPluginIpcResult<boolean> };
+  'plugins:stremio:validate-playback': { args: [reference: string]; result: StremioPluginIpcResult<boolean> };
+  'plugins:stremio:service-status': { args: []; result: StremioPluginIpcResult<StremioServiceStatus> };
+  'plugins:stremio:prepare-torrent': { args: [reference: string, requestId: string]; result: StremioPluginIpcResult<StremioTorrentPreparation> };
+  'plugins:stremio:select-torrent': { args: [reference: string, index: number]; result: StremioPluginIpcResult<string> };
   'plugins:stremio:review-installed': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginReview> };
   'plugins:stremio:approve': { args: [addonId: string, reviewToken: string]; result: StremioPluginIpcResult<StremioPluginSummary> };
   'plugins:stremio:disable': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginSummary> };
@@ -247,7 +256,8 @@ export interface IpcContract {
   'plugins:stremio:catalog': { args: [addonId: string, request: StremioPluginCatalogRequest]; result: StremioPluginIpcResult<StremioPluginCatalogResult> };
   'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
   'plugins:stremio:meta-item': { args: [request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
-  'plugins:stremio:streams': { args: [addonId: string, request: StremioStreamRequest]; result: StremioPluginIpcResult<StremioStreamResult> };
+  'plugins:stremio:stop-playback': { args: [reference: string]; result: boolean };
+  'plugins:stremio:streams': { args: [addonId: string, request: StremioStreamRequest, requestId?: string]; result: StremioPluginIpcResult<StremioStreamResult> };
   'plugins:stremio:subtitles': { args: [addonId: string, request: StremioStreamRequest]; result: StremioPluginIpcResult<StremioSubtitleListResult> };
   'plugins:stremio:subtitle-download': { args: [token: string]; result: StremioPluginIpcResult<{ text: string }> };
   'plugins:stremio:item-key': { args: [type: 'movie' | 'series', providerId: string]; result: StremioPluginIpcResult<string> };
@@ -269,6 +279,7 @@ export interface IpcContract {
 export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
+  'plugins:stremio:playback-revoked': { args: [reference: string] };
   'libvlc:state': { args: [state: LibVlcPlaybackState] };
   'playback:sleep-timer-reset': { args: [] };
   'media-control:command': { args: [command: MediaSessionCommand, handledInMain: boolean] };

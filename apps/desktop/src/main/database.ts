@@ -818,6 +818,7 @@ function validateProfileImport(value: unknown): asserts value is ProfileExportV1
     ['appDarkTheme', new Set(['black'])],
     ['appLoaderStyle', new Set(['play-mark', 'logo-mark', 'horizontal-logo'])],
     ['appHomeStyle', new Set(['default', 'modern'])],
+    ['appPlayerControlStyle', new Set(['default', 'pill'])],
     ['appModernHeroMode', new Set(['continue-watching', 'featured'])],
   ];
   for (const [key, allowed] of allowedPreferenceValues) {
@@ -833,6 +834,11 @@ function validateProfileImport(value: unknown): asserts value is ProfileExportV1
     || preferences.sidebarNavOrder.length > 256
     || preferences.sidebarNavOrder.some((entry) => typeof entry !== 'string')
   )) throw new Error('The profile navigation order is invalid.');
+  if (preferences.hiddenSidebarItems !== undefined && (
+    !Array.isArray(preferences.hiddenSidebarItems)
+    || preferences.hiddenSidebarItems.length > 256
+    || preferences.hiddenSidebarItems.some(entry => typeof entry !== 'string' || entry.length > 8192)
+  )) throw new Error('The profile sidebar visibility is invalid.');
   if (preferences.autoplayNextEnabled !== undefined && typeof preferences.autoplayNextEnabled !== 'boolean') {
     throw new Error('The profile preferences are invalid.');
   }

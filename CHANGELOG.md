@@ -4,6 +4,14 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.31](docs/releases/v2.0.31.md)
+
+Adds managed torrent playback for Stremio add-ons, richer add-on detail metadata and ratings, and selectable player controls and loading styles.
+
+### [2.0.30](docs/releases/v2.0.30.md)
+
+Adds the native build tools required to compile SQLite dependencies while building the headless container.
+
 ### [2.0.29](docs/releases/v2.0.29.md)
 
 Runs on Electron 44, and the Mac app is 43 MB smaller.

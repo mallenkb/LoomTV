@@ -341,7 +341,15 @@ export function resetOwnerProfile(confirmation: string): ProfileSummary {
   return summary(owner);
 }
 
+const profileChangeListeners = new Set<() => void>();
+
+export function onDesktopProfileChange(listener: () => void): () => void {
+  profileChangeListeners.add(listener);
+  return () => { profileChangeListeners.delete(listener); };
+}
+
 export function broadcastProfilesChanged(): void {
+  for (const listener of profileChangeListeners) listener();
   const profiles = profileSummaries();
   const selectionRevision = getDeviceSelectionRevision(DESKTOP_DEVICE_ID);
   for (const window of BrowserWindow.getAllWindows()) {
@@ -351,6 +359,7 @@ export function broadcastProfilesChanged(): void {
 
 export function broadcastActiveProfileChanged(deviceId: string): void {
   if (deviceId !== DESKTOP_DEVICE_ID) return;
+  for (const listener of profileChangeListeners) listener();
   const state = getDesktopActiveProfileState();
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send('profile:active-changed', state);

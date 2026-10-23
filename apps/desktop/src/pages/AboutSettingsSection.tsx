@@ -110,7 +110,12 @@ export default function AboutSettingsSection({ controller }: { controller: About
       </SettingsGroup>
 
       <SettingsGroup title="Legal">
-        <SettingsDisclosure title="License" description={`${APP_LICENSE.name} is released under the ${APP_LICENSE.license} license.`}>
+        <SettingsRow title="The Movie Database (TMDB)" description="This product uses the TMDB API but is not endorsed or certified by TMDB.">
+          <Button type="button" size="sm" variant="outline" onClick={() => void desktopApi.openExternal('https://www.themoviedb.org/')}>
+            TMDB <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        </SettingsRow>
+        <SettingsDisclosure title="License" description={`${APP_LICENSE.name}-authored source code uses the ${APP_LICENSE.license} license.`}>
           <div className="space-y-2 py-1 text-xs leading-5 text-[var(--loom-muted)]">
             <p>{APP_LICENSE.copyright}</p>
             <p>Bundled media tools keep their own licenses. LibVLC uses LGPL terms; its plugins and dependencies may use other licenses. libmpv and FFmpeg builds can carry GPL terms. The packaged media notices document the bundled versions and dependencies.</p>
@@ -131,8 +136,9 @@ export default function AboutSettingsSection({ controller }: { controller: About
             ))}
           </SettingsList>
         </SettingsDisclosure>
-        <SettingsDisclosure title="Metadata and artwork sources" summary={METADATA_ATTRIBUTIONS.length}>
-          <SettingsList label="Metadata and artwork sources">
+        <SettingsDisclosure title="Metadata, ratings and online services" summary={METADATA_ATTRIBUTIONS.length}>
+          <p className="py-2 text-xs text-[var(--loom-muted)]">LoomTV is not affiliated with these services. Their data, artwork and brands remain subject to their respective terms.</p>
+          <SettingsList label="Metadata, ratings and online services">
             {METADATA_ATTRIBUTIONS.map((source) => (
               <li key={source.name}>
                 <button type="button" onClick={() => void desktopApi.openExternal(source.url)} className="group flex w-full items-start justify-between gap-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]">

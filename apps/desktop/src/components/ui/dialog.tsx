@@ -9,6 +9,7 @@ const DialogLabelContext = React.createContext<{ titleId: string; descriptionId:
 
 type ModalLayer = {
   id: string;
+  priority: number;
   content: HTMLElement | null;
   onEscape?: () => void;
 };
@@ -117,12 +118,15 @@ export function useModalLayer({
   onClose,
   onEscape,
   initialFocusRef,
+  priority = 0,
 }: {
   open?: boolean;
   contentRef: React.RefObject<HTMLElement | null>;
   onClose?: () => void;
   onEscape?: () => void;
   initialFocusRef?: React.RefObject<HTMLElement | null>;
+  /** Lower layers, such as the lazy-loaded player, stay below dialogs. */
+  priority?: number;
 }) {
   const id = React.useId();
   const callbackRef = React.useRef(onEscape || onClose);
@@ -134,8 +138,11 @@ export function useModalLayer({
     if (!open) return undefined;
     const content = contentRef.current;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const layer: ModalLayer = { id, content, onEscape: () => callbackRef.current?.() };
+    const layer: ModalLayer = { id, priority, content, onEscape: () => callbackRef.current?.() };
     modalLayers.push(layer);
+    // Mount order can differ from visual order when a lower layer is lazy-loaded.
+    // Stable sorting preserves opening order among dialogs at the same priority.
+    modalLayers.sort((a, b) => a.priority - b.priority);
     syncModalUnderlay();
 
     const focusFirst = () => {
@@ -195,17 +202,18 @@ export function useModalLayer({
       // commit, while still restoring into a surviving parent layer.
       restoreFocusAfterCommit(previouslyFocused);
     };
-  }, [contentRef, id, open]);
+  }, [contentRef, id, open, priority]);
 }
 
 interface DialogProps extends React.HTMLAttributes<HTMLDivElement> {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   contentClassName?: string;
+  closeOnOutsideClick?: boolean;
 }
 
 const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
-  ({ className, contentClassName, open, onOpenChange, children, ...props }, forwardedRef) => {
+  ({ className, contentClassName, open, onOpenChange, children, closeOnOutsideClick = true, ...props }, forwardedRef) => {
     const contentRef = React.useRef<HTMLDivElement | null>(null);
     const titleId = React.useId();
     const descriptionId = React.useId();
@@ -222,7 +230,7 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
         className={cn('loom-no-drag fixed inset-0 flex items-center justify-center bg-black/80 p-4', className)}
         style={{ zIndex: 1000 }}
         onMouseDown={(event) => {
-          if (event.target === event.currentTarget) onOpenChange?.(false);
+          if (closeOnOutsideClick && event.target === event.currentTarget) onOpenChange?.(false);
         }}
         {...props}
       >
@@ -235,6 +243,7 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
           tabIndex={-1}
           className={cn('loom-modal-surface max-h-[85vh] w-full max-w-4xl overflow-auto rounded-[20px] border bg-card p-5 shadow-lg', contentClassName)}
           style={{
+            outline: 'none',
             position: 'fixed',
             top: '50dvh',
             left: '50vw',
@@ -257,7 +266,7 @@ Dialog.displayName = 'Dialog';
 
 const DialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('relative', className)} {...props} />
+    <div ref={ref} className={cn('loom-dialog-content relative', className)} {...props} />
   )
 );
 DialogContent.displayName = 'DialogContent';

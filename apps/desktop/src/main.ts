@@ -10,6 +10,7 @@ import { createPhotoLibraryService } from './main/photoLibraryService.ts';
 import { createMediaLibrariesService } from './main/mediaLibrariesService.ts';
 import {
   app,
+  BrowserWindow,
   dialog,
   nativeImage,
   powerMonitor,
@@ -289,7 +290,13 @@ import {
 } from './main/stremioPluginServiceDesktop.ts';
 import { StremioPluginServiceError } from './main/stremioPluginService.ts';
 import { createStremioSubtitleTokens } from './main/stremioSubtitleTokens.ts';
+import { createStremioPlayback } from './main/stremioPlayback.ts';
+import { createTorrentEngine } from './main/torrentEngine.ts';
+import { onDesktopProfileChange } from './main/profileService.ts';
+import { resolveArchivePlaybackSource } from './main/archivePlayback.ts';
+import type { StremioWireOptions } from './main/stremioPluginWire.ts';
 import {
+  EMBEDDED_STREMIO_ADDON_IDS,
   OFFICIAL_STREMIO_ADDONS,
   officialStremioAddonId,
   officialStremioManifestUrl,
@@ -1865,7 +1872,8 @@ const analysisCoordinator = createAnalysisCoordinator({
 });
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
-const stremioPluginService = createDesktopStremioPluginService();
+let revalidateAddonPlayback = () => { /* Assigned after playback dependencies initialize. */ };
+const stremioPluginService = createDesktopStremioPluginService({ onStateChanged: () => revalidateAddonPlayback() });
 const requestMetadataProvider = createMetadataProviderGateway({
   loadSettings,
   getMetadataApiKey,
@@ -1888,11 +1896,38 @@ function currentStremioSourceRevision(profileId: string, addonId: string): strin
   return stremioSourceRevision(record, getStremioAddonConfigurationState(record.addonId));
 }
 
-/** Stamp results with the revision at request start and keep subtitle URLs in main. */
-function stremioWireOptions(profileId: string, addonId: string) {
+const torrentEngine = createTorrentEngine();
+const stremioPlayback = createStremioPlayback({
+  prepareManagedTorrent: torrentEngine.prepare,
+  identity: () => ({ profileId: requireDesktopProfileId(), selectionRevision: getDesktopActiveProfileState().selectionRevision }),
+  revision: currentStremioSourceRevision,
+  port: getMediaServerPort,
+  onRevoked: reference => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('plugins:stremio:playback-revoked', reference);
+    }
+  },
+});
+revalidateAddonPlayback = stremioPlayback.revalidate;
+onDesktopProfileChange(stremioPlayback.revalidate);
+
+/** Stamp results at request start; provider media and subtitle URLs stay in main. */
+function stremioWireOptions(profileId: string, addonId: string): StremioWireOptions & { sourceRevision: string; subtitleToken: NonNullable<StremioWireOptions['subtitleToken']> } {
   const sourceRevision = currentStremioSourceRevision(profileId, addonId);
+  const selectionRevision = getDesktopActiveProfileState().selectionRevision;
   return {
     sourceRevision,
+    playbackReference: source => {
+      const url = source.url || (source.torrent ? `torrent:${source.torrent.infoHash}` : undefined);
+      if (!url) throw new Error('The addon source has no media URL.');
+      return stremioPlayback.issue({
+        profileId, selectionRevision, addonId,
+        revision: sourceRevision, url, sourceKind: source.sourceKind,
+        requestHeaders: source.requestHeaders,
+        torrent: source.torrent,
+        target: { type: source.source.type, videoId: source.source.itemId },
+      });
+    },
     subtitleToken: (subtitleAddonId: string, subtitle: { url: string; language: string }) => stremioSubtitleTokens.issue({
       profileId,
       addonId: subtitleAddonId,
@@ -2376,6 +2411,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
   photos: photoLibraryService,
   getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
+  openAddonPlayback: stremioPlayback.open,
+  openAddonBrowserPlayback: stremioPlayback.openBrowser,
+  closeAddonPlayback: stremioPlayback.close,
   showOpenFolderDialog,
   loadLibrary,
   libraryForRenderer,
@@ -2630,9 +2668,16 @@ registerIpcHandlers<LibraryData, AppSettings>({
       officialStremioAddonId(officialId),
     ),
   ),
-  reviewStremioManifestUrl: async (manifestUrl) => stremioPluginReviewForRenderer(
-    await stremioPluginService.reviewManifestUrl(normalizeStremioManifestLink(manifestUrl)),
-  ),
+  reviewStremioManifestUrl: async (manifestUrl, expectedAddonId) => {
+    if (expectedAddonId) {
+      if (EMBEDDED_STREMIO_ADDON_IDS.has(expectedAddonId)) throw new Error('Built-in addons cannot be replaced.');
+      // A configured-link return must belong to an owner-managed provider.
+      stremioPluginService.configurationUrl(expectedAddonId);
+    }
+    return stremioPluginReviewForRenderer(
+      await stremioPluginService.reviewManifestUrl(normalizeStremioManifestLink(manifestUrl), expectedAddonId),
+    );
+  },
   reviewInstalledStremioAddon: async (addonId) => stremioPluginReviewForRenderer(
     await stremioPluginService.reviewInstalled(addonId),
   ),
@@ -2712,15 +2757,45 @@ registerIpcHandlers<LibraryData, AppSettings>({
       options,
     );
   },
-  fetchStremioStreams: async (addonId, request) => {
+  getStremioManifestUrl: (addonId, revision) => {
+    const record = stremioPluginService.listManaged().find(candidate => candidate.addonId === addonId);
+    if (!record || stremioPluginSummaryForRenderer(record).revision !== revision) throw new Error('This add-on changed. Reopen Manage before editing its URL.');
+    return stremioPluginService.manifestUrlForEditing(addonId);
+  },
+  openStremioConfiguration: async (addonId, revision) => {
+    const record = stremioPluginService.listManaged().find(candidate => candidate.addonId === addonId);
+    if (!record || stremioPluginSummaryForRenderer(record).revision !== revision) throw new Error('This addon changed. Review it again before configuring it.');
+    const url = stremioPluginService.configurationUrl(addonId);
+    try { await shell.openExternal(url); } catch { throw new Error('The provider configuration page could not be opened.'); }
+    return true;
+  },
+  stremioMagnetLink: stremioPlayback.magnetLink,
+  openStremioExport: stremioPlayback.exportSource,
+  validateStremioPlayback: stremioPlayback.validate,
+  stremioServiceStatus: torrentEngine.status,
+  prepareStremioTorrent: stremioPlayback.prepareTorrent,
+  selectStremioTorrent: stremioPlayback.selectTorrent,
+  fetchStremioStreams: async (addonId, request, signal) => {
+    signal?.throwIfAborted();
     const profileId = requireDesktopProfileId();
+    const selectionRevision = getDesktopActiveProfileState().selectionRevision;
     const options = stremioWireOptions(profileId, addonId);
+    if (addonId === 'org.archive.clean' && request.type === 'movie' && request.id.startsWith('archive:')) {
+      const source = await resolveArchivePlaybackSource(request.id.slice('archive:'.length), signal);
+      signal?.throwIfAborted();
+      const reference = stremioPlayback.issue({
+        profileId, addonId, revision: options.sourceRevision,
+        selectionRevision,
+        url: source, sourceKind: 'https-media',
+      });
+      return { addonId, sourceRevision: options.sourceRevision, streams: [{ id: request.id, transport: 'media', playbackReference: reference }], playableCount: 1, unsupportedPeerToPeerCount: 0, rejectedCount: 0 };
+    }
     return stremioStreamResult(
       await stremioPluginService.fetchStreams(profileId, addonId, {
         type: request.type,
         videoId: request.id,
         ...(request.extra ? { extra: request.extra } : {}),
-      }),
+      }, signal),
       options,
     );
   },
@@ -2870,6 +2945,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
 
 export const mediaServerDeps = {
   ALLOWED_CORS_ORIGINS,
+  serveAddonPlayback: stremioPlayback.serve,
   LOCAL_ACCESS_HEADER,
   // LOCAL_ACCESS_TOKEN is intentionally not passed. The media server authorizes
   // through the closures below and never holds a credential it could serialize
@@ -3230,6 +3306,9 @@ app.whenReady().then(async () => {
     void stremioPluginService.installDefaultCinemeta().catch((error) => {
       console.warn('Default Cinemeta installation will retry on next startup:', describeErrorForLog(error));
     });
+    void stremioPluginService.installDefaultWatchHub().catch((error) => {
+      console.warn('Default WatchHub installation will retry on next startup:', describeErrorForLog(error));
+    });
   }
 
   void startBackgroundServices().catch((error) => {
@@ -3274,6 +3353,8 @@ let scannerQuitPending = false;
 let nativePlaybackQuitPending = false;
 let nativePlaybackQuitReady = false;
 app.on('before-quit', (event) => {
+  stremioPlayback.dispose();
+  torrentEngine.dispose();
   for (const scan of activeScans) scan.abort();
   if (!nativePlaybackQuitReady) {
     event.preventDefault();

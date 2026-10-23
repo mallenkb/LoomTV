@@ -64,7 +64,7 @@ function EpisodeThumbnail({
     let cancelled = false;
     setGeneratedThumbnail('');
 
-    if (!filePath || existingThumbnail) return () => {
+    if (!filePath || filePath.startsWith('addon-video:') || existingThumbnail) return () => {
       cancelled = true;
     };
 

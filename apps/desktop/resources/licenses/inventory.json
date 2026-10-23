@@ -1,0 +1,158 @@
+{
+  "scope": "Direct desktop runtime dependencies; native and transitive components require separate release verification.",
+  "dependencies": [
+    {
+      "package": "@phosphor-icons/react",
+      "version": "2.1.10",
+      "license": "MIT",
+      "files": [
+        "@phosphor-icons__react/LICENSE"
+      ]
+    },
+    {
+      "package": "@tanstack/react-query",
+      "version": "5.104.5",
+      "license": "MIT",
+      "files": [
+        "@tanstack__react-query/LICENSE"
+      ]
+    },
+    {
+      "package": "@tanstack/react-router",
+      "version": "1.170.45",
+      "license": "MIT",
+      "files": [
+        "@tanstack__react-router/LICENSE"
+      ]
+    },
+    {
+      "package": "@tanstack/react-virtual",
+      "version": "3.14.21",
+      "license": "MIT",
+      "files": [
+        "@tanstack__react-virtual/LICENSE"
+      ]
+    },
+    {
+      "package": "better-sqlite3",
+      "version": "13.0.3",
+      "license": "MIT",
+      "files": [
+        "better-sqlite3/LICENSE"
+      ]
+    },
+    {
+      "package": "bonjour-service",
+      "version": "1.4.4",
+      "license": "MIT",
+      "files": [
+        "bonjour-service/LICENSE"
+      ]
+    },
+    {
+      "package": "clsx",
+      "version": "2.1.1",
+      "license": "MIT",
+      "files": [
+        "clsx/license"
+      ]
+    },
+    {
+      "package": "electron-squirrel-startup",
+      "version": "1.0.1",
+      "license": "Apache-2.0",
+      "files": [
+        "electron-squirrel-startup/LICENSE"
+      ]
+    },
+    {
+      "package": "electron-updater",
+      "version": "6.8.9",
+      "license": "MIT",
+      "files": [
+        "electron-updater/LICENSE"
+      ]
+    },
+    {
+      "package": "hls.js",
+      "version": "1.7.3",
+      "license": "Apache-2.0",
+      "files": [
+        "hls.js/LICENSE"
+      ]
+    },
+    {
+      "package": "koffi",
+      "version": "3.3.3",
+      "license": "MIT",
+      "files": [
+        "koffi/LICENSE.txt"
+      ]
+    },
+    {
+      "package": "lucide-react",
+      "version": "1.59.0",
+      "license": "ISC",
+      "files": [
+        "lucide-react/LICENSE"
+      ]
+    },
+    {
+      "package": "motion",
+      "version": "14.4.0",
+      "license": "MIT",
+      "files": [
+        "motion/LICENSE.md"
+      ]
+    },
+    {
+      "package": "react",
+      "version": "19.3.0",
+      "license": "MIT",
+      "files": [
+        "react/LICENSE"
+      ]
+    },
+    {
+      "package": "react-dom",
+      "version": "19.3.0",
+      "license": "MIT",
+      "files": [
+        "react-dom/LICENSE"
+      ]
+    },
+    {
+      "package": "sharp",
+      "version": "0.35.5",
+      "license": "Apache-2.0",
+      "files": [
+        "sharp/LICENSE"
+      ]
+    },
+    {
+      "package": "tailwind-merge",
+      "version": "3.7.0",
+      "license": "MIT",
+      "files": [
+        "tailwind-merge/LICENSE.md"
+      ]
+    },
+    {
+      "package": "webtorrent",
+      "version": "3.0.21",
+      "license": "MIT",
+      "files": [
+        "webtorrent/LICENSE"
+      ]
+    },
+    {
+      "package": "zod",
+      "version": "4.6.7",
+      "license": "MIT",
+      "files": [
+        "zod/LICENSE"
+      ]
+    }
+  ],
+  "stremioRegistryLicenseSource": "https://raw.githubusercontent.com/Stremio/stremio-official-addons/master/LICENSE.md"
+}

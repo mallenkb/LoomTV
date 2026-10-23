@@ -2,6 +2,7 @@ import type { AppSettings } from './appContracts.ts';
 import type { MetadataProviderRequest } from '../shared/desktopProtocol.ts';
 import { safeFetch } from './safeFetch.ts';
 import { z } from 'zod';
+import { fetchCinemetaMeta } from './metadata/cinemeta.ts';
 
 type GatewayDependencies = {
   loadSettings: () => AppSettings;
@@ -14,6 +15,7 @@ const JIKAN_PATHS = new Set(['anime', 'genres/anime', 'seasons/now', 'top/anime'
 const TVMAZE_PATHS = new Set(['schedule', 'schedule/web', 'search/shows', 'lookup/shows']);
 const finiteNumber = z.number().finite();
 export const metadataProviderRequestSchema: z.ZodType<MetadataProviderRequest> = z.discriminatedUnion('provider', [
+  z.object({ provider: z.literal('mdblist'), imdbId: z.string().regex(/^tt\d{5,12}$/), type: z.enum(['movie', 'series']) }),
   z.object({ provider: z.literal('cinemeta'), path: z.string().min(1).max(4000) }),
   z.object({
     provider: z.literal('omdb'),
@@ -53,6 +55,24 @@ async function responseJson(response: Response, provider: string): Promise<unkno
 }
 
 export function createMetadataProviderGateway(deps: GatewayDependencies) {
+  const cooldowns = new Map<string, { key: string; until: number }>();
+  const ratingsRequest = async (provider: 'omdb' | 'mdblist', key: string, url: URL, host: string) => {
+    const cooldown = cooldowns.get(provider);
+    if (cooldown?.key === key && cooldown.until > Date.now()) throw new Error(`${provider} request limit is cooling down.`);
+    const response = await safeFetch(url, { headers: { accept: 'application/json' } }, {
+      allowedHosts: [host], retries: 0, maxBytes: 2 * 1024 * 1024, timeoutMs: 10_000,
+      provider, operation: `metadata.${provider}.lookup`,
+    });
+    const payload: unknown = await response.json();
+    const failure = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    if (response.status === 429 || /limit|quota/i.test(String(failure.Error || failure.error || ''))) {
+      const retry = Number(response.headers.get('retry-after'));
+      const delay = Number.isFinite(retry) && retry > 0 ? Math.min(86400, retry) * 1000 : 60 * 60_000;
+      cooldowns.set(provider, { key, until: Date.now() + delay });
+    }
+    if (!response.ok) throw new Error(`${provider} request failed with status ${response.status}.`);
+    return payload;
+  };
   return async function requestMetadataProvider(request: MetadataProviderRequest): Promise<unknown> {
     // Public providers only need the offline preference, not saved credentials.
     if (deps.loadMetadataOfflineMode ? deps.loadMetadataOfflineMode() : deps.loadSettings().metadataOfflineMode) {
@@ -74,15 +94,30 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
     }
 
     if (request.provider === 'cinemeta') {
+      const meta = /^meta\/(movie|series)\/(tt\d{5,12})\.json$/.exec(request.path);
+      if (meta) return fetchCinemetaMeta(meta[1] as 'movie' | 'series', meta[2]);
       if (!/^(?:manifest\.json|catalog\/(?:movie|series)\/(?:top|year|imdbRating)(?:\/[^/?#]+)?\.json)$/.test(request.path)
         || request.path.includes('..')) throw new Error('Cinemeta path is not allowed.');
-      const response = await safeFetch(`https://v3-cinemeta.strem.io/${request.path}`, {
-        headers: { accept: 'application/json' },
-      }, {
-        allowedHosts: ['v3-cinemeta.strem.io', 'cinemeta-catalogs.strem.io'], maxBytes: 4 * 1024 * 1024,
-        retries: 2, provider: 'cinemeta', operation: 'metadata.cinemeta.catalog',
-      });
-      return responseJson(response, 'Cinemeta');
+      const fetchCatalog = async (url: string): Promise<unknown> => {
+        const response = await safeFetch(url, {
+          headers: { accept: 'application/json' },
+        }, {
+          allowedHosts: ['v3-cinemeta.strem.io', 'cinemeta-catalogs.strem.io'], maxBytes: 4 * 1024 * 1024,
+          // These are interactive requests. A scan's host cooldown must not
+          // prevent the user from explicitly retrying the catalog.
+          ignoreSkipWindow: true,
+          retries: 1, provider: 'cinemeta', operation: 'metadata.cinemeta.catalog',
+        });
+        return responseJson(response, 'Cinemeta');
+      };
+      // The unfiltered popular catalogs redirect to this fixed CDN path.
+      // Avoid an extra DNS/TLS request on the most common browse operation.
+      // Keep other routes on the official router, including search and genres.
+      if (/^catalog\/(?:movie|series)\/top\.json$/.test(request.path)) {
+        try { return await fetchCatalog(`https://cinemeta-catalogs.strem.io/top/${request.path}`); }
+        catch { /* Fall back if Cinemeta changes its CDN routing. */ }
+      }
+      return fetchCatalog(`https://v3-cinemeta.strem.io/${request.path}`);
     }
 
     if (request.provider === 'omdb') {
@@ -90,13 +125,14 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
       const apiKey = deps.getMetadataApiKey(settings, 'omdb');
       if (!apiKey) throw new Error('OMDb API key is missing.');
       const url = queryUrl('https://www.omdbapi.com/', { ...request.query, apikey: apiKey });
-      const response = await safeFetch(url, {}, {
-        allowedHosts: ['www.omdbapi.com'],
-        retries: 2,
-        provider: 'omdb',
-        operation: 'metadata.omdb.lookup',
-      });
-      return responseJson(response, 'OMDb');
+      return ratingsRequest('omdb', apiKey, url, 'www.omdbapi.com');
+    }
+
+    if (request.provider === 'mdblist') {
+      const key = deps.getMetadataApiKey(deps.loadSettings(), 'mdblist');
+      if (!key) throw new Error('MDBList API key is missing.');
+      const url = queryUrl(`https://api.mdblist.com/imdb/${request.type === 'series' ? 'show' : 'movie'}/${request.imdbId}`, { apikey: key });
+      return ratingsRequest('mdblist', key, url, 'api.mdblist.com');
     }
 
     if (request.provider === 'jikan') {
