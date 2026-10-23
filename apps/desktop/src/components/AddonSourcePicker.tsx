@@ -41,7 +41,7 @@ function SourceDescriptionLine({ line }: { line: string }) {
     {parts.map((part, index) => {
       const match = /^(👤|💾|⚙\uFE0F?)\s*(.*)$/u.exec(part);
       return <span key={index} className="inline-flex min-w-0 items-center gap-1.5">
-        {match ? <><span aria-hidden="true" className="shrink-0">{match[1]}</span><span className="break-words" title={match[1] === '👤' ? 'Reported seeders' : match[1] === '💾' ? 'File size' : 'Torrent source'}>{match[2]}</span></> : part}
+        {match ? <><span aria-hidden="true" className="shrink-0">{match[1]}</span><span className="break-words" title={match[1] === '👤' ? 'Reported seeders' : match[1] === '💾' ? 'File size' : 'Source'}>{match[2]}</span></> : part}
       </span>;
     })}
   </span>;
@@ -177,7 +177,7 @@ export default function AddonSourcePicker({ target, onClose, onPlay, presentatio
         if (!signal) return;
         releasePreparation();
         preparedReference.current = stream.playbackReference;
-        setNotice('Finding peers and loading torrent files...');
+        setNotice('Connecting to peers…');
         const prepared = await desktopApi.prepareStremioTorrent(stream.playbackReference, signal);
         if (requestId !== request.current || signal.aborted) return;
         if ((autoPlay || compactRows) && prepared.suggestedIndex !== undefined && prepared.selectionReason !== 'choose') {
@@ -252,7 +252,7 @@ export default function AddonSourcePicker({ target, onClose, onPlay, presentatio
         if (!signal) return;
         releasePreparation();
         preparedReference.current = reference;
-        setNotice('Finding peers and loading torrent files...');
+        setNotice('Connecting to peers…');
         const prepared = await desktopApi.prepareStremioTorrent(reference, signal);
         if (current !== request.current || signal.aborted) return;
         if (prepared.suggestedIndex === undefined || prepared.selectionReason === 'choose') {
@@ -464,7 +464,7 @@ export default function AddonSourcePicker({ target, onClose, onPlay, presentatio
         ) : null}
         {!groups && !error ? <SourceListShimmer /> : null}
         {selectedTorrent ? (
-          <section aria-label="Choose torrent file" className="space-y-3">
+          <section aria-label="Choose video file" className="space-y-3">
             <h3 className="font-medium">Choose a video file</h3>
             <p className="text-sm text-[var(--loom-muted)]">{selectedTorrent.prepared.notice}</p>
             <ul className="max-h-[45vh] space-y-2 overflow-y-auto">
