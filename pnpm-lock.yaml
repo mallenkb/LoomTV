@@ -204,7 +204,7 @@ overrides:
   xcode>uuid: 11.1.1
 
 patchedDependencies:
-  bittorrent-tracker@11.2.3: e22d4407567a9d1a110638807165f4b276e3cb6f1e101dc06e1d5861287b562f
+  bittorrent-tracker@11.2.3: b688f024a2777df6bd5959e56b6f820a58eb915fa33ed360bd48b36561bd54d3
   braces@3.0.3: f74126492b9552c676d4ab5618cf9b074f33b4e6ccb8c8f8c07678ed92a6741f
   node-forge@1.4.0: 050b680788faa8b324e14f0af46ef86414e2294c13c2ef62f12bb1ef2ee74da5
   react-native-zeroconf@0.17.6: 2fc87cef73ffbc7ae490dbe247e002637bcce3d3634a3888bf1c46db49ad26fe
@@ -9694,7 +9694,7 @@ snapshots:
       - react-native-b4a
       - supports-color
 
-  bittorrent-tracker@11.2.3(patch_hash=e22d4407567a9d1a110638807165f4b276e3cb6f1e101dc06e1d5861287b562f)(supports-color@8.1.1):
+  bittorrent-tracker@11.2.3(patch_hash=b688f024a2777df6bd5959e56b6f820a58eb915fa33ed360bd48b36561bd54d3)(supports-color@8.1.1):
     dependencies:
       '@thaunknown/simple-peer': 10.1.2(supports-color@8.1.1)
       '@thaunknown/simple-websocket': 9.1.5(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6)
@@ -13039,7 +13039,7 @@ snapshots:
     dependencies:
       bittorrent-dht: 11.0.12(supports-color@8.1.1)
       bittorrent-lsd: 2.0.3(supports-color@8.1.1)
-      bittorrent-tracker: 11.2.3(patch_hash=e22d4407567a9d1a110638807165f4b276e3cb6f1e101dc06e1d5861287b562f)(supports-color@8.1.1)
+      bittorrent-tracker: 11.2.3(patch_hash=b688f024a2777df6bd5959e56b6f820a58eb915fa33ed360bd48b36561bd54d3)(supports-color@8.1.1)
       debug: 4.4.3(supports-color@8.1.1)
       run-parallel: 1.2.0
     transitivePeerDependencies:
