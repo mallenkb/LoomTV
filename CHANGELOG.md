@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.32](docs/releases/v2.0.32.md)
+
+Shows update download progress in the About button and improves add-on playback error reporting and cache cleanup.
+
 ### [2.0.31](docs/releases/v2.0.31.md)
 
 Adds episode tracking and source switching for add-on playback, provider availability with logos and country selection, richer detail metadata and ratings, and player interface refinements.

@@ -55,6 +55,9 @@ export default function AboutSettingsSection({ controller }: { controller: About
             : status === 'error'
               ? update?.message || 'The last update check failed.'
               : 'You have the latest version.';
+  const updateButtonLabel = status === 'downloading'
+    ? controller.updateDownloadPercent > 0 ? `Downloading ${controller.updateDownloadPercent}%` : 'Downloading...'
+    : controller.updateButtonLabel;
 
   const engine = (name: string, availability: { available: boolean; runtimeSource?: string; reason?: string } | null) => (
     <SettingsRow
@@ -76,29 +79,30 @@ export default function AboutSettingsSection({ controller }: { controller: About
       <SettingsPageHeader title="About" description="Version, updates, bundled media tools, and licenses." />
 
       <SettingsGroup title="Updates">
-        <SettingsRow title={APP_LICENSE.name} description={<span role="status">{updateText}</span>}>
+        <SettingsRow title={APP_LICENSE.name} description={status === 'downloading' ? undefined : <span role="status">{updateText}</span>}>
           <span className="text-sm tabular-nums text-[var(--loom-muted)]">{version}</span>
           <Button
             type="button"
             size="sm"
-            variant="default"
+            variant={status === 'downloading' ? 'secondary' : 'default'}
             disabled={controller.isUpdateBusy && status !== 'downloading'}
             onClick={() => void controller.handleUpdateAction()}
+            aria-busy={status === 'downloading'}
+            aria-label={status === 'downloading' ? `Downloading update, ${controller.updateDownloadPercent}% complete` : undefined}
+            className={status === 'downloading' ? 'relative isolate h-9 min-w-40 overflow-hidden rounded-full bg-[var(--loom-surface-3)] px-4 text-[var(--loom-text)] hover:bg-[var(--loom-surface-3)]' : undefined}
           >
-            {controller.updateButtonLabel}
+            {status === 'downloading' ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--loom-accent)] transition-[width] duration-300"
+                  style={{ width: `${controller.updateDownloadPercent}%` }}
+                />
+                <span className="relative z-10" aria-live="polite">{updateButtonLabel}</span>
+              </>
+            ) : updateButtonLabel}
           </Button>
         </SettingsRow>
-        {status === 'downloading' || status === 'downloaded' ? (
-          <div className="settings-row space-y-2 px-4 py-3.5" aria-live="polite">
-            <div className="flex items-center justify-between text-xs text-[var(--loom-muted)]">
-              <span>{status === 'downloaded' ? 'Downloaded' : `Downloading ${update?.latestVersion ?? ''}`.trim()}</span>
-              <span className="tabular-nums">{status === 'downloading' ? `${controller.updateDownloadPercent}%` : '100%'}</span>
-            </div>
-            <div role="progressbar" aria-label="Update download" aria-valuemin={0} aria-valuemax={100} aria-valuenow={status === 'downloading' ? controller.updateDownloadPercent : 100} className="h-1.5 overflow-hidden rounded-full bg-[var(--loom-surface-3)]">
-              <div className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-300" style={{ width: `${status === 'downloading' ? controller.updateDownloadPercent : 100}%` }} />
-            </div>
-          </div>
-        ) : null}
       </SettingsGroup>
 
       <SettingsGroup title="Bundled media tools">

@@ -15,6 +15,34 @@ export type ManagedTorrent = {
   onFailure: (callback: () => void) => void;
 };
 
+
+/** Worker errors contain bounded codes and stages, never provider URLs, hashes or disk paths. */
+function torrentWorkerError(message: { code?: unknown; stage?: unknown }): Error {
+  const code = typeof message.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(message.code) ? message.code : 'ENGINE_ERROR';
+  const stage = typeof message.stage === 'string' && ['startup', 'module', 'metadata', 'network', 'cache', 'relay', 'host'].includes(message.stage) ? message.stage : 'startup';
+  const errors: Record<string, string> = {
+    CACHE_LIMIT: 'This source reached LoomTV’s 16 GiB torrent cache limit. Choose a smaller source.',
+    ENOSPC: 'The device has run out of space for playback. Free disk space and retry.',
+    EDQUOT: 'The device’s disk quota prevents caching this source. Free disk space and retry.',
+    EACCES: 'LoomTV cannot access its playback cache. Check temporary-folder permissions.',
+    EPERM: 'The system blocked access required by the playback engine. Check app permissions.',
+    EROFS: 'The playback cache is on a read-only filesystem. Choose a writable temporary location.',
+    ERR_MODULE_NOT_FOUND: 'A playback-engine dependency is missing. Rebuild or reinstall LoomTV.',
+    MODULE_NOT_FOUND: 'A playback-engine dependency is missing. Rebuild or reinstall LoomTV.',
+    DEPENDENCY_LOAD_FAILED: 'A playback-engine dependency could not load. Rebuild or reinstall LoomTV for this device.',
+    INVALID_METADATA: 'The source returned invalid torrent metadata. Refresh the source list or choose another source.',
+    ERR_DLOPEN_FAILED: 'A native playback-engine dependency could not load. Rebuild or reinstall LoomTV for this device.',
+    UNSUPPORTED_PIECE_SIZE: 'This source uses a torrent piece size the engine does not support. Choose another source.',
+    METADATA_LIMIT: 'This source exceeds the engine’s supported metadata limits. Choose another source.',
+    INVALID_REQUEST: 'The playback request is invalid. Refresh the source list and choose again.',
+    HOST_TIMEOUT: 'The playback host stopped responding. Try opening the source again.',
+    CANCELLED: 'Source loading was cancelled.',
+    ETIMEDOUT: 'The source connection timed out. Check your connection or choose another source.',
+  };
+  const detail = errors[code] || `The playback engine failed during ${stage === 'module' ? 'dependency loading' : stage} (${code}). Try another source.`;
+  return Object.assign(new Error(detail), { code });
+}
+
 /** One isolated engine per selection. The renderer never receives its port or token. */
 export function createTorrentEngine() {
   const active = new Set<() => void>();
@@ -127,10 +155,12 @@ export function createTorrentEngine() {
         });
         return await new Promise<ManagedTorrent>((resolve, reject) => {
           rejectPreparation = reject;
-          child.on('message', (message: { type?: string; port?: number; files?: unknown; infoHash?: string }) => {
+          child.on('message', (message: { type?: string; port?: number; files?: unknown; infoHash?: string; code?: unknown; stage?: unknown }) => {
             if (released) return;
             if (message.type === 'error') {
-              release(); reject(new Error('The torrent engine could not load this source or its cache is full. Try another source.'));
+              const error = torrentWorkerError(message);
+              console.warn('[torrent-engine]', error.message);
+              release(); reject(error);
               if (ready) failure?.();
               return;
             }
