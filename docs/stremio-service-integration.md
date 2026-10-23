@@ -1,6 +1,6 @@
 # Optional Stremio Service playback
 
-Desktop now uses the [managed torrent engine](managed-torrent-playback.md). The following describes the earlier external-service adapter, retained for its existing integration fixtures. Its previous test results do not verify the new managed engine.
+The desktop's managed torrent engine is separate from this legacy external-service adapter, which remains for its integration fixtures. This page documents only that adapter; its test results do not verify the managed engine.
 
 Implemented October 22, 2026. After user authorization, 32 targeted tests passed: 13 protocol tests, 15 desktop tests and four controlled service integration tests. Real Stremio torrent playback and visual verification have not been performed; the local service was unavailable when checked.
 

@@ -210,4 +210,4 @@ were added for configured endpoints, fresh approval, request cancellation and
 expired selections. Tests, live-provider configuration and runtime/visual playback
 checks remain unrun at the user's request.
 
-Managed torrent lifecycle and current verification limits are documented in [Managed torrent playback](managed-torrent-playback.md).
+Desktop manages torrent sources with host-owned WebTorrent workers, explicit file selection, and the existing native playback relay. Browser torrent playback remains unsupported.
