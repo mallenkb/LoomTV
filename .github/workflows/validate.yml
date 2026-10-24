@@ -79,8 +79,11 @@ jobs:
         # These integration regressions must execute, rather than skip when
         # the runner image does not provide an encoder.
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes ffmpeg
+          # Avoid stalled downloads from the runner's Azure package mirror.
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g; s|https://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends --yes ffmpeg
           ffmpeg -version
 
       - name: Test all workspaces
