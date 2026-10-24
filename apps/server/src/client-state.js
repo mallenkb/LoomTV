@@ -389,16 +389,38 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     return { restrictions: next, changed: true };
   };
 
-  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {import('./server-state-types.js').Profile} profile @param {Pick<import('@loom-media-server/video-contracts').ProfileAssignment, 'access'>} assignment @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {{ deviceId: string; selectionRevision: number }} context @returns {import('./server-state-types.js').PlaybackProfileContext} */
-  const restrictedProfileContext = (state, accountId, profile, assignment, media, context) => {
+  /** @param {string} profileId @param {boolean} [snapshot] @returns {import('./server-state-types.js').ProfileMediaAccess | null} */
+  const profileMediaAccess = (profileId, snapshot = false) => {
+    if (snapshot && store.createProfileMediaAccess) return store.createProfileMediaAccess(profileId);
+    if (snapshot && store.readMeta?.('native_video_storage_version')) {
+      throw Object.assign(new Error('Native source access rules are unavailable.'), { status: 503, code: 'policy_unavailable' });
+    }
+    if (store.profileAllowsMedia) return (mediaId, locator) => store.profileAllowsMedia(profileId, mediaId, locator);
+    if (store.createProfileMediaAccess) return store.createProfileMediaAccess(profileId);
+    if (store.readMeta?.('native_video_storage_version')) {
+      throw Object.assign(new Error('Native folder access rules are unavailable.'), { status: 503, code: 'policy_unavailable' });
+    }
+    return null;
+  };
+
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {import('./server-state-types.js').Profile} profile @param {Pick<import('@loom-media-server/video-contracts').ProfileAssignment, 'access'>} assignment @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {{ deviceId: string; selectionRevision: number }} context @param {import('./server-state-types.js').ProfileMediaAccess | null} [mediaAccess] @returns {import('./server-state-types.js').PlaybackProfileContext} */
+  const restrictedProfileContext = (state, accountId, profile, assignment, media, context, mediaAccess = profileMediaAccess(profile.id, media?.sourceLocator === undefined && Array.isArray(media?.sourceIds))) => {
     const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
     if (profile.kind === 'child' && (!restrictions || !RESTRICTION_COUNTRIES.has(restrictions.country)
       || restrictions.maximumAge === null || !Number.isSafeInteger(restrictions.maximumAge)
       || restrictions.maximumAge < 0 || restrictions.maximumAge > 18 || typeof restrictions.allowUnrated !== 'boolean')) {
       throw Object.assign(new Error('The child profile has no enforceable restriction record.'), { status: 403, code: 'permission_denied' });
     }
+    if (media && mediaAccess && !mediaAccess(media.id || '', media.sourceLocator)) {
+      throw Object.assign(new Error('The active profile cannot access this folder.'), { status: 403, code: 'permission_denied' });
+    }
+    const mediaSources = media?.sourceLocator === undefined && Array.isArray(media?.sourceIds)
+      ? mediaAccess?.projectSources?.(media.id || '', media.sourceIds) : undefined;
+    if (mediaSources && !mediaSources.sourceIds.length) {
+      throw Object.assign(new Error('The active profile cannot access these media sources.'), { status: 403, code: 'permission_denied' });
+    }
     if (restrictions && media) {
-      if (restrictions.allowedRootIds !== null
+      if (!mediaAccess && restrictions.allowedRootIds !== null
         && (!Array.isArray(restrictions.allowedRootIds) || !restrictions.allowedRootIds.includes(media.rootId ?? ''))) {
         throw Object.assign(new Error('The active profile cannot access this library root.'), { status: 403, code: 'permission_denied' });
       }
@@ -417,12 +439,13 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
       profile: publicProfile(profile), profileId: profile.id,
       assignmentAccess: assignment.access,
       restrictions: restrictions ? { ...restrictions } : null,
+      ...(mediaSources ? { mediaSources } : {}),
       ...context,
     };
   };
 
-  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string | undefined} deviceId @param {import('./server-state-types.js').ProfileMedia | undefined} media */
-  const playbackContext = (state, accountId, deviceId, media) => {
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string | undefined} deviceId @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {import('./server-state-types.js').ProfileMediaAccess | null} [mediaAccess] */
+  const playbackContext = (state, accountId, deviceId, media, mediaAccess) => {
     const normalizedDeviceId = String(deviceId || `account:${accountId}`).slice(0, 128);
     const selection = state.selections.find((item) => item.accountId === accountId && item.deviceId === normalizedDeviceId);
     if (!selection?.profileId) throw Object.assign(new Error('Select a viewing profile before playback.'), { status: 409, code: 'profile_required' });
@@ -438,18 +461,19 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     }
     return restrictedProfileContext(state, accountId, profile, assignment, media, {
       deviceId: normalizedDeviceId, selectionRevision: selection.revision,
-    });
+    }, mediaAccess);
   };
 
-  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {string | undefined} deviceId */
-  const scopedContext = (state, accountId, profileId, media, deviceId) => {
+  /** @param {import('./server-state-types.js').ClientState} state @param {string} accountId @param {string} profileId @param {import('./server-state-types.js').ProfileMedia | undefined} media @param {string | undefined} deviceId @param {import('./server-state-types.js').ProfileMediaAccess | null} [mediaAccess] */
+  const scopedContext = (state, accountId, profileId, media, deviceId, mediaAccess) => {
     const { profile, assignment } = requireProfile(state, profileId, accountId, false);
     const restrictions = state.profileRestrictions.find((item) => item.profileId === profile.id) || null;
     return restrictedProfileContext(state, accountId, profile, assignment, media, {
       deviceId: String(deviceId || `invitation:${profileId}`).slice(0, 128),
       selectionRevision: Number(restrictions?.revision || 0),
-    });
+    }, mediaAccess);
   };
+
 
   return {
     async ready() {},
@@ -516,7 +540,13 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
           if (!name) throw Object.assign(new Error('Profile name is required.'), { status: 400, code: 'profile_name_required' });
           profile.name = name;
         }
-        if (input.kind !== undefined || input.type !== undefined) profile.kind = profileKindInput(input, profile.kind);
+        if (input.kind !== undefined || input.type !== undefined) {
+          const nextKind = profileKindInput(input,profile.kind);
+          if (store.readMeta?.('native_owner_profile') === profileId && nextKind !== 'adult') {
+            throw Object.assign(new Error('The desktop owner must remain an adult profile.'),{status:409,code:'conflict'});
+          }
+          profile.kind = nextKind;
+        }
         const ensuredRestrictions = ensureChildProfileRestrictions(state, profile, previousKind !== profile.kind);
         const releasedChildLimits = previousKind === 'child' && profile.kind !== 'child'
           && releaseChildAgeLimits(state, profile.id);
@@ -548,6 +578,7 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     },
     /** @param {string} profileId @param {string} accountId */
     async removeProfile(profileId, accountId, canSeeAll = false) {
+      if (store.readMeta?.('native_owner_profile') === profileId) throw Object.assign(new Error('Reset the desktop owner through the desktop application.'),{status:409,code:'conflict'});
       const removed = store.mutateClientState((state) => {
         const { assignment } = requireProfile(state, profileId, accountId, canSeeAll);
         if (assignment.access !== 'manage') throw Object.assign(new Error('That account cannot manage this profile.'), { status: 403, code: 'profile_forbidden' });
@@ -701,9 +732,10 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
      */
     async activePlaybackProfileChecker(accountId, deviceId) {
       const state = store.readClientState();
-      playbackContext(state, accountId, deviceId, undefined);
+      const context = playbackContext(state, accountId, deviceId, undefined);
+      const mediaAccess = profileMediaAccess(context.profileId, true);
       /** @param {import('./server-state-types.js').ProfileMedia} media */
-      return (media) => playbackContext(state, accountId, deviceId, media);
+      return (media) => playbackContext(state, accountId, deviceId, media, mediaAccess);
     },
     /**
      * Check many items against an invitation's profile with one client-state read.
@@ -712,8 +744,9 @@ export function createHeadlessClientState({ store, validateAccount = async () =>
     async scopedProfileChecker(accountId, profileId, deviceId = undefined) {
       const state = store.readClientState();
       scopedContext(state, accountId, profileId, undefined, deviceId);
+      const mediaAccess = profileMediaAccess(profileId, true);
       /** @param {import('./server-state-types.js').ProfileMedia} media */
-      return (media) => scopedContext(state, accountId, profileId, media, deviceId);
+      return (media) => scopedContext(state, accountId, profileId, media, deviceId, mediaAccess);
     },
     /** @param {string} accountId @param {string | undefined} deviceId */
     async getActiveProfileState(accountId, deviceId) {

@@ -4,17 +4,17 @@ This document records the current video-only implementation. It avoids invented 
 
 ## Current architecture
 
-LoomTV has one canonical server, `/api/v1` contract, SQLite state store, account system, and media authority. The same runtime operates independently on a NAS or inside the packaged desktop application. Desktop, hosted web, mobile, and Android TV/Fire TV clients consume that server instead of keeping separate authoritative libraries or watch state.
+The canonical server provides the `/api/v1` contract used by hosted web, mobile, and TV. Native desktop IPC repositories now use compatibility views over the same canonical SQLite tables. Native-only settings and caches live in extension tables in that file. Startup consolidation preserves verified legacy backups; runtime and rollback evidence is still required.
 
-Legacy desktop and headless data can be projected into the canonical store through the verified migration package. The canonical server never silently falls back to a legacy database after cutover.
+[Platform capabilities and verification](platform-capabilities.md) is the current reference for storage boundaries, client differences, and outstanding checks. This document inventories implementation; it does not certify device behavior or claim a new test run.
 
-## Implemented and automatically verified
+## Implemented in source
 
 | Area | Current behavior |
 | --- | --- |
 | Canonical state | Accounts, multiple administrators, users, profiles, PINs, restrictions, roots, catalog items, sources, devices, credentials, lists, preferences, progress, sessions, invitations, downloads, and audits persist in one SQLite store. |
 | Migration | Desktop-only, headless-only, and combined migrations create verified backups, bounded redacted reports, atomic commits, readback evidence, idempotent reruns, and rollback artifacts. |
-| Desktop host | The packaged entry starts the canonical TLS server, performs one-time migration, advertises its pinned identity, opens the hosted client, retains tray behavior, and uses the existing signed-update flow. |
+| Desktop host | Starts an embedded server over the shared canonical database while retaining the native IPC UI, playback, and LAN transport. The administration host defaults to loopback; explicit unified mode opens the hosted client. The tray and updater remain. |
 | Headless/NAS | The GUI-independent runtime, container/systemd deployment, mounted-root health, scan preservation on mount loss, direct delivery, HLS fallback, backup/restore, logs, and admin UI are implemented. |
 | Hosted browser | Owner setup, account sign-in, profiles/PINs, movies, series/seasons/episodes, search, lists, progress, direct/HLS playback, audio/subtitle selection, external text subtitles, downloads, private invitations, and browser casting controls are implemented. |
 | Mobile | Pinned discovery/pairing, profiles/PINs, canonical catalog and progress, lists, direct/HLS playback, track selection, saved outage catalog, capability-based downloads, local offline playback, and local download removal are implemented. |
@@ -27,7 +27,7 @@ Legacy desktop and headless data can be projected into the canonical store throu
 
 ## Runtime or platform evidence still required
 
-These are validation gaps, not alternate server implementations:
+Runtime evidence is still required for the following:
 
 - Install, migrate, update, and roll back an actual packaged desktop build on macOS, Windows, and Linux.
 - Run the phone/tablet matrix on physical iOS and Android devices, including large and interrupted offline downloads.
@@ -49,7 +49,7 @@ The following are not complete in the current video scope:
 - Collections, playlists beyond profile lists, editions, alternate versions, extras, local NFO import/export, and trickplay thumbnails.
 - Webhooks, notifications, synchronized watch rooms, live TV, and DVR.
 
-Electron support for other media is planned in this order: Photos, Music, Audiobooks, Books, then Comics and manga. The first photo folder workflow is implemented in source, with runtime and visual verification still outstanding. See [the execution plan](multimedia-execution-plan.md). This status table continues to describe video capabilities.
+Work on other media formats is paused. Existing implementation is retained without expansion. New mobile/TV features, watch rooms, and DVR are deferred while local-video reliability and storage migration are the priority.
 
 ## Evidence commands
 

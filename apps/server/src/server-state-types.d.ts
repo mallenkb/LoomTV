@@ -30,6 +30,7 @@ export interface PlaybackProfileContext {
   restrictions: V.ProfileRestrictions | null;
   deviceId: string;
   selectionRevision: number;
+  mediaSources?: import('./native-persistence.js').CanonicalSourceProjection;
 }
 export type ProfileInput = { name?: unknown; kind?: unknown; type?: unknown; avatarKey?: unknown; colorKey?: unknown; restrictions?: unknown };
 export interface StoredAccount {
@@ -131,7 +132,10 @@ export type ReadCatalogItem = Omit<StoredCatalogItem, 'rootId' | 'path' | 'relat
   rootId: string | null; path: string | null; relativePath: string | null; sourceId: string | null; extension: string | null;
 };
 export type ReadAdminState = Omit<AdminState, 'catalog'> & { catalog: ReadCatalogItem[] };
-export type ProfileMedia = { rootId?: string | null; contentRatings?: Record<string, { minimumAge?: number }>;
+export type ProfileMediaAccess = ((mediaId: string, locator?: string) => boolean) & {
+  projectSources?: (mediaId: string, sourceIds: readonly string[]) => import('./native-persistence.js').CanonicalSourceProjection;
+};
+export type ProfileMedia = { id?: string; rootId?: string | null; sourceLocator?: string; sourceIds?: string[]; contentRatings?: Record<string, { minimumAge?: number }>;
   maximumAge?: number; ageRating?: number; localMetadata?: unknown };
 export interface MigrationIssue { code: string; category: string; count: number; [key: string]: unknown }
 export type DesktopProjection = Omit<import('./legacy-state-import.js').DesktopCanonicalProjection, 'adminState' | 'profileRestrictions' | 'libraryRoots'> & {

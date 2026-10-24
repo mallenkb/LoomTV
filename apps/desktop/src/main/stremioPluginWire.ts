@@ -5,7 +5,7 @@ import type {
   StremioManifestReview,
   StremioMetaResult,
   StremioStreamResult,
-} from '@loom-media-server/plugin-protocol';
+} from '@loom-media-server/stremio-adapter';
 import type {
   OfficialStremioAddon,
   StremioPluginCatalogItem,

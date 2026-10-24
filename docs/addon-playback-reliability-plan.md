@@ -30,7 +30,7 @@ Do not run tests until the user explicitly requests them. Static inspection is a
 
 ## Phase 1: Correct source classification
 
-Primary integration point: `packages/plugin-protocol/src/stremio-adapter.mjs` and its TypeScript contracts.
+Primary integration point: `packages/stremio-adapter/src/stremio-adapter.mjs` and its TypeScript contracts.
 
 - Distinguish direct media, HLS, torrents and external links.
 - Prefer a valid direct media URL when a source also contains torrent metadata.

@@ -111,8 +111,8 @@ function bridgeProblems(libraryDirectory, listExports = exportedSymbols) {
   } catch (error) {
     problems.push(`Could not read ${INVENTORY_NAME}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (recorded && recorded.version !== expected) {
-    problems.push(`The libmpv bridge is version ${recorded.version ?? 'unknown'}; the host requires ${expected}. Build it from native/libmpv/render-bridge (fetch-native-runtimes.cjs does this).`);
+  if (recorded?.version !== expected) {
+    problems.push(`The libmpv bridge is version ${recorded?.version ?? 'unknown'}; the host requires ${expected}. Build it from native/libmpv/render-bridge (fetch-native-runtimes.cjs does this).`);
   }
   const exported = listExports(bridgePath);
   const missing = expectedBridgeExports().filter((name) => !exported.has(name));

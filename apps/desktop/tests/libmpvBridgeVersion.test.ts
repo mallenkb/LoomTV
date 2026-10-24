@@ -58,13 +58,19 @@ test('native renderer teardown releases its AppKit and OpenGL owners', {
     const compile = spawnSync('xcrun', ['clang', '-std=c11', '-fobjc-arc', '-fblocks',
       '-Wno-deprecated-declarations', '-I', path.join(source, 'include'),
       path.join(source, 'tests/lifecycle.m'), '-framework', 'Cocoa', '-framework', 'OpenGL',
-      '-framework', 'CoreGraphics', '-o', executable], { encoding: 'utf8' });
+      '-framework', 'CoreGraphics', '-o', executable], { encoding: 'utf8', timeout: 30_000 });
     assert.equal(compile.status, 0, compile.stderr);
     const runtime = path.join(desktopRoot, 'resources/mpv/lib/libmpv.dylib');
-    const run = spawnSync(executable, fs.existsSync(runtime) ? [runtime] : [], { encoding: 'utf8', timeout: 15_000 });
+    const clips = (process.env.LOOMTV_NATIVE_PLAYBACK_CLIPS || '').split(path.delimiter).filter(Boolean);
+    if (clips.length) assert.ok(fs.existsSync(runtime), 'real rendering requires the bundled libmpv runtime');
+    const run = spawnSync(executable, fs.existsSync(runtime) ? [runtime, ...clips] : [], { encoding: 'utf8', timeout: 25_000 });
     if (run.status === 77) { t.skip(run.stdout.trim()); return; }
     assert.equal(run.status, 0, run.stderr || String(run.error || run.signal));
     assert.match(run.stdout, /PASS: repeated teardown, duplicate attach and failed attach/);
+    if (clips.length) {
+      assert.equal((run.stdout.match(/PASS: real background playback /g) || []).length, clips.length);
+      process.stdout.write(run.stdout);
+    }
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

@@ -4,43 +4,41 @@ import { createLibraryFolderMutations } from '../src/main/libraryFolderMutations
 
 type Library = { libraryFolders: string[] };
 function fixture() {
-  let library: Library = { libraryFolders: ['/old'] };
-  const server = new Set(['/old']);
-  const deps = {
+  let library: Library = {libraryFolders: ['/old']};
+  let rejectNext = false;
+  let commits = 0;
+  const mutations = createLibraryFolderMutations({
     loadLibrary: () => library,
-    saveLibraryMutation: (next: Library) => { library = next; },
-    addFolderToLibrary: (current: Library, folder: string) => ({ libraryFolders: [...new Set([...current.libraryFolders, folder])] }),
-    removeFolderFromLibrary: (current: Library, folder: string) => ({ libraryFolders: current.libraryFolders.filter((entry) => entry !== folder) }),
-    addUnifiedLibraryRoot: async (folder: string) => { server.add(folder); return true; },
-    removeUnifiedLibraryRoot: async (folder: string) => { server.delete(folder); return true; },
-  };
-  return { deps, server, library: () => library };
+    saveLibraryMutation: (next: Library) => {
+      if (rejectNext) { rejectNext = false; throw new Error('Disk full'); }
+      library = next;
+      commits += 1;
+    },
+    addFolderToLibrary: (current: Library,folder: string) => ({libraryFolders: [...new Set([...current.libraryFolders,folder])]}),
+    removeFolderFromLibrary: (current: Library,folder: string) => ({libraryFolders: current.libraryFolders.filter(value=>value!==folder)}),
+  });
+  return {mutations,library:()=>library,commits:()=>commits,failNext:()=>{rejectNext=true;}};
 }
 
-test('server rejection leaves local folders unchanged', async () => {
+test('folder replacement is one commit of the complete saved state',async()=>{
   const context = fixture();
-  context.deps.addUnifiedLibraryRoot = async () => { throw new Error('Server unavailable'); };
-  await assert.rejects(createLibraryFolderMutations(context.deps).add('/new', 'movies'), /Server unavailable/);
-  assert.deepEqual(context.library().libraryFolders, ['/old']);
+  await context.mutations.update('/old','/new','movies');
+  assert.deepEqual(context.library().libraryFolders,['/new']);
+  assert.equal(context.commits(),1);
 });
 
-test('failed local commit compensates a replacement in reverse order', async () => {
+test('failed storage commit preserves the library and does not poison the queue',async()=>{
   const context = fixture();
-  context.deps.saveLibraryMutation = () => { throw new Error('Disk full'); };
-  await assert.rejects(createLibraryFolderMutations(context.deps).update('/old', '/new', 'movies'), /Disk full/);
-  assert.deepEqual([...context.server], ['/old']);
-  assert.deepEqual(context.library().libraryFolders, ['/old']);
+  context.failNext();
+  await assert.rejects(context.mutations.add('/bad','movies'),/Disk full/);
+  assert.deepEqual(context.library().libraryFolders,['/old']);
+  await context.mutations.add('/good','movies');
+  assert.deepEqual(context.library().libraryFolders,['/old','/good']);
 });
 
-test('concurrent adds preserve both folders and a rejected operation does not poison the queue', async () => {
+test('queued mutations read the latest committed library',async()=>{
   const context = fixture();
-  const add = context.deps.addUnifiedLibraryRoot;
-  context.deps.addUnifiedLibraryRoot = async (folder) => {
-    if (folder === '/bad') throw new Error('Rejected');
-    return add(folder);
-  };
-  const mutations = createLibraryFolderMutations(context.deps);
-  const results = await Promise.allSettled([mutations.add('/bad', 'movies'), mutations.add('/one', 'movies'), mutations.add('/two', 'movies')]);
-  assert.deepEqual(results.map((result) => result.status), ['rejected', 'fulfilled', 'fulfilled']);
-  assert.deepEqual(context.library().libraryFolders, ['/old', '/one', '/two']);
+  await Promise.all([context.mutations.add('/one','movies'),context.mutations.add('/two','tvShows'),context.mutations.remove('/old')]);
+  assert.deepEqual(context.library().libraryFolders,['/one','/two']);
+  assert.equal(context.commits(),3);
 });

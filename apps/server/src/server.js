@@ -505,6 +505,14 @@ export function createCanonicalVideoServer(options) {
       const session = await adminService.createNativeOwnerSession();
       return { adminToken: session.adminToken, expiresAt: session.expiresAt };
     },
+    nativeOwnerPasswordPending() { return persistence.store.nativeOwnerPasswordPending(); },
+    /** @param {{name: string; password: string}} input */
+    async configureNativeOwner(input) {
+      if (deploymentMode !== 'desktop-hosted' || !desktopSetupChannel.enabled || draining || !server.listening) {
+        throw Object.assign(new Error('Native owner setup requires the running desktop host.'),{code:'native_owner_access_unavailable'});
+      }
+      await adminService.configureNativeOwner(input);
+    },
     async start() {
       if (draining) throw Object.assign(new Error('The server is shutting down.'), { code: 'server_draining' });
       if (server.listening) return this.address();

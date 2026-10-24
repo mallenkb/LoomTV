@@ -358,7 +358,7 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       invitationSessionAbsoluteExpiresAt: currentSession.absoluteExpiresAt };
   }
 
-  /** @param {import('./server-media-types.js').Principal | null | undefined} principal @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource} [media] */
+  /** @param {import('./server-media-types.js').Principal | null | undefined} principal @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource | (import('./server-media-types.js').MediaSource & {sourceLocator: string})} [media] */
   async function invitationProfileContext(principal, media) {
     if (principal?.authentication !== 'invitation-session') return null;
     if (!principal.invitationProfileId) throw remoteError(403, 'permission_denied', 'Invitation profile is unavailable.');
@@ -367,7 +367,11 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
       principal.id, principal.invitationProfileId, undefined, deviceId,
     );
     if (principal.invitationMediaIds && !principal.invitationMediaIds.includes(media.id)) throw remoteError(403, 'permission_denied', 'Media is outside the invitation scope.');
-    if (!principal.rootIds?.includes(media.rootId || '')) throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+    const logicalSources = 'sourceIds' in media && Array.isArray(media.sourceIds)
+      && !('sourceLocator' in media && media.sourceLocator !== undefined);
+    if (!logicalSources && !principal.rootIds?.includes(media.rootId || '')) {
+      throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+    }
     return getClientState().requireScopedProfile(principal.id, principal.invitationProfileId, media, deviceId);
   }
 
@@ -398,7 +402,12 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     /** @param {import('./server-media-types.js').LibraryItem | import('./server-media-types.js').MediaSource} media */
     return (media) => {
       if (principal.invitationMediaIds && !principal.invitationMediaIds.includes(media.id)) throw remoteError(403, 'permission_denied', 'Media is outside the invitation scope.');
-      if (!principal.rootIds?.includes(media.rootId || '')) throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+      // Logical source lists have already been narrowed to invitation roots.
+      const logicalSources = 'sourceIds' in media && Array.isArray(media.sourceIds)
+        && !('sourceLocator' in media && media.sourceLocator !== undefined);
+      if (!logicalSources && !principal.rootIds?.includes(media.rootId || '')) {
+        throw remoteError(403, 'permission_denied', 'Media is outside the invitation roots.');
+      }
       return check(media);
     };
   }
@@ -408,13 +417,20 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     const requestContext = assertPrincipal(req, principal, 'download');
     if (!hasPermission(principal, 'downloads')) throw remoteError(403, 'download_not_allowed', 'Offline downloads are not allowed.');
     const admin = getAdminService();
-    const source = await admin.resolveMediaPath(String(input.mediaId || ''), principal, input.sourceId);
+    const itemId = String(input.mediaId || '');
+    const catalogItem = input.sourceId ? null : await admin.getLibraryItem?.(itemId, principal);
+    const logicalProfile = catalogItem
+      ? principal.authentication === 'invitation-session'
+        ? await invitationProfileContext(principal, catalogItem)
+        : await getClientState().requireActivePlaybackProfile(principal.id, principal.deviceId ?? undefined, catalogItem)
+      : null;
+    const source = await admin.resolveMediaPath(itemId, principal, input.sourceId || logicalProfile?.mediaSources?.sourceIds[0]);
     if (!Number.isSafeInteger(source.sizeBytes) || source.sizeBytes < 0) {
       throw remoteError(409, 'source_unavailable', 'The media source size is unavailable for quota reservation.');
     }
     const profileContext = principal.authentication === 'invitation-session'
-      ? await invitationProfileContext(principal, source)
-      : await getClientState().requireActivePlaybackProfile(principal.id, principal.deviceId ?? undefined, source);
+      ? await invitationProfileContext(principal, { ...source, sourceLocator: source.sourceLocator ?? source.path })
+      : await getClientState().requireActivePlaybackProfile(principal.id, principal.deviceId ?? undefined, { ...source, sourceLocator: source.sourceLocator ?? source.path });
     if (!profileContext) throw remoteError(403, 'permission_denied', 'Download profile is unavailable.');
     const currentPolicy = policy();
     const ownerQuota = principal.authentication === 'invitation-session'
@@ -477,8 +493,8 @@ export function createRemotePolicyService({ store, proxyPolicy, getAccount, getA
     assertPrincipal(req, principal, 'download');
     const source = await getAdminService().resolveMediaPath(lease.mediaId, principal, lease.sourceId);
     const profileContext = principal.authentication === 'invitation-session'
-      ? await invitationProfileContext(principal, source)
-      : await getClientState().requireActivePlaybackProfile(principal.id, lease.deviceId, source);
+      ? await invitationProfileContext(principal, { ...source, sourceLocator: source.sourceLocator ?? source.path })
+      : await getClientState().requireActivePlaybackProfile(principal.id, lease.deviceId, { ...source, sourceLocator: source.sourceLocator ?? source.path });
     if (!profileContext || profileContext.profileId !== lease.profileId || profileContext.selectionRevision !== lease.selectionRevision
       || source.rootId !== lease.rootId || source.sourceId !== lease.sourceId || source.sizeBytes !== lease.sizeBytes
       || fileVersion(source) !== lease.fileVersion) throw remoteError(409, 'source_unavailable', 'Download lease binding changed.');

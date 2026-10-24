@@ -20,6 +20,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { expectedBridgeVersion } = require('./libmpv-bridge.cjs');
 
 const DESKTOP_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_OUTPUT = path.join(DESKTOP_ROOT, 'resources', 'mpv', 'lib');
@@ -101,6 +102,30 @@ function cellarOrigin(file) {
   return match ? { formula: match[1], version: match[2] } : { formula: null, version: null };
 }
 
+function highestMinimumMacOS(versions) {
+  return versions.filter((version) => typeof version === 'string' && /^\d+(?:\.\d+){0,2}$/.test(version))
+    .reduce((highest, version) => {
+      if (!highest) return version;
+      const left = version.split('.').map(Number);
+      const right = highest.split('.').map(Number);
+      for (let index = 0; index < 3; index += 1) {
+        if ((left[index] || 0) !== (right[index] || 0)) return (left[index] || 0) > (right[index] || 0) ? version : highest;
+      }
+      return highest;
+    }, null);
+}
+
+function minimumMacOSFromLoadCommands(commands) {
+  const modern = [...commands.matchAll(/^\s*minos (\S+)/gm)].map((match) => match[1]);
+  const legacy = [...commands.matchAll(/cmd LC_VERSION_MIN_MACOSX\s+cmdsize \d+\s+version (\S+)/g)].map((match) => match[1]);
+  return highestMinimumMacOS([...modern, ...legacy]);
+}
+
+function bridgeBuildEnvironment(include, minimumMacOS) {
+  return { ...process.env, LIBMPV_INCLUDE_DIR: include, LIBMPV_BRIDGE_ARCH: 'arm64',
+    ...(minimumMacOS ? { LIBMPV_BRIDGE_MIN_MACOS: minimumMacOS } : {}) };
+}
+
 function main() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     throw new Error('bundle-libmpv.cjs builds the macOS arm64 runtime and must run on an Apple silicon Mac.');
@@ -113,6 +138,10 @@ function main() {
   const output = path.resolve(process.argv[2] || DEFAULT_OUTPUT);
 
   const closure = dependencyClosure(library);
+  // The bridge and runtime declaration must cover every bundled dependency,
+  // including libraries built on a newer macOS than libmpv itself.
+  const minimumMacOS = highestMinimumMacOS(closure.map((file) => minimumMacOSFromLoadCommands(run('otool', ['-l', file]))));
+  if (!minimumMacOS) throw new Error('The libmpv dependency closure has no recorded minimum macOS version.');
   // Every library is stored under the file name its dependents refer to.
   const nameFor = new Map();
   const usedNames = new Set();
@@ -144,17 +173,16 @@ function main() {
     }
 
     run(process.execPath, [path.join(DESKTOP_ROOT, 'native', 'libmpv', 'render-bridge', 'build.mjs'), path.join(staging, BRIDGE_NAME)], {
-      env: { ...process.env, LIBMPV_INCLUDE_DIR: include },
+      env: bridgeBuildEnvironment(include, minimumMacOS),
     });
 
     verifyBundle(staging, usedNames);
 
     for (const entry of inventory) entry.sha256 = sha256(path.join(staging, entry.file));
-    const minimumMacOS = /minos (\S+)/.exec(run('otool', ['-l', path.join(staging, LIBRARY_NAME)]))?.[1] || null;
     fs.writeFileSync(path.join(staging, INVENTORY_NAME), `${JSON.stringify({
       manifestVersion: 1,
       library: LIBRARY_NAME,
-      bridge: { file: BRIDGE_NAME, sha256: sha256(path.join(staging, BRIDGE_NAME)) },
+      bridge: { file: BRIDGE_NAME, sha256: sha256(path.join(staging, BRIDGE_NAME)), version: expectedBridgeVersion() },
       minimumMacOS,
       files: inventory,
     }, null, 2)}\n`);
@@ -216,9 +244,11 @@ function verifyBundle(directory, names) {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[libmpv] ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try { main(); } catch (error) {
+    console.error(`[libmpv] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { highestMinimumMacOS, minimumMacOSFromLoadCommands, bridgeBuildEnvironment };

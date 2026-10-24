@@ -96,7 +96,6 @@ import {
 import { isImageFileName, isMacSidecarFile, isSubtitleFileName, isVideoFileName } from './main/fileClassification';
 import { createArtworkFinders } from './main/artworkFinders';
 import {
-  defaultLibraryFolderGroups,
   flattenLibraryFolders,
   getLibraryFolderStatus,
   libraryFolderStatusesFor,
@@ -104,7 +103,6 @@ import {
 } from './main/libraryFolders';
 import {
   fetchJikanEpisodesForLocalAnimeSeasons,
-  isLikelyAnimePath,
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createIptvService } from './main/iptv/iptvService.ts';
@@ -144,13 +142,12 @@ import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayba
 import { createServerTray, destroyServerTray, isServerTrayMenuWindow } from './main/serverTray';
 import { startDesktopPresentation } from './main/desktopStartup.ts';
 import {
-  addUnifiedDesktopLibraryRoot,
   configureUnifiedDesktopOwner,
   getUnifiedDesktopLanAdvertisement,
   getUnifiedDesktopServerState,
+  waitForUnifiedDesktopServerState,
   openUnifiedDesktopAdmin,
   openUnifiedDesktopSetup,
-  removeUnifiedDesktopLibraryRoot,
   requiresUnifiedDesktopSetup,
   startUnifiedDesktopServer,
   stopUnifiedDesktopServer,
@@ -239,6 +236,8 @@ import {
   updateProfile,
   eraseAutomaticSegmentCandidates,
   loadLibraryFromDatabase,
+  getVideoDatabaseRevision,
+  resolveCanonicalVideoId,
   remapLibraryMediaReferences,
   recordMetadataRefresh,
   saveCustomArtwork,
@@ -356,6 +355,7 @@ import {
   type ScanContext,
 } from './main/libraryScanner';
 import { createMetadataItemBuilders } from './main/metadataItemBuilders.ts';
+import { fetchVideoProviderRatings } from './main/metadata/providerRatings.ts';
 import {
   createOfficialMetadataService,
 } from './main/officialMetadataService.ts';
@@ -490,7 +490,6 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
   });
   return result.response === 0;
 }
-const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 // 20: refresh show years using series providers and reject movie-only OMDb matches.
 // 21: re-read episode numbers from filenames instead of embedded track tags.
@@ -641,21 +640,35 @@ async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
   }
 }
 
-function clearAppData(): LibraryData {
+async function clearAppData(): Promise<LibraryData> {
+  advanceLibraryMutationVersion();
+  await Promise.all([
+    stopUnifiedDesktopServer(),
+    stopScannerProcesses(),
+    stopAllMpvPlayback(),
+    stopAllLibVlcPlayback(),
+  ]);
+  stopAllTranscodes();
+  for (const socket of getLanMediaServerSockets()) socket.destroy();
+  for (const socket of getMediaServerSockets()) socket.destroy();
   const owner = clearDatabase();
   stremioPluginService.discardCachedState();
   selectDeviceProfile(DESKTOP_DEVICE_ID, owner.id);
   broadcastProfilesChanged();
   broadcastActiveProfileChanged(DESKTOP_DEVICE_ID);
-  for (const filePath of [LIBRARY_FILE, SETTINGS_FILE]) {
+  for (const filePath of [path.join(USER_DATA_DIR, 'library.json'), SETTINGS_FILE]) {
     try {
       fs.rmSync(filePath, { force: true });
     } catch (error) {
       console.warn(`[data] Failed to remove legacy file ${filePath}:`, error);
     }
   }
+  cachedLibrary = null;
   advanceLibraryMutationVersion();
-  return loadLibrary();
+  const library = loadLibrary();
+  await startUnifiedDesktopServer(unifiedDesktopSetupHooks);
+  syncLanAdvertisement();
+  return library;
 }
 
 async function shouldSplitContainerFolder(folderPath: string, folderName: string, subDirs: fs.Dirent[]): Promise<boolean> {
@@ -695,6 +708,17 @@ function metadataRequestWhenOnline<TArgs extends unknown[], TResult>(
 }
 
 const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuilders({
+  enrichProviderRatings: async (item) => {
+    const settings = loadSettings();
+    if (settings.metadataOfflineMode) return item;
+    const providerRatings = await fetchVideoProviderRatings(item.providerIds?.imdbId,
+      item.type === 'movie' || item.format?.toLowerCase() === 'movie' ? 'movie' : 'series', {
+        omdbApiKey: getMetadataApiKey(settings, 'omdb'),
+        mdblistApiKey: getMetadataApiKey(settings, 'mdblist'),
+        existing: item.providerRatings,
+      });
+    return { ...item, providerRatings };
+  },
   getExistingItem: (() => {
     let indexedLibrary: LibraryData | undefined;
     let byPath = new Map<string, MediaItem>();
@@ -815,6 +839,7 @@ async function scanLibrary(
   let scannedFolders = 0;
   let checkpointedFolders = 0;
 
+  const storedIdsByPath = new Map(libraryItemsFor(data).filter(item=>item.filePath).map(item=>[path.resolve(item.filePath),item.id]));
   const appendItem = (item: MediaItem, folderKind: ScanCacheFolderKind = 'auto') => {
     const type: MediaItem['type'] = folderKind === 'movies'
       ? 'movie'
@@ -823,7 +848,8 @@ async function scanLibrary(
         : folderKind === 'tv'
           ? 'tv'
           : item.type;
-    const next = item.type === type ? item : { ...item, type };
+    const storedId = item.filePath ? storedIdsByPath.get(path.resolve(item.filePath)) : undefined;
+    const next = item.type === type && (!storedId || item.id === storedId) ? item : { ...item, type, id: storedId || item.id };
     const identity = next.id || (next.filePath ? createMediaItemId(next.filePath) : '');
     if (identity && scannedItemIds.has(identity)) return;
     if (identity) scannedItemIds.add(identity);
@@ -1155,7 +1181,7 @@ function sanitizeStoredItem(item: MediaItem, inventory?: DiscoveryInventory): Me
   const withStableIdentity = (next: MediaItem): MediaItem => {
     const localTitle = localTitleFromPath(next.filePath);
     return next.filePath
-      ? { ...next, id: createMediaItemId(next.filePath), title: next.title || localTitle || '' }
+      ? { ...next, id: next.id || createMediaItemId(next.filePath), title: next.title || localTitle || '' }
       : next;
   };
 
@@ -1189,73 +1215,19 @@ function persistSeasonFolderRepair(data: LibraryData, forcePersist = false): Lib
 }
 
 function loadLibraryUncached(): LibraryData {
-  const databaseLibrary = loadLibraryFromDatabase();
-  if (databaseLibrary) return persistSeasonFolderRepair(databaseLibrary);
-
-  try {
-    if (fs.existsSync(LIBRARY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf-8'));
-      const normalized: LibraryData = { animeShows: [], ...data };
-      const hasExplicitFolderGroups = Boolean(data.libraryFolderGroups);
-      normalized.libraryFolderGroups = normalizeLibraryFolderGroups(normalized);
-      normalized.libraryFolders = flattenLibraryFolders(normalized.libraryFolderGroups);
-
-      if (hasExplicitFolderGroups) {
-        normalized.movies = (normalized.movies || [])
-          .map((item) => sanitizeStoredItem(item))
-          .filter((item): item is MediaItem => Boolean(item))
-          .map((item) => ({ ...item, type: 'movie' }));
-        normalized.tvShows = (normalized.tvShows || [])
-          .map((item) => sanitizeStoredItem(item))
-          .filter((item): item is MediaItem => Boolean(item))
-          .map((item) => ({ ...item, type: 'tv' }));
-        normalized.animeShows = (normalized.animeShows || [])
-          .map((item) => sanitizeStoredItem(item))
-          .filter((item): item is MediaItem => Boolean(item))
-          .map((item) => ({ ...item, type: 'anime' }));
-        return persistSeasonFolderRepair(normalized, true);
-      }
-
-      const existingAnimeShows = normalized.animeShows || [];
-      normalized.animeShows = [];
-      const stillMovies: MediaItem[] = [];
-      for (const rawMovie of normalized.movies || []) {
-        const movie = sanitizeStoredItem(rawMovie);
-        if (!movie) continue;
-        if (movie.type === 'anime' || isLikelyAnimePath(movie.filePath, movie.title)) {
-          normalized.animeShows.push({ ...movie, type: 'anime' });
-        } else if (movie.type === 'tv') {
-          normalized.tvShows.push(movie);
-        } else {
-          stillMovies.push(movie);
-        }
-      }
-      const stillSeries: MediaItem[] = [];
-      for (const rawShow of normalized.tvShows || []) {
-        const show = sanitizeStoredItem(rawShow);
-        if (!show) continue;
-        if (show.type === 'anime' || isLikelyAnimePath(show.filePath, show.title)) {
-          normalized.animeShows.push({ ...show, type: 'anime' });
-        } else {
-          stillSeries.push(show);
-        }
-      }
-      for (const rawAnimeShow of existingAnimeShows) {
-        const animeShow = sanitizeStoredItem(rawAnimeShow);
-        if (animeShow) normalized.animeShows.push({ ...animeShow, type: 'anime' });
-      }
-      normalized.movies = stillMovies;
-      normalized.tvShows = stillSeries;
-      return persistSeasonFolderRepair(normalized, true);
-    }
-  } catch (e) {
-    console.error('loadLibrary error:', e);
-  }
-  const libraryFolderGroups = defaultLibraryFolderGroups();
-  return { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups, libraryFolderStatuses: [], scanCache: {} };
+  const library = loadLibraryFromDatabase();
+  if (!library) throw new Error('The canonical video library is unavailable.');
+  return persistSeasonFolderRepair(library);
 }
 
+let cachedVideoRevision = '';
 function loadLibrary(): LibraryData {
+  const revision = getVideoDatabaseRevision();
+  if (revision !== cachedVideoRevision) {
+    if (cachedLibrary) advanceLibraryMutationVersion();
+    cachedLibrary = null;
+    cachedVideoRevision = revision;
+  }
   libraryLastReadAt = Date.now();
   if (!cachedLibrary) cachedLibrary = loadLibraryUncached();
   return cachedLibrary;
@@ -1270,8 +1242,9 @@ function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
 }
 
 function findLibraryItem(data: LibraryData, mediaId: string): MediaItem | null {
+  const canonicalId = resolveCanonicalVideoId(mediaId);
   for (const collection of [data.movies || [], data.tvShows || [], data.animeShows || []]) {
-    const item = collection.find((candidate) => candidate.id === mediaId);
+    const item = collection.find((candidate) => candidate.id === mediaId || candidate.id === canonicalId);
     if (item) return item;
   }
   return null;
@@ -1443,6 +1416,7 @@ function saveLibrary(data: LibraryData): boolean {
     };
     saveLibraryToDatabase(nextLibrary);
     cachedLibrary = nextLibrary;
+    cachedVideoRevision = getVideoDatabaseRevision();
     return true;
   } catch (e) {
     console.error('saveLibrary error:', e);
@@ -1466,6 +1440,7 @@ function saveLibraryMutation(data: LibraryData): void {
 function saveLibraryItemMutation(item: MediaItem): void {
   advanceLibraryMutationVersion();
   saveLibraryItemToDatabase(item);
+  cachedVideoRevision = getVideoDatabaseRevision();
   if (cachedLibrary) {
     let replaced = false;
     const replaceItem = (candidate: MediaItem): MediaItem => {
@@ -1577,6 +1552,7 @@ function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): bool
   const commit = scanCommits.get(data);
   if (!commit || !isCurrentScanCommit(data, scanVersion, getDesktopActiveProfileId())) return false;
   const previous = loadLibrary();
+  if (scanVersion !== libraryMutationVersion) return false;
   preserveLockedMetadata(previous, data);
   const addedAtById = new Map(libraryItemsFor(previous).map((item) => [item.id, item.addedAt ?? 0]));
   for (const [sourceId, targetId] of commit.aliases || []) {
@@ -1598,8 +1574,9 @@ function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): bool
     && JSON.stringify(durableNext.scanCache[root]) !== JSON.stringify(previous.scanCache?.[root]))
     .flatMap((root) => { const entry = durableNext.scanCache?.[root]; return entry ? [[root, entry] as const] : []; }));
   try {
-    const rowsChanged = saveLibraryScanDeltaToDatabase(delta.changed, delta.removed, cache, commit.aliases, delta.removedFilePaths);
+    const rowsChanged = saveLibraryScanDeltaToDatabase(delta.changed, delta.removed, cache, commit.aliases, delta.removedFilePaths, data.libraryFolderStatuses);
     cachedLibrary = delta.published;
+    cachedVideoRevision = getVideoDatabaseRevision();
     try {
       importInventory.reconcile(commit.roots);
       importInventory.captureLibrary(libraryItemsFor(delta.published), commit.roots);
@@ -2430,8 +2407,6 @@ registerIpcHandlers<LibraryData, AppSettings>({
   addFolderToLibrary,
   removeFolderFromLibrary,
   saveLibraryMutation,
-  addUnifiedLibraryRoot: addUnifiedDesktopLibraryRoot,
-  removeUnifiedLibraryRoot: removeUnifiedDesktopLibraryRoot,
   assertLocalMediaPath,
   authorizeMediaPath: (filePath) => assertProfileCanAccessPath(loadLibrary(), requireDesktopProfileId(), filePath),
   assertSubtitleCanAccessMediaPath: (mediaFilePath, subtitleFilePath) =>
@@ -2494,7 +2469,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
     refreshNativePlaybackDisplaySleepTimeout();
     if (!loadSettings().localNetworkSharingEnabled) stopTranscodesForScope('lan:');
   },
-  getUnifiedDesktopServerState,
+  getUnifiedDesktopServerState: waitForUnifiedDesktopServerState,
   configureUnifiedDesktopOwner,
   openUnifiedDesktopAdmin,
   syncLanAdvertisement,
@@ -3290,6 +3265,7 @@ app.whenReady().then(async () => {
         console.error('[unified desktop] Canonical server startup failed:', state.error);
       }
       if (!isAppShuttingDown && !isUpdateInstalling()) syncLanAdvertisement();
+
     },
   });
   if (waitForSetup) await unifiedServerStartup;

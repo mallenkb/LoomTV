@@ -14,6 +14,10 @@
     "./migration": {
       "types": "./src/legacy-state-import.d.ts",
       "import": "./src/legacy-state-import.js"
+    },
+    "./native-persistence": {
+      "types": "./src/native-persistence.d.ts",
+      "import": "./src/native-persistence.js"
     }
   },
   "packageManager": "pnpm@12.6.0",
@@ -24,7 +28,7 @@
     "start": "node src/cli.js",
     "server": "node src/cli.js",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
-    "typecheck": "tsrs --noEmit"
+    "typecheck": "node ../../scripts/compile-typescript.cjs --noEmit"
   },
   "dependencies": {
     "@loom-media-server/media-core": "workspace:*",

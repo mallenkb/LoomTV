@@ -4,7 +4,7 @@ import test from 'node:test';
 import type {
   StremioAddonStateSnapshot,
   StremioFetchImplementation,
-} from '@loom-media-server/plugin-protocol';
+} from '@loom-media-server/stremio-adapter';
 import {
   createStremioPluginService,
   StremioPluginServiceError,

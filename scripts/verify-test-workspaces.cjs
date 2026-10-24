@@ -11,7 +11,7 @@ const EXPECTED_TEST_WORKSPACES = Object.freeze([
   'apps/tv',
   'packages/lan-protocol',
   'packages/media-core',
-  'packages/plugin-protocol',
+  'packages/stremio-adapter',
   'packages/runtime-paths',
   'packages/transcode-capabilities',
   'packages/video-contracts',

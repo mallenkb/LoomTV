@@ -42,6 +42,7 @@ import {
 } from './libraryScanConcurrency.ts';
 
 export type MetadataItemBuilderDependencies = {
+  enrichProviderRatings?: (item: MediaItem) => Promise<MediaItem>;
   getExistingItem?: (filePath: string) => MediaItem | undefined;
   fetchTVMetadataById?: typeof import('./metadata/tvmaze.ts').fetchTVMetadataById;
   fetchCinemetaMetadataCandidates?: typeof import('./metadata/cinemeta.ts').fetchCinemetaMetadataCandidates;
@@ -78,6 +79,11 @@ function compatibleOmdbMetadata(data: OMDbResponse | null, type?: 'movie' | 'ser
 }
 
 export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies) {
+  const enrichProviderRatings = async (item: MediaItem) => {
+    // Optional ratings and secret-store access must not fail a local scan.
+    try { return await deps.enrichProviderRatings?.(item) || item; }
+    catch { return item; }
+  };
   const {
     extractSeasons,
     fetchAniListAnimeMetadata,
@@ -435,7 +441,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const mergedSeasons = mergeLocalSeasonsWithMetadata(localSeasons, remoteSeasons);
 
     const item: MediaItem = {
-      id,
+      id: existing?.id || id,
       type: finalType,
       format: finalType === 'anime' ? (matchedAniListMeta?.format || matchedJikanMeta?.format || 'TV') : 'TV',
       title: resolvedTitle,
@@ -486,7 +492,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       providerIds.imdbId || matchedOmdbData?.imdbID || item.providerIds?.imdbId,
       [...localAndAnimeAliasTitles, resolvedTitle],
     );
-    return preferCinemetaMetadata(item, defaultCinemeta, { poster: localPoster, backdrop: localBackdrop });
+    return enrichProviderRatings(preferCinemetaMetadata(item, defaultCinemeta, { poster: localPoster, backdrop: localBackdrop }));
   }
 
   async function buildMovieItemFromFile({
@@ -728,7 +734,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || searchYear || parsedFile.year;
 
     const fallbackItem: MediaItem = {
-      id: createMediaItemId(fullPath),
+      id: existing?.id || createMediaItemId(fullPath),
       type: finalType,
       format: finalType === 'anime'
         ? (matchedAniListMeta?.format || matchedJikanMeta?.format || (isAnimeMovie ? 'Movie' : 'TV'))
@@ -828,7 +834,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       );
       const episodeStill = singleEpisode?.still || officialBackdrop || embeddedPoster || localThumbnail;
 
-      return preferCinemetaMetadata({
+      return enrichProviderRatings(preferCinemetaMetadata({
         ...baseItem,
         seasons,
         episodes: [{
@@ -848,10 +854,10 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
           localMetadata: probe.localMetadata,
           subtitles,
         }],
-      }, defaultCinemeta, { poster: localPoster, backdrop: localBackdrop });
+      }, defaultCinemeta, { poster: localPoster, backdrop: localBackdrop }));
     }
 
-    return baseItem;
+    return enrichProviderRatings(baseItem);
   }
 
   return { buildMovieItemFromFile, buildTVItemFromFolder };

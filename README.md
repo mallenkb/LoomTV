@@ -1,6 +1,6 @@
 # Loom
 
-Loom is a private media library for video, photos, music, and reading. The Electron app organizes files stored on your computer or an OS-mounted server folder.
+Loom is a private video library. The Electron app organizes movies, TV shows, anime, and other videos stored on your computer or an OS-mounted server folder.
 
 Loom does not provide media or streaming subscriptions. Use it only with files and streams you own, created, or are allowed to access.
 
@@ -20,7 +20,7 @@ Loom does not provide media or streaming subscriptions. Use it only with files a
 - Runs inside the desktop app or as a headless service on a NAS or always-on computer.
 - Includes a Discover page for browsing public catalogs (TMDB, AniList, Cinemeta) and the Internet Archive's Feature Films collection. See [Discover and add-ons](#discover-and-add-ons).
 
-Video is the established library experience. Electron media expansion is starting with Photos, followed by Music, Audiobooks, Books, and Comics and manga. See the [execution plan](docs/multimedia-execution-plan.md) for scope and implementation status. These media types are not yet advertised as released support.
+Current development focuses on local and NAS video reliability. Work on photos, music, audiobooks, books, and comics is paused. Existing code for those media types is retained, without expanding its scope. See the [video roadmap](docs/future-work.md).
 
 ## Where it runs
 
@@ -32,7 +32,7 @@ Video is the established library experience. Electron media expansion is startin
 | Mobile | Connects from iOS or Android, with profile support and offline downloads. |
 | TV | Connects from Android TV or Fire TV with remote-friendly navigation. |
 
-The desktop and headless versions use the same server, API, accounts, and database model. Before startup, the desktop app can migrate older LoomTV data into that shared database.
+Desktop and the embedded server use `loomtv-canonical.sqlite` for local-video state. Native IPC repositories use compatibility views over the canonical tables; hosted web, mobile, and TV use the server API. The native UI, playback engines, and LAN transport remain in place. Desktop consolidation preserves verified source backups and stops on unresolved conflicts. Migration and rollback fixture tests pass; packaged-app and device checks are still pending. See [storage boundaries and verification](docs/platform-capabilities.md#storage-boundaries) and [migration and rollback](docs/canonical-migration.md).
 
 Some internal package names still use `loom-media-server`. The installed product is Loom. The server component is Loom Media Server. Existing application IDs, data paths, and update identifiers remain unchanged for upgrade safety.
 
@@ -98,17 +98,20 @@ The desktop build downloads LibVLC, libmpv, and FFmpeg from a pinned GitHub rele
 
 ## Metadata
 
-Provider setup is optional. TVmaze and Jikan work without user API keys. TMDB, Fanart.tv, and OMDb can be added during setup or later in Settings.
+Provider setup is optional. Cinemeta, TVmaze, AniList, and Jikan work without user API keys. Saved provider keys remain in the desktop host.
 
 | Provider | Used for |
 | --- | --- |
-| TMDB | Movie and TV metadata, artwork, cast, and ratings |
-| TVmaze | TV show and episode metadata without a user key |
-| Jikan / MyAnimeList | Anime metadata without a user key |
-| Fanart.tv | Clearlogos and media-center artwork |
-| OMDb | Fallback movie and TV details and ratings |
+| Cinemeta | Default video metadata and IMDb identity |
+| TMDB | Movie and TV artwork, cast portraits, and detailed metadata |
+| TVmaze | TV and episode details, including cast portraits |
+| AniList and Jikan / MyAnimeList | Anime metadata and episode matching |
+| TheTVDB | Optional TV metadata and episode matching |
+| Fanart.tv | Clearlogos and additional artwork |
+| OMDb | IMDb, Rotten Tomatoes, and Metacritic scores when supplied |
+| MDBList | Missing ratings or OMDb quota fallback, including audience scores when supplied |
 
-Fetched metadata and selected artwork are stored with the library. Normal browsing reads that saved data instead of calling providers for every screen. A scan or manual metadata refresh can update it.
+Fetched metadata and selected artwork are stored with the library. Normal browsing reads that saved data instead of calling providers for every screen. A scan or manual metadata refresh can update it. Local-video and add-on ratings share the same normalization, missing-score fallback, and host quota cooldown. Exact IMDb identity is required before merging scores; unavailable scores remain absent.
 
 ## Discover and add-ons
 
@@ -157,16 +160,16 @@ Run commands from the repository root.
 | `corepack pnpm --filter loom-media-server-desktop package` | Create an unpacked desktop build |
 | `corepack pnpm --filter loom-media-server-desktop make` | Create Electron Forge distributables |
 | `corepack pnpm --filter loom-media-server-desktop dist` | Create Electron Builder release files without publishing |
-| `corepack pnpm typecheck` | Run all workspace type checks with tsrs |
+| `corepack pnpm typecheck` | Run all workspace type checks with platform compiler fallback |
 | `corepack pnpm test` | Run workspace tests |
 
 Desktop build output goes to `apps/desktop/out/`. Electron Builder writes installers and archives to `apps/desktop/out/builder/`.
 
-Type checking and the plugin-protocol declaration build use tsrs, pinned in the workspace catalog. Run `corepack pnpm --filter @loom-media-server/plugin-protocol build` to emit declarations. CI runs the same compiler commands. Mobile and TV retain TypeScript 6.0.3 because Expo SDK 58 tooling loads the TypeScript JavaScript API. Desktop does not install TypeScript.
+Type checking and the Stremio adapter declaration build use Cloudflare/Oxc's tsrs Rust compiler, pinned at `0.18.0-ts7.1.0-dev.20260929` in the workspace catalog. Run `corepack pnpm --filter @loom-media-server/stremio-adapter build` to emit declarations. CI and local scripts use `scripts/compile-typescript.cjs` with the same configuration. TypeScript 6.0.3 remains available only for Expo and tools that call its JavaScript compiler API.
 
 Linting uses oxlint, pinned in the workspace catalog and configured in `.oxlintrc.json`. Run `corepack pnpm lint` from the root, or `corepack pnpm --filter loom-media-server-desktop lint` for desktop. `scripts/oxlint/loom-plugin.mjs` blocks synchronous child-process calls in the desktop main process and the canonical server.
 
-The pinned experimental tsrs release provides binaries for Apple Silicon macOS and Linux x64/arm64, including glibc and musl. Windows and Intel macOS cannot run compiler commands with this release. Use a supported development host or Linux CI, or supply a compatible locally built compiler through `TSRS_BINARY`. There is no automatic fallback to tsc. This compiler restriction does not change the app's runtime platform targets.
+The launcher tries tsrs, Microsoft TypeScript `7.1.0-beta`, then Microsoft TypeScript `7.0.2`. The current tsrs package supports Apple silicon macOS and Linux x64/arm64, so Windows and Intel Macs normally start with the Microsoft beta. A compatible custom tsrs binary can be supplied through `TSRS_BINARY`. Missing binaries and startup failures select the next compiler. Once compilation starts, type errors, invalid options, crashes, and cancellation fail the command without switching compilers. Both Microsoft versions are pinned under separate package aliases so a global `tsc` cannot change the result.
 
 The configs list Node types explicitly and load Vite client declarations for desktop CSS imports. Desktop path aliases use paths relative to the config file without the removed `baseUrl` option.
 
@@ -184,7 +187,7 @@ packages/
   runtime-paths/          Shared data, cache, and media path resolution
   transcode-capabilities/ Client capability and transcode decisions
   lan-protocol/           LAN discovery, pairing, and transport types
-  plugin-protocol/        Plugin protocol and sandbox types
+  stremio-adapter/        Stremio add-on client and validation
   video-migration/        Canonical state migration helpers
 deploy/
   docker/        Headless Docker files

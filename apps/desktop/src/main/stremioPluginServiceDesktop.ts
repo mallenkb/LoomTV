@@ -1,4 +1,4 @@
-import type { StremioFetchImplementation } from '@loom-media-server/plugin-protocol';
+import type { StremioFetchImplementation } from '@loom-media-server/stremio-adapter';
 import {
   getProfile,
   getStremioAddonConfiguration,

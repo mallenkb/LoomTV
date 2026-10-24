@@ -31,7 +31,7 @@ LOOM_SCANNER_ENGINE=rust pnpm start
 LOOM_SCANNER_ENGINE=auto pnpm start
 ```
 
-The default full-discovery engine is `typescript`. Before discovering a root, eligible quick scans try a Rust signature check and fall back to ordinary discovery if the worker is unavailable or lacks that capability. Setting `LOOM_SCANNER_ENGINE=typescript` explicitly bypasses the native check. `rust` reports worker failures. `auto` retries a failed worker attempt once with TypeScript, after discarding its staging database. Filesystem failures and cancellation do not trigger a language fallback. Set the engine to `typescript` to roll back discovery without reverting the database improvements.
+The default full-discovery engine is `typescript`. Before discovering a root, eligible quick scans try a Rust signature check and fall back to ordinary discovery if the worker is unavailable or lacks that capability. Setting `LOOM_SCANNER_ENGINE=typescript` explicitly bypasses the native check. `rust` reports worker failures. `auto` retries a failed worker attempt once with tsrs, after discarding its staging database. Filesystem failures and cancellation do not trigger a language fallback. Set the engine to `typescript` to roll back discovery without reverting the database improvements.
 
 Production resolves the binary from `process.resourcesPath/scanner/<platform>-<arch>/loom-scanner`, with `.exe` on Windows. Development uses the app's resources directory. No installed application needs Cargo or PATH lookup. Forge and electron-builder compile and copy the matching worker before code signing. Cross compilation needs the Rust target and the corresponding system linker. The build script installs cross targets through rustup; it does not supply Linux cross linkers or Windows SDKs.
 
@@ -170,7 +170,7 @@ Earlier implementation checks, before the memory follow-up:
 - Before the memory follow-up, affected TypeScript tests: 41 passed, 0 failed, 0 skipped. The three lifecycle tests were rerun successfully after wiring awaited shutdown into app quit and update installation. This includes the latest signature, subtitle lookup, memory-bound inventory, worker deadline and transactional segment cleanup changes.
 - Rust unit tests: 3 passed, covering shared protocol fixtures, signature spill/merge ordering and merge cancellation.
 - Dedicated FFmpeg/ffprobe integration: passed for both engines using a generated valid video.
-- Desktop and build-config TypeScript checks: passed.
+- Desktop and build-config tsrs checks: passed.
 - Lint for changed runtime, test and build files: passed.
 - macOS ARM64 Rust release build: passed.
 - macOS ARM64 electron-builder package: passed with ad-hoc signing. Its bundled worker passed handshake, discovery, signature and cancellation checks, plus packaged-runtime and strict app/worker code-signature verification.
@@ -190,8 +190,8 @@ node apps/desktop/scripts/benchmark-scan-pipeline.ts apps/desktop/docs/scanner-b
 node apps/desktop/scripts/benchmark-scan-persistence.ts
 cargo fmt --check --manifest-path apps/desktop/native/scanner/Cargo.toml
 cargo build --locked --release --manifest-path apps/desktop/native/scanner/Cargo.toml
-node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json
-node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.node.json
+node scripts/compile-typescript.cjs --noEmit -p apps/desktop/tsconfig.json
+node scripts/compile-typescript.cjs --noEmit -p apps/desktop/tsconfig.node.json
 cd apps/desktop
 corepack pnpm run lint
 corepack pnpm run build:main
@@ -211,7 +211,7 @@ The normal application startup rebuilds better-sqlite3 for Electron. The process
 Latest follow-up commands from the repository root:
 
 ```sh
-node_modules/.bin/tsrs --noEmit -p apps/desktop/tsconfig.json
+node scripts/compile-typescript.cjs --noEmit -p apps/desktop/tsconfig.json
 corepack pnpm --dir apps/desktop exec oxlint src/main.ts src/main/artworkCache.ts src/main/database.ts src/main/databaseArtworkRepository.ts src/main/libraryProjections.ts src/main/scanning/inventory.ts src/main/scanning/typescriptDiscovery.ts src/main/scanning/discover.ts src/main/scanning/quickScanCache.ts src/main/scanning/rustScannerClient.ts scripts/benchmark-scan-pipeline.ts scripts/benchmark-scan-projection.ts scripts/verify-scanner.cjs
 node apps/desktop/scripts/benchmark-scan-pipeline.ts apps/desktop/docs/scanner-benchmarks/pipeline-native-quick-macos-arm64.json
 node apps/desktop/scripts/benchmark-scan-projection.ts apps/desktop/docs/scanner-benchmarks/projection-second-pass-macos-arm64.json

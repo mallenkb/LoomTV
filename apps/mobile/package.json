@@ -30,9 +30,9 @@
   },
   "devDependencies": {
     "@types/react": "19.3.0",
-    "typescript": "6.0.3",
-    "tsrs": "catalog:",
-    "oxlint": "catalog:"
+    "typescript": "catalog:",
+    "oxlint": "catalog:",
+    "tsrs": "catalog:"
   },
   "scripts": {
     "start": "expo start --dev-client",
@@ -51,7 +51,7 @@
     "submit:production": "eas submit --platform all --profile production",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
     "lint": "oxlint",
-    "typecheck": "tsrs --noEmit"
+    "typecheck": "node ../../scripts/compile-typescript.cjs --noEmit"
   },
   "private": true
 }

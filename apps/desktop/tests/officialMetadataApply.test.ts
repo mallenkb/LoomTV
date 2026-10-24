@@ -116,6 +116,8 @@ test('applying a candidate whose source has no provider scores drops the stale o
 test('applying a candidate looks its scores up by the id the match came with', async () => {
   const { service, saved, omdbById } = createHarness(animeShow(), {
     Response: 'True',
+    imdbID: 'tt9335498',
+    Type: 'series',
     imdbRating: '8.6',
     imdbVotes: '132,000',
     Metascore: '82',
@@ -131,7 +133,7 @@ test('applying a candidate looks its scores up by the id the match came with', a
   assert.equal(saved[0].providerIds?.imdbId, 'tt9335498');
 });
 
-test('an OMDb candidate applies the scores it already carries', async () => {
+test('a partial OMDb candidate keeps its scores while checking for missing ratings', async () => {
   const { service, saved, omdbById } = createHarness(animeShow());
 
   const result = await service.applyOfficialMetadataCandidate('anime-1', candidate({
@@ -141,7 +143,7 @@ test('an OMDb candidate applies the scores it already carries', async () => {
     providerRatings: { imdb: { value: 8.5, scale: 10, votes: 130000 } },
   }));
 
-  assert.deepEqual(omdbById, []);
+  assert.deepEqual(omdbById, ['tt9335498']);
   assert.equal(result.rating, 8.5);
   assert.deepEqual(saved[0].providerRatings, { imdb: { value: 8.5, scale: 10, votes: 130000 } });
 });

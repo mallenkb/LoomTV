@@ -3,6 +3,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
+import { profileAllowsCanonicalMedia, createCanonicalMediaAccess } from 'loom-media-server-headless/native-persistence';
 import { safeFetch } from './safeFetch.ts';
 import { runBoundedArtworkFetch } from './artworkFetchAdmission.ts';
 import { artworkExtensionForMimeType } from './artworkCache.ts';
@@ -14,7 +16,8 @@ import {
   resizeArtworkBytes,
   sanitizeArtworkBytes,
 } from './artworkSecurity.ts';
-import type { LibraryData } from './appContracts.ts';
+import type { LibraryData, LibraryFolderStatus } from './appContracts.ts';
+import type { MediaItem } from './metadata/types.ts';
 import type { ProfileExportV1, StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
 import {
   createDatabaseArtworkRepository,
@@ -28,7 +31,6 @@ import { compactDatabaseIfWasteful, trimFreePages } from './databaseCompaction.t
 import {
   loadLibrary as loadLibraryRecord,
   remapLibraryMediaReferences as remapLibraryMediaReferencesRecord,
-  saveLibrary as saveLibraryRecord,
   saveLibraryItem as saveLibraryItemRecord,
   saveLibraryScanDelta as saveLibraryScanDeltaRecord,
 } from './databaseLibraryRepository.ts';
@@ -85,10 +87,10 @@ import type {
   MediaSegmentSource,
   ProviderCacheEntry,
 } from './skipSegments/types';
-import { migrateDatabase, profilesMigrationPending } from './databaseMigrations.ts';
+import { profilesMigrationPending } from './databaseMigrations.ts';
+import { openConsolidatedVideoDatabase, videoDatabaseRevision, canonicalVideoConnection } from './consolidatedVideoDatabase.ts';
 import {
   clearDeviceProfileSelection as clearDeviceProfileSelectionRecord,
-  clearAllGuestProfiles as clearAllGuestProfilesRecord,
   createProfile as createProfileRecord,
   createGuestProfile as createGuestProfileRecord,
   deleteProfile as deleteProfileRecord,
@@ -103,7 +105,6 @@ import {
   reorderProfiles as reorderProfileRecords,
   resetOwnerProfile as resetOwnerProfileRecord,
   saveProfilePreferences as saveProfilePreferencesRecord,
-  saveProfileRestrictions as saveProfileRestrictionsRecord,
   selectDeviceProfile as selectDeviceProfileRecord,
   setDeviceAutomaticSignIn as setDeviceAutomaticSignInRecord,
   setProfileListEntry as setProfileListEntryRecord,
@@ -141,7 +142,7 @@ let segmentRepository: ReturnType<typeof createDatabaseSegmentsRepository> | nul
 let pluginSecretStore: PluginSecretStore | null = null;
 
 function databasePath(): string {
-  return path.join(app.getPath('userData'), 'loomtv.sqlite');
+  return path.join(app.getPath('userData'), 'loomtv-canonical.sqlite');
 }
 
 function artworkCacheDirectory(): string {
@@ -155,21 +156,10 @@ function pluginArtworkCacheDirectory(): string {
 function getDb(): BetterSqlite3.Database {
   if (db) return db;
 
-  fs.mkdirSync(app.getPath('userData'), { recursive: true });
-  const connection = new BetterSqlite3(databasePath());
-  try {
-    connection.pragma('journal_mode = WAL');
-    connection.pragma('foreign_keys = ON');
-    connection.pragma('busy_timeout = 5000');
-    backupBeforeProfilesMigration(connection);
-    migrateDatabase(connection);
-    db = connection;
-    scheduleDatabaseMaintenance(connection);
-    return connection;
-  } catch (error) {
-    connection.close();
-    throw error;
-  }
+  const connection = openConsolidatedVideoDatabase(app.getPath('userData'));
+  db = connection;
+  scheduleDatabaseMaintenance(connection);
+  return connection;
 }
 
 /**
@@ -239,34 +229,22 @@ const secureSettingsCodec: SecureSettingsCodec = {
   isCurrentCiphertext: (value) => isLocalSecretCiphertext(Buffer.from(value, 'base64')),
 };
 
-// A plain file copy of an open WAL database misses recent writes, so the
-// pre-migration backup uses VACUUM INTO and is verified before migrating.
-function backupBeforeProfilesMigration(database: BetterSqlite3.Database): void {
-  try {
-    if (!profilesMigrationPending(database)) return;
-    const hasProgress = database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'playback_progress'")
-      .get()
-      ? (database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n > 0
-      : false;
-    if (!hasProgress) return;
-    const backupPath = path.join(app.getPath('userData'), 'loomtv-pre-profiles-backup.sqlite');
-    if (!fs.existsSync(backupPath)) {
-      database.prepare('VACUUM INTO ?').run(backupPath);
-    }
-    const backup = new BetterSqlite3(backupPath, { readonly: true });
-    try {
-      const check = backup.pragma('quick_check') as Array<{ quick_check: string }>;
-      if (check[0]?.quick_check !== 'ok') throw new Error('Backup integrity check failed.');
-    } finally {
-      backup.close();
-    }
-  } catch (error) {
-    throw new Error(
-      `LoomTV could not create a pre-migration database backup: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
+export function profileCanReadCanonicalVideo(profileId: string, mediaId: string, locator?: string): boolean {
+  return profileAllowsCanonicalMedia(canonicalVideoConnection(getDb()) as unknown as DatabaseSync, profileId, mediaId, locator);
+}
+
+export function createProfileCanonicalVideoAccess(profileId: string): (mediaId: string, locator?: string) => boolean {
+  return createCanonicalMediaAccess(canonicalVideoConnection(getDb()) as unknown as DatabaseSync, profileId);
+}
+
+export function resolveCanonicalVideoId(alias: string): string | null {
+  const row = canonicalVideoConnection(getDb()).prepare('SELECT media_id FROM media_identity_aliases WHERE alias=? ORDER BY created_at DESC LIMIT 1')
+    .get(alias) as {media_id: string} | undefined;
+  return row?.media_id || null;
+}
+
+export function getVideoDatabaseRevision(): string {
+  return videoDatabaseRevision(getDb());
 }
 
 export function isProfilesMigrationComplete(): boolean {
@@ -485,11 +463,58 @@ export function saveCachedThumbnail(cacheKey: string, bytes: Buffer, mimeType = 
 export function loadLibraryFromDatabase(): LibraryData | null {
   // The library payload is profile-neutral: viewer recency is derived from the
   // selected profile's progress by each client, never baked into the catalog.
-  return loadLibraryRecord(getDb(), getCustomArtworkTargets());
+  const library = loadLibraryRecord(getDb(), getCustomArtworkTargets());
+  if (!library) return {
+    movies: [], tvShows: [], animeShows: [], libraryFolders: [],
+    libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] }, scanCache: {},
+  };
+  // Legacy episode rows had no rating column. Keep canonical episode policies
+  // available to the native profile filter without changing repository SQL.
+  const ratings = canonicalVideoConnection(getDb()).prepare(`SELECT json_extract(extension_json,'$.seriesId') series_id,
+    series_season season,series_episode episode,
+    COALESCE(json_extract(extension_json,'$.contentRatings'),json_extract(extension_json,'$.metadata.contentRatings')) ratings_json
+    FROM catalog_items WHERE media_kind='episode' AND ratings_json IS NOT NULL`).all() as Array<{
+      series_id: string; season: number; episode: number; ratings_json: string;
+    }>;
+  const bySeries = new Map<string, Map<string, MediaItem['contentRatings']>>();
+  for (const row of ratings) {
+    const contentRatings: unknown = JSON.parse(row.ratings_json);
+    if (!contentRatings || typeof contentRatings !== 'object' || Array.isArray(contentRatings)) continue;
+    if (!bySeries.has(row.series_id)) bySeries.set(row.series_id, new Map());
+    bySeries.get(row.series_id)?.set(`${row.season}:${row.episode}`, contentRatings as MediaItem['contentRatings']);
+  }
+  for (const show of [...library.tvShows, ...library.animeShows]) {
+    const episodes = bySeries.get(show.id);
+    if (!episodes) continue;
+    show.episodes = show.episodes?.map((episode) => {
+      const contentRatings = episodes.get(`${episode.season}:${episode.number}`);
+      return contentRatings ? { ...episode, contentRatings } : episode;
+    });
+  }
+  return library;
 }
 
 export function saveLibraryToDatabase(data: LibraryData): void {
-  saveLibraryRecord(getDb(), data);
+  const database = getDb();
+  const items = [...data.movies, ...data.tvShows, ...(data.animeShows || [])];
+  const desired = new Set(items.map((item) => item.id));
+  const groups = data.libraryFolderGroups || { movies: data.libraryFolders, tvShows: [], anime: [], others: [] };
+  database.transaction(() => {
+    const previous = loadLibraryFromDatabase();
+    const removed = [...(previous?.movies || []), ...(previous?.tvShows || []), ...(previous?.animeShows || [])]
+      .filter((item) => !desired.has(item.id)).map((item) => item.id);
+    const folders = new Set<string>();
+    const insert = database.prepare('INSERT OR REPLACE INTO library_folders(path,kind,added_at) VALUES(?,?,?)');
+    for (const [kind, paths] of Object.entries(groups)) for (const folder of paths || []) {
+      folders.add(folder);
+      insert.run(folder, kind, Date.now());
+    }
+    saveLibraryScanDeltaRecord(database, items, removed, data.scanCache || {});
+    for (const folder of previous?.libraryFolders || []) if (!folders.has(folder)) {
+      database.prepare('DELETE FROM library_folders WHERE path=?').run(folder);
+      database.prepare('DELETE FROM scan_cache WHERE folder_path=?').run(folder);
+    }
+  }).immediate();
 }
 
 export function saveLibraryItemToDatabase(item: import('./metadata/types.ts').MediaItem): void {
@@ -697,7 +722,9 @@ export function createGuestProfile(deviceId: string): ProfileRecord {
 }
 
 export function clearAllGuestProfiles(): void {
-  clearAllGuestProfilesRecord(getDb());
+  const raw = canonicalVideoConnection(getDb());
+  raw.prepare(`DELETE FROM profiles WHERE kind='guest' AND (guest_device_id IN (SELECT device_id FROM native_selection_revisions)
+    OR guest_device_id IN (SELECT id FROM devices WHERE kind='desktop' AND disabled=1))`).run();
 }
 
 export function reorderProfiles(profileIds: readonly string[]): ProfileRecord[] {
@@ -720,12 +747,64 @@ export function saveProfilePreferences(profileId: string, patch: ProfilePreferen
   return saveProfilePreferencesRecord(getDb(), profileId, patch);
 }
 
+export function getProfileRestrictionState(profileId: string): { restrictions: ProfileRestrictions; configured: boolean } {
+  const database = getDb();
+  const restrictions = getProfileRestrictionsRecord(database, profileId);
+  const raw = canonicalVideoConnection(database);
+  const stored = raw.prepare('SELECT allowed_root_ids_json FROM profile_restrictions WHERE profile_id=?')
+    .get(profileId) as { allowed_root_ids_json: string | null } | undefined;
+  const paths = raw.prepare('SELECT 1 FROM profile_path_grants WHERE profile_id=? LIMIT 1').get(profileId);
+  const constrained = stored?.allowed_root_ids_json != null || Boolean(paths);
+  return {
+    restrictions: { ...restrictions, ...(constrained && restrictions.allowedFolders.length === 0 ? { denyAll: true } : {}) },
+    configured: Boolean(stored),
+  };
+}
+
 export function getProfileRestrictions(profileId: string): ProfileRestrictions {
-  return getProfileRestrictionsRecord(getDb(), profileId);
+  return getProfileRestrictionState(profileId).restrictions;
 }
 
 export function saveProfileRestrictions(profileId: string, input: Omit<ProfileRestrictions, 'revision'>): ProfileRestrictions {
-  return saveProfileRestrictionsRecord(getDb(), profileId, input);
+  const database = getDb();
+  return database.transaction(() => {
+    const profile = getProfileRecord(database, profileId);
+    if (!profile) throw new Error('That profile no longer exists.');
+    if (!RATING_COUNTRIES.has(input.country)) throw new Error('Choose a supported ratings country.');
+    const requestedMaximumAge = input.maximumAge === null ? null : Number(input.maximumAge);
+    if (requestedMaximumAge !== null && !Number.isFinite(requestedMaximumAge)) throw new Error('Choose a valid maximum age.');
+    const maximumAge = requestedMaximumAge === null ? null : Math.min(18, Math.max(0, Math.round(requestedMaximumAge)));
+    if (profile.type === 'kid' && maximumAge === null) throw new Error('Choose a maximum age for a Kids profile.');
+    if (input.denyAll !== undefined && typeof input.denyAll !== 'boolean') throw new Error('Choose valid folder access.');
+    const folders = [...new Set(input.allowedFolders.map(String).map((folder) => folder.trim()).filter(Boolean))];
+    const before = getProfileRestrictions(profileId);
+    const sameFolders = JSON.stringify([...folders].sort()) === JSON.stringify([...before.allowedFolders].sort());
+    const denyAll = input.denyAll ?? (folders.length === 0 && before.denyAll === true);
+    const raw = canonicalVideoConnection(database);
+    const stored = raw.prepare('SELECT allowed_root_ids_json FROM profile_restrictions WHERE profile_id=?')
+      .get(profileId) as { allowed_root_ids_json: string | null } | undefined;
+    // An age-only edit must preserve the canonical root IDs and narrower grants.
+    const preserveFolders = sameFolders && denyAll === Boolean(before.denyAll);
+    if (!preserveFolders) {
+      const available = raw.prepare("SELECT 1 FROM library_roots WHERE state!='removed' AND loom_contains(locator,?) LIMIT 1");
+      for (const folder of folders) if (!available.get(folder)) throw new Error('Folder access must use a current library folder.');
+    }
+    const roots = denyAll ? '[]' : preserveFolders ? stored?.allowed_root_ids_json ?? null : null;
+    const payload = JSON.stringify({ country: input.country, maximumAge, allowUnrated: Boolean(input.allowUnrated) });
+    raw.prepare(`INSERT INTO profile_restrictions(profile_id,allowed_root_ids_json,payload_json,revision) VALUES(?,?,?,1)
+      ON CONFLICT(profile_id) DO UPDATE SET allowed_root_ids_json=excluded.allowed_root_ids_json,
+        payload_json=excluded.payload_json,revision=profile_restrictions.revision+1`)
+      .run(profileId, roots, payload);
+    raw.prepare(`INSERT INTO native_profile_ui(profile_id,restrictions_updated_at) VALUES(?,?)
+      ON CONFLICT(profile_id) DO UPDATE SET restrictions_updated_at=excluded.restrictions_updated_at`).run(profileId, Date.now());
+    if (!preserveFolders) {
+      raw.prepare('DELETE FROM profile_path_grants WHERE profile_id=?').run(profileId);
+      const insert = raw.prepare('INSERT INTO profile_path_grants(profile_id,folder_path) VALUES(?,?)');
+      if (!denyAll) for (const folder of folders) insert.run(profileId, folder);
+    }
+    raw.prepare('UPDATE profile_selections SET revision=revision+1 WHERE profile_id=?').run(profileId);
+    return getProfileRestrictions(profileId);
+  }).immediate();
 }
 
 export function getProfileLists(profileId: string, kind?: ProfileListKind): ProfileListEntry[] {
@@ -849,6 +928,7 @@ function validateProfileImport(value: unknown): asserts value is ProfileExportV1
     || !RATING_COUNTRIES.has(String(restrictions.country))
     || (restrictions.maximumAge !== null && (!Number.isInteger(restrictions.maximumAge) || Number(restrictions.maximumAge) < 0 || Number(restrictions.maximumAge) > 18))
     || typeof restrictions.allowUnrated !== 'boolean'
+    || (restrictions.denyAll !== undefined && typeof restrictions.denyAll !== 'boolean')
     || !Array.isArray(restrictions.allowedFolders)
     || restrictions.allowedFolders.length > 1_000
     || restrictions.allowedFolders.some((folder) => typeof folder !== 'string' || folder.length > 4_096)
@@ -923,11 +1003,12 @@ export function importProfileData(bundle: ProfileExportV1): ProfileImportResult 
       if (scope.length <= 500) savePlaybackTrackPreferencesRecord(database, profile.id, scope, preferences);
     }
     saveProfilePreferencesRecord(database, profile.id, bundle.preferences || {});
-    saveProfileRestrictionsRecord(database, profile.id, {
+    saveProfileRestrictions(profile.id, {
       country: bundle.restrictions?.country || 'US',
       maximumAge: type === 'kid' ? bundle.restrictions?.maximumAge ?? 13 : bundle.restrictions?.maximumAge ?? null,
       allowUnrated: Boolean(bundle.restrictions?.allowUnrated),
       allowedFolders: Array.isArray(bundle.restrictions?.allowedFolders) ? bundle.restrictions.allowedFolders : [],
+      ...(bundle.restrictions?.denyAll === true ? {denyAll:true} : {}),
     });
     for (const entry of listEntries) {
       const isDiscoverWatched = entry.kind === 'watched' && entry.mediaId.startsWith('discover:');
@@ -1367,7 +1448,7 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
 
   const destination = result.filePath;
   const userData = app.getPath('userData');
-  if (backupDestinationOverlapsLiveDatabase(destination, [databasePath(), path.join(userData, 'loomtv-canonical.sqlite')])) {
+  if (backupDestinationOverlapsLiveDatabase(destination, [databasePath(), path.join(userData, 'loomtv.sqlite')])) {
     return { ok: false, error: 'Choose a different file. A backup cannot replace a database LoomTV is using.' };
   }
 
@@ -1377,6 +1458,7 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
   let movedExistingBackup = false;
 
   try {
+    fs.closeSync(fs.openSync(temporaryPath, 'wx', 0o600));
     await database.backup(temporaryPath);
 
     const backup = new BetterSqlite3(temporaryPath, { readonly: true });
@@ -1431,7 +1513,10 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
 
 export function clearDatabase(): ProfileRecord {
   const database = getDb();
-  database.transaction(() => database.exec(`
+  const ownerId = randomUUID();
+  const now = Date.now();
+  database.transaction(() => {
+    database.exec(`
     DELETE FROM music_roots;
     DELETE FROM audiobooks_roots;
     DELETE FROM books_roots;
@@ -1484,7 +1569,32 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM iptv_sources;
     DELETE FROM app_settings;
     INSERT OR IGNORE INTO plugin_secret_revisions (id, revision) VALUES (1, 0);
-  `))();
+    `);
+    // Native views retain removed video identities during normal scans. A reset
+    // removes their canonical records and revokes capabilities issued before it.
+    canonicalVideoConnection(database).exec(`
+      DELETE FROM offline_download_leases;
+      DELETE FROM invitation_sessions;
+      DELETE FROM invitations;
+      DELETE FROM account_sessions;
+      DELETE FROM device_credentials;
+      DELETE FROM pairing_requests;
+      UPDATE devices SET disabled=1,revoked_at=${now},revoked_reason='app_data_reset',updated_at=${now};
+      UPDATE accounts SET root_ids_json='[]',updated_at=${now} WHERE account_type!='owner';
+      DELETE FROM profile_selections;
+      DELETE FROM native_selection_revisions;
+      DELETE FROM watch_history;
+      DELETE FROM catalog_items;
+      DELETE FROM library_roots;
+      DELETE FROM scan_state;
+      DELETE FROM backup_state;
+      DELETE FROM meta WHERE key='native_owner_profile';
+    `);
+    database.prepare(`
+      INSERT INTO profiles (id, name, avatar_key, color_key, profile_type, created_at, updated_at, sort_order)
+      VALUES (?, 'Owner', 'glyph-01', 'ember', 'owner', ?, ?, 0)
+    `).run(ownerId, now, now);
+  }).immediate();
   // The cached signer holds the MAC key that was just deleted. Drop it so the
   // next plugin write creates and persists a fresh key.
   pluginSecretStore = null;
@@ -1498,12 +1608,6 @@ export function clearDatabase(): ProfileRecord {
     }
   }
 
-  const now = Date.now();
-  const ownerId = randomUUID();
-  database.prepare(`
-    INSERT INTO profiles (id, name, avatar_key, color_key, profile_type, created_at, updated_at, sort_order)
-    VALUES (?, 'Owner', 'glyph-01', 'ember', 'owner', ?, ?, 0)
-  `).run(ownerId, now, now);
   database.pragma('wal_checkpoint(TRUNCATE)');
   database.exec('VACUUM;');
   const owner = getProfile(ownerId);
@@ -1511,6 +1615,22 @@ export function clearDatabase(): ProfileRecord {
   return owner;
 }
 
-export function saveLibraryScanDeltaToDatabase(...args: Parameters<typeof saveLibraryScanDeltaRecord> extends [unknown, ...infer Rest] ? Rest : never): number {
-  return saveLibraryScanDeltaRecord(getDb(), ...args);
+export function saveLibraryScanDeltaToDatabase(
+  changed: Parameters<typeof saveLibraryScanDeltaRecord>[1], removed: Parameters<typeof saveLibraryScanDeltaRecord>[2],
+  cache: Parameters<typeof saveLibraryScanDeltaRecord>[3], aliases?: Parameters<typeof saveLibraryScanDeltaRecord>[4],
+  removedFiles?: Parameters<typeof saveLibraryScanDeltaRecord>[5], statuses: readonly LibraryFolderStatus[] = [],
+): number {
+  const database = getDb();
+  return database.transaction(() => {
+    const result = saveLibraryScanDeltaRecord(database, changed, removed, cache, aliases, removedFiles);
+    const raw = canonicalVideoConnection(database);
+    for (const status of statuses) {
+      const root = raw.prepare("SELECT id FROM library_roots WHERE locator=? AND state!='removed'").get(status.path) as { id: string } | undefined;
+      if (!root) continue;
+      const online = status.state === 'available';
+      raw.prepare('UPDATE library_roots SET state=? WHERE id=?').run(online ? 'available' : 'offline', root.id);
+      raw.prepare('UPDATE media_sources SET state=? WHERE root_id=? AND state=?').run(online ? 'online' : 'offline', root.id, online ? 'offline' : 'online');
+    }
+    return result;
+  }).immediate();
 }

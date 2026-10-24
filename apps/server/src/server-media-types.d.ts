@@ -35,11 +35,13 @@ export interface ProfileBinding {
   fileId?: FileIdentity;
   externalSubtitleTrackId?: string;
   externalSubtitleFileId?: FileIdentity;
+  mediaSources?: import('./native-persistence.js').CanonicalSourceProjection;
 }
 export interface ProfileContext extends ProfileBinding {
   profileId: string;
   selectionRevision: number;
-  restrictions?: { allowedRootIds?: string[] | null } | null;
+  restrictions?: { allowedRootIds?: string[] | null; revision?: number } | null;
+  mediaSources?: import('./native-persistence.js').CanonicalSourceProjection;
 }
 export interface SubtitleSidecar {
   id: string; path: string; format: string; codec?: string;
@@ -50,9 +52,10 @@ export interface MediaSource {
   fileId: FileIdentity; sizeBytes: number; modifiedAtMs: number;
   recordedSizeBytes?: number; recordedModifiedAtMs?: number;
   localMetadata?: unknown; subtitleSidecars?: SubtitleSidecar[];
+  sourceLocator?: string;
 }
 export interface LibraryItem {
-  id: string; sourceId?: string; rootId?: string;
+  id: string; sourceId?: string; rootId?: string; sourceIds?: string[];
 }
 export interface MediaAdmin {
   authenticateRequest(req: MediaRequest): Promise<Principal | null>;

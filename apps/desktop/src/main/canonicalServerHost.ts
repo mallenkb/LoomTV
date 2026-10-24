@@ -124,6 +124,11 @@ export function createCanonicalServerHost(options: CanonicalServerHostOptions) {
       if (!runtime || stopPromise) throw new Error('The canonical desktop host is not running.');
       return runtime.createDesktopOwnerSession();
     },
+    nativeOwnerPasswordPending(): boolean { return runtime?.nativeOwnerPasswordPending() ?? false; },
+    async configureNativeOwner(input: {name: string; password: string}): Promise<void> {
+      if (!runtime || stopPromise) throw new Error('The canonical desktop host is not running.');
+      await runtime.configureNativeOwner(input);
+    },
 
     async stop(): Promise<void> {
       if (!stopPromise) {

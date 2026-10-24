@@ -199,12 +199,14 @@ export default function ProfileGate({
   // profile and adding a new one.
   useEffect(() => {
     if (initialRoutedRef.current) return;
-    if (activeProfile) return;
+    if (activeProfile && !(activeProfile.type === 'owner' && unifiedGateServerLoaded
+      && unifiedGateServer.enabled && !unifiedGateServer.ownerConfigured)) return;
     const freshHostSetup = initialSetup === 'host';
     const interruptedUnifiedSetup = unifiedGateServerLoaded
       && unifiedGateServer.enabled
+      && unifiedGateServer.ready
       && !unifiedGateServer.ownerConfigured;
-    if (!freshHostSetup && !unifiedGateServerLoaded) return;
+    if (!freshHostSetup && (!unifiedGateServerLoaded || (unifiedGateServer.enabled && !unifiedGateServer.ready))) return;
     initialRoutedRef.current = true;
     if (!freshHostSetup && !interruptedUnifiedSetup) return;
     const owner = profiles.find((profile) => profile.type === 'owner');
@@ -213,7 +215,7 @@ export default function ProfileGate({
       setSetupMode(true);
       setEditorTarget(owner);
     }
-  }, [initialSetup, activeProfile, profiles, unifiedGateServer.enabled, unifiedGateServer.ownerConfigured, unifiedGateServerLoaded]);
+  }, [initialSetup, activeProfile, profiles, unifiedGateServer.enabled, unifiedGateServer.ready, unifiedGateServer.ownerConfigured, unifiedGateServerLoaded]);
 
   return (
     <div

@@ -39,7 +39,7 @@
     "dist:adhoc": "corepack pnpm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir --publish=never && bash scripts/sign-mac-adhoc.sh",
     "verify:mac-release": "bash scripts/verify-mac-release.sh",
     "verify:windows-release": "pwsh -NoProfile -File scripts/verify-windows-release.ps1",
-    "typecheck": "tsrs --noEmit -p tsconfig.json && tsrs --noEmit -p tsconfig.node.json",
+    "typecheck": "node ../../scripts/compile-typescript.cjs --noEmit -p tsconfig.json && node ../../scripts/compile-typescript.cjs --noEmit -p tsconfig.node.json",
     "lint": "oxlint && oxlint -c .oxlintrc.promises.json src",
     "lint:promises": "oxlint -c .oxlintrc.promises.json src",
     "pretest": "cargo build --locked --release --manifest-path native/scanner/Cargo.toml",
@@ -78,14 +78,15 @@
     "tailwindcss": "4.3.3",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "tsrs": "catalog:",
     "oxlint": "catalog:",
-    "sucrase": "3.35.1"
+    "sucrase": "3.35.1",
+    "typescript": "catalog:",
+    "tsrs": "catalog:"
   },
   "dependencies": {
     "@loom-media-server/lan-protocol": "workspace:*",
     "@loom-media-server/media-core": "workspace:*",
-    "@loom-media-server/plugin-protocol": "workspace:*",
+    "@loom-media-server/stremio-adapter": "workspace:*",
     "@loom-media-server/transcode-capabilities": "workspace:*",
     "@loom-media-server/video-migration": "workspace:*",
     "@phosphor-icons/react": "2.1.10",
@@ -110,7 +111,7 @@
     "zod": "catalog:"
   },
   "build": {
-    "copyright": "Copyright © 2026 LoomTV",
+    "copyright": "Copyright \u00a9 2026 LoomTV",
     "appId": "com.mallenkb.loommediaserver",
     "productName": "LoomTV",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",

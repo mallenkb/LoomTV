@@ -132,6 +132,8 @@ export interface MediaSource extends MediaSourceSummary {
   rootState: 'online' | 'offline' | 'unreadable' | 'missing'; probe?: Probe | Record<string, unknown>;
 }
 export interface AdminStore {
+  nativeOwnerPasswordPending?(): boolean;
+  configureNativeOwner?(name: string,credentials: {salt: string; hash: string}): unknown;
   readAdminState(): unknown; replaceAdminState(state: AdminState): unknown;
   updateScanState?(scan: Scan): unknown;
   updateBackupState?(state: BackupStatus): unknown; appendOperationalLog?(entry: OperationalLog): unknown;

@@ -3,6 +3,7 @@ import { desktopApi } from './desktopApi';
 import { cachedDesktopRead } from './queryClient';
 import { mdblistProviderRatings } from '@/shared/mdblistRatings';
 import { omdbProviderRatings } from '@/shared/omdbRatings';
+import { resolveVideoRatings } from '@/shared/videoRatings';
 import type { LanProviderRatings } from '@loom-media-server/lan-protocol';
 
 const responseSchema = z.object({
@@ -32,14 +33,10 @@ async function omdbRatings(imdbId: string, type: 'movie' | 'series'): Promise<La
 /** Preserve OMDb scores and fill only gaps from MDBList, including quota failures. */
 export async function addonRatings(imdbId: string, type: 'movie' | 'series'): Promise<LanProviderRatings> {
   if (!/^tt\d{5,12}$/.test(imdbId)) return {};
-  const primary = await omdbRatings(imdbId, type);
-  if (primary.imdb && primary.rottenTomatoes && primary.metacritic && primary.popcornmeter) return primary;
-  try {
-    const fallback = await cachedDesktopRead('addon-mdblist-ratings', [type, imdbId], async () => (
+  return resolveVideoRatings({
+    loadOMDb: () => omdbRatings(imdbId, type),
+    loadMDBList: () => cachedDesktopRead('addon-mdblist-ratings', [type, imdbId], async () => (
       mdblistProviderRatings(await desktopApi.requestMetadataProvider({ provider: 'mdblist', imdbId, type }), imdbId, type)
-    ), 30 * 60_000);
-    return { ...fallback, ...primary };
-  } catch {
-    return primary;
-  }
+    ), 30 * 60_000),
+  });
 }

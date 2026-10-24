@@ -62,7 +62,8 @@ test('canonical rescans reuse relinked sources and retain source-less series acr
   const store = createCanonicalStateStore({ dataDir });
   await store.start();
   const { service, principal } = await onboardedService({ dataDir, options: { stateStore: store } });
-  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  let reopened;
+  t.after(async () => { await reopened?.stop(); await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
   const rootPath = path.join(dataDir, 'library');
   await fs.mkdir(rootPath);
   const filePath = path.join(rootPath, 'Show.S01E01.mkv');
@@ -83,8 +84,7 @@ test('canonical rescans reuse relinked sources and retain source-less series acr
     mediaId: 'migrated-episode', sourceId: 'migrated-source', seriesId: 'series-1',
   });
   assert.equal(store.resolveScanIdentity(path.join(rootPath, 'alias.mkv'), createMediaItemId(filePath)).mediaId, 'migrated-episode');
-  const reopened = (await makeService({ dataDir, options: { stateStore: store } })).service;
-  t.after(() => reopened.stop());
+  reopened = (await makeService({ dataDir, options: { stateStore: store } })).service;
   for (const mode of ['quick', 'full', 'metadata']) {
     await reopened.startLibraryScan({ mode }, principal);
     assert.equal((await waitForScan(reopened, principal)).state, 'completed');
@@ -162,7 +162,8 @@ test('catalog ratings survive projection and quick rescans while child restricti
   });
   const { service } = await makeService({ dataDir, options: { stateStore: store } });
   const client = createHeadlessClientState({ store });
-  t.after(async () => { await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  let reopened;
+  t.after(async () => { await reopened?.stop(); await service.stop(); await store.stop(); await fs.rm(dataDir, { recursive: true, force: true }); });
   const principal = await service.getPrincipalById('owner-1');
   async function assertRatedCatalog(activeService) {
     const items = await activeService.listLibraryItems(principal);
@@ -178,8 +179,7 @@ test('catalog ratings survive projection and quick rescans while child restricti
   await service.startLibraryScan({ mode: 'quick' }, principal);
   assert.equal((await waitForScan(service, principal)).state, 'completed');
   await assertRatedCatalog(service);
-  const reopened = (await makeService({ dataDir, options: { stateStore: store } })).service;
-  t.after(() => reopened.stop());
+  reopened = (await makeService({ dataDir, options: { stateStore: store } })).service;
   const items = await assertRatedCatalog(reopened);
   store.mutateClientState((state) => { state.profileRestrictions[0].maximumAge = 6; state.profileRestrictions[0].revision += 1; });
   const tightened = await client.activePlaybackProfileChecker('owner-1', 'account:owner-1');

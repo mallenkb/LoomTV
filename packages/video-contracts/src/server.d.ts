@@ -30,6 +30,12 @@ export interface CanonicalStateSnapshot {
   createdAt: number;
   policy: CanonicalBackupRetentionPolicy;
   tables: Record<string, Array<Record<string, string | number | null>>>;
+  nativeVideo?: {
+    version: 1;
+    ownerProfileId?: string;
+    ownerPasswordPending?: boolean;
+    tables: Record<string, {schema: string; columns: string[]; rows: Array<Record<string, string | number | null | {base64: string}>>}>;
+  };
 }
 
 export interface CanonicalBackupEnvelope {

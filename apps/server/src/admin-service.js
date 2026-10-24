@@ -1,3 +1,4 @@
+import { carryAdminWriteRevision } from './canonical-write-revision.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
@@ -530,8 +531,8 @@ function defaultState() {
   };
 }
 
-/** @param {unknown} raw @returns {AdminState} */
-function normalizeState(raw) {
+/** @param {unknown} raw @param {boolean} [recoverScan] @returns {AdminState} */
+function normalizeState(raw, recoverScan = true) {
   if (!isRecord(raw)) return defaultState();
   const state = defaultState();
   if (isRecord(raw.owner)
@@ -703,7 +704,7 @@ function normalizeState(raw) {
     }
   }
   if (raw.scan && typeof raw.scan === 'object') state.scan = { ...state.scan, ...raw.scan };
-  if (state.scan.state === 'scanning') {
+  if (recoverScan && state.scan.state === 'scanning') {
     state.scan = {
       ...state.scan,
       state: 'interrupted',
@@ -763,6 +764,9 @@ export function createHeadlessAdminService(options) {
   const storageOperations = new Map();
   /** @type {Promise<AdminState> | undefined} */
   let statePromise;
+  /** @type {string | number | null} */
+  let cachedStoreRevision = null;
+  let hasLoadedCanonicalState = false;
   let writeQueue = Promise.resolve();
   let accountMutationQueue = Promise.resolve();
   /** @template T @param {() => Promise<T>} mutation */
@@ -939,9 +943,19 @@ export function createHeadlessAdminService(options) {
 
   /** @returns {Promise<AdminState>} */
   async function loadState() {
+    const revision = stateStore?.catalogRevision?.() ?? null;
+    if (stateStore && revision !== cachedStoreRevision) {
+      statePromise = undefined;
+      cachedStoreRevision = revision;
+    }
     if (!statePromise) {
       statePromise = (stateStore
-        ? Promise.resolve(normalizeState(stateStore.readAdminState()))
+        ? Promise.resolve().then(() => {
+          const raw = stateStore.readAdminState();
+          const state = carryAdminWriteRevision(normalizeState(raw, !hasLoadedCanonicalState), raw);
+          hasLoadedCanonicalState = true;
+          return state;
+        })
         : fs.readFile(statePath, 'utf8').then((contents) => normalizeState(JSON.parse(contents))))
         .catch(async (error) => {
           if (errorCode(error) === 'ENOENT') {
@@ -1579,6 +1593,17 @@ export function createHeadlessAdminService(options) {
       });
       return issueToken(state, publicOwnerPrincipal(state.owner));
     },
+    /** In-process desktop bootstrap only. Never exposed through an HTTP route.
+     * @param {{name: string; password: string}} input */
+    async configureNativeOwner(input) {
+      if (!stateStore?.configureNativeOwner || !stateStore.nativeOwnerPasswordPending?.()) throw invalidInput('Desktop owner setup is unavailable.');
+      if (!input.name.trim() || input.name.trim().length > 80 || input.password.length < 8 || input.password.length > 256) {
+        throw invalidInput('Enter an owner name and a password of 8 to 256 characters.');
+      }
+      const credentials = await hashPassword(input.password);
+      stateStore.configureNativeOwner(input.name.trim(),credentials);
+      statePromise = undefined;
+    },
 
     /** @param {Record<string, unknown>} input */
     async createSession(input) {
@@ -1998,10 +2023,19 @@ export function createHeadlessAdminService(options) {
         throw invalidInput('A library root path is required.');
       }
       const rootPath = path.resolve(input.path);
+      // Accept the earlier desktop alias while storing the canonical kind.
+      const requestedKind = input.kind === 'tv' ? 'tvShows'
+        : typeof input.kind === 'string' && ['movies', 'tvShows', 'anime', 'others'].includes(input.kind) ? input.kind : undefined;
       const existingRoot = state.roots.find((root) => root.path === rootPath);
-      if (existingRoot) return rootView(existingRoot);
+      if (existingRoot) {
+        if (requestedKind && requestedKind !== existingRoot.kind) {
+          existingRoot.kind = requestedKind;
+          await saveState(state);
+        }
+        return rootView(existingRoot);
+      }
       if (state.roots.length >= MAX_ROOTS) throw Object.assign(new Error('The server has reached its library-root limit.'), { status: 400 });
-      const kind = typeof input.kind === 'string' && ['movies', 'tvShows', 'anime', 'others'].includes(input.kind) ? input.kind : 'others';
+      const kind = requestedKind || 'others';
       const root = { id: rootIdFor(rootPath), path: rootPath, kind, createdAt: Date.now() };
       state.roots.push(root);
       await saveState(state);
@@ -2176,6 +2210,7 @@ export function createHeadlessAdminService(options) {
         ...(Number.isFinite(selected.modifiedAtMs) ? { recordedModifiedAtMs: Number(selected.modifiedAtMs) } : {}),
         ...(Number.isFinite(selected.sizeBytes) ? { recordedSizeBytes: Number(selected.sizeBytes) } : {}),
         path: verified.realPath,
+        sourceLocator: selected.path,
         rootPath: verified.rootRealPath,
         fileId: verified.fileId,
         sizeBytes: verified.stats.size,

@@ -1,4 +1,4 @@
-import { safeFetch } from '../safeFetch.ts';
+import { requestRatingsProvider } from './ratingsRequest.ts';
 import { normalizeContentRating } from './contentRatings.ts';
 import type { ContentRating, EpisodeMeta } from './types.ts';
 import { z } from 'zod';
@@ -98,8 +98,7 @@ export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey
       const yearParam = attemptYear ? `&y=${attemptYear}` : '';
       const typeParam = mediaType ? `&type=${mediaType}` : '';
       const url = `https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}${typeParam}`;
-      const res = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'], retries: 2 });
-      const data = omdbResponseSchema.parse(await res.json());
+      const data = omdbResponseSchema.parse(await requestRatingsProvider('omdb', omdbApiKey, url));
       if (data.Response !== 'False') return data;
     }
     return null;
@@ -112,9 +111,8 @@ export async function fetchOMDbMetadataById(imdbId: string | undefined, omdbApiK
   if (!imdbId || !omdbApiKey) return null;
   try {
     const url = `https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(omdbApiKey)}`;
-    const res = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'], retries: 2 });
-    const data = omdbResponseSchema.parse(await res.json());
-    return data.Response !== 'False' ? data : null;
+    const data = omdbResponseSchema.parse(await requestRatingsProvider('omdb', omdbApiKey, url));
+    return data.Response !== 'False' && data.imdbID === imdbId ? data : null;
   } catch {
     return null;
   }
@@ -164,15 +162,7 @@ export async function fetchOMDbSeasonEpisodes(
       url.searchParams.set('i', seriesImdbId);
       url.searchParams.set('Season', String(season));
       url.searchParams.set('apikey', omdbApiKey);
-      const response = await safeFetch(url.toString(), {}, {
-        allowedHosts: ['www.omdbapi.com'],
-        maxBytes: 1_000_000,
-        retries: 2,
-        operation: 'metadata.omdb.season',
-        provider: 'omdb',
-      });
-      if (!response.ok) continue;
-      const metadata = omdbSeasonResponseSchema.parse(await response.json());
+      const metadata = omdbSeasonResponseSchema.parse(await requestRatingsProvider('omdb', omdbApiKey, url));
       if (metadata.Response === 'False') continue;
       episodes.push(...omdbSeasonEpisodeMetadata(metadata, season));
     } catch {

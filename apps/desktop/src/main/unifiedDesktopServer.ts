@@ -41,7 +41,7 @@ let desktopSetupToken = '';
 // password nor a bearer credential needs to be saved on disk.
 const nativeOwner = createNativeOwnerSession({
   issue: () => {
-    if (!host || !identity || !origin || restoredAdminOnly) {
+    if (!host || !identity || !origin) {
       return Promise.reject(new Error('The unified desktop host is not available for native access.'));
     }
     return host.createDesktopOwnerSession();
@@ -49,7 +49,6 @@ const nativeOwner = createNativeOwnerSession({
 });
 let certificatePinInstalled = false;
 let setupRequired = false;
-let restoredAdminOnly = false;
 let startup: Promise<UnifiedDesktopServerState> | null = null;
 let state: UnifiedDesktopServerState = {
   enabled: false,
@@ -60,8 +59,7 @@ let state: UnifiedDesktopServerState = {
 function enabledByEnvironment(): boolean {
   const flag = String(process.env[TEST_FLAG] || '').trim().toLowerCase();
   if (flag) return ['1', 'true', 'yes', 'on'].includes(flag);
-  // Reopen an existing administration installation on ordinary desktop
-  // launches. Never silently create a second catalog for a fresh install.
+  // Native repositories prepare the canonical store before this host starts.
   return fs.existsSync(canonicalStatePath(configuredDataDir() || app.getPath('userData')));
 }
 
@@ -230,15 +228,20 @@ function installCanonicalCertificatePin(): void {
 }
 
 export function getUnifiedDesktopServerState(): UnifiedDesktopServerState {
-  // `enabled` opts the native renderer into unified onboarding. Restoring
-  // browser administration must not switch its profile or catalog workflow.
-  return { ...state, enabled: state.enabled && !restoredAdminOnly };
+  return {
+    ...state,
+    ownerConfigured: state.ownerConfigured && (!state.ready || !host || !host.nativeOwnerPasswordPending()),
+  };
+}
+
+export async function waitForUnifiedDesktopServerState(): Promise<UnifiedDesktopServerState> {
+  if (startup) await startup;
+  return getUnifiedDesktopServerState();
 }
 
 export function getUnifiedDesktopLanAdvertisement(): { port: number; certFingerprint: string } | null {
-  if (restoredAdminOnly) return null;
   const address = host?.address();
-  if (!state.enabled || !state.ready || !address || !identity?.certFingerprint) return null;
+  if (!state.enabled || !state.ready || !address || address.host === '127.0.0.1' || !identity?.certFingerprint) return null;
   return { port: address.port, certFingerprint: identity.certFingerprint };
 }
 
@@ -273,7 +276,6 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
     return getUnifiedDesktopServerState();
   }
 
-  restoredAdminOnly = !String(process.env[TEST_FLAG] || '').trim();
   state = { enabled: true, ready: false, ownerConfigured: state.ownerConfigured };
   try {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -298,7 +300,11 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
     const tlsIdentity = identity;
     const hostOptions = (port: number): Parameters<typeof createCanonicalServerHost>[0] => ({
       migrationReady: true,
-      host: '0.0.0.0',
+      // Native playback keeps its existing LAN transport. The canonical host
+      // shares storage and serves administration locally unless explicitly enabled.
+      host: ['1', 'true', 'yes', 'on'].includes(String(process.env[TEST_FLAG] || '').trim().toLowerCase())
+        ? '0.0.0.0'
+        : '127.0.0.1',
       port,
       paths: {
         dataDir,
@@ -321,7 +327,7 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
         });
         return result.canceled ? null : result.filePaths[0] || null;
       },
-      setupHooks: restoredAdminOnly ? undefined : {
+      setupHooks: {
         ...setupHooks,
         ownerCreated: (session) => { nativeOwner.set(session); },
       },
@@ -361,7 +367,7 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
     });
     setupRequired = setup.required;
     if (setup.ownerConfigured) removeBootstrapSecret(dataDir);
-    if (setup.ownerConfigured && !restoredAdminOnly) await nativeOwner.token();
+    if (setup.ownerConfigured) await nativeOwner.token();
     state = {
       enabled: true,
       ready: true,
@@ -384,12 +390,18 @@ async function startServer(setupHooks: UnifiedDesktopSetupHooks): Promise<Unifie
 
 export async function configureUnifiedDesktopOwner(input: { name: string; password: string }): Promise<UnifiedDesktopServerState> {
   await startup;
-  if (!state.enabled || restoredAdminOnly) return getUnifiedDesktopServerState();
+  if (!state.enabled) return getUnifiedDesktopServerState();
   if (!state.ready || !identity) throw new Error(state.error || 'The unified LoomTV server is not ready.');
   const name = String(input.name || '').trim();
   const password = String(input.password || '');
   if (!name) throw new Error('Enter an administrator name.');
   if (password.length < 8 || password.length > 256) throw new Error('The administrator password must contain between 8 and 256 characters.');
+  if (host?.nativeOwnerPasswordPending()) {
+    await host.configureNativeOwner({ name, password });
+    nativeOwner.reset();
+    state = { ...state, ownerConfigured: true };
+    return getUnifiedDesktopServerState();
+  }
   if (state.ownerConfigured) {
     await ensureCanonicalProfile(name);
     return getUnifiedDesktopServerState();
@@ -407,39 +419,6 @@ export async function configureUnifiedDesktopOwner(input: { name: string; passwo
   return getUnifiedDesktopServerState();
 }
 
-function canonicalRootId(folderPath: string): string {
-  return createHash('sha256').update(path.resolve(folderPath)).digest('hex').slice(0, 24);
-}
-
-export async function addUnifiedDesktopLibraryRoot(folderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others'): Promise<boolean> {
-  await startup;
-  if (!state.enabled || restoredAdminOnly) return false;
-  if (!state.ready || !identity) throw new Error('The unified server is not ready to change library folders.');
-  const added = await requestNativeJson<{ root?: { id?: string } }>('/api/v1/library/roots', {
-    method: 'POST',
-    body: { path: path.resolve(folderPath), kind: kind === 'tvShows' ? 'tv' : kind },
-  });
-  await requestNativeJson('/api/v1/library/scan', {
-    method: 'POST',
-    body: { mode: 'quick', rootId: added.root?.id || canonicalRootId(folderPath) },
-  }).catch((error) => {
-    // Root persistence succeeded. Scan scheduling is a separate operation;
-    // treating its failure as a failed add would corrupt rollback decisions.
-    console.warn('[unified-server] Library folder saved, but scan scheduling failed. Retry the scan from administration.', error);
-  });
-  return true;
-}
-
-export async function removeUnifiedDesktopLibraryRoot(folderPath: string): Promise<boolean> {
-  await startup;
-  if (!state.enabled || restoredAdminOnly) return false;
-  if (!state.ready || !identity) throw new Error('The unified server is not ready to change library folders.');
-  await requestNativeJson(`/api/v1/library/roots/${canonicalRootId(folderPath)}`, {
-    method: 'DELETE',
-  });
-  return true;
-}
-
 export async function openUnifiedDesktopAdmin(): Promise<boolean> {
   await startup;
   if (!state.ready || !state.adminUrl) return false;
@@ -448,7 +427,7 @@ export async function openUnifiedDesktopAdmin(): Promise<boolean> {
 }
 
 export function openUnifiedDesktopSetup(onComplete: () => void): boolean {
-  if (!state.enabled || restoredAdminOnly || !state.ready || !setupRequired) return false;
+  if (!state.enabled || !state.ready || !setupRequired) return false;
   openCanonicalSetupWindow(() => {
     const dataDir = configuredDataDir();
     if (dataDir) removeBootstrapSecret(dataDir);
@@ -471,4 +450,5 @@ export async function stopUnifiedDesktopServer(): Promise<void> {
   setupRequired = false;
   state = { ...state, ready: false };
   await current?.stop();
+  startup = null;
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { omdbProviderRatings, type OMDbRatingFields } from './omdbRatings';
+import { omdbProviderRatings, type OMDbRatingFields } from './omdbRatings.ts';
 import type { LanProviderRatings } from '@loom-media-server/lan-protocol';
 
 const schema = z.object({

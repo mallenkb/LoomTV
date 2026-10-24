@@ -260,6 +260,7 @@ export type LanProfileRestrictions = {
   maximumAge: number | null;
   allowUnrated: boolean;
   allowedFolders: string[];
+  denyAll?: boolean;
   revision: number;
 };
 

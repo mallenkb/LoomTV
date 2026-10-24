@@ -1,5 +1,13 @@
 #import "../bridge.m"
 #import <CoreGraphics/CoreGraphics.h>
+#include <unistd.h>
+
+@interface LMBackgroundTestWindow : NSWindow
+@end
+@implementation LMBackgroundTestWindow
+- (BOOL)canBecomeKeyWindow { return NO; }
+- (BOOL)canBecomeMainWindow { return NO; }
+@end
 
 static int freed, shutdowns, detached;
 static void check(BOOL condition, const char *message) {
@@ -48,9 +56,84 @@ static LMEngine *engine(BOOL fail) {
 }
 static const char *errorString(int error) { (void)error; return "Expected renderer setup failure"; }
 
+static int realSwaps;
+static void (*realReportSwap)(mpv_render_context *);
+static void countedRealSwap(mpv_render_context *renderer) {
+    realReportSwap(renderer);
+    realSwaps++;
+}
+static void verifyRealPlayback(const char *runtime, const char *clip, NSView *host) {
+    __weak LMView *releasedView;
+    __weak NSOpenGLContext *releasedContext;
+    @autoreleasepool {
+        char error[512];
+        void *opaque = loom_mpv_create(runtime, error, sizeof(error));
+        check(opaque != NULL, error);
+        LMEngine *value = (__bridge LMEngine *)opaque;
+        check(value->api.mpv_set_property_string(value->player, "aid", "no") == 0, "Could not disable test audio.");
+        check(value->api.mpv_set_property_string(value->player, "mute", "yes") == 0, "Could not mute test playback.");
+        check(loom_mpv_attach(opaque, (__bridge void *)host, error, sizeof(error)) == 0, error);
+        releasedView = value->view;
+        releasedContext = value->view.openGLContext;
+        realReportSwap = value->view->api.mpv_render_context_report_swap;
+        value->view->api.mpv_render_context_report_swap = countedRealSwap;
+        realSwaps = 0;
+        int (*get)(mpv_handle *, const char *, mpv_format, void *) = dlsym(value->library, "mpv_get_property");
+        void (*release)(void *) = dlsym(value->library, "mpv_free");
+        check(get != NULL && release != NULL, "The bundled runtime lacks playback property APIs.");
+        NSData *command = [NSJSONSerialization dataWithJSONObject:@[@"loadfile", @(clip), @"replace"] options:0 error:NULL];
+        NSString *json = [[NSString alloc] initWithData:command encoding:NSUTF8StringEncoding];
+        check(loom_mpv_command(opaque, 1, json.UTF8String, error, sizeof(error)) == 0, error);
+        CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 8.0;
+        double position = 0;
+        int64_t width = 0, height = 0;
+        NSString *decoder = @"unavailable";
+        BOOL verified = NO;
+        while (CFAbsoluteTimeGetCurrent() < deadline) {
+            @autoreleasepool {
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
+                char *events = loom_mpv_poll(opaque);
+                if (events) {
+                    NSData *data = [NSData dataWithBytes:events length:strlen(events)];
+                    NSArray *batch = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+                    for (NSDictionary *event in batch) {
+                        check(![event[@"event"] isEqual:@"bridge-error"], "The real render bridge reported an error.");
+                        check(!([event[@"event"] isEqual:@"end-file"] && [event[@"reason"] isEqual:@"error"]), "The disposable clip could not decode.");
+                        id commandError = event[@"error"];
+                        BOOL failedCommand = [commandError isKindOfClass:NSString.class] && ![commandError isEqual:@"success"];
+                        check(!([event[@"event"] isEqual:@"command-reply"] && failedCommand), "The real playback command failed.");
+                    }
+                    loom_mpv_free(events);
+                }
+                get(value->player, "time-pos", MPV_FORMAT_DOUBLE, &position);
+                get(value->player, "video-params/w", MPV_FORMAT_INT64, &width);
+                get(value->player, "video-params/h", MPV_FORMAT_INT64, &height);
+                char *hardware = NULL;
+                if (get(value->player, "hwdec-current", MPV_FORMAT_STRING, &hardware) == 0 && hardware) {
+                    decoder = @(hardware);
+                    release(hardware);
+                }
+                BOOL hardwareActive = [decoder isEqual:@"videotoolbox"] || [decoder isEqual:@"videotoolbox-copy"];
+                if (position >= 0.2 && width > 0 && height > 0 && realSwaps >= 3 && hardwareActive) { verified = YES; break; }
+            }
+        }
+        if (!verified) fprintf(stderr, "Real playback: time=%.3f size=%lldx%lld swaps=%d decoder=%s\n", position, (long long)width, (long long)height, realSwaps, decoder.UTF8String);
+        check(verified, "Real background playback did not present VideoToolbox-decoded frames.");
+        check(!NSApp.active && !host.window.keyWindow && !host.window.mainWindow
+              && NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier != getpid(), "Real playback took foreground focus.");
+        printf("PASS: real background playback %s, decoder=%s, size=%lldx%lld, time=%.3f, swaps=%d.\n", strrchr(clip, '/') ? strrchr(clip, '/') + 1 : clip, decoder.UTF8String, (long long)width, (long long)height, position, realSwaps);
+        value = nil;
+        check(loom_mpv_destroy(opaque) == 0, "Real playback teardown failed.");
+        check(NSOpenGLContext.currentContext == nil && host.subviews.count == 0, "Real playback retained its drawable after closing.");
+    }
+    check(releasedView == nil && releasedContext == nil, "Real playback retained an AppKit or OpenGL owner.");
+}
+
 int main(int argc, const char **argv) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        check([NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory], "The test could not disable its Dock presence.");
+        check(!NSApp.active, "The background lifecycle test became active.");
         NSScreen *screen = nil;
         for (NSScreen *candidate in NSScreen.screens) {
             if (CGDisplayIsBuiltin([candidate.deviceDescription[@"NSScreenNumber"] unsignedIntValue])) { screen = candidate; break; }
@@ -58,12 +141,18 @@ int main(int argc, const char **argv) {
         // Opt-in integration tests never create a window on an external display.
         if (!screen) { puts("No built-in display is available."); return 77; }
         NSRect frame = NSMakeRect(screen.visibleFrame.origin.x + 60, screen.visibleFrame.origin.y + 60, 640, 480);
-        NSWindow *window = [[NSWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO screen:screen];
+        NSWindow *window = [[LMBackgroundTestWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO screen:screen];
         window.releasedWhenClosed = NO;
+        window.ignoresMouseEvents = YES;
+        window.animationBehavior = NSWindowAnimationBehaviorNone;
+        window.collectionBehavior = NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle;
+        window.level = CGWindowLevelForKey(kCGDesktopWindowLevelKey) + 1;
         [window setFrame:frame display:NO];
         check(window.screen == screen, "The test window left the built-in display.");
         // Allocate the drawable behind the user's windows without activation.
         [window orderBack:nil];
+        check(!window.keyWindow && !window.mainWindow && !NSApp.active, "The test window took focus.");
+        check(NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier != getpid(), "The test became the foreground application.");
         NSView *host = window.contentView;
         char error[512];
         if (argc > 1) {
@@ -122,7 +211,9 @@ int main(int argc, const char **argv) {
             loom_mpv_destroy(opaque);
         }
         check(freed == 3 && shutdowns == 4, "Failed attach did not release its core exactly once.");
+        for (int clip = 2; clip < argc; clip++) verifyRealPlayback(argv[1], argv[clip], host);
         [window close];
+        check(!NSApp.active, "The background lifecycle test became active during rendering.");
         puts("PASS: repeated teardown, duplicate attach and failed attach on the built-in display.");
     }
     return 0;

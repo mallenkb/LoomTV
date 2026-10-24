@@ -1,0 +1,36 @@
+{
+  "name": "@loom-media-server/stremio-adapter",
+  "version": "1.0.0",
+  "description": "Stremio add-on client, manifest validation, and bounded catalog, metadata, stream, and subtitle requests",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.mjs"
+    },
+    "./stremio-schema": "./schema/stremio-addon-manifest.v3.schema.json",
+    "./stremio-adapter": {
+      "types": "./src/stremio-adapter.ts",
+      "import": "./src/stremio-adapter.mjs"
+    },
+    "./schema": "./schema/stremio-addon-manifest.v3.schema.json"
+  },
+  "files": [
+    "src",
+    "dist",
+    "schema",
+    "examples"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/compile-typescript.cjs -p tsconfig.build.json",
+    "prepack": "pnpm build",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "node ../../scripts/compile-typescript.cjs --noEmit"
+  },
+  "devDependencies": {
+    "tsrs": "catalog:"
+  }
+}

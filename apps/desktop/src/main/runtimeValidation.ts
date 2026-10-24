@@ -38,6 +38,7 @@ export const profileExportSchema = z.object({
     maximumAge: z.number().finite().nullable(),
     allowUnrated: z.boolean(),
     allowedFolders: z.array(z.string()),
+    denyAll: z.boolean().optional(),
     revision: z.number().finite().nonnegative(),
   }),
   lists: z.array(lanProfileListEntrySchema),

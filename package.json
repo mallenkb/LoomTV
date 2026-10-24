@@ -39,12 +39,16 @@
     "lint": "oxlint && pnpm --filter loom-media-server-desktop run lint:promises",
     "typecheck": "pnpm -r --if-present typecheck",
     "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs scripts/dependency-patches.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
-    "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
+    "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test",
+    "video:rollback": "node scripts/rollback-native-video.cjs"
   },
   "devDependencies": {
     "yaml": "2.9.1",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
     "tsrs": "catalog:",
-    "oxlint": "catalog:"
+    "@loom-typescript/beta": "catalog:",
+    "@loom-typescript/stable": "catalog:"
   },
   "engines": {
     "node": "^22.18.0 || ^24.11.0 || >=26.0.0"

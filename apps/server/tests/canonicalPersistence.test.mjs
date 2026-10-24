@@ -188,6 +188,13 @@ test('library filtering checks every item against one client-state read', async 
     { id: 'rated-16', rootId: 'root-a', contentRatings: { US: { minimumAge: 16 } } },
     { id: 'rated-7', rootId: 'root-a', maximumAge: 7 },
   ];
+  store.replaceAdminState({
+    ...store.readAdminState(),
+    roots: ['root-a', 'root-b'].map((id) => ({ id, path: `/media/${id}`, kind: 'movies', createdAt: 1 })),
+    catalog: items.map((item) => ({ ...item, type: 'movie', kind: 'movie', title: item.id,
+      path: `/media/${item.rootId}/${item.id}.mkv`, relativePath: `${item.id}.mkv`, indexedAt: 1 })),
+  });
+  for (const item of items) item.sourceIds = [`${item.id}:primary`];
   const decide = async (run) => {
     try { await run(); return 'allowed'; } catch (error) { return error.code; }
   };

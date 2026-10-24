@@ -33,6 +33,7 @@ import {
 import { normalizeAnimeCast } from '../shared/animeCast.ts';
 import { isMeaningfulCinemetaEpisodeTitle } from '../shared/cinemetaEpisodeTitles.ts';
 import { lookupAutomaticCinemeta, preferCinemetaMetadata } from './metadata/cinemetaDefaults.ts';
+import { fetchVideoProviderRatings } from './metadata/providerRatings.ts';
 
 export type OfficialArtworkRefreshResult = {
   title?: string;
@@ -922,12 +923,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       type: 'movie' | 'series',
       cachedMetadata?: Partial<MediaItem> | null,
     ): Promise<OfficialArtworkRefreshResult> => {
+      const enrichRatings = async (result: OfficialArtworkRefreshResult): Promise<OfficialArtworkRefreshResult> => {
+        try {
+          return {
+            ...result,
+            providerRatings: await fetchVideoProviderRatings(result.providerIds?.imdbId || providerIds.imdbId, type, {
+              omdbApiKey,
+              mdblistApiKey: getMetadataApiKey(settings, 'mdblist'),
+              existing: result.providerRatings,
+              fetchOMDb: fetchOMDbMetadataById,
+            }),
+          };
+        } catch { return result; }
+      };
       const metadata = cachedMetadata || await lookupAutomaticCinemeta(
         deps.fetchCinemetaMetadataCandidates, title, type, year,
         providerIds.imdbId || fallback.providerIds?.imdbId,
         [...localTitles, fallback.title || ''],
       );
-      if (!metadata) return fallback;
+      if (!metadata) return enrichRatings(fallback);
       const fallbackEpisodes = fallback.episodes || item.episodes || [];
       const episodeKeys = new Set(fallbackEpisodes.map((episode) => `${episode.season}-${episode.number}`));
       const episodes = [...fallbackEpisodes, ...(metadata.episodes || []).filter((episode) => (
@@ -940,27 +954,25 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         backdrop: fallback.cover,
         episodes,
       }, metadata);
-      return {
+      return enrichRatings({
         ...fallback,
         ...preferred,
         thumbnail: preferred.poster,
         cover: preferred.backdrop,
         ratingSource: metadata.providerRatings?.imdb ? 'Cinemeta' : fallback.ratingSource,
         episodeSource: metadata.episodes?.length ? 'Cinemeta' : fallback.episodeSource,
-      };
+      });
     };
 
     if (item.type === 'movie') {
-      const [tmdbById, tmdbBySearch, omdbById, omdbBySearch, tvMeta] = await Promise.all([
+      const [tmdbById, tmdbBySearch, omdbById, omdbBySearch] = await Promise.all([
         providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-        fetchTMDBMovieMetadata(title, year, tmdbApiKey),
+        providerIds.tmdbId ? Promise.resolve(null) : fetchTMDBMovieMetadata(title, year, tmdbApiKey),
         providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-        fetchOMDbMetadata(title, year, omdbApiKey),
-        fetchTVMetadata(title, year),
+        providerIds.imdbId ? Promise.resolve(null) : fetchOMDbMetadata(title, year, omdbApiKey),
       ]);
       const tmdbMeta = tmdbById || tmdbBySearch || null;
       const omdbMeta = omdbById || omdbBySearch || null;
-      const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
       const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
       const [fanartArtwork, cinemeta] = await Promise.all([
         fetchFanartMovieArtwork(tmdbMeta?.providerIds?.tmdbId || providerIds.tmdbId, fanartApiKey),
@@ -990,7 +1002,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         thumbnail: posterCandidates[0] || '',
         cover: backdropCandidates[0] || '',
         summary: tmdbMeta?.summary || omdbMeta?.Plot || cinemeta?.summary || '',
-        rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
+        rating: movieMetadataRating(tmdbMeta, omdbMeta),
         ratingSource: 'OMDb',
         trailerUrl: tmdbMeta?.trailerUrl || cinemeta?.trailerUrl,
         runtime: tmdbMeta?.runtime,
@@ -1002,20 +1014,20 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         backdropCandidates,
         logo: logoCandidates[0] || '',
         logoCandidates,
-        cast: tmdbMeta?.cast || matchedTV?.cast || [],
+        cast: tmdbMeta?.cast || [],
       }, 'movie', cinemeta);
     }
 
     const likelyAnime = item.type === 'anime';
     const [omdbById, omdbBySearch, anilistMeta, jikanMeta, tmdbById, tmdbBySearch, tvdbById, tvdbBySearch, tvMeta] = await Promise.all([
       safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
-      safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
+      safeMetadataProvider(providerIds.imdbId ? Promise.resolve(null) : fetchOMDbMetadata(title, year, omdbApiKey), null),
       safeMetadataProvider(likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null), null),
       safeMetadataProvider(likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null), null),
       safeMetadataProvider(providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null), null),
-      safeMetadataProvider(fetchTMDBTVMetadata(title, year, tmdbApiKey), null),
+      safeMetadataProvider(providerIds.tmdbId ? Promise.resolve(null) : fetchTMDBTVMetadata(title, year, tmdbApiKey), null),
       safeMetadataProvider(providerIds.tvdbId ? fetchTVDBMetadataById(providerIds.tvdbId, tvdbApiKey) : Promise.resolve(null), null),
-      safeMetadataProvider(fetchTVDBMetadata(title, year, tvdbApiKey), null),
+      safeMetadataProvider(providerIds.tvdbId ? Promise.resolve(null) : fetchTVDBMetadata(title, year, tvdbApiKey), null),
       safeMetadataProvider(fetchTVMetadata(title, year), null),
     ]);
     const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
@@ -1184,20 +1196,20 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }, animeMovie ? 'movie' : 'series', cinemeta);
   }
 
-  /* Candidates without provider scores can obtain IMDb, Rotten Tomatoes and
-     Metacritic scores from OMDb. Look them up by the id the
-     chosen match came with, rather than leaving whatever the previous match
-     stored: the hero badges read from providerRatings first, so a stale entry
-     there makes an applied candidate look like it did nothing. */
+  // Use the chosen match's identity so ratings from an old match cannot survive.
   async function providerRatingsForCandidate(
     candidate: OfficialMetadataCandidate,
+    item: MediaItem,
   ): Promise<MediaItem['providerRatings']> {
-    if (hasProviderRatings(candidate.providerRatings)) return candidate.providerRatings;
-    if (!metadataRequestsAllowed()) return {};
-    const imdbId = candidate.providerIds?.imdbId;
-    if (!imdbId) return {};
-    const omdbApiKey = getMetadataApiKey(loadSettings(), 'omdb');
-    return omdbProviderRatings(await fetchOMDbMetadataById(imdbId, omdbApiKey));
+    if (!metadataRequestsAllowed()) return candidate.providerRatings || {};
+    const settings = loadSettings();
+    return fetchVideoProviderRatings(candidate.providerIds?.imdbId,
+      item.type === 'movie' || (candidate.format || item.format)?.toLowerCase() === 'movie' ? 'movie' : 'series', {
+        omdbApiKey: getMetadataApiKey(settings, 'omdb'),
+        mdblistApiKey: getMetadataApiKey(settings, 'mdblist'),
+        existing: candidate.providerRatings,
+        fetchOMDb: fetchOMDbMetadataById,
+      });
   }
 
   async function applyOfficialMetadataCandidate(
@@ -1235,7 +1247,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
        3.4 badge is the failure this guards against. Only a candidate that
        carries no rating at all leaves the existing scores alone. */
     const candidateRating = numericRating(candidate.rating);
-    const resolvedProviderRatings = applyAll ? await providerRatingsForCandidate(candidate) : {};
+    const resolvedProviderRatings = applyAll ? await providerRatingsForCandidate(candidate, target) : {};
     const hasResolvedProviderRatings = hasProviderRatings(resolvedProviderRatings);
 
     if (applyAll && candidate.title) target.title = candidate.title;

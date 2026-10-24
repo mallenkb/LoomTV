@@ -1,39 +1,30 @@
-# Product roadmap
+# Video roadmap
 
-The active Electron expansion order is Photos, Music, Audiobooks, Books, then Comics and manga. Start with photo folders, nested browsing, All photos, and viewing. See [Media library expansion](multimedia-execution-plan.md) for the execution plan.
+Current development is limited to local and OS-mounted NAS video: movies, TV shows, anime, and other videos. Work on photos, music, audiobooks, books, and comics is paused. Existing clients and media code stay in place.
 
-The remaining sections track video and platform work alongside that expansion.
+## Current cleanup
 
-## Release and platform validation
+- Keep the Stremio client and validation in `packages/stremio-adapter`. Remove the unused native marketplace and executable-plugin contracts. Installed add-ons retain their existing state.
+- Prefer tsrs for workspace compilation, with Microsoft TypeScript 7.1 beta and 7.0.2 as platform/startup fallbacks. Preserve the JavaScript compiler API used by existing tools.
+- Share OMDb/MDBList ratings fallback between local video and add-on details. Reuse successful lookups, respect quota cooldowns, and require matching IMDb identity before combining scores.
+- Use one canonical video database for native desktop and server operations. Preserve native UI/playback through compatibility views, verified migration backups, and rollback tooling.
+- Keep the platform and performance documentation aligned with the code. Source implementation and device verification are separate claims.
 
-- Run packaged desktop migration, update, rollback, and playback on macOS, Windows, and Linux.
-- Complete the physical iOS/Android phone and tablet matrix, including large and interrupted offline downloads.
-- Complete Android TV and Fire TV hardware/store checks.
-- Validate Chromecast and AirPlay receivers from supported browsers and iOS.
-- Validate Docker/systemd installs on representative NAS platforms, including offline mounts, restarts, backup restore, and read-only media.
-- Validate hardware transcoding and HDR fallback on Intel, NVIDIA, AMD, Apple Silicon, and selected NAS accelerators.
+## Next local-video work
 
-## Near-term product work
+Prioritize correctness with real libraries before new features. The checks below require separate test authorization.
 
-- Add an Android Chromecast sender and DLNA discovery/control without bypassing canonical cast-session authorization.
-- Add multiple saved-server switching to mobile and TV.
-- Add hosted device/session approval, naming, history, termination, invitation, download, and remote-policy management views.
-- Add clearer remote HTTPS certificate lifecycle and reverse-proxy readiness checks. Loom will remain private and self-hosted; no hosted relay or subscription is planned.
-- Make scan jobs cancellable, throttled, scheduled, and resumable across process restarts for large NAS libraries.
-- Improve user-facing distinctions among an offline NAS, a removed file, a revoked capability, a decoder failure, and exhausted transcode capacity.
+1. Exercise folder recovery, offline mounts, interrupted scans, missing files, profile changes, and saved watch progress on disposable data.
+2. Verify the implemented canonical desktop adapter, packaged backup, migration, update, and rollback on macOS, Windows, and Linux. Check identity, progress, folder grants, concurrent writers, and interrupted publication before release. Keep the legacy import schema and recovery tools while older installations need them.
+3. Measure startup, scan throughput, memory, and playback using fixed video fixtures and the existing timing/budget tools. Compare engines with the same files and window state before changing their priority.
+4. Improve resumable scan jobs and clear recovery messages where the preceding checks expose failures.
 
-## Library depth
+## Kept for the current product
 
-- Collections and richer ordered playlists.
-- Editions, alternate versions, extras, trailers, and grouped duplicates.
-- Local NFO import/export.
-- Scheduled trickplay thumbnail generation.
-- Better metadata-provider and artwork repair in canonical clients.
+Keep local scanning, metadata repair, profiles, watch progress, subtitles, downloads, backup/migration, and the existing LibVLC/mpv/browser playback paths. Keep Stremio integration as the supported add-on protocol. The Rust compiler change does not replace any playback engine or imply playback performance gains.
 
-## Later video features
+## Deferred
 
-- Watch-together rooms with server-authoritative clocks and permissions.
-- Webhooks and operator notifications.
-- Live TV, guide data, time shifting, and DVR only after the core playback and deployment matrix is proven.
+New media formats, a separate Loom-native plugin system, mobile/TV feature expansion, watch rooms, DVR, and additional casting integrations are outside this pass. Existing mobile, TV, and hosted-web functionality remains supported; platform validation is still needed before release.
 
-The current implementation and remaining evidence are tracked in [loomtv-vs-jellyfin-feature-status.md](loomtv-vs-jellyfin-feature-status.md).
+[Platform capabilities and verification](platform-capabilities.md) records the current storage boundary and outstanding device checks. [Performance status](performance-and-memory-issues.md) separates implemented optimizations from measurements still needed.

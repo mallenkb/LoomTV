@@ -117,7 +117,7 @@ An add-on cannot bypass those controls by returning a URL or a P2P reference.
 
 ## Safe example
 
-[`packages/plugin-protocol/examples/stremio-trusted-addon.manifest.json`](../packages/plugin-protocol/examples/stremio-trusted-addon.manifest.json)
+[`packages/stremio-adapter/examples/stremio-trusted-addon.manifest.json`](../packages/stremio-adapter/examples/stremio-trusted-addon.manifest.json)
 is a small HTTPS-only manifest example. It declares all four supported
 resources, one movie catalog, and `p2p: false`. It is a declaration fixture,
 not a bundled provider or a source allow-list; the user must still review and
@@ -125,24 +125,23 @@ approve the actual HTTPS manifest URL before use.
 
 ## Integration status
 
-The adapter is re-exported from `packages/plugin-protocol/src/index.mjs`, has a
+The adapter is re-exported from `packages/stremio-adapter/src/index.mjs`, has a
 direct package export and TypeScript declarations, and exposes the manifest
-schema at `@loom-media-server/plugin-protocol/stremio-schema`. Persisted
+schema at `@loom-media-server/stremio-adapter/stremio-schema`. Persisted
 snapshots use a canonical raw manifest subset and are regenerated through the
 strict normalizer on load; derived adapter fields and request-scoped consent
 are not trusted as persisted input.
 
-Static checks performed for this additive layer were JavaScript syntax checks,
-the package TypeScript declaration check, JSON parsing of the schema/examples,
-and a targeted fake-HTTPS lifecycle check covering review, approval, fetch,
-normalization, ephemeral consent, persistence, disable, and removal. Tests,
-renderer/UI wiring, playback changes, torrent support, and LibVLC changes were
-not performed.
+The desktop host imports this package through `stremioPluginService.ts`,
+`stremioPluginServiceDesktop.ts`, and `stremioPluginWire.ts`. Settings installation,
+catalog browsing, metadata details, source selection, and subtitle lookup use the
+host integration. The following section describes its playback grants and relay.
 
-No renderer, UI, playback, torrent, or LibVLC integration is implied by this
-adapter layer. A future UI integration should treat `pending-review`,
-`disabled`, `consent-required`, and `rejected` as explicit states rather than
-filtering them into an apparently empty provider result.
+The unused Loom-native marketplace, identity, executable-runtime, signing, and
+downstream contract modules have been removed. The Stremio adapter implementation,
+manifest schema, example, and its two existing regression suites are preserved.
+Registry snapshots and user-installed add-ons need no migration for the package
+rename. This cleanup does not change native playback engines.
 
 ## Desktop playback sessions (October 22, 2026)
 

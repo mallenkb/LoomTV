@@ -3,6 +3,7 @@ import type { MetadataProviderRequest } from '../shared/desktopProtocol.ts';
 import { safeFetch } from './safeFetch.ts';
 import { z } from 'zod';
 import { fetchCinemetaMeta } from './metadata/cinemeta.ts';
+import { requestRatingsProvider } from './metadata/ratingsRequest.ts';
 
 type GatewayDependencies = {
   loadSettings: () => AppSettings;
@@ -55,24 +56,6 @@ async function responseJson(response: Response, provider: string): Promise<unkno
 }
 
 export function createMetadataProviderGateway(deps: GatewayDependencies) {
-  const cooldowns = new Map<string, { key: string; until: number }>();
-  const ratingsRequest = async (provider: 'omdb' | 'mdblist', key: string, url: URL, host: string) => {
-    const cooldown = cooldowns.get(provider);
-    if (cooldown?.key === key && cooldown.until > Date.now()) throw new Error(`${provider} request limit is cooling down.`);
-    const response = await safeFetch(url, { headers: { accept: 'application/json' } }, {
-      allowedHosts: [host], retries: 0, maxBytes: 2 * 1024 * 1024, timeoutMs: 10_000,
-      provider, operation: `metadata.${provider}.lookup`,
-    });
-    const payload: unknown = await response.json();
-    const failure = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-    if (response.status === 429 || /limit|quota/i.test(String(failure.Error || failure.error || ''))) {
-      const retry = Number(response.headers.get('retry-after'));
-      const delay = Number.isFinite(retry) && retry > 0 ? Math.min(86400, retry) * 1000 : 60 * 60_000;
-      cooldowns.set(provider, { key, until: Date.now() + delay });
-    }
-    if (!response.ok) throw new Error(`${provider} request failed with status ${response.status}.`);
-    return payload;
-  };
   return async function requestMetadataProvider(request: MetadataProviderRequest): Promise<unknown> {
     // Public providers only need the offline preference, not saved credentials.
     if (deps.loadMetadataOfflineMode ? deps.loadMetadataOfflineMode() : deps.loadSettings().metadataOfflineMode) {
@@ -125,14 +108,14 @@ export function createMetadataProviderGateway(deps: GatewayDependencies) {
       const apiKey = deps.getMetadataApiKey(settings, 'omdb');
       if (!apiKey) throw new Error('OMDb API key is missing.');
       const url = queryUrl('https://www.omdbapi.com/', { ...request.query, apikey: apiKey });
-      return ratingsRequest('omdb', apiKey, url, 'www.omdbapi.com');
+      return requestRatingsProvider('omdb', apiKey, url);
     }
 
     if (request.provider === 'mdblist') {
       const key = deps.getMetadataApiKey(deps.loadSettings(), 'mdblist');
       if (!key) throw new Error('MDBList API key is missing.');
       const url = queryUrl(`https://api.mdblist.com/imdb/${request.type === 'series' ? 'show' : 'movie'}/${request.imdbId}`, { apikey: key });
-      return ratingsRequest('mdblist', key, url, 'api.mdblist.com');
+      return requestRatingsProvider('mdblist', key, url);
     }
 
     if (request.provider === 'jikan') {

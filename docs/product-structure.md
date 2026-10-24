@@ -1,5 +1,7 @@
 # Loom product structure
 
+Current scope: local and NAS video only. The additional media work below is paused and retained as a historical plan, not an active implementation order. See the [video roadmap](future-work.md).
+
 Loom is the name users see in the desktop app. Loom Media Server is the server component that runs locally, on another computer, or on a NAS.
 
 ```text

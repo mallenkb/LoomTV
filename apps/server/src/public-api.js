@@ -799,26 +799,48 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
 
   /** @param {Principal} principal @param {ApiRequest} req */
   async function profileVisibleItems(principal, req) {
-    await playbackProfileContext(principal, req);
+    const initial = await playbackProfileContext(principal, req);
     // Read client state once for the whole list rather than once per item.
     const check = principal.authentication === 'invitation-session'
       ? await remotePolicy.invitationProfileChecker(principal)
       : await clientState.activePlaybackProfileChecker(principal.id, deviceIdForRequest(req, principal));
     if (!check) throw requestError(403, 'permission_denied', 'An active unlocked profile is required.');
     const visible = [];
-    for (const item of await service.listLibraryItems(principal)) {
+    const items = await service.listLibraryItems(principal);
+    for (const item of items) {
       try {
-        check(item);
-        visible.push(item);
+        const context = check(item);
+        visible.push(context.mediaSources ? { ...item, ...context.mediaSources } : item);
       } catch (error) {
         if (errorDetails(error).code === 'permission_denied') continue;
         throw error;
       }
     }
+    const seriesWithEpisodes = new Set(items.filter((item) => item.kind === 'episode' && item.seriesId).map((item) => item.seriesId));
+    /** @type {Map<string, {sourceIds: Set<string>; available: boolean}>} */
+    const visibleEpisodes = new Map();
+    for (const item of visible) {
+      if (item.kind !== 'episode' || !item.seriesId) continue;
+      const series = visibleEpisodes.get(item.seriesId) || { sourceIds: new Set(), available: false };
+      for (const id of item.sourceIds || []) series.sourceIds.add(id);
+      series.available ||= item.available === true;
+      visibleEpisodes.set(item.seriesId, series);
+    }
+    const projected = visible.flatMap((item) => {
+      if (item.kind !== 'series' || !seriesWithEpisodes.has(item.id)) return [item];
+      const episodes = visibleEpisodes.get(item.id);
+      const sourceIds = (item.sourceIds || []).filter((id) => episodes?.sourceIds.has(id));
+      return sourceIds.length ? [{ ...item, sourceIds, available: episodes?.available === true }] : [];
+    });
     // Recheck after the library read so a selection, lock, or revocation
     // that changed meanwhile still applies to this response.
-    await playbackProfileContext(principal, req);
-    return visible;
+    const current = await playbackProfileContext(principal, req);
+    if (current.profileId !== initial.profileId || current.deviceId !== initial.deviceId
+      || current.selectionRevision !== initial.selectionRevision
+      || current.restrictions?.revision !== initial.restrictions?.revision) {
+      throw requestError(409, 'stale_profile_selection', 'The selected profile changed while the catalog was loading.');
+    }
+    return projected;
   }
 
   /** @param {ApiRequest} req @param {Principal} principal @param {import('./cast-session-registry.js').CastRecord | null} record */

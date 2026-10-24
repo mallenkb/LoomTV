@@ -14,7 +14,7 @@ import {
   type StremioStreamResult,
   type StremioSubtitleResult,
   type StremioVideoRequest,
-} from '@loom-media-server/plugin-protocol';
+} from '@loom-media-server/stremio-adapter';
 import type {
   StremioPluginAuditEntry,
   StremioPluginConfigurationField,

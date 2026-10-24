@@ -5,6 +5,34 @@ canonical SQLite store. The implementation is
 `@loom-media-server/video-migration` and the canonical import API is
 `loom-media-server-headless/migration`.
 
+## Native desktop consolidation
+
+Native desktop startup now uses the canonical store directly. It consolidates an older `loomtv.sqlite` into `loomtv-canonical.sqlite`; if the SQLite catalog is empty, it can import the validated legacy `library.json` instead. Subsequent launches use the canonical file only. The old files are retained as migration inputs and recovery copies, not writable video stores.
+
+Close other LoomTV processes before the first launch. Consolidation verifies the source, creates durable read-only backups, checks for concurrent writes, imports inside an immediate transaction, and verifies the result before publication. A new database is published without overwriting a file another process created. An existing canonical database is backed up before the transaction. Unresolved identity, credential, or profile conflicts stop the operation.
+
+Backups live under `<data-dir>/video-consolidation-backups/<migration-id>/`. The directory contains the applicable source databases or JSON, `manifest.json`, and a redacted `report.json`. The `native_storage_migrations` ledger pins the manifest and report digests. Keep that directory with the installation's backups.
+
+Existing canonical media IDs and matched source identities remain authoritative. Verified legacy aliases preserve progress, lists, and track references through rescans. Native file metadata stays separate from canonical probe records. Existing canonical profile grants remain unchanged; newly imported roots and profiles do not widen previously unrestricted nonowner access across the two installations. Subfolder grants are enforced alongside canonical root grants.
+
+A desktop-only installation creates an owner account with no exposed login credential. The existing owner setup screen sets its password through an in-process channel. A combined installation keeps its existing server owner password.
+
+To roll back this native consolidation, stop every process using the data directory and run from the repository root:
+
+```sh
+pnpm video:rollback --data-dir <dir> --confirm-stopped
+```
+
+The equivalent command is `node scripts/rollback-native-video.cjs --data-dir <dir> --confirm-stopped`. It verifies the ledger, exact artifact paths, digests, sizes, and report inventory before restoring. It archives the consolidated database and sidecars, restores the prior canonical database when one existed, and restores legacy inputs from the verified copies. Use the previous application build after rollback; the new build will otherwise consolidate again.
+
+Desktop SQLite backups contain the full store. Canonical JSON snapshots include registered native extension records and BLOBs, and require a matching installed extension schema when restored. Restore rejects missing or incompatible native records before clearing tables. Native JSON export and restore clear paired LAN devices and disable sharing, so restored clients must pair again. Provider secrets retain their OS-encrypted envelope. Store backups privately because they contain credentials and settings.
+
+On 2026-10-24, all 10 native consolidation tests and 21 migration-package tests passed against disposable fixtures. Coverage includes first-launch publication, repeated startup, JSON import, rollback with and without a prior canonical store, modified-backup rejection, permissions, and metadata preservation. No user database was migrated. Packaged-app migration, process termination at publication boundaries, and visual checks remain unverified.
+
+## Explicit migration CLI
+
+The commands below describe the existing migration package. Its reports and rollback directory differ from native desktop consolidation. Use it first when importing legacy headless files; native startup stops if those files still need an explicit import.
+
 ## Before you start
 
 1. Stop every desktop or headless LoomTV process that can write the source.
@@ -84,9 +112,10 @@ authenticate.
 
 ## Access and identity decisions
 
-An empty desktop folder grant means access to every folder. Migration maps it to
-canonical `allowedRootIds: null`. A subfolder grant cannot be represented by a
-root ID, so migration stops instead of granting the whole root.
+In the explicit migration CLI, an empty desktop folder grant maps to canonical
+`allowedRootIds: null`. That CLI stops on subfolder grants it cannot represent
+as root IDs. Native desktop consolidation instead retains those grants in
+`profile_path_grants` and intersects them with canonical root restrictions.
 
 Media reconnection uses content SHA-256, filesystem identity, then quick hash.
 It does not use size or modification time alone. Ambiguous evidence reconnects

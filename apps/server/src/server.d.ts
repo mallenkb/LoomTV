@@ -92,6 +92,8 @@ export interface CanonicalVideoServer {
   start(): Promise<{ host: string; port: number }>;
   /** In-process native access only; unavailable to standalone hosts or HTTP callers. */
   createDesktopOwnerSession(): Promise<{ adminToken: string; expiresAt: number }>;
+  nativeOwnerPasswordPending(): boolean;
+  configureNativeOwner(input: {name: string; password: string}): Promise<void>;
   stop(): Promise<void>;
 }
 

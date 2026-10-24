@@ -3,6 +3,9 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { registerNativeVideoFunctions, profileAllowsCanonicalMedia, createCanonicalMediaAccess } from './native-video-functions.js';
+import { exportNativeVideoBackup, validateNativeVideoBackup, clearNativeVideoBackupTables, restoreNativeVideoBackup } from './native-video-backup.js';
+import { ADMIN_WRITE_REVISION } from './canonical-write-revision.js';
 import { ACCOUNT_PERMISSIONS } from '@loom-media-server/video-contracts';
 import {
   CANONICAL_BACKUP_DURABLE_TABLES,
@@ -77,13 +80,29 @@ function inTransaction(database, operation) {
   }
 }
 
+/** Read related rows from one snapshot, including when invoked by a mutation.
+ * @template T @param {DatabaseSync} database @param {() => T} operation @returns {T} */
+function inReadTransaction(database, operation) {
+  if (database.isTransaction) return operation();
+  database.exec('BEGIN');
+  try {
+    const result = operation();
+    database.exec('COMMIT');
+    return result;
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 /** @param {object} item @param {Set<string>} authoritative */
 function extensionFrom(item, authoritative) {
   return Object.fromEntries(Object.entries(item || {}).filter(([key]) => !authoritative.has(key)));
 }
 
 /** @param {DatabaseSync} database */
-function initializeSchema(database) {
+export function initializeCanonicalSchema(database) {
+  registerNativeVideoFunctions(database);
   database.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   database.exec(`
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -320,6 +339,10 @@ function addColumnIfMissing(database, table, name, declaration) {
 
 /** @param {DatabaseSync} database */
 function ensureRuntimeSchema(database) {
+  database.exec(`CREATE TABLE IF NOT EXISTS profile_path_grants (
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,folder_path TEXT NOT NULL,
+    PRIMARY KEY(profile_id,folder_path));
+    CREATE INDEX IF NOT EXISTS catalog_series_parent ON catalog_items(json_extract(extension_json,'$.seriesId'));`);
   addColumnIfMissing(database, 'devices', 'permissions_json', "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(database, 'devices', 'certificate_fingerprint', 'TEXT');
   addColumnIfMissing(database, 'devices', 'revoked_at', 'INTEGER');
@@ -483,7 +506,7 @@ function replaceAdminState(database, state) {
     id,media_type,media_kind,title,year,anime_likely,series_title,series_season,series_episode,extension_json,created_at,updated_at
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET media_type=excluded.media_type,media_kind=excluded.media_kind,
     title=excluded.title,year=excluded.year,anime_likely=excluded.anime_likely,series_title=excluded.series_title,
-    series_season=excluded.series_season,series_episode=excluded.series_episode,extension_json=excluded.extension_json,updated_at=excluded.updated_at`);
+    series_season=excluded.series_season,series_episode=excluded.series_episode,extension_json=json_patch(catalog_items.extension_json,excluded.extension_json),updated_at=excluded.updated_at`);
   const upsertSource = database.prepare(`INSERT INTO media_sources(
     id,media_id,root_id,relative_path,locator,state,file_extension,size_bytes,modified_at_ms,indexed_at,last_seen_at,probe_json,extension_json
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET media_id=excluded.media_id,root_id=excluded.root_id,
@@ -560,7 +583,7 @@ function readAdminState(database) {
   const catalog = /** @type {Array<import('./server-state-types.js').SqlRows['catalog_items'] & import('./server-state-types.js').SqlRows['media_sources'] & {source_id: string; source_state: 'online' | 'offline' | 'unreadable' | 'missing'}>} */ (database.prepare(`SELECT c.*,s.id source_id,s.root_id,s.relative_path,s.locator,s.state source_state,
     s.file_extension,s.size_bytes,s.modified_at_ms,s.indexed_at,s.probe_json FROM catalog_items c
     LEFT JOIN media_sources s ON s.id=(SELECT s2.id FROM media_sources s2 WHERE s2.media_id=c.id ORDER BY s2.state='online' DESC,s2.indexed_at DESC LIMIT 1)
-    ORDER BY c.title`).all()).map((row) => ({
+    WHERE COALESCE(json_extract(c.extension_json,'$.nativeRemoved'),0)=0 ORDER BY c.title`).all()).map((row) => ({
       ...parseRequiredJson(row.extension_json, 'catalog extension'), id: row.id, rootId: row.root_id, path: row.locator,
       relativePath: row.relative_path, type: row.media_type, kind: row.media_kind, title: row.title,
       ...(row.year === null ? {} : { year: Number(row.year) }), ...(row.anime_likely === 1 ? { animeLikely: true } : {}),
@@ -603,6 +626,15 @@ function replaceClientState(database, state) {
   const managedProfiles = new Set((state.assignments || []).filter((item) => item.access === 'manage' && enabledAccounts.has(item.accountId)).map((item) => item.profileId));
   const unmanaged = (state.profiles || []).find((profile) => !managedProfiles.has(profile.id));
   if (unmanaged) throw codedError('profile_manager_required', 'Every profile must retain at least one manage assignment.');
+  const nativeOwnerId = database.prepare("SELECT value FROM meta WHERE key='native_owner_profile'").get()?.value;
+  const nativeOwner = (state.profiles || []).find((profile) => profile.id === nativeOwnerId);
+  if (nativeOwner) {
+    const ownerAccountId = database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get()?.account_id;
+    if (nativeOwner.kind !== 'adult' || !(state.assignments || []).some((assignment) =>
+      assignment.profileId === nativeOwner.id && assignment.accountId === ownerAccountId && assignment.access === 'manage')) {
+      throw codedError('native_owner_required', 'The desktop owner must remain an adult profile managed by the owner account.');
+    }
+  }
   const desired = new Set();
   const upsertProfile = database.prepare(`INSERT INTO profiles(
     id,name,kind,avatar_key,color_key,has_pin,guest_device_id,sort_order,created_at,updated_at,last_used_at
@@ -712,7 +744,7 @@ function replaceProjectedMediaState(database, state = {}) {
     id,media_type,media_kind,title,year,anime_likely,series_title,series_season,series_episode,extension_json,created_at,updated_at
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET media_type=excluded.media_type,media_kind=excluded.media_kind,
     title=excluded.title,year=excluded.year,anime_likely=excluded.anime_likely,series_title=excluded.series_title,
-    series_season=excluded.series_season,series_episode=excluded.series_episode,extension_json=excluded.extension_json,updated_at=excluded.updated_at`);
+    series_season=excluded.series_season,series_episode=excluded.series_episode,extension_json=json_patch(catalog_items.extension_json,excluded.extension_json),updated_at=excluded.updated_at`);
   for (const item of state.catalogItems || []) upsertItem.run(
     item.id, ['series','episode'].includes(item.kind) ? 'tv' : 'movie', item.kind, item.title, item.year ?? null,
     item.animeLikely === true ? 1 : 0, null, item.seasonNumber ?? null, item.episodeNumber ?? null,
@@ -835,6 +867,8 @@ function tableColumns(database, table) {
 function exportCanonicalSnapshot(database, createdAt = Date.now()) {
   /** @type {import('./server-state-types.js').StateSnapshot['tables']} */
   const tables = {};
+  /** @type {import('./native-video-backup.js').NativeVideoBackup | undefined} */
+  let nativeVideo;
   database.exec('BEGIN');
   try {
     reconcileInvitationScopes(database);
@@ -842,6 +876,7 @@ function exportCanonicalSnapshot(database, createdAt = Date.now()) {
     for (const table of CANONICAL_BACKUP_TABLES) {
       tables[table] = /** @type {Array<Record<string, string | number | null>>} */ (database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     }
+    nativeVideo = exportNativeVideoBackup(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -858,6 +893,7 @@ function exportCanonicalSnapshot(database, createdAt = Date.now()) {
       invitationsRestoredAsRevoked: true,
     },
     tables,
+    ...(nativeVideo ? { nativeVideo } : {}),
   };
 }
 
@@ -1109,12 +1145,24 @@ function validateCanonicalJsonState(database) {
 /** @param {DatabaseSync} database @param {import('./server-state-types.js').StateSnapshot} snapshot @param {number} [restoredAt] */
 function replaceFromCanonicalSnapshot(database, snapshot, restoredAt = Date.now()) {
   const columnsByTable = validateCanonicalSnapshot(snapshot, database);
+  validateNativeVideoBackup(database,snapshot.nativeVideo);
   const currentOwnerId = /** @type {(import('./server-state-types.js').SqlRows['owner_account']) | undefined} */ (database.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get())?.account_id;
   const snapshotOwnerRows = snapshot.tables.owner_account;
   if (!currentOwnerId || snapshotOwnerRows.length !== 1 || snapshotOwnerRows[0].account_id !== currentOwnerId) {
     throw codedError('canonical_owner_mismatch', 'A backup cannot replace the configured owner identity.');
   }
+  if (database.prepare("SELECT value FROM meta WHERE key='native_video_storage_version'").get()) {
+    const nativeOwnerId = snapshot.nativeVideo?.ownerProfileId;
+    if (!nativeOwnerId || typeof snapshot.nativeVideo?.ownerPasswordPending !== 'boolean'
+      || !snapshot.tables.profiles.some((profile) => profile.id === nativeOwnerId && profile.kind === 'adult')
+      || !snapshot.tables.profile_assignments.some((assignment) => assignment.profile_id === nativeOwnerId
+        && assignment.account_id === currentOwnerId && assignment.access === 'manage')) {
+      throw codedError('canonical_backup_invalid', 'The native backup must retain its desktop owner and management assignment.');
+    }
+  }
   return inTransaction(database, () => {
+    database.exec('PRAGMA defer_foreign_keys=ON');
+    clearNativeVideoBackupTables(database,snapshot.nativeVideo);
     for (const table of CANONICAL_RESTORE_DELETE_ORDER) database.exec(`DELETE FROM ${table}`);
     for (const table of CANONICAL_BACKUP_TABLES) {
       const columns = columnsByTable[table];
@@ -1126,6 +1174,16 @@ function replaceFromCanonicalSnapshot(database, snapshot, restoredAt = Date.now(
             revoked_reason: sourceRow.revoked_reason || 'backup_restored' }
           : sourceRow;
         insert.run(...columns.map((column) => row[column]));
+      }
+    }
+    restoreNativeVideoBackup(database,snapshot.nativeVideo);
+    if (snapshot.nativeVideo?.ownerProfileId) {
+      database.prepare("INSERT INTO meta(key,value) VALUES('native_owner_profile',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .run(snapshot.nativeVideo.ownerProfileId);
+      if (snapshot.nativeVideo.ownerPasswordPending) {
+        database.prepare("INSERT INTO meta(key,value) VALUES('native_owner_password_pending','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
+      } else {
+        database.prepare("DELETE FROM meta WHERE key='native_owner_password_pending'").run();
       }
     }
     const ownerCount = Number(/** @type {{count: number}} */ (database.prepare('SELECT COUNT(*) count FROM owner_account').get())?.count || 0);
@@ -1247,7 +1305,7 @@ export function createCanonicalStateStore({ dataDir }) {
         const stagedPath = path.join(path.dirname(databasePath), `.${CANONICAL_STATE_FILENAME}.fresh-${randomUUID()}.stage`);
         const staged = new DatabaseSync(stagedPath);
         try {
-          initializeSchema(staged);
+          initializeCanonicalSchema(staged);
           const now = Date.now();
           staged.prepare(`INSERT INTO migration_markers(id,format,schema_version,source_fingerprint,state,
             source_counts_json,reconciliation_json,target_counts_json,created_at,committed_at)
@@ -1259,6 +1317,8 @@ export function createCanonicalStateStore({ dataDir }) {
         await syncDirectory(path.dirname(databasePath));
       }
       const next = new DatabaseSync(databasePath);
+      registerNativeVideoFunctions(next);
+      next.exec('PRAGMA busy_timeout=5000');
       try {
         next.exec('PRAGMA foreign_keys=ON');
         marker = verifyOpenDatabase(next);
@@ -1284,7 +1344,40 @@ export function createCanonicalStateStore({ dataDir }) {
         : await evidenceAvailability(marker);
       return { marker: redactedMarker(marker, availability), restoredAt };
     },
-    readAdminState: () => readAdminState(requireDatabase()),
+    readAdminState: () => inReadTransaction(requireDatabase(), () => {
+      const active = requireDatabase();
+      const version = active.prepare('PRAGMA data_version').get()?.data_version;
+      return Object.defineProperty(readAdminState(active),ADMIN_WRITE_REVISION,{value:version,enumerable:true});
+    }),
+    nativeOwnerPasswordPending() {
+      return requireDatabase().prepare("SELECT value FROM meta WHERE key='native_owner_password_pending'").get()?.value === '1';
+    },
+    /** Only the in-process desktop bootstrap can replace its provisional secret.
+     * @param {string} name @param {{salt: string; hash: string}} credentials */
+    configureNativeOwner(name,credentials) {
+      return inTransaction(requireDatabase(),()=>{
+        const active = requireDatabase();
+        if (active.prepare("SELECT value FROM meta WHERE key='native_owner_password_pending'").get()?.value !== '1') {
+          throw codedError('native_owner_already_configured','The desktop owner is already configured.');
+        }
+        const owner = active.prepare('SELECT account_id FROM owner_account WHERE singleton=1').get();
+        if (!owner || typeof owner.account_id !== 'string') throw codedError('owner_required','The desktop owner is missing.');
+        active.prepare('UPDATE accounts SET name=?,updated_at=? WHERE id=?').run(name,Date.now(),owner.account_id);
+        active.prepare('UPDATE account_credentials SET password_salt=?,password_hash=?,updated_at=? WHERE account_id=?')
+          .run(credentials.salt,credentials.hash,Date.now(),owner.account_id);
+        active.prepare('DELETE FROM account_sessions WHERE account_id=?').run(owner.account_id);
+        active.prepare("DELETE FROM meta WHERE key='native_owner_password_pending'").run();
+      });
+    },
+    /** Preserve native subfolder restrictions without exposing their paths.
+     * @param {string} profileId @param {string} mediaId @param {string} [locator] */
+    profileAllowsMedia(profileId, mediaId, locator) {
+      return profileAllowsCanonicalMedia(requireDatabase(),profileId,mediaId,locator);
+    },
+    /** @param {string} profileId */
+    createProfileMediaAccess(profileId) {
+      return createCanonicalMediaAccess(requireDatabase(),profileId);
+    },
     /** Replace only the scan status row; scan checkpoints use this. @param {import('./server-admin-types.js').Scan} scan */
     updateScanState(scan) {
       requireDatabase().prepare('INSERT OR REPLACE INTO scan_state(singleton,payload_json) VALUES(1,?)').run(json(scan));
@@ -1742,8 +1835,14 @@ export function createCanonicalStateStore({ dataDir }) {
       requireDatabase().prepare('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)').run(name, String(value));
     },
     /** @param {Partial<import('./server-state-types.js').AdminState>} state */
-    replaceAdminState: (state) => inTransaction(requireDatabase(), () => replaceAdminState(requireDatabase(), state)),
-    readClientState: () => readClientState(requireDatabase()),
+    replaceAdminState: (state) => inTransaction(requireDatabase(), () => {
+      const active = requireDatabase();
+      if (ADMIN_WRITE_REVISION in state && state[ADMIN_WRITE_REVISION] !== active.prepare('PRAGMA data_version').get()?.data_version) {
+        throw Object.assign(codedError('canonical_state_changed','Video state changed on another client. Reload and retry.'),{status:409});
+      }
+      return replaceAdminState(active,state);
+    }),
+    readClientState: () => inReadTransaction(requireDatabase(), () => readClientState(requireDatabase())),
     /** @param {Partial<import('./server-state-types.js').ClientState>} state */
     replaceClientState: (state) => inTransaction(requireDatabase(), () => replaceClientState(requireDatabase(), state)),
     /** @param {import('./server-state-types.js').CanonicalState} state */
@@ -1845,7 +1944,7 @@ export async function createCanonicalImportStage({ dataDir, migrationId, sourceF
   }
   const database = new DatabaseSync(stagedPath);
   try {
-    initializeSchema(database);
+    initializeCanonicalSchema(database);
     const createdAt = Date.now();
     database.prepare(`INSERT INTO migration_markers(
       id,format,schema_version,source_fingerprint,state,backup_path,backup_sha256,backup_size_bytes,

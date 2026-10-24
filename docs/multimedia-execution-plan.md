@@ -1,5 +1,7 @@
 # Media library expansion
 
+Current scope: local and NAS video only. The additional media work below is paused and retained as a historical plan, not an active implementation order. See the [video roadmap](future-work.md).
+
 The agreed delivery order is Photos, Music, Audiobooks, Books, then Comics and manga. Implementation targets the Electron desktop app. Mobile, TV, and hosted-browser support are outside this expansion's current scope.
 
 ## Storage and client boundaries

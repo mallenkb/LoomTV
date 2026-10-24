@@ -157,6 +157,7 @@ const profileRestrictionsInputSchema = z.object({
   maximumAge: finiteNumber.nullable(),
   allowUnrated: z.boolean(),
   allowedFolders: z.array(z.string().max(8192)).max(1024),
+  denyAll: z.boolean().optional(),
 });
 const profileListKindSchema = z.enum(['watchlist', 'favorite', 'watched']);
 const progressImportValueSchema = z.union([
@@ -371,8 +372,6 @@ export interface IpcHandlerDependencies<
   addFolderToLibrary: (library: TLibraryData, folderPath: string, kind: IpcLibraryFolderKind) => TLibraryData;
   removeFolderFromLibrary: (library: TLibraryData, folderPath: string) => TLibraryData;
   saveLibraryMutation: (library: TLibraryData) => void;
-  addUnifiedLibraryRoot: (folderPath: string, kind: IpcLibraryFolderKind) => Promise<boolean>;
-  removeUnifiedLibraryRoot: (folderPath: string) => Promise<boolean>;
   assertLocalMediaPath: (filePath: string) => void;
   authorizeMediaPath: (filePath: string) => void;
   assertSubtitleCanAccessMediaPath?: (mediaFilePath: string, subtitleFilePath: string) => void;
@@ -412,7 +411,7 @@ export interface IpcHandlerDependencies<
   authorizeSettingsWrite: () => void;
   saveSettings: (settings: TSettings) => void;
   onSettingsSaved?: (previousSettings: TSettings, nextSettings: TSettings) => void;
-  getUnifiedDesktopServerState: () => IpcResult<'server:unified-state'>;
+  getUnifiedDesktopServerState: () => IpcResult<'server:unified-state'> | Promise<IpcResult<'server:unified-state'>>;
   configureUnifiedDesktopOwner: (input: IpcContract['server:configure-owner']['args'][0]) => Promise<IpcResult<'server:configure-owner'>>;
   openUnifiedDesktopAdmin: () => Promise<IpcResult<'server:open-admin'>>;
   syncLanAdvertisement: () => void;
@@ -523,7 +522,7 @@ export interface IpcHandlerDependencies<
   requestMetadataProvider: (request: MetadataProviderRequest) => unknown | Promise<unknown>;
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => void;
   backupDatabase: () => IpcResult<'database:backup'> | Promise<IpcResult<'database:backup'>>;
-  clearAppData: () => TLibraryData;
+  clearAppData: () => TLibraryData | Promise<TLibraryData>;
   getUpdateState: () => IpcResult<'updates:get-state'>;
   checkForUpdates: () => IpcResult<'updates:check'> | Promise<IpcResult<'updates:check'>>;
   installDownloadedUpdate: () => IpcResult<'updates:install'> | Promise<IpcResult<'updates:install'>>;
@@ -1566,9 +1565,9 @@ export function registerIpcHandlers<
     return true;
   }, z.tuple([z.record(z.string(), z.record(z.string(), z.string()))]));
   handleNoArgs('database:backup', () => { deps.authorizeSettingsWrite(); return deps.backupDatabase(); });
-  handleNoArgs('database:clear', () => {
+  handleNoArgs('database:clear', async () => {
     deps.authorizeSettingsWrite();
-    deps.clearAppData();
+    await deps.clearAppData();
     return deps.libraryIndexForRenderer();
   });
   handle('shell:open-external', (_event, url: string): OpenExternalResult => {

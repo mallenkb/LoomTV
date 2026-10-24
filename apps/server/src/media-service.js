@@ -615,12 +615,12 @@ export function createHeadlessMediaService({
   /** @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null | undefined} profileContext @param {import('./server-media-types.js').MediaSource} media @returns {Promise<import('./server-media-types.js').ProfileContext>} */
   async function requireBoundProfile(principal, profileContext, media) {
     if (principal?.authentication === 'invitation-session' && remotePolicy?.invitationProfileContext) {
-      const context = await remotePolicy.invitationProfileContext(principal, media);
+      const context = await remotePolicy.invitationProfileContext(principal, { ...media, sourceLocator: media.sourceLocator ?? media.path });
       if (!context) throw playbackError('profile_required', 'An active profile is required for playback.', 409);
       return context;
     }
     if (!clientState) throw playbackError('profile_required', 'An active profile is required for playback.', 409);
-    return clientState.requireActivePlaybackProfile(principal.id, profileContext?.deviceId, media);
+    return clientState.requireActivePlaybackProfile(principal.id, profileContext?.deviceId, { ...media, sourceLocator: media.sourceLocator ?? media.path });
   }
   const root = path.join(configuredCacheDir, 'headless-transcodes');
   const now = typeof clock.now === 'function' ? clock.now : () => Date.now();
@@ -1061,7 +1061,7 @@ export function createHeadlessMediaService({
     } else if (requestedProfile.canonicalPlanRequired || principal.authentication === 'invitation-session') {
       throw playbackError('playback_session_invalid', 'A server-issued playback plan is required.', 401);
     }
-    const item = await adminService.resolveMediaPath(itemId, principal, requestedProfile.sourceId);
+    const item = await adminService.resolveMediaPath(itemId, principal, requestedProfile.sourceId || requestedProfile.profileContext?.mediaSources?.sourceIds[0]);
     if (requestedProfile.expectedFileId
       && (item.fileId?.dev !== requestedProfile.expectedFileId.dev || item.fileId?.ino !== requestedProfile.expectedFileId.ino)) {
       throw playbackError('source_unavailable', 'The media source changed after the playback plan was created.', 409);
@@ -1074,7 +1074,7 @@ export function createHeadlessMediaService({
       }
       requestedProfile.profileContext = { ...requestedProfile.profileContext, ...current };
     } else if (requestedProfile.profileId && clientState?.requireActivePlaybackProfile) {
-      const current = await clientState.requireActivePlaybackProfile(principal.id, requestedProfile.deviceId, item);
+      const current = await clientState.requireActivePlaybackProfile(principal.id, requestedProfile.deviceId, { ...item, sourceLocator: item.sourceLocator ?? item.path });
       if (current.profileId !== requestedProfile.profileId
         || current.selectionRevision !== Number(requestedProfile.selectionRevision)) {
         throw playbackError('stale_profile_selection', 'The selected playback profile has changed.', 409);
@@ -1258,7 +1258,7 @@ export function createHeadlessMediaService({
     if (!catalogItem) throw playbackError('media_not_found', 'Media item was not found.', 404);
     let source;
     try {
-      source = await adminService.resolveMediaPath(itemId, principal, request.sourceId);
+      source = await adminService.resolveMediaPath(itemId, principal, request.sourceId || profileContext?.mediaSources?.sourceIds[0]);
     } catch (error) {
       if (errorFields(error).code === 'permission_denied') throw error;
       throw playbackError(
@@ -1324,7 +1324,7 @@ export function createHeadlessMediaService({
 
   /** @param {string} itemId @param {import('./server-media-types.js').Principal} principal @param {import('./server-media-types.js').ProfileBinding | null} profileContext @param {string} [sourceId] */
   async function describeDirectCapability(itemId, principal, profileContext, sourceId = undefined) {
-    const source = await adminService.resolveMediaPath(itemId, principal, sourceId);
+    const source = await adminService.resolveMediaPath(itemId, principal, sourceId || profileContext?.mediaSources?.sourceIds[0]);
     if (clientState?.requireActivePlaybackProfile) {
       const current = await requireBoundProfile(principal, profileContext, source);
       if (!profileContext || current.profileId !== profileContext.profileId
@@ -1342,7 +1342,7 @@ export function createHeadlessMediaService({
   async function serveDirectCapability(req, res, {
     itemId, principal, profileContext, sourceId, fileVersion,
   }) {
-    const source = await adminService.resolveMediaPath(itemId, principal, sourceId);
+    const source = await adminService.resolveMediaPath(itemId, principal, sourceId || profileContext?.mediaSources?.sourceIds[0]);
     if (directCapabilityFileVersion(source) !== fileVersion) {
       return json(res, 409, { ok: false, error: 'source_unavailable', message: 'The media source changed.' });
     }

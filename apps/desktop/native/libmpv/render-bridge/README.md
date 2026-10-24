@@ -86,3 +86,25 @@ LibVLC still requires a composited host. A partial successful reply with the wro
 surface is stopped instead of leaked. Delayed seeks and metadata probes are
 cancelled during disposal. The MPV adapter does not falsely report composition
 when the host still returns an external window.
+
+## Background playback checks
+
+On an Apple silicon Mac with the bundled runtime installed, opt into the native
+renderer lifecycle check from `apps/desktop`:
+
+```sh
+LOOMTV_NATIVE_PLAYBACK_TESTS=1 \
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/libmpvBridgeVersion.test.ts
+```
+
+Set `LOOMTV_NATIVE_PLAYBACK_CLIPS` to colon-separated absolute paths of disposable
+H.264 and HEVC clips to also exercise real bridge decoding and presentation.
+The check disables audio and requires VideoToolbox, advancing playback time,
+and successful render swap reports before teardown. It uses a nonactivating,
+mouse-transparent window behind other windows on the built-in display. It skips
+when no built-in display is available. It does not change Spaces or fullscreen
+state.
+
+Both real clip checks and the repeated, duplicate, and failed attach lifecycle
+cases passed on macOS 27.2 arm64 on 2026-10-24. HDR color accuracy and sustained
+high-resolution presentation still need separate checks.
