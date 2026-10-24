@@ -3483,10 +3483,7 @@ export default function VideoPlayer({
   }, [duration, isLiveStream, seekTo, showSeekFeedback]);
 
   const { handleProgressKeyDown, handleProgressPointerDown, isScrubbing } = usePlayerScrubbing({
-    containerRef,
     duration,
-    wheelScrubEnabled: !isLiveStream,
-    onWheelScrubActivity: handlePointerMove,
     isScrubbingRef,
     playbackEngineRef,
     playbackPositionRef,

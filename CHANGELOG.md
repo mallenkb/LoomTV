@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.34](docs/releases/v2.0.34.md)
+
+Removes horizontal trackpad swipe seeking from the player while keeping timeline dragging and the seek controls.
+
 ### [2.0.33](docs/releases/v2.0.33.md)
 
 Adds Pill playback controls, automatic window fitting, clearer subtitle and seek feedback, and more reliable background media keys. Repairs local movie organization and consolidates library storage while preserving profiles and playback history.
