@@ -263,6 +263,7 @@ export type DesktopBridgeApi = {
       getServerBase: () => Promise<string>;
       getRendererSession?: () => Promise<RendererSession>;
       setWindowChromeVisible?: (visible: boolean) => Promise<boolean>;
+      setPlaybackWindowAspect?: (sessionId: string, ratio: number | null) => Promise<boolean>;
       publishMediaSession?: (snapshot: MediaSessionSnapshot) => Promise<MediaSessionDiagnostics>;
       releaseMediaSession?: () => Promise<boolean>;
       onPlaybackSleepTimerReset?: (callback: () => void) => () => void;
@@ -1112,6 +1113,10 @@ const desktopTransport = {
 
   async setWindowChromeVisible(visible: boolean): Promise<boolean> {
     return window.desktopApi?.setWindowChromeVisible?.(visible) ?? false;
+  },
+
+  async setPlaybackWindowAspect(sessionId: string, ratio: number | null): Promise<boolean> {
+    return window.desktopApi?.setPlaybackWindowAspect?.(sessionId, ratio) ?? false;
   },
 
   /**

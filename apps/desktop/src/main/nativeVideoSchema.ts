@@ -21,6 +21,19 @@ export const nativeVideoTables = [
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
 const owner = '(SELECT account_id FROM owner_account WHERE singleton=1)';
 const parent = "json_extract(c.extension_json,'$.seriesId')";
+const movieSourcePredicate = "(c.media_kind!='movie' OR EXISTS(SELECT 1 FROM media_sources movie_source WHERE movie_source.media_id=c.id))";
+
+/** Keep historical catalog identities, but do not expose source-less movies as playable cards. */
+export function repairNativeMovieProjection(database: BetterSqlite3.Database): void {
+  const definition = database.prepare("SELECT sql FROM sqlite_master WHERE type='view' AND name='native_media_items'").get() as { sql: string } | undefined;
+  if (!definition || definition.sql.includes(movieSourcePredicate)) return;
+  database.transaction(() => {
+    const triggers = database.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='native_media_items'").all() as Array<{ sql: string }>;
+    database.exec('DROP VIEW native_media_items');
+    database.exec(`${definition.sql.replace(/;\s*$/, '')} AND ${movieSourcePredicate}`);
+    for (const trigger of triggers) database.exec(trigger.sql);
+  })();
+}
 const restoredSourceState =
   "CASE WHEN media_sources.state='missing' THEN COALESCE(json_extract(media_sources.extension_json,'$.nativePreviousState'),'online') ELSE media_sources.state END";
 const markSourcesMissing = (
@@ -190,6 +203,7 @@ export function createNativeVideoSchema(database: BetterSqlite3.Database): void 
         WHERE s.media_id=c.id ORDER BY s.state='online' DESC,s.indexed_at DESC LIMIT 1) file_size,
       c.created_at added_at,c.updated_at FROM catalog_items c WHERE c.media_kind IN ('movie','series')
         AND COALESCE(json_extract(c.extension_json,'$.nativeRemoved'),0)=0
+        AND ${movieSourcePredicate}
         AND ((NOT EXISTS(SELECT 1 FROM media_sources WHERE media_id=c.id
           OR media_id IN(SELECT id FROM catalog_items WHERE json_extract(extension_json,'$.seriesId')=c.id))
           AND NOT EXISTS(SELECT 1 FROM video_series_locations WHERE media_id=c.id))
@@ -469,6 +483,10 @@ export function nativeVideoSql(sql: string): string {
     // while names before a dot are table qualifiers used by repository joins.
     if (/^(FROM|JOIN|INTO|UPDATE)$/i.test(token.value)) {
       let relation = index + 1;
+      // SQLite puts its conflict clause before the target table. Rename
+      // operations use UPDATE OR IGNORE for progress and track preferences.
+      if (/^UPDATE$/i.test(token.value) && /^OR$/i.test(tokens[relation]?.value || '')
+        && /^(ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)$/i.test(tokens[relation + 1]?.value || '')) relation += 2;
       if (tokens[relation + 1]?.value === '.') relation += 2;
       if (names.has(identifier(tokens[relation]?.value || '').toLowerCase())) relations.add(relation);
       const alias = /^AS$/i.test(tokens[relation + 1]?.value || '') ? relation + 2 : relation + 1;

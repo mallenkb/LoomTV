@@ -605,6 +605,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
 
   const selector = (name: string): NativeHandle => nativeHandle(selRegisterName(name));
   const nsViewClass = objcGetClass('NSView');
+  const visualEffectViewClass = objcGetClass('NSVisualEffectView');
   if (!nsViewClass) throw new Error('The macOS NSView class is unavailable.');
   const nsColorClass = objcGetClass('NSColor');
   const clearColor = nsColorClass ? msgSend0(nsColorClass, selector('clearColor')) as NativeDrawable : null;
@@ -651,6 +652,16 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
 
   let nativeView: NativeDrawable | null = null;
   let backdropView: NativeDrawable | null = null;
+  const controlBackdropViews: NativeDrawable[] = [];
+  let controlBackdropKey = '';
+  let hostVisible = true;
+  const releaseControlBackdrops = () => {
+    for (const view of controlBackdropViews.splice(0)) {
+      try { msgSendVoid0(view, selector('removeFromSuperview')); } catch { /* best effort */ }
+      try { msgSendVoid0(view, selector('release')); } catch { /* best effort */ }
+    }
+    controlBackdropKey = '';
+  };
   // Leave these unset until the first attach. The initial call uses the same
   // synchronizer as fullscreen reattachment, so it must perform a real insert
   // even when the first discovered hierarchy matches the preferred one.
@@ -716,9 +727,59 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       try { msgSendVoid0(view, selector('layoutSubtreeIfNeeded')); } catch { /* best effort */ }
       try { msgSendVoid0(view, selector('displayIfNeeded')); } catch { /* best effort */ }
     };
-    const setHidden = (hidden: boolean) => msgSendVoid1Bool(nativeView, selector('setHidden:'), hidden);
+    const setHidden = (hidden: boolean) => {
+      hostVisible = !hidden;
+      msgSendVoid1Bool(nativeView, selector('setHidden:'), hidden);
+      for (const view of controlBackdropViews) msgSendVoid1Bool(view, selector('setHidden:'), hidden);
+    };
     const setBackdropHidden = (hidden: boolean) => msgSendVoid1Bool(backdropView, selector('setHidden:'), hidden);
     let viewport: PlaybackViewport | null = null;
+    const syncControlBackdrops = (width: number, height: number) => {
+      if (!parentView || !nativeView || !visualEffectViewClass) return;
+      const regions = viewport?.controlBackdrops || [];
+      const key = JSON.stringify([width, height, regions]);
+      if (key === controlBackdropKey) return;
+      // NSVisualEffectView samples the native video below it in this window.
+      // It stays below WebContents, so all input still goes to the HTML controls.
+      while (controlBackdropViews.length > regions.length) {
+        const view = controlBackdropViews.pop();
+        msgSendVoid0(view, selector('removeFromSuperview'));
+        msgSendVoid0(view, selector('release'));
+      }
+      regions.forEach((region, index) => {
+        let view = controlBackdropViews[index];
+        if (!view) {
+          const allocated = msgSend0(visualEffectViewClass, selector('alloc')) as NativeDrawable;
+          view = msgSend0(allocated, selector('init')) as NativeDrawable;
+          if (!view) throw new Error('The native player control backdrop could not be created.');
+          controlBackdropViews.push(view);
+          msgSendVoid1Bool(view, selector('setWantsLayer:'), true);
+          // NSVisualEffectMaterialHUDWindow, NSVisualEffectBlendingModeWithinWindow.
+          msgSendVoid1UnsignedLong(view, selector('setMaterial:'), 13);
+          msgSendVoid1UnsignedLong(view, selector('setBlendingMode:'), 1);
+          // Follow window activity and the system's accessibility appearance.
+          msgSendVoid1UnsignedLong(view, selector('setState:'), 0);
+          msgSendVoid1UnsignedLong(view, selector('setAutoresizingMask:'), 0);
+          msgSendVoid1Bool(view, selector('setAccessibilityElement:'), false);
+        }
+        if (msgSend0(view, selector('superview')) !== parentView) {
+          msgSendVoid0(view, selector('removeFromSuperview'));
+          msgSendVoid3PointerIntPointer(parentView, selector('addSubview:positioned:relativeTo:'), view, 1, nativeView);
+        }
+        const left = clamp(region.x, 0, width);
+        const top = clamp(region.y, 0, height);
+        const right = clamp(region.x + region.width, left, width);
+        const bottom = clamp(region.y + region.height, top, height);
+        setFrame(view, left, height - bottom, right - left, bottom - top);
+        const layer = msgSend0(view, selector('layer')) as NativeDrawable;
+        if (layer) {
+          msgSendVoid1Double(layer, selector('setCornerRadius:'), Math.min(region.cornerRadius, (right - left) / 2, (bottom - top) / 2));
+          msgSendVoid1Bool(layer, selector('setMasksToBounds:'), true);
+        }
+        msgSendVoid1Bool(view, selector('setHidden:'), !hostVisible || right <= left || bottom <= top);
+      });
+      controlBackdropKey = key;
+    };
     const syncBounds = (nextViewport?: PlaybackViewport | null, animateSeconds = 0) => {
       if (!nativeView || !backdropView || ownerWindow.isDestroyed()) return;
       if (nextViewport !== undefined) viewport = nextViewport;
@@ -738,6 +799,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       if (!viewport) {
         setFrame(backdropView, 0, 0, width, height);
         setFrame(nativeView, 0, 0, width, height);
+        syncControlBackdrops(width, height);
         return;
       }
 
@@ -750,6 +812,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       const frameHeight = clamp(viewport.height, 1, height - top);
       setFrame(backdropView, 0, 0, width, height);
       setFrame(nativeView, left, height - top - frameHeight, frameWidth, frameHeight);
+      syncControlBackdrops(width, height);
     };
 
     const attachToContentView = (_forceRebind = false): boolean => {
@@ -767,6 +830,8 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       const hierarchyChanged = nextParentView !== parentView
         || nextRendererView !== rendererView;
       if (hierarchyChanged) {
+        controlBackdropKey = '';
+        for (const view of controlBackdropViews) msgSendVoid0(view, selector('removeFromSuperview'));
         msgSendVoid0(nativeView, selector('removeFromSuperview'));
         msgSendVoid0(backdropView, selector('removeFromSuperview'));
         parentView = nextParentView;
@@ -839,6 +904,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       destroy: () => {
         if (destroyed || !nativeView) return;
         destroyed = true;
+        releaseControlBackdrops();
         try { msgSendVoid0(nativeView, selector('removeFromSuperview')); } catch { /* best effort */ }
         try { msgSendVoid0(backdropView, selector('removeFromSuperview')); } catch { /* best effort */ }
         try { msgSendVoid0(nativeView, selector('release')); } catch { /* best effort */ }
@@ -849,6 +915,7 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
       },
     };
   } catch (error) {
+    releaseControlBackdrops();
     if (nativeView) {
       try { msgSendVoid0(nativeView, selector('removeFromSuperview')); } catch { /* best effort */ }
       try { msgSendVoid0(nativeView, selector('release')); } catch { /* best effort */ }

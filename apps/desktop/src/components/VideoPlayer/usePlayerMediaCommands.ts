@@ -6,6 +6,7 @@ type LiveControls = { step: (step: number) => void; last: () => void };
 
 type PlayerMediaCommandOptions = {
   paused: boolean;
+  setPaused: (paused: boolean) => void;
   userPausedRef: RefObject<boolean>;
   playbackEngineRef: RefObject<PlaybackEngine | null>;
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -16,6 +17,7 @@ type PlayerMediaCommandOptions = {
   onManualPause: () => void;
   onNativeResume: () => void;
   seekTo: (targetSeconds: number) => void;
+  seekWithFeedback: (targetSeconds: number) => void;
   setPlaybackRate: (rate: number) => void;
   setMediaSessionStopped: (stopped: boolean) => void;
   handleNextEpisode: () => void;
@@ -38,6 +40,7 @@ type PlayerMediaCommandOptions = {
  */
 export function usePlayerMediaCommands({
   paused,
+  setPaused,
   userPausedRef,
   playbackEngineRef,
   videoRef,
@@ -48,6 +51,7 @@ export function usePlayerMediaCommands({
   onManualPause,
   onNativeResume,
   seekTo,
+  seekWithFeedback,
   setPlaybackRate,
   setMediaSessionStopped,
   handleNextEpisode,
@@ -59,21 +63,26 @@ export function usePlayerMediaCommands({
     command: MediaSessionCommand,
     handledInMain = false,
   ) => {
+    if (handledInMain) {
+      // The engine already moved. Record the user's intent so the player does
+      // not treat the resulting state change as an unexpected pause.
+      if (command.type === 'play' || command.type === 'pause' || command.type === 'toggle') {
+        const nextPaused = command.type === 'pause' ? true
+          : command.type === 'play' ? false : !userPausedRef.current;
+        if (nextPaused) onManualPause();
+        else onNativeResume();
+        userPausedRef.current = nextPaused;
+        setPaused(nextPaused);
+        if (!nextPaused) setMediaSessionStopped(false);
+      }
+      return;
+    }
+
     if (command.type !== 'seekAbsolute') {
       const now = performance.now();
       const previous = lastMediaCommandRef.current;
       if (previous?.type === command.type && now - previous.at < 250) return;
       lastMediaCommandRef.current = { type: command.type, at: now };
-    }
-
-    if (handledInMain) {
-      // The engine already moved. Record the user's intent so the player does
-      // not treat the resulting state change as an unexpected pause.
-      if (command.type === 'play' || (command.type === 'toggle' && paused)) onNativeResume();
-      if (command.type === 'play') userPausedRef.current = false;
-      else if (command.type === 'pause') userPausedRef.current = true;
-      else if (command.type === 'toggle') userPausedRef.current = !paused;
-      return;
     }
 
     switch (command.type) {
@@ -83,6 +92,7 @@ export function usePlayerMediaCommands({
       case 'pause': {
         onManualPause();
         userPausedRef.current = true;
+        setPaused(true);
         const engine = playbackEngineRef.current;
         if (engine) {
           void engine.pause().catch((error) => console.warn('[player] Pause failed:', error));
@@ -111,7 +121,7 @@ export function usePlayerMediaCommands({
         else handleNextEpisode();
         break;
       case 'seekRelative':
-        seekTo(playbackPositionRef.current + command.offsetSeconds);
+        seekWithFeedback(playbackPositionRef.current + command.offsetSeconds);
         break;
       case 'seekAbsolute':
         seekTo(command.positionSeconds);
@@ -126,9 +136,11 @@ export function usePlayerMediaCommands({
     isLiveStreamRef,
     liveControlsRef,
     paused,
+    setPaused,
     playbackEngineRef,
     playbackPositionRef,
     seekTo,
+    seekWithFeedback,
     setMediaSessionStopped,
     setPlaybackRate,
     togglePlay,

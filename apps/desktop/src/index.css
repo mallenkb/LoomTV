@@ -438,7 +438,12 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 }
 
 .loom-player-pill {
-  --loom-player-control-bg: rgb(0 0 0 / 55%);
+  --loom-player-control-bg: rgb(0 0 0 / 50%);
+  --loom-player-control-hover-bg: rgb(0 0 0 / 65%);
+}
+
+.loom-player-pill .loom-player-controls {
+  background-image: linear-gradient(to top, rgb(0 0 0 / 55%), rgb(0 0 0 / 20%), transparent);
 }
 
 .loom-player-pill .loom-player-controls {
@@ -451,7 +456,8 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 
 .loom-player-pill .loom-player-timeline-track {
   height: 5px;
-  box-shadow: none;
+  background-color: rgb(255 255 255 / 40%);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 60%);
   --tw-ring-shadow: 0 0 #0000;
 }
 
@@ -475,7 +481,7 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -487,7 +493,17 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   align-items: center;
   gap: 0;
   border-radius: 999px;
+  background: transparent;
+}
+
+.loom-player-pill .loom-player-volume {
   background: var(--loom-player-control-bg);
+}
+
+.loom-player-pill .loom-player-skip-controls,
+.loom-player-pill .loom-player-options,
+.loom-player-pill .loom-player-navigation {
+  gap: 8px;
 }
 
 .loom-player-pill .loom-player-navigation {
@@ -502,9 +518,6 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   box-shadow: none;
 }
 
-.loom-player-pill .loom-player-skip-controls,
-.loom-player-pill .loom-player-options,
-.loom-player-pill .loom-player-navigation,
 .loom-player-pill .loom-player-volume,
 .loom-player-pill .loom-player-play,
 .loom-player-pill .loom-player-time {
@@ -533,24 +546,38 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   width: 40px;
 }
 
-.loom-player-pill .loom-player-controls button:hover {
-  background-color: rgb(255 255 255 / 10%);
-  color: white;
+.loom-player-pill .loom-player-controls button {
+  background-color: var(--loom-player-control-bg);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(24px) saturate(130%);
 }
 
-.loom-player-pill .loom-player-volume > button,
-.loom-player-pill .loom-player-volume > button:hover {
-  background-color: transparent;
+.loom-player-pill .loom-player-controls button:hover {
+  background-color: var(--loom-player-control-hover-bg);
+  color: white;
 }
 
 .loom-player-pill .loom-player-controls button[data-player-panel-toggle] {
   border: 0;
   box-shadow: none;
-  backdrop-filter: none;
 }
 
 .loom-player-pill .loom-player-controls button[aria-expanded='true'] {
-  background-color: rgb(255 255 255 / 15%);
+  background-color: var(--loom-player-control-hover-bg);
+}
+
+/* The volume group already supplies the shared pill background. */
+.loom-player-pill .loom-player-controls .loom-player-volume > button {
+  background-color: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.loom-player-pill .loom-player-controls .loom-player-volume > button:hover {
+  background-color: rgb(0 0 0 / 25%);
 }
 
 .loom-player-pill .loom-player-time {
@@ -564,6 +591,23 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   height: 23px;
   fill: none;
   stroke-width: 1.8;
+}
+
+.loom-player-pill .loom-player-controls button.loom-player-play {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+}
+
+.loom-player-pill .loom-player-play svg {
+  display: block;
+  margin: 0;
+}
+
+/* The triangle needs a small optical offset; the pause bars stay centered. */
+.loom-player-pill .loom-player-play[aria-label='Play'] svg {
+  transform: translateX(1px);
 }
 
 .loom-player-pill .loom-player-controls button:not(.loom-player-play) svg {
@@ -604,8 +648,12 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 }
 
 .loom-player-pill .loom-player-controls-divider {
+  width: 2px;
   height: 26px;
+  flex-shrink: 0;
   margin: 0 2px;
+  background-color: rgb(0 0 0 / 65%);
+  border-radius: 1px;
 }
 
 @media (max-width: 900px) {
@@ -662,9 +710,9 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   backdrop-filter: blur(24px) saturate(130%);
 }
 
-/* Native video is outside Chromium's backdrop. These filters allocate large
-   Retina render targets when paused controls stay visible, without blurring
-   the video. Keep their translucent backgrounds without the extra targets. */
+/* Native video is outside Chromium's backdrop. AppKit supplies the measured
+   control backdrops there; avoid redundant Chromium filter render targets. */
+.loom-player-native.loom-player-pill .loom-player-controls button,
 .loom-player-native .loom-player-top-controls .loom-player-top-control,
 .loom-player-native .loom-player-controls [class*='backdrop-blur-'],
 .loom-player-native.loom-player-pill .loom-player-skip-controls,

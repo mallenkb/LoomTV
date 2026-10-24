@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type BetterSqlite3 from 'better-sqlite3';
 import type { MediaItem } from '../metadata/types.ts';
-import { cleanMediaTitle, remoteMatchesAnyLocalTitle, seriesTitleFromEpisodeFileName } from '../metadata/helpers.ts';
+import { cleanMediaTitle, normalizeTitleForMatch, remoteMatchesAnyLocalTitle, seriesTitleFromEpisodeFileName } from '../metadata/helpers.ts';
 import { titleAgrees } from './renamePlanner.ts';
 
 /**
@@ -10,14 +10,17 @@ import { titleAgrees } from './renamePlanner.ts';
  * library already holds. The match counts as confirmed when at least two
  * sources land on the same title (the same IMDb, TMDB, TVDB, TVmaze or
  * MyAnimeList ID, with the year within one) and none lands somewhere else.
+ * A single confirming source may instead be corroborated by the file's own
+ * title and year or embedded identity, without conflicting embedded tags.
  * A source without a key, without the title, or offline neither confirms
  * nor contradicts.
  */
 
-export type SourceName = 'tmdb' | 'omdb' | 'tvdb' | 'tvmaze' | 'anilist' | 'mal';
+export type SourceName = 'tmdb' | 'omdb' | 'tvdb' | 'tvmaze' | 'anilist' | 'mal' | 'cinemeta';
 
 export const SOURCE_LABELS: Record<SourceName, string> = {
   tmdb: 'TMDB', omdb: 'OMDb', tvdb: 'TVDB', tvmaze: 'TVmaze', anilist: 'AniList', mal: 'MyAnimeList',
+  cinemeta: 'Cinemeta',
 };
 
 type Ids = { imdbId?: string; tmdbId?: string; tvdbId?: string; tvmazeId?: string; malId?: string };
@@ -39,6 +42,13 @@ export type MatchConfirmation = {
   searchedYear?: number;
   asked: SourceName[];
   records: SourceRecord[];
+  localEvidence?: {
+    fileTitle: string;
+    fileYear?: number;
+    embeddedTitle?: string;
+    embeddedYear?: number;
+    providerIds?: Ids;
+  };
 };
 
 export type MatchVerdict = {
@@ -101,11 +111,30 @@ export function evaluateConfirmation(item: Identity, confirmation: MatchConfirma
       for (const title of [record.title, ...(record.titles || [])]) if (title) knownTitles.add(title);
     }
   }
-  const status = conflicts.length ? 'conflict' : confirmedBy.length >= 2 ? 'confirmed' : 'waiting';
+  const local = confirmation.localEvidence;
+  const normalize = (title: string) => normalizeTitleForMatch(cleanMediaTitle(title).title);
+  const matchingTitles = [item.title, ...knownTitles].map(normalize).filter(Boolean);
+  const agrees = (title: string) => Boolean(normalize(title)) && matchingTitles.includes(normalize(title));
+  const embeddedIds = local?.providerIds || {};
+  const comparableLocalIds = ID_KEYS.filter((key) => embeddedIds[key] && anchor[key]);
+  const localIdsConflict = comparableLocalIds.some((key) => embeddedIds[key] !== anchor[key]);
+  const embeddedYearAgrees = !local?.embeddedYear || Boolean(item.year && Math.abs(local.embeddedYear - item.year) <= 1);
+  const embeddedTitleAgrees = !local?.embeddedTitle || agrees(local.embeddedTitle);
+  // One provider can be corroborated by the file's own title and year or
+  // embedded identity. Never use the library's matched title as local evidence.
+  const localConfirms = confirmedBy.length === 1 && local !== undefined
+    && !localIdsConflict && embeddedYearAgrees && embeddedTitleAgrees
+    && agrees(local.fileTitle)
+    && (Boolean(local.fileYear && item.year && Math.abs(local.fileYear - item.year) <= 1)
+      || (!local.fileYear && (comparableLocalIds.length > 0
+        || Boolean(local.embeddedTitle && local.embeddedYear && item.year))));
+  const status = conflicts.length ? 'conflict' : confirmedBy.length >= 2 || localConfirms ? 'confirmed' : 'waiting';
   const note = status === 'conflict'
     ? conflicts.map((record) => `${SOURCE_LABELS[record.source]} found "${record.title}"${record.year ? ` (${record.year})` : ''} for this file instead.`).join(' ')
     : status === 'confirmed'
-      ? `Confirmed by ${sourceList(confirmedBy)}.`
+      ? localConfirms
+        ? `Confirmed by ${sourceList(confirmedBy)} and matching local file metadata.`
+        : `Confirmed by ${sourceList(confirmedBy)}.`
       : confirmedBy.length === 1
         ? `Only ${SOURCE_LABELS[confirmedBy[0]]} confirmed this match. It waits for a second source, or for your approval.`
         : 'No metadata source confirmed this match yet. It waits, or you can approve it.';
@@ -114,7 +143,7 @@ export function evaluateConfirmation(item: Identity, confirmation: MatchConfirma
 
 /** Which sources can know this kind of title. */
 export function sourcesFor(item: Identity, likelyAnime: boolean): SourceName[] {
-  if (item.type === 'movie') return likelyAnime ? ['tmdb', 'omdb', 'tvdb', 'anilist', 'mal'] : ['tmdb', 'omdb', 'tvdb'];
+  if (item.type === 'movie') return likelyAnime ? ['tmdb', 'omdb', 'tvdb', 'cinemeta', 'anilist', 'mal'] : ['tmdb', 'omdb', 'tvdb', 'cinemeta'];
   return item.type === 'anime' || likelyAnime
     ? ['tmdb', 'omdb', 'tvdb', 'tvmaze', 'anilist', 'mal']
     : ['tmdb', 'omdb', 'tvdb', 'tvmaze'];
@@ -145,6 +174,7 @@ export function searchTermsFor(item: Pick<MediaItem, 'type' | 'filePath' | 'titl
 type Found = Partial<Pick<MediaItem, 'title' | 'year' | 'providerIds'>> & { aliases?: string[]; malId?: number };
 
 export type ConfirmationSources = {
+  cinemeta?: (title: string, year: number | undefined, type: 'movie' | 'series') => Promise<Found[] | null>;
   tmdbMovie?: (title: string, year?: number) => Promise<Found | null>;
   tmdbShow?: (title: string, year?: number) => Promise<Found | null>;
   omdb?: (title: string, year: number | undefined, type: 'movie' | 'series') => Promise<{ Title?: string; Year?: string; imdbID?: string } | null>;
@@ -170,7 +200,7 @@ export async function gatherConfirmation(
   item: Identity,
   search: { title: string; year?: number },
   sources: ConfirmationSources,
-  options: { likelyAnime?: boolean; now?: number } = {},
+  options: { likelyAnime?: boolean; now?: number; localEvidence?: MatchConfirmation['localEvidence'] } = {},
 ): Promise<MatchConfirmation> {
   const asked = sourcesFor(item, Boolean(options.likelyAnime));
   const kind = item.type === 'movie' ? 'movie' : 'series';
@@ -178,6 +208,23 @@ export async function gatherConfirmation(
   // A source's answer only counts when it is about the searched title.
   const about = (titles: Array<string | undefined>) => titles.some((title) => remoteMatchesAnyLocalTitle(searched, title || ''));
   const lookups: Record<SourceName, () => Promise<SourceRecord | null>> = {
+    cinemeta: async () => {
+      // Search the filename independently. Looking up the library's IMDb ID
+      // here would only repeat its existing match, not corroborate it.
+      const found = await sources.cinemeta?.(search.title, search.year, kind);
+      const candidates = (found || []).flatMap((candidate) => {
+        const { title, year } = candidate;
+        const imdbId = candidate.providerIds?.imdbId;
+        if (!title || !about([title]) || !imdbId
+          || (search.year && (!year || Math.abs(year - search.year) > 1))) return [];
+        return [{ title, year, imdbId }];
+      });
+      const unique = [...new Map(candidates.map((candidate) => [candidate.imdbId, candidate])).values()];
+      // An ambiguous title search must not count as a second confirmation.
+      if (unique.length !== 1) return null;
+      const candidate = unique[0];
+      return { source: 'cinemeta', ids: { imdbId: candidate.imdbId }, title: candidate.title, year: candidate.year };
+    },
     tmdb: async () => {
       const found = await (kind === 'movie' ? sources.tmdbMovie : sources.tmdbShow)?.(search.title, search.year);
       return found?.title && about([found.title]) ? { source: 'tmdb', ids: idsOf(found.providerIds), title: found.title, year: found.year || undefined } : null;
@@ -220,6 +267,7 @@ export async function gatherConfirmation(
     searchedYear: search.year,
     asked,
     records: records.filter((record): record is SourceRecord => Boolean(record)),
+    ...(options.localEvidence ? { localEvidence: options.localEvidence } : {}),
   };
 }
 
@@ -227,6 +275,8 @@ export async function gatherConfirmation(
 export function confirmationIsFresh(confirmation: MatchConfirmation, item: Identity, now = Date.now()): boolean {
   if (confirmation.anchor !== confirmationAnchor(item)) return false;
   const verdict = evaluateConfirmation(item, confirmation);
+  if (verdict.status !== 'confirmed' && item.type === 'movie' && !confirmation.localEvidence) return false;
+  if (verdict.status !== 'confirmed' && item.type === 'movie' && !confirmation.asked.includes('cinemeta')) return false;
   // A confirmed match stays confirmed; an unconfirmed one is asked again
   // daily, since databases add new titles after release.
   return verdict.status === 'confirmed' || now - confirmation.checkedAt < 24 * 60 * 60 * 1000;

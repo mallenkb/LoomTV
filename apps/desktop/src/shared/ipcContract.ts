@@ -121,6 +121,7 @@ export interface IpcContract {
   'libvlc:set-fullscreen-transition': { args: [transitioning: boolean, waitForFinalViewport?: boolean]; result: boolean };
   'libvlc:set-viewport': { args: [viewport: PlaybackViewport]; result: boolean };
   'window:set-chrome-visible': { args: [visible: boolean]; result: boolean };
+  'window:set-playback-aspect': { args: [sessionId: string, ratio: number | null]; result: boolean };
   'artwork:apply-official': { args: [mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget]; result: OfficialArtworkResult };
   'artwork:get': { args: [mediaId: string]; result: Record<string, string> };
   'artwork:import': { args: [entries: Record<string, Record<string, string>>]; result: boolean };

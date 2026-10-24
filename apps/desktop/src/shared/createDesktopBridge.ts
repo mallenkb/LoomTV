@@ -145,6 +145,7 @@ const desktopApi = {
   getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port) => `http://127.0.0.1:${port}`),
   getRendererSession: () => ipcRenderer.invoke('renderer:session'),
   setWindowChromeVisible: (visible: boolean) => ipcRenderer.invoke('window:set-chrome-visible', visible),
+  setPlaybackWindowAspect: (sessionId: string, ratio: number | null) => ipcRenderer.invoke('window:set-playback-aspect', sessionId, ratio),
   publishMediaSession: (snapshot: MediaSessionSnapshot): Promise<MediaSessionDiagnostics> =>
     ipcRenderer.invoke('media-control:publish', snapshot),
   releaseMediaSession: () => ipcRenderer.invoke('media-control:release'),

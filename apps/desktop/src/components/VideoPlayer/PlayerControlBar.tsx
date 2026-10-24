@@ -22,11 +22,13 @@ import type { ControlTab } from './types';
 import SeekHoverPreview from './SeekHoverPreview';
 import { RulerSlider } from '@/components/ui/ruler-slider';
 import { skipPromptLabel, type TimelineSegmentBand } from './skipPrompt';
-import type { AppPlayerControlStyle } from '@/lib/theme';
+import { DEFAULT_THEME_SETTINGS, type AppPlayerControlStyle } from '@/lib/theme';
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 
 interface PlayerControlBarProps {
+  /** Settings uses the real controls without requesting video thumbnails. */
+  preview?: boolean;
   controlStyle?: AppPlayerControlStyle;
   filePath: string;
   showControls: boolean;
@@ -83,7 +85,8 @@ interface PlayerControlBarProps {
 }
 
 export default function PlayerControlBar({
-  controlStyle = 'default',
+  preview = false,
+  controlStyle = DEFAULT_THEME_SETTINGS.playerControlStyle,
   filePath,
   showControls,
   seekSliderRef,
@@ -196,7 +199,7 @@ export default function PlayerControlBar({
           style={{ '--loom-progress': `${progressPct}%` } as React.CSSProperties}
           className={`group relative h-6 min-w-0 flex-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isLiveStream ? 'cursor-default' : 'cursor-pointer'}`}
         >
-          {!isLiveStream && duration > 0 && (
+          {!preview && !isLiveStream && duration > 0 && (
             <SeekHoverPreview key={filePath} filePath={filePath} duration={duration} sliderRef={seekSliderRef} visible={showControls} playbackPositionRef={playbackPositionRef} />
           )}
           {!isLiveStream && (

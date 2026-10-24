@@ -41,6 +41,10 @@ catalog:
   vite-plus: 1.3.0
   zod: 4.6.7
 overrides:
+  # Keep the patched tracker graph free of the removed vulnerable IP helper.
+  'bittorrent-tracker@11.2.3>ip': '-'
+  # Expo's dev-tool schemas use APIs compatible with the fixed Zod release.
+  '@expo/cli>zod': 4.6.7
   # Align Expo optional peers with its SDK 58 React compatibility set.
   react-dom: 19.3.0
   source-map-js: 1.2.2
@@ -73,6 +77,7 @@ peerDependencyRules:
     vite: '*'
 resolutionMode: highest
 patchedDependencies:
+  app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   bittorrent-tracker@11.2.3: patches/bittorrent-tracker@11.2.3.patch
   braces@3.0.3: patches/braces@3.0.3.patch
   node-forge@1.4.0: patches/node-forge@1.4.0.patch

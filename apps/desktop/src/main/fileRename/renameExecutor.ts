@@ -341,13 +341,13 @@ function remapStoredState(
 }
 
 /** The library with every stored path moved, and IDs re-derived from the new paths. */
-function remapLibrary(data: LibraryData, mapPath: (value: string) => string, mediaPaths: ReadonlyMap<string, string>, restoredItems: readonly MediaItem[]): { data: LibraryData; aliases: Map<string, string> } {
+function remapLibrary(data: LibraryData, mapPath: (value: string) => string, mediaPaths: ReadonlyMap<string, string>, restoredItems: readonly MediaItem[], retainMediaIds = false): { data: LibraryData; aliases: Map<string, string> } {
   const aliases = new Map<string, string>();
   const remapItem = (item: MediaItem): MediaItem => {
     let next = rewriteDeep(item, mapPath);
     const mediaPath = mediaPaths.get(item.filePath);
     if (mediaPath) next.filePath = mapPath(mediaPath);
-    if (next.filePath !== item.filePath && item.id === createMediaItemId(item.filePath)) {
+    if (!retainMediaIds && next.filePath !== item.filePath && item.id === createMediaItemId(item.filePath)) {
       const nextId = createMediaItemId(next.filePath);
       if (nextId !== item.id) {
         aliases.set(item.id, nextId);
@@ -579,7 +579,8 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
       !operation.restoreJoinedMedia && operation.mediaFrom && operation.mediaTo ? [[operation.mediaFrom, operation.mediaTo] as const] : []
     )));
     const restoredItems = operations.flatMap((operation) => operation.restoreJoinedMedia && operation.joinedMedia ? [operation.joinedMedia] : []);
-    const { data: next, aliases } = remapLibrary(data, mapPath, mediaPaths, restoredItems);
+    const canonical = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='view' AND name='native_media_items'").get());
+    const { data: next, aliases } = remapLibrary(data, mapPath, mediaPaths, restoredItems, canonical);
     // Undo may find that a removed empty folder has already been recreated.
     // Do not journal a no-op as a creation that rollback should remove.
     const diskOperations = operations.filter((operation) => !(
@@ -610,6 +611,27 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     }
     try {
       database.transaction(() => {
+        if (canonical) {
+          // Canonical progress and lists reference stable media IDs. Move the
+          // source locator first so saving the renamed item reuses that source
+          // and progress never gets copied to an unresolved path identity.
+          const sources = database.prepare('SELECT id,locator FROM media_sources').all() as Array<{ id: string; locator: string }>;
+          const moveSource = database.prepare(`UPDATE media_sources SET locator=?,
+            root_id=(SELECT id FROM library_roots WHERE state!='removed' AND loom_contains(locator,?) ORDER BY length(locator) DESC LIMIT 1),
+            relative_path=loom_relative(COALESCE((SELECT locator FROM library_roots WHERE state!='removed' AND loom_contains(locator,?) ORDER BY length(locator) DESC LIMIT 1),?),?) WHERE id=?`);
+          for (const source of sources) {
+            const target = mapPath(source.locator);
+            if (target !== source.locator) moveSource.run(target, target, target, target, target, source.id);
+          }
+          for (const table of ['video_series_locations', 'native_progress_locators']) {
+            const locations = database.prepare(`SELECT DISTINCT locator FROM ${table}`).all() as Array<{ locator: string }>;
+            const moveLocation = database.prepare(`UPDATE ${table} SET locator=? WHERE locator=?`);
+            for (const location of locations) {
+              const target = mapPath(location.locator);
+              if (target !== location.locator) moveLocation.run(target, location.locator);
+            }
+          }
+        }
         remapStoredState(database, mapPath, aliases, revisions);
         deps.remapMediaIds(aliases);
         deps.inventory?.moved(diskOperations, false, direction === 'apply');
@@ -704,7 +726,7 @@ export function createRenameExecutor(deps: RenameExecutorDeps) {
     applyAutomatic(): { batchId: string; renamed: number; retryAfterMs?: number } | null {
       const planned = plan({ automatic: true });
       const retryAfterMs = planned.retryAfterMs;
-      // Only matches two sources agree on are applied without review.
+      // Apply provider agreement or a provider corroborated by local file metadata.
       const entries = planned.entries.filter((entry) => !entry.verification || entry.verification.status === 'confirmed');
       if (entries.length === 0) return retryAfterMs === undefined ? null : { batchId: '', renamed: 0, retryAfterMs };
       return { ...this.apply(entries.map((entry) => entry.id), true), retryAfterMs };

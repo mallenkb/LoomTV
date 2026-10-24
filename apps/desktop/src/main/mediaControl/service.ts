@@ -107,6 +107,14 @@ export function createMediaSessionController(
   let adapter: MediaSessionAdapter | null = null;
   let adapterKind: MediaSessionAdapterKind = 'unsupported';
   let published: MediaSessionSnapshot | null = null;
+  let publishedAt = performance.now();
+  let pendingNativeTransport: {
+    ownerId: number;
+    sessionId: string;
+    engineSessionId: string;
+    state: 'playing' | 'paused';
+    expiresAt: number;
+  } | null = null;
   let startFailureReason: string | undefined;
   /**
    * True once a session has been released. While set, a paused snapshot does
@@ -123,6 +131,12 @@ export function createMediaSessionController(
     active: adapter !== null,
     ...(startFailureReason ? { reason: startFailureReason } : {}),
   });
+
+  const currentPosition = (snapshot: MediaSessionSnapshot): number => {
+    const elapsed = snapshot.state === 'playing' ? Math.max(0, performance.now() - publishedAt) / 1000 * snapshot.rate : 0;
+    const position = snapshot.positionSeconds + elapsed;
+    return snapshot.durationSeconds > 0 ? Math.min(snapshot.durationSeconds, position) : position;
+  };
 
   const routeCommand = (input: MediaSessionCommand) => {
     // Adapters build commands from platform callbacks. A NaN position or a
@@ -142,6 +156,10 @@ export function createMediaSessionController(
     if (!supportsMediaSessionCommand(snapshot, command.type)) return;
 
     let handledInMain = false;
+    let notification = command;
+    const transportPaused = command.type === 'play' ? false
+      : command.type === 'pause' ? true
+        : command.type === 'toggle' ? snapshot.state === 'playing' : null;
     const nativeEngine = snapshot.engine !== 'chromium' && snapshot.engineSessionId
       ? snapshot.engine
       : null;
@@ -168,8 +186,33 @@ export function createMediaSessionController(
       }
     }
 
+    if (handledInMain && transportPaused !== null) {
+      // Background renderer updates can arrive a second later. Resolve toggles
+      // here so the next media key uses the state we actually requested.
+      const position = currentPosition(snapshot);
+      const nextState = transportPaused ? 'paused' : 'playing';
+      published = {
+        ...snapshot,
+        state: nextState,
+        positionSeconds: !transportPaused && snapshot.state === 'paused'
+          ? Math.max(0, position - (snapshot.rewindOnResumeSeconds ?? 0)) : position,
+      };
+      publishedAt = performance.now();
+      pendingNativeTransport = {
+        ownerId: target.id,
+        sessionId: snapshot.sessionId,
+        engineSessionId: snapshot.engineSessionId as string,
+        state: nextState,
+        expiresAt: publishedAt + 2500,
+      };
+      // Keep the paused session registered with the OS and update its button
+      // immediately, without waiting for background renderer timers.
+      publishSnapshot(published);
+      notification = { type: transportPaused ? 'pause' : 'play' };
+    }
+
     try {
-      target.notify(command, handledInMain);
+      target.notify(notification, handledInMain);
     } catch (error) {
       warn(`[media-session] Notifying the player of ${command.type} failed.`, error);
     }
@@ -206,6 +249,7 @@ export function createMediaSessionController(
     adapter = null;
     adapterKind = 'unsupported';
     published = null;
+    pendingNativeTransport = null;
     if (!current) return;
     try {
       current.clear();
@@ -241,7 +285,7 @@ export function createMediaSessionController(
         return diagnostics();
       }
 
-      const snapshot = normalizeMediaSessionSnapshot(rawSnapshot);
+      let snapshot = normalizeMediaSessionSnapshot(rawSnapshot);
 
       if (snapshot.state === 'stopped') {
         // Playback ended: release the session but leave the player window alone.
@@ -252,6 +296,18 @@ export function createMediaSessionController(
       if (!nextOwner.isAlive()) {
         if (owner?.id === nextOwner.id) releaseAll();
         return diagnostics();
+      }
+
+      const pending = pendingNativeTransport;
+      if (pending) {
+        const sameSession = nextOwner.id === pending.ownerId && snapshot.sessionId === pending.sessionId
+          && snapshot.engineSessionId === pending.engineSessionId;
+        if (!sameSession || snapshot.state === pending.state || performance.now() >= pending.expiresAt) {
+          pendingNativeTransport = null;
+        } else if (published) {
+          // Ignore snapshots queued before the global key reached the engine.
+          snapshot = { ...snapshot, state: pending.state, positionSeconds: currentPosition(published) };
+        }
       }
 
       if (awaitingPlayToReclaim && snapshot.state !== 'playing') {
@@ -271,10 +327,12 @@ export function createMediaSessionController(
       // Power management still needs playback state when OS media controls fail.
       if (ownerChanged || isMediaSessionDiscontinuity(published, snapshot)) {
         published = snapshot;
+        publishedAt = performance.now();
         publishSnapshot(snapshot);
       } else {
         // Keep the position current for the next seek without touching the OS.
         published = snapshot;
+        publishedAt = performance.now();
       }
 
       return diagnostics();
@@ -297,7 +355,11 @@ export function createMediaSessionController(
     snapshot: () => published,
 
     refresh() {
-      if (published) publishSnapshot(published);
+      if (published) {
+        published = { ...published, positionSeconds: currentPosition(published) };
+        publishedAt = performance.now();
+        publishSnapshot(published);
+      }
     },
   };
 }

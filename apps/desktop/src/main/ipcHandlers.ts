@@ -3,6 +3,7 @@ import { parseAddonPlaybackReference } from '../shared/addonPlaybackReference.ts
 import type { AddonPlaybackLease } from './stremioPlayback.ts';
 import type { StremioServiceStatus, StremioTorrentPreparation } from '../shared/stremioService.ts';
 import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
+import { setPlaybackWindowAspect } from './playbackWindow';
 import type { DownloadItem, IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue, WebContents } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -106,6 +107,13 @@ const playbackViewportSchema = z.object({
   y: finiteNumber.min(-10_000).max(100_000),
   width: finiteNumber.positive().max(100_000),
   height: finiteNumber.positive().max(100_000),
+  controlBackdrops: z.array(z.object({
+    x: finiteNumber.min(-10_000).max(100_000),
+    y: finiteNumber.min(-10_000).max(100_000),
+    width: finiteNumber.positive().max(100_000),
+    height: finiteNumber.positive().max(100_000),
+    cornerRadius: finiteNumber.min(0).max(1000),
+  })).max(64).optional(),
   subtitleBlur: z.object({
     radius: finiteNumber.min(0).max(24),
     cornerRadius: finiteNumber.min(0).max(12),
@@ -1347,6 +1355,12 @@ export function registerIpcHandlers<
     ownerWindow.setWindowButtonVisibility(Boolean(visible));
     return true;
   }, z.tuple([z.boolean()]));
+
+  handle('window:set-playback-aspect', (event, sessionId, ratio) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!ownerWindow || ownerWindow.isDestroyed()) return false;
+    return setPlaybackWindowAspect(ownerWindow, sessionId, ratio);
+  }, z.tuple([z.string().min(1).max(200), finiteNumber.min(0.1).max(10).nullable()]));
 
   handleNoArgs('network:status', () => {
     const status = buildNetworkStatus(deps);

@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.33](docs/releases/v2.0.33.md)
+
+Adds Pill playback controls, automatic window fitting, clearer subtitle and seek feedback, and more reliable background media keys. Repairs local movie organization and consolidates library storage while preserving profiles and playback history.
+
 ### [2.0.32](docs/releases/v2.0.32.md)
 
 Shows update download progress in the About button and improves add-on playback error reporting and cache cleanup.

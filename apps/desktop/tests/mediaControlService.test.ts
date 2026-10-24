@@ -176,6 +176,50 @@ test('a relative seek resolves against the live position and clamps to the item'
   assert.deepEqual(calls.map((call) => call.value), [90, 0]);
 });
 
+test('background native toggles alternate without waiting for renderer snapshots', () => {
+  const adapter = fakeAdapter();
+  const calls: EngineCall[] = [];
+  const received: Notification[] = [];
+  const controller = createMediaSessionController({
+    platform: 'darwin',
+    candidates: () => [candidate(adapter)],
+    engine: recordingEngine(calls),
+  });
+
+  controller.publish(owner(1, received), libvlcPlaying);
+  adapter.send({ type: 'toggle' });
+  adapter.send({ type: 'toggle' });
+  adapter.send({ type: 'toggle' });
+
+  assert.deepEqual(calls.map(call => call.value), [true, false, true]);
+  assert.deepEqual(received.map(entry => entry.command.type), ['pause', 'play', 'pause']);
+  assert.ok(received.every(entry => entry.handledInMain));
+  assert.equal(controller.snapshot()?.state, 'paused');
+  assert.equal(adapter.published.at(-1)?.state, 'paused');
+  assert.equal(adapter.clears, 0);
+});
+
+test('a queued background snapshot cannot reverse an acknowledged native command', () => {
+  const adapter = fakeAdapter();
+  const calls: EngineCall[] = [];
+  const controller = createMediaSessionController({
+    platform: 'darwin',
+    candidates: () => [candidate(adapter)],
+    engine: recordingEngine(calls),
+  });
+  const player = owner(1, []);
+  controller.publish(player, libvlcPlaying);
+  adapter.send({ type: 'toggle' });
+  controller.publish(player, libvlcPlaying);
+  assert.equal(controller.snapshot()?.state, 'paused');
+
+  adapter.send({ type: 'toggle' });
+  controller.publish(player, { ...libvlcPlaying, state: 'paused' });
+  assert.equal(controller.snapshot()?.state, 'playing');
+  adapter.send({ type: 'toggle' });
+  assert.deepEqual(calls.map(call => call.value), [true, false, true]);
+});
+
 test('Chromium playback is routed to the renderer instead of the main process', () => {
   const adapter = fakeAdapter();
   const calls: EngineCall[] = [];

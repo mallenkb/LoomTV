@@ -271,7 +271,8 @@ test('player window handlers keep seeking above modals and defer the rest', () =
       document, containerRef: { current: surface }, isTopmostModalContent: () => topmost,
       isEditableShortcutTarget, isPlayerControlTarget, isSliderShortcutTarget,
       playerStateRef: { current: 'playing' }, togglePlay: () => { toggles++; },
-      resetSurfaceDoubleClickGuard: () => undefined, seekTo: () => { seeks++; }, playbackPositionRef: { current: 0 },
+      resetSurfaceDoubleClickGuard: () => undefined, seekTo: () => { seeks++; },
+      seekWithFeedback: () => { seeks++; }, playbackPositionRef: { current: 0 },
     });
     const send = (key: string, target: Target = surface, type = 'keydown') => {
       let prevented = false;

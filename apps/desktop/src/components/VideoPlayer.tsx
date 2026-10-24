@@ -1,5 +1,6 @@
 import AddonSourcePicker from './AddonSourcePicker';
 import PlaybackLoadingProgress from './VideoPlayer/PlaybackLoadingProgress';
+import LoomLoader from './LoomLoader';
 import { addonProgressKey, rememberAddonVideo } from '@/lib/addonWatchHistory';
 import { DEFAULT_RESUME_REWIND_SECONDS, normalizeResumeRewind, resumeRewindTarget } from '@/shared/resumeRewind';
 /**
@@ -9,7 +10,10 @@ import { DEFAULT_RESUME_REWIND_SECONDS, normalizeResumeRewind, resumeRewindTarge
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Volume2, VolumeX } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Subtitles, Volume2, VolumeX } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { useSeekFeedback } from './VideoPlayer/useSeekFeedback';
+import { useNativeControlBackdrops } from './VideoPlayer/useNativeControlBackdrops';
 import { usePlaybackProgressDisplay } from './VideoPlayer/usePlaybackProgressDisplay';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
@@ -116,7 +120,7 @@ import { isAssDialogueTrack, isAssSignsTrack, parseAssDialogueCues } from './Vid
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import { subtitleBackgroundColor } from '../shared/subtitleBackground.ts';
-import type { SubtitleBlurRegion } from '../shared/playbackProtocol';
+import type { PlaybackControlBackdrop, SubtitleBlurRegion } from '../shared/playbackProtocol';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
 import { activeSkipSegmentAt, buildSkipAction, pinVisibleTarget, shouldShowSkipPrompt, skipPromptLabel, timelineSegmentBands } from './VideoPlayer/skipPrompt';
 import { isProfileSelectionRequiredError } from './VideoPlayer/playbackProfileGuard';
@@ -223,6 +227,16 @@ export default function VideoPlayer({
   onClose,
   onEpisodeChange,
 }: VideoPlayerProps) {
+  const { seekFeedback, showSeekFeedback } = useSeekFeedback(filePath);
+  const reduceSeekMotion = useReducedMotion();
+  const [playbackWindowSessionId] = useState(() => crypto.randomUUID());
+  // Classify the original source so local files keep their loading indicator
+  // even when playback falls back to a local HTTP transcode stream.
+  const showStreamingLoadingProgress = Boolean(
+    addonTarget || isLiveStream || isIptvPlaybackReference(filePath)
+    || parseAddonPlaybackReference(filePath) || parseExternalPlaybackReference(filePath)
+    || /^https?:/i.test(filePath),
+  );
   const torrentSubtitlesOnly = addonSubtitles?.opensubtitlesOnly === true;
   const torrentSubtitlesOnlyRef = useRef(torrentSubtitlesOnly);
   torrentSubtitlesOnlyRef.current = torrentSubtitlesOnly;
@@ -285,6 +299,7 @@ export default function VideoPlayer({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const nativeSubtitleBlurRef = useRef<SubtitleBlurRegion | null>(null);
+  const nativeControlBackdropsRef = useRef<PlaybackControlBackdrop[]>([]);
   const nativeSubtitleBlurKeyRef = useRef('');
   const { state: libraryState } = useLibrary();
   const [playbackActivityKey] = useState(() => `desktop-player:${crypto.randomUUID()}`);
@@ -601,6 +616,25 @@ export default function VideoPlayer({
   const [subtitleSelectionRevision, setSubtitleSelectionRevision] = useState(0);
   const subtitleSelectionRevisionRef = useRef(0);
   const activeOnlineCaption = onlineCaption?.key === onlinePlaybackKey ? onlineCaption : null;
+  const lastSubtitleChoiceRef = useRef<{ key: string; trackIndex: number; caption: typeof onlineCaption } | null>(null);
+  const [subtitleHint, setSubtitleHint] = useState<{ key: string; title: string; detail: string } | null>(null);
+  const subtitleHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSubtitleHint = useCallback((title: string, detail: string) => {
+    if (subtitleHintTimerRef.current) clearTimeout(subtitleHintTimerRef.current);
+    setSubtitleHint({ key: onlinePlaybackKey, title, detail });
+    subtitleHintTimerRef.current = setTimeout(() => {
+      subtitleHintTimerRef.current = null;
+      setSubtitleHint(null);
+    }, 2200);
+  }, [onlinePlaybackKey]);
+  useEffect(() => {
+    lastSubtitleChoiceRef.current = null;
+    setSubtitleHint(null);
+    return () => {
+      if (subtitleHintTimerRef.current) clearTimeout(subtitleHintTimerRef.current);
+      subtitleHintTimerRef.current = null;
+    };
+  }, [onlinePlaybackKey]);
   useEffect(() => { setOnlineCaption(null); setOnlineSubtitleDelay(0); }, [onlinePlaybackKey]);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [cropMode, setCropMode] = useState<CropMode>('none');
@@ -640,6 +674,7 @@ export default function VideoPlayer({
       width: rect.width,
       height: rect.height,
       subtitleBlur: nativeSubtitleBlurRef.current,
+      controlBackdrops: nativeControlBackdropsRef.current,
     });
   }, [libVlcSurfaceActive]);
   const syncNativeSubtitleBlur = useCallback((region: SubtitleBlurRegion | null) => {
@@ -663,6 +698,16 @@ export default function VideoPlayer({
     showTopControls,
     toggleFullscreen: requestFullscreenToggle,
   } = usePlayerChrome(paused, containerRef, libVlcSurfaceActive, syncNativeViewport);
+  const syncNativeControlBackdrops = useCallback((regions: PlaybackControlBackdrop[]) => {
+    nativeControlBackdropsRef.current = regions;
+    void syncNativeViewport().catch(() => undefined);
+  }, [syncNativeViewport]);
+  useNativeControlBackdrops({
+    containerRef,
+    enabled: libVlcSurfaceActive && theme.playerControlStyle === 'pill',
+    showControls,
+    onChange: syncNativeControlBackdrops,
+  });
   const toggleFullscreen = useCallback(() => {
     resetSurfaceDoubleClickGuard();
     requestFullscreenToggle();
@@ -1875,7 +1920,8 @@ export default function VideoPlayer({
     const pendingSeek = nativeSeekLoadingRef.current;
     if (pendingSeek && state.status === 'ready' && reportedPosition !== null && !state.diagnostics?.buffering) {
       const landed = Math.abs(reportedPosition - pendingSeek.target) <= NATIVE_SEEK_LANDING_TOLERANCE_SECONDS;
-      if (landed && (userPausedRef.current || (pendingSeek.landedPosition !== undefined && reportedPosition > pendingSeek.landedPosition + 0.05))) {
+      if (landed && (!showStreamingLoadingProgress || userPausedRef.current
+        || (pendingSeek.landedPosition !== undefined && reportedPosition > pendingSeek.landedPosition + 0.05))) {
         nativeSeekLoadingRef.current = null;
         setSeekLoading(false);
       } else if (landed && pendingSeek.landedPosition === undefined) {
@@ -1884,13 +1930,18 @@ export default function VideoPlayer({
         pendingSeek.landedPosition = reportedPosition;
       }
     }
-    const awaitingSeekData = Boolean(nativeSeekLoadingRef.current);
+    const awaitingSeekData = showStreamingLoadingProgress && Boolean(nativeSeekLoadingRef.current);
     if (['ended', 'error', 'closed'].includes(state.status)) {
       nativeSeekLoadingRef.current = null;
       setSeekLoading(false);
     }
 
-    if ((awaitingSeekData && state.status === 'ready') || ((!suppressSeekSnapshot || Boolean(nativeSeekGuardRef.current)) && (state.status === 'starting' || state.status === 'loading'))) {
+    // A local seek is already sent directly to the decoder. Its transient
+    // loading snapshots must not put the controls into the streaming wait state.
+    const localSeekInFlight = !showStreamingLoadingProgress && Boolean(seekGuard);
+    if ((awaitingSeekData && state.status === 'ready') || (!localSeekInFlight
+      && (!suppressSeekSnapshot || Boolean(nativeSeekGuardRef.current))
+      && (state.status === 'starting' || state.status === 'loading'))) {
       setPlayerState('loading');
       setStatusMessage(awaitingSeekData ? 'Seeking...' : nativeSeekGuardRef.current ? 'Buffering...' : 'Opening with native player...');
       if (!suppressSeekSnapshot && !awaitingSeekData) setPaused(true);
@@ -2025,7 +2076,7 @@ export default function VideoPlayer({
         void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
       })();
     }
-  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, markNativeEngineAttempted, nativeEngineAttempted, reportFirstFrame, savePlaybackProgress, startBrowserStreamAt, updatePlaybackSnapshot]);
+  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, markNativeEngineAttempted, nativeEngineAttempted, reportFirstFrame, savePlaybackProgress, showStreamingLoadingProgress, startBrowserStreamAt, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -3254,8 +3305,10 @@ export default function VideoPlayer({
       nativeSeekLoadingRef.current = { target: nextPosition };
       setBufferingPercent(null);
       setSeekLoading(true);
-      setPlayerState('loading');
-      setStatusMessage('Buffering...');
+      if (showStreamingLoadingProgress) {
+        setPlayerState('loading');
+        setStatusMessage('Buffering...');
+      }
       void playbackEngineRef.current.seek(nextPosition).catch(() => {
         if (nativeSeekGuardRef.current === seekGuard) {
           nativeSeekGuardRef.current = null;
@@ -3273,8 +3326,10 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     setSeekLoading(true);
-    setPlayerState('loading');
-    setStatusMessage('Seeking...');
+    if (showStreamingLoadingProgress) {
+      setPlayerState('loading');
+      setStatusMessage('Seeking...');
+    }
     const shouldResumeAfterSeek = !video.paused && !userPausedRef.current;
     suppressPauseIntentUntilMsRef.current = performance.now() + 1500;
     const seekGeneration = ++transcodeSeekGenerationRef.current;
@@ -3415,7 +3470,17 @@ export default function VideoPlayer({
     if (shouldResumeAfterSeek) {
       void video.play().catch(() => setPaused(true));
     }
-  }, [duration, isLiveStream, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
+  }, [duration, isLiveStream, showStreamingLoadingProgress, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
+
+  const seekWithFeedback = useCallback((targetSeconds: number) => {
+    if (isLiveStream || !Number.isFinite(targetSeconds)
+      || (!playbackEngineRef.current && !videoRef.current)) return;
+    const currentPosition = playbackPositionRef.current;
+    const nextPosition = clampSeconds(targetSeconds, duration || playbackDurationRef.current || undefined);
+    seekTo(nextPosition);
+    setVolumeIndicatorVisible(false);
+    showSeekFeedback(nextPosition - currentPosition);
+  }, [duration, isLiveStream, seekTo, showSeekFeedback]);
 
   const { handleProgressKeyDown, handleProgressPointerDown, isScrubbing } = usePlayerScrubbing({
     containerRef,
@@ -3648,7 +3713,8 @@ export default function VideoPlayer({
     if (torrentSubtitlesOnlyRef.current && trackIndex !== -1) return;
     setSubtitleSelectionRevision(++subtitleSelectionRevisionRef.current);
     setOnlineCaption(null);
-    if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
+    if (selectedSubtitleTrackIndexRef.current === trackIndex
+      && subtitlesDefaultEnabledRef.current === (trackIndex >= 0 || trackIndex <= -1000)) return;
     const previousTrackIndex = selectedSubtitleTrackIndexRef.current;
     subtitleSelectionExplicitRef.current = true;
     const enabled = trackIndex >= 0 || trackIndex <= -1000;
@@ -3856,12 +3922,14 @@ export default function VideoPlayer({
     onNativeResume: () => { nativeSeekGuardRef.current = null; },
     onManualPause: () => { if (videoRef.current && !videoRef.current.paused) browserResumeRewindPendingRef.current = true; },
     paused,
+    setPaused,
     userPausedRef,
     isLiveStreamRef,
     liveControlsRef,
     playbackPositionRef,
     togglePlay,
     seekTo,
+    seekWithFeedback,
     setPlaybackRate,
     setMediaSessionStopped,
     handleNextEpisode,
@@ -3909,6 +3977,44 @@ export default function VideoPlayer({
     ...(mediaSessionArtworkUrl ? { artworkUrl: mediaSessionArtworkUrl } : {}),
   }, runMediaSessionCommand);
 
+  const toggleSubtitles = useCallback(() => {
+    const selected = selectedSubtitleTrackIndexRef.current;
+    const isOn = Boolean(activeOnlineCaption) || (selected !== -1 && subtitlesDefaultEnabledRef.current);
+    const expectedRevision = subtitleSelectionRevisionRef.current + 1;
+    const reportFailure = () => {
+      if (onlinePlaybackKeyRef.current !== onlinePlaybackKey
+        || subtitleSelectionRevisionRef.current !== expectedRevision) return;
+      showSubtitleHint('Subtitles could not be changed', 'Choose a track in Subtitles');
+      showSubtitlesPanel();
+    };
+    if (isOn) {
+      lastSubtitleChoiceRef.current = { key: onlinePlaybackKey, trackIndex: selected, caption: activeOnlineCaption };
+      showSubtitleHint('Subtitles off', 'Press C to turn on');
+      selectSubtitleTrack(-1, false, reportFailure);
+      return;
+    }
+    const remembered = lastSubtitleChoiceRef.current?.key === onlinePlaybackKey ? lastSubtitleChoiceRef.current : null;
+    if (remembered?.caption) {
+      // Keep downloaded captions and their timing offset when toggling them.
+      selectSubtitleTrack(-1, true);
+      setOnlineCaption(remembered.caption);
+      showSubtitleHint('Subtitles on', 'Press C to turn off');
+      return;
+    }
+    const rememberedTrack = remembered?.trackIndex;
+    const trackIndex = torrentSubtitlesOnlyRef.current ? -1
+      : selected !== -1 ? selected
+        : rememberedTrack !== undefined && probeTracksRef.current.some(track => track.type === 'subtitle' && track.index === rememberedTrack)
+          ? rememberedTrack : firstSubtitleTrackIndex(probeTracksRef.current);
+    if (trackIndex === -1) {
+      showSubtitleHint('Choose subtitles', 'No subtitle track is currently available');
+      showSubtitlesPanel();
+      return;
+    }
+    showSubtitleHint('Subtitles on', 'Press C to turn off');
+    selectSubtitleTrack(trackIndex, false, reportFailure);
+  }, [activeOnlineCaption, onlinePlaybackKey, selectSubtitleTrack, showSubtitleHint, showSubtitlesPanel]);
+
   usePlayerKeyboardShortcuts({
     containerRef,
     playerStateRef,
@@ -3916,8 +4022,6 @@ export default function VideoPlayer({
     isLiveStreamRef,
     liveControlsRef,
     showLiveGuideRef,
-    selectedSubtitleTrackIndexRef,
-    probeTracksRef,
     setShowLiveGuide,
     resetSurfaceDoubleClickGuard,
     toggleLiveGuide,
@@ -3932,12 +4036,11 @@ export default function VideoPlayer({
     paused,
     resetPlaybackRate,
     runMediaSessionCommand,
-    hasOnlineCaption: Boolean(activeOnlineCaption),
-    selectSubtitleTrack,
-    showSubtitlesPanel,
+    toggleSubtitles,
     skipBackSeconds,
     skipForwardSeconds,
     seekTo,
+    seekWithFeedback,
     toggleMute,
     toggleFullscreen,
     togglePlay,
@@ -4054,6 +4157,26 @@ export default function VideoPlayer({
   const aspectRatio = aspectMode === 'default' ? undefined : aspectMode;
   const cropRatio = cropMode !== 'none' && cropMode !== 'custom' ? cropMode : undefined;
   const videoFrameRatio = cropRatio || aspectRatio;
+  const windowVideoSpecs = mergeVideoSpecs(probedVideoSpecs, factsVideoSpecs(cachedMediaFacts));
+  const sourceVideoWidth = playingVideoSize?.width || windowVideoSpecs.width;
+  const sourceVideoHeight = playingVideoSize?.height || windowVideoSpecs.height;
+  const [forcedWidth, forcedHeight] = videoFrameRatio ? videoFrameRatio.split('/').map(Number) : [];
+  const naturalWindowRatio = sourceVideoWidth && sourceVideoHeight ? sourceVideoWidth / sourceVideoHeight : null;
+  const unrotatedWindowRatio = forcedWidth && forcedHeight ? forcedWidth / forcedHeight : naturalWindowRatio;
+  const playbackWindowRatio = unrotatedWindowRatio && (rotation === 90 || rotation === 270)
+    ? 1 / unrotatedWindowRatio : unrotatedWindowRatio;
+  useEffect(() => {
+    if (activeIframeUrl) {
+      void desktopApi.setPlaybackWindowAspect(playbackWindowSessionId, null).catch(() => undefined);
+    } else if (playbackWindowRatio && Number.isFinite(playbackWindowRatio)) {
+      void desktopApi.setPlaybackWindowAspect(playbackWindowSessionId, playbackWindowRatio).catch(error => {
+        console.warn('[player] Could not fit the window to the video.', error);
+      });
+    }
+  }, [activeIframeUrl, playbackWindowRatio, playbackWindowSessionId]);
+  useEffect(() => () => {
+    void desktopApi.setPlaybackWindowAspect(playbackWindowSessionId, null).catch(() => undefined);
+  }, [playbackWindowSessionId]);
   const videoFrameStyle: React.CSSProperties = videoFrameRatio
     ? { aspectRatio: videoFrameRatio, maxHeight: '100%', width: '100%' }
     : { height: '100%', width: '100%' };
@@ -4346,6 +4469,57 @@ export default function VideoPlayer({
       >
         <div className="loom-player-drag-region" aria-hidden="true" />
 
+        {subtitleHint?.key === onlinePlaybackKey && (
+          <div role="status" aria-live="polite" aria-atomic="true"
+            className="pointer-events-none absolute left-6 top-20 z-40 flex max-w-[calc(100%-3rem)] items-center gap-3 rounded-2xl bg-black/65 px-4 py-3 text-white backdrop-blur-xl">
+            <Subtitles size={22} aria-hidden="true" className="shrink-0" />
+            <div>
+              <p className="text-sm font-medium">{subtitleHint.title}</p>
+              <p className="text-xs text-white/70">{subtitleHint.detail}</p>
+            </div>
+          </div>
+        )}
+
+        {seekFeedback && !volumeIndicatorVisible && !activeIframeUrl && playerState !== 'error' && (
+          <div
+            className={`pointer-events-none absolute top-1/2 z-40 -translate-y-1/2 text-white ${seekFeedback.direction < 0 ? 'left-6' : 'right-6'}`}
+          >
+            <div
+              className={`flex h-8 items-center gap-2.5 text-2xl font-semibold leading-none tabular-nums drop-shadow-md transition-opacity duration-150 motion-reduce:transition-none ${seekFeedback.direction > 0 ? 'flex-row-reverse' : ''} ${seekFeedback.visible ? 'opacity-100' : 'opacity-0'}`}
+              aria-hidden="true"
+            >
+              <span className="relative block h-8 w-8 shrink-0">
+                {!reduceSeekMotion && (
+                  <motion.span
+                    key={seekFeedback.sequence}
+                    className="absolute inset-0 grid place-items-center"
+                    initial={{ opacity: 0.15, x: -seekFeedback.direction * 22 }}
+                    animate={{ opacity: [0.15, 0.55, 0.4, 0], x: [-seekFeedback.direction * 22, -seekFeedback.direction * 12, -seekFeedback.direction * 3, 0] }}
+                    transition={{ duration: 0.52, times: [0, 0.36, 0.78, 1], ease: [0.2, 0.65, 0.3, 1] }}
+                  >
+                    {seekFeedback.direction < 0
+                      ? <ChevronLeft size={32} strokeWidth={2.5} />
+                      : <ChevronRight size={32} strokeWidth={2.5} />}
+                  </motion.span>
+                )}
+                <span className="absolute inset-0 grid place-items-center">
+                  {seekFeedback.direction < 0
+                    ? <ChevronLeft size={32} strokeWidth={2.5} />
+                    : <ChevronRight size={32} strokeWidth={2.5} />}
+                </span>
+              </span>
+              <span className={`flex h-8 w-[5ch] items-center ${seekFeedback.direction > 0 ? 'justify-end' : 'justify-start'}`}>
+                <span className="block -translate-y-px whitespace-nowrap leading-none">
+                  {seekFeedback.direction < 0 ? '−' : '+'}{seekFeedback.seconds}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {seekFeedback ? `${seekFeedback.direction < 0 ? 'Back' : 'Forward'} ${seekFeedback.seconds} seconds` : ''}
+        </span>
+
         <div
           role="status"
           aria-live="polite"
@@ -4464,18 +4638,33 @@ export default function VideoPlayer({
           isLiveStream={isLiveStream}
         />
 
-        {(preparingAddonSource || (playerState === 'loading' && Boolean(filePath))) && (
+        {/* Local seeks use the edge feedback without covering the video. */}
+        {(preparingAddonSource || (playerState === 'loading' && Boolean(filePath)))
+          && (!seekLoading || showStreamingLoadingProgress) && (
           <div
             className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center"
           >
             {addonTarget && position === 0 && artwork?.backdrop ? <img src={artwork.backdrop} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover brightness-[.3]" /> : null}
-            <PlaybackLoadingProgress
-              title={title}
-              logoSources={addonTarget || seekLoading ? pauseLogoSources : undefined}
-              progressPercent={preparingAddonSource ? null : bufferingPercent}
-              status={preparingAddonSource ? 'Finding a playback source...' : statusMessage || 'Buffering video...'}
-
-            />
+            {showStreamingLoadingProgress ? (
+              <PlaybackLoadingProgress
+                title={title}
+                logoSources={addonTarget || seekLoading ? pauseLogoSources : undefined}
+                progressPercent={preparingAddonSource ? null : bufferingPercent}
+                status={preparingAddonSource ? 'Finding a playback source...' : statusMessage || 'Buffering video...'}
+              />
+            ) : (
+              <div role="status" aria-atomic="true" aria-busy="true" aria-live="polite" className="flex flex-col items-center gap-2">
+                <span aria-hidden="true">
+                  <LoomLoader
+                    style={theme.loaderStyle}
+                    className="text-white/85"
+                    markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-6 w-auto' : 'h-10 w-10'}
+                    color="currentColor"
+                  />
+                </span>
+                <p className="text-sm text-white/80">{statusMessage || 'Loading...'}</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -4671,7 +4860,7 @@ export default function VideoPlayer({
           handleProgressKeyDown={handleProgressKeyDown}
           togglePlay={togglePlay}
           toggleTimeDisplay={toggleTimeDisplay}
-          seekTo={seekTo}
+          seekTo={seekWithFeedback}
           toggleMute={toggleMute}
           handleVolume={handleVolume}
           handlePrevEpisode={handlePrevEpisode}

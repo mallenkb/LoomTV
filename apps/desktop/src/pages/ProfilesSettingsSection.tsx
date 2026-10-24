@@ -1,28 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Lock, Plus } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useToast } from '@/components/ToastProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
-import { useLibrary, type MediaItem } from '@/contexts/LibraryContext';
 import ProfileAvatar from '@/components/profiles/ProfileAvatar';
 import PinDigitInput from '@/components/profiles/PinDigitInput';
-import MediaPosterCard from '@/components/MediaPosterCard';
-import MediaRail from '@/components/MediaRail';
-import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { Button } from '@/components/ui/button';
 import { SettingsDialog, SettingsDialogMessage } from '@/components/settings/SettingsDialog';
-import { SettingsBadge, SettingsDisclosure, SettingsGroup, SettingsNote, SettingsPageHeader, SettingsRow, SettingsSwitch } from '@/components/settings/SettingsLayout';
-import type { ProfileListKind } from '@/lib/desktopApi';
+import { SettingsBadge, SettingsGroup, SettingsPageHeader, SettingsRow, SettingsSwitch } from '@/components/settings/SettingsLayout';
 
 const TYPE_LABELS: Record<string, string> = { owner: 'Owner', standard: 'Standard', kid: 'Kids' };
-const titles = (count: number) => `${count.toLocaleString()} ${count === 1 ? 'title' : 'titles'}`;
 
 export default function ProfilesSettingsSection() {
   const {
     activeProfile,
     activeState,
     profiles,
-    lists,
     canCreateProfiles,
     canManageProfiles,
     changeProfilePin,
@@ -30,9 +23,7 @@ export default function ProfilesSettingsSection() {
     openGate,
     selectProfile,
     setAutomaticSignIn,
-    setListEntry,
   } = useProfiles();
-  const { state: libraryState } = useLibrary();
   const confirm = useConfirm();
   const { showToast } = useToast();
   const [showPinSetup, setShowPinSetup] = useState(false);
@@ -40,22 +31,8 @@ export default function ProfilesSettingsSection() {
   const [pinError, setPinError] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
 
-  const byId = useMemo(
-    () => new Map([...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows].map((item) => [item.id, item])),
-    [libraryState.animeShows, libraryState.movies, libraryState.tvShows],
-  );
-  const itemsFor = (kind: ProfileListKind) => lists
-    .filter((entry) => entry.kind === kind)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((entry) => byId.get(entry.mediaId))
-    .filter((item): item is MediaItem => Boolean(item));
-
   if (!activeProfile) return null;
   const people = profiles.filter((profile) => !profile.isGuest);
-  const myListEntries = lists.filter((entry) => entry.kind === 'watchlist');
-  const favoriteEntries = lists.filter((entry) => entry.kind === 'favorite');
-  const myListItems = itemsFor('watchlist');
-  const favoriteItems = itemsFor('favorite');
   const canUsePin = !activeProfile.isGuest;
 
   const switchTo = (profileId: string, hasPin: boolean, name: string) => {
@@ -106,21 +83,9 @@ export default function ProfilesSettingsSection() {
     }
   };
 
-  const clearList = async (kind: ProfileListKind, name: string, entries: typeof lists) => {
-    const ok = await confirm({
-      title: `Clear ${name}?`,
-      description: `Every title in ${name} is removed for ${activeProfile.name}. The titles stay in your library.`,
-      confirmLabel: `Clear ${name}`,
-      destructive: true,
-    });
-    if (!ok) return;
-    for (const entry of entries) await setListEntry(entry.mediaId, kind, false);
-    showToast({ title: `${name} cleared`, tone: 'success' });
-  };
-
   return (
     <div>
-      <SettingsPageHeader title="Profiles" description="Who uses Loom on this device, their PINs, and what each person has saved." />
+      <SettingsPageHeader title="Profiles" description="Who uses Loom on this device and their sign-in settings." />
 
       <SettingsGroup title="This profile">
         <div className="settings-row flex flex-wrap items-center gap-4 px-4 py-4">
@@ -181,41 +146,6 @@ export default function ProfilesSettingsSection() {
             </SettingsRow>
           );
         })}
-      </SettingsGroup>
-
-      <SettingsGroup title="Saved titles" description={`My List and Favorites belong to ${activeProfile.name} and only show for this profile.`}>
-        <SettingsDisclosure
-          title="My List"
-          description={myListEntries.length ? `${titles(myListEntries.length)} saved to watch later.` : 'Use the bookmark button on a movie or show to add one.'}
-          summary={myListEntries.length || undefined}
-          actions={myListEntries.length ? <Button type="button" variant="outline" size="sm" className="settings-destructive-text" onClick={() => void clearList('watchlist', 'My List', myListEntries)}>Clear</Button> : null}
-        >
-          {myListItems.length ? (
-            <div className="py-2">
-              <MediaRail title="My List" variant="modern">
-                {myListItems.slice(0, 24).map((item) => (
-                  <MediaPosterCard key={item.id} item={item} from="/settings" variant="home" metaLine={mediaMetaLine(item)} />
-                ))}
-              </MediaRail>
-            </div>
-          ) : <SettingsNote>Nothing saved yet.</SettingsNote>}
-        </SettingsDisclosure>
-        <SettingsDisclosure
-          title="Favorites"
-          description={favoriteEntries.length ? `${titles(favoriteEntries.length)} marked as favorites.` : 'Use the heart button on a movie or show to add one.'}
-          summary={favoriteEntries.length || undefined}
-          actions={favoriteEntries.length ? <Button type="button" variant="outline" size="sm" className="settings-destructive-text" onClick={() => void clearList('favorite', 'Favorites', favoriteEntries)}>Clear</Button> : null}
-        >
-          {favoriteItems.length ? (
-            <div className="py-2">
-              <MediaRail title="Favorites" variant="modern">
-                {favoriteItems.slice(0, 24).map((item) => (
-                  <MediaPosterCard key={item.id} item={item} from="/settings" variant="home" metaLine={mediaMetaLine(item)} />
-                ))}
-              </MediaRail>
-            </div>
-          ) : <SettingsNote>No favorites yet.</SettingsNote>}
-        </SettingsDisclosure>
       </SettingsGroup>
 
       <SettingsDialog

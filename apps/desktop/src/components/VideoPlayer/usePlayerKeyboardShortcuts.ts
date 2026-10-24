@@ -1,9 +1,8 @@
 import { useEffect, type RefObject } from 'react';
 import { isTopmostModalContent } from '@/components/ui/dialog';
 import type { MediaSessionCommand } from '@/shared/mediaControlProtocol';
-import { firstSubtitleTrackIndex } from './helpers';
 import { isEditableShortcutTarget, isPlayerControlTarget, isSliderShortcutTarget } from './playerControls';
-import type { MediaTrack, PlayerState } from './types';
+import type { PlayerState } from './types';
 
 type LiveControls = { step: (step: number) => void; last: () => void };
 
@@ -14,8 +13,6 @@ type PlayerKeyboardShortcutOptions = {
   isLiveStreamRef: RefObject<boolean>;
   liveControlsRef: RefObject<LiveControls>;
   showLiveGuideRef: RefObject<boolean>;
-  selectedSubtitleTrackIndexRef: RefObject<number>;
-  probeTracksRef: RefObject<MediaTrack[]>;
   setShowLiveGuide: (open: boolean) => void;
   resetSurfaceDoubleClickGuard: () => void;
   toggleLiveGuide: () => void;
@@ -30,12 +27,11 @@ type PlayerKeyboardShortcutOptions = {
   paused: boolean;
   resetPlaybackRate: () => void;
   runMediaSessionCommand: (command: MediaSessionCommand) => void;
-  hasOnlineCaption: boolean;
-  selectSubtitleTrack: (trackIndex: number, temporary?: boolean, onFailure?: () => void) => void;
-  showSubtitlesPanel: () => void;
+  toggleSubtitles: () => void;
   skipBackSeconds: number;
   skipForwardSeconds: number;
   seekTo: (targetSeconds: number) => void;
+  seekWithFeedback: (targetSeconds: number) => void;
   toggleMute: () => void;
   toggleFullscreen: () => void;
   togglePlay: () => void;
@@ -53,8 +49,6 @@ export function usePlayerKeyboardShortcuts({
   isLiveStreamRef,
   liveControlsRef,
   showLiveGuideRef,
-  selectedSubtitleTrackIndexRef,
-  probeTracksRef,
   setShowLiveGuide,
   resetSurfaceDoubleClickGuard,
   toggleLiveGuide,
@@ -69,12 +63,11 @@ export function usePlayerKeyboardShortcuts({
   paused,
   resetPlaybackRate,
   runMediaSessionCommand,
-  hasOnlineCaption,
-  selectSubtitleTrack,
-  showSubtitlesPanel,
+  toggleSubtitles,
   skipBackSeconds,
   skipForwardSeconds,
   seekTo,
+  seekWithFeedback,
   toggleMute,
   toggleFullscreen,
   togglePlay,
@@ -93,6 +86,18 @@ export function usePlayerKeyboardShortcuts({
       && !isEditableShortcutTarget(event.target)
     );
     const onKey = (e: KeyboardEvent) => {
+      // Captions remain available after clicking a player button or slider.
+      if ((e.key === 'c' || e.key === 'C') && !e.metaKey && !e.ctrlKey && !e.altKey
+        && !e.isComposing && !e.defaultPrevented && isTopmostModalContent(containerRef.current)
+        && !isEditableShortcutTarget(e.target) && !isEditableShortcutTarget(document.activeElement)
+        && !(e.target instanceof Element && e.target.closest('select, [role="combobox"], [role="listbox"]'))
+        && !(document.activeElement instanceof Element && document.activeElement.closest('select, [role="combobox"], [role="listbox"]'))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        resetSurfaceDoubleClickGuard();
+        if (!e.repeat && playerStateRef.current !== 'error') toggleSubtitles();
+        return;
+      }
       // M also works when the volume button or slider has keyboard focus.
       if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey
         && !e.isComposing && !e.defaultPrevented && isTopmostModalContent(containerRef.current)
@@ -114,7 +119,7 @@ export function usePlayerKeyboardShortcuts({
         if (playerStateRef.current === 'error') return;
         resetSurfaceDoubleClickGuard();
         const step = e.shiftKey ? 30 : 10;
-        seekTo(playbackPositionRef.current + (e.key === 'ArrowRight' ? step : -step));
+        seekWithFeedback(playbackPositionRef.current + (e.key === 'ArrowRight' ? step : -step));
         return;
       }
       if (e.key === 'Escape' || !ownsShortcut(e)) return;
@@ -193,14 +198,14 @@ export function usePlayerKeyboardShortcuts({
         case 'MediaRewind':
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
-          seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
+          seekWithFeedback(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
           break;
         case 'l':
         case 'L':
         case 'MediaFastForward':
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
-          seekTo(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
+          seekWithFeedback(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
           break;
         case 'MediaPlay':
           resetSurfaceDoubleClickGuard();
@@ -237,20 +242,6 @@ export function usePlayerKeyboardShortcuts({
           e.preventDefault();
           toggleFullscreen();
           break;
-        case 'c':
-        case 'C': {
-          if (hasCommandModifier) break;
-          resetSurfaceDoubleClickGuard();
-          e.preventDefault();
-          if (hasOnlineCaption || selectedSubtitleTrackIndexRef.current !== -1) break;
-          const captionTrackIndex = firstSubtitleTrackIndex(probeTracksRef.current);
-          if (captionTrackIndex === -1) {
-            showSubtitlesPanel();
-            break;
-          }
-          selectSubtitleTrack(captionTrackIndex, false, showSubtitlesPanel);
-          break;
-        }
         case '[':
           resetSurfaceDoubleClickGuard();
           e.preventDefault();
@@ -313,12 +304,11 @@ export function usePlayerKeyboardShortcuts({
     paused,
     resetPlaybackRate,
     runMediaSessionCommand,
-    hasOnlineCaption,
-    selectSubtitleTrack,
-    showSubtitlesPanel,
+    toggleSubtitles,
     skipBackSeconds,
     skipForwardSeconds,
     seekTo,
+    seekWithFeedback,
     toggleMute,
     toggleFullscreen,
     togglePlay,
@@ -328,8 +318,6 @@ export function usePlayerKeyboardShortcuts({
     liveControlsRef,
     playbackPositionRef,
     playerStateRef,
-    probeTracksRef,
-    selectedSubtitleTrackIndexRef,
     setShowLiveGuide,
     showLiveGuideRef,
   ]);

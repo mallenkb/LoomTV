@@ -28,7 +28,7 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   darkTheme: 'black',
   loaderStyle: 'play-mark',
   homeStyle: 'modern',
-  playerControlStyle: 'default',
+  playerControlStyle: 'pill',
   modernHeroMode: 'continue-watching',
   castCardStyle: 'compact',
 };
@@ -154,7 +154,8 @@ export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {})
     darkTheme: normalizeDarkTheme(settings.darkTheme),
     loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
     homeStyle,
-    playerControlStyle: settings.playerControlStyle === 'pill' ? 'pill' : 'default',
+    playerControlStyle: settings.playerControlStyle === 'default' || settings.playerControlStyle === 'pill'
+      ? settings.playerControlStyle : DEFAULT_THEME_SETTINGS.playerControlStyle,
     modernHeroMode: normalizeModernHeroMode(settings.modernHeroMode),
     castCardStyle: normalizeCastCardStyle(settings.castCardStyle),
   };

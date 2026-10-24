@@ -7,7 +7,9 @@ import path from 'node:path';
 import type BetterSqlite3 from 'better-sqlite3';
 import { initializeCanonicalSchema, profileAllowsCanonicalMedia } from 'loom-media-server-headless/native-persistence';
 import { canonicalVideoConnection, openConsolidatedVideoDatabase } from '../src/main/consolidatedVideoDatabase.ts';
-import { loadLibrary, saveLibrary } from '../src/main/databaseLibraryRepository.ts';
+import { loadLibrary, saveLibrary, saveLibraryScanDelta, remapLibraryMediaReferences } from '../src/main/databaseLibraryRepository.ts';
+import { createRenameExecutor } from '../src/main/fileRename/renameExecutor.ts';
+import { createMediaItemId } from '../src/main/libraryItemHelpers.ts';
 import { getAllProgress, getPlaybackTrackPreferences, savePlaybackTrackPreferences, saveProgress } from '../src/main/databasePlaybackRepository.ts';
 import {
   createProfile, deleteProfile, getDeviceProfileSelection, getDeviceSelectionRevision, getOwnerProfile,
@@ -287,6 +289,12 @@ test('restriction updates retain explicit unrestricted age and dedicated root/re
 });
 
 test('SQL translation changes relation identifiers and preserves data, aliases, parameters, and comments', () => {
+  for (const conflict of ['ROLLBACK', 'ABORT', 'FAIL', 'IGNORE', 'REPLACE']) {
+    assert.equal(
+      nativeVideoSql(`UPDATE OR ${conflict} playback_progress SET file_path=? WHERE file_path=?`),
+      `UPDATE OR ${conflict} "native_playback_progress" SET file_path=? WHERE file_path=?`,
+    );
+  }
   const sql = `-- profiles remains a comment
 SELECT profiles.name AS episodes, ':profiles media_items' literal, :profiles parameter
 FROM [profiles] JOIN \`profile_preferences\` AS prefs ON profiles.id=prefs.profile_id
@@ -496,4 +504,56 @@ test('native repositories round-trip library and viewer state through the produc
   assert.equal(getDeviceSelectionRevision(database, 'desktop-test'), revision + 2);
   assert.deepEqual(getAllProgress(database, viewer.id), {});
   assert.equal(getAllProgress(database, ownerProfile.id)['/library/film.mkv']?.position, 30);
+});
+
+
+test('canonical movie organization keeps source identity, progress and lists through rename and undo', (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-canonical-rename-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const database = openConsolidatedVideoDatabase(directory);
+  context.after(() => database.close());
+  const root = path.join(directory, 'Movies');
+  fs.mkdirSync(root);
+  const original = path.join(root, 'Tuner.2025.1080p.WEBRip.mkv');
+  fs.writeFileSync(original, 'local movie fixture');
+  const id = createMediaItemId(original);
+  saveLibrary(database, {
+    movies: [{ id, type: 'movie', title: 'Tuner', year: 2026, poster: '', backdrop: '',
+      summary: '', rating: 7, genres: [], cast: [], filePath: original,
+      providerIds: { imdbId: 'tt33296751' } }],
+    tvShows: [], animeShows: [], libraryFolders: [root],
+    libraryFolderGroups: { movies: [root], tvShows: [], anime: [], others: [] }, scanCache: {},
+  });
+  const owner = getOwnerProfile(database);
+  assert.ok(owner);
+  saveProgress(database, owner.id, original, 30, 600);
+  setProfileListEntry(database, owner.id, id, 'favorite', true);
+  const source = canonicalVideoConnection(database).prepare('SELECT id FROM media_sources WHERE media_id=?').get(id);
+  const executor = createRenameExecutor({
+    getDatabase: () => database,
+    loadLibrary: () => {
+      const library = loadLibrary(database, new Map());
+      assert.ok(library);
+      return library;
+    },
+    saveLibraryMutation: (data) => { saveLibraryScanDelta(database, [...data.movies, ...data.tvShows, ...data.animeShows], [], data.scanCache || {}); },
+    remapMediaIds: (aliases) => remapLibraryMediaReferences(database, aliases),
+    isScanRunning: () => false,
+    libraryRoots: (data) => data.libraryFolders,
+  });
+  const entry = executor.plan().entries.find((candidate) => candidate.mediaId === id && candidate.kind === 'file');
+  assert.ok(entry);
+  const result = executor.apply([entry.id]);
+  assert.equal(result.renamed, 1);
+  assert.ok(fs.existsSync(entry.to));
+  assert.equal(fs.existsSync(original), false);
+  assert.equal(loadLibrary(database, new Map())?.movies[0]?.id, id);
+  assert.equal(getAllProgress(database, owner.id)[entry.to]?.position, 30);
+  assert.equal(getAllProgress(database, owner.id)[original], undefined);
+  assert.equal(getProfileLists(database, owner.id)[0]?.mediaId, id);
+  assert.deepEqual(canonicalVideoConnection(database).prepare('SELECT id FROM media_sources WHERE media_id=?').get(id), source);
+  executor.undo(result.batchId);
+  assert.ok(fs.existsSync(original));
+  assert.equal(getAllProgress(database, owner.id)[original]?.position, 30);
+  assert.equal(getProfileLists(database, owner.id)[0]?.mediaId, id);
 });

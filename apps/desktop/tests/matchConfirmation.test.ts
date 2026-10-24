@@ -18,7 +18,8 @@ import type { MediaItem } from '../src/main/metadata/types.ts';
 
 const movie = { type: 'movie', title: 'One Night Only', year: 2026, providerIds: { tmdbId: '1433367', imdbId: 'tt37853455' } } as const;
 const confirmation = (records: SourceRecord[], item: Pick<MediaItem, 'type' | 'title' | 'year' | 'providerIds'> = movie): MatchConfirmation => ({
-  checkedAt: 0, anchor: confirmationAnchor(item), searchedTitle: item.title, asked: ['tmdb', 'omdb', 'tvdb'], records,
+  checkedAt: 0, anchor: confirmationAnchor(item), searchedTitle: item.title, asked: ['tmdb', 'omdb', 'tvdb', 'cinemeta'], records,
+  localEvidence: { fileTitle: item.title },
 });
 const tmdb: SourceRecord = { source: 'tmdb', ids: { tmdbId: '1433367', imdbId: 'tt37853455' }, title: 'One Night Only', year: 2026 };
 const omdb: SourceRecord = { source: 'omdb', ids: { imdbId: 'tt37853455' }, title: 'One Night Only', year: 2026 };
@@ -34,6 +35,35 @@ test('one source is not enough', () => {
   const verdict = evaluateConfirmation(movie, confirmation([tmdb]));
   assert.equal(verdict.status, 'waiting');
   assert.match(verdict.note, /Only TMDB confirmed/);
+});
+
+test('one provider and the local filename title and year can confirm a movie', () => {
+  const stored = confirmation([tmdb]);
+  stored.localEvidence = { fileTitle: 'One Night Only', fileYear: 2025 };
+  const verdict = evaluateConfirmation(movie, stored);
+  assert.equal(verdict.status, 'confirmed');
+  assert.deepEqual(verdict.confirmedBy, ['tmdb']);
+  assert.match(verdict.note, /local file metadata/);
+});
+
+test('local fallback rejects conflicting titles, years, and embedded identities', () => {
+  for (const evidence of [
+    { fileTitle: 'Another Movie', fileYear: 2026 },
+    { fileTitle: movie.title, fileYear: 2016 },
+    { fileTitle: movie.title, fileYear: 2026, embeddedTitle: 'Another Movie' },
+    { fileTitle: movie.title, fileYear: 2026, embeddedYear: 2016 },
+    { fileTitle: movie.title, fileYear: 2026, providerIds: { imdbId: 'tt0000001' } },
+  ]) {
+    assert.equal(evaluateConfirmation(movie, { ...confirmation([tmdb]), localEvidence: evidence }).status, 'waiting');
+  }
+});
+
+test('embedded identity supports a matching filename without a year', () => {
+  const stored = confirmation([tmdb]);
+  stored.localEvidence = { fileTitle: movie.title, providerIds: { imdbId: movie.providerIds.imdbId } };
+  assert.equal(evaluateConfirmation(movie, stored).status, 'confirmed');
+  assert.equal(evaluateConfirmation(movie, { ...stored, records: [] }).status, 'waiting');
+  assert.equal(evaluateConfirmation(movie, { ...stored, records: [tmdb, { ...omdb, ids: { imdbId: 'tt0000001' } }] }).status, 'conflict');
 });
 
 test('a source that finds a different title blocks the match', () => {
@@ -74,6 +104,35 @@ test('sources are searched with the file name, and answers about other titles ar
 
 test('a loose episode is searched by its series name', () => {
   assert.equal(searchTermsFor({ type: 'tv', filePath: '/tv/SEAL.Team.S05E14.720p.AMZN.WEBRip.mkv', title: 'SEAL Team', year: 2017 }, ['/tv']).title, 'SEAL Team');
+});
+
+test('Cinemeta can corroborate a movie when keyed providers are unavailable', async () => {
+  const tuner = { type: 'movie', title: 'Tuner', year: 2026, providerIds: { imdbId: 'tt33296751', tmdbId: '1340206' } } as const;
+  const result = await gatherConfirmation(tuner, { title: 'Tuner', year: 2025 }, {
+    tmdbMovie: async () => tuner,
+    cinemeta: async (title, year, type) => {
+      assert.deepEqual([title, year, type], ['Tuner', 2025, 'movie']);
+      return [{ title: 'Tuner', year: 2026, providerIds: { imdbId: 'tt33296751' } }];
+    },
+  });
+  assert.equal(evaluateConfirmation(tuner, result).status, 'confirmed');
+  assert.deepEqual(evaluateConfirmation(tuner, result).confirmedBy, ['tmdb', 'cinemeta']);
+});
+
+test('ambiguous Cinemeta search results do not confirm the stored identity', async () => {
+  const result = await gatherConfirmation(movie, { title: movie.title, year: movie.year }, {
+    tmdbMovie: async () => movie,
+    cinemeta: async () => [movie, { ...movie, providerIds: { imdbId: 'tt0000001' } }],
+  });
+  assert.equal(evaluateConfirmation(movie, result).status, 'waiting');
+});
+
+test('old incomplete movie checks refresh immediately to include Cinemeta', () => {
+  const stored = confirmation([tmdb]);
+  stored.asked = ['tmdb', 'omdb', 'tvdb'];
+  assert.equal(confirmationIsFresh(stored, movie, 1), false);
+  stored.records.push(omdb);
+  assert.equal(confirmationIsFresh(stored, movie, 1), true);
 });
 
 test('unconfirmed checks are repeated daily; confirmed ones only when the match changes', () => {

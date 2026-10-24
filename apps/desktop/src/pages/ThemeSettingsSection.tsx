@@ -1,4 +1,6 @@
-import { Captions, Check, Maximize, Play, RotateCcw, RotateCw, SlidersHorizontal, Volume2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Check } from 'lucide-react';
+import PlayerControlBar from '@/components/VideoPlayer/PlayerControlBar';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import { SettingsGroup, SettingsPageHeader, SettingsRow, SettingsSegmented, SettingsSelect, SettingsSwitch } from '@/components/settings/SettingsLayout';
 import { THEME_COLORS, type AppPlayerControlStyle, type AppThemeColor } from '@/lib/theme';
@@ -17,20 +19,38 @@ export type AppearanceController = Pick<SettingsController,
   | 'setShowProviderRatingBadges'
 >;
 
-function PlayerControlPreview({ style }: { style: AppPlayerControlStyle }) {
+const ignorePreviewAction = () => undefined;
+
+function PlayerControlPreview({ style, modern }: { style: AppPlayerControlStyle; modern: boolean }) {
   const { state } = useLibrary();
   const hasBackdrop = (item: (typeof state.movies)[number]) => Boolean(item.backdrop || item.backdropCandidates?.length);
-  const previewItem = state.movies.find(hasBackdrop)
+  const previewItem = state.animeShows.find(hasBackdrop)
     || state.tvShows.find(hasBackdrop)
-    || state.animeShows.find(hasBackdrop)
-    || state.movies[0] || state.tvShows[0] || state.animeShows[0];
+    || state.movies.find(hasBackdrop)
+    || state.animeShows[0] || state.tvShows[0] || state.movies[0];
   const pill = style === 'pill';
-  const time = <span className={cn('whitespace-nowrap text-[10px] tabular-nums text-white/85', pill && 'inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/55 backdrop-blur-xl px-2 py-0')}>23:51 <span className="text-white/50">/ 53:27</span></span>;
-  const group = pill ? 'h-7 rounded-full bg-black/55 backdrop-blur-xl px-2 py-0' : '';
+  const [paused, setPaused] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(0.75);
+  const [position, setPosition] = useState(603);
+  const [showRemainingTime, setShowRemainingTime] = useState(false);
+  const seekSliderRef = useRef<HTMLDivElement>(null);
+  const progressFillRef = useRef<HTMLDivElement>(null);
+  const progressThumbRef = useRef<HTMLDivElement>(null);
+  const scrubTimeHudRef = useRef<HTMLDivElement>(null);
+  const currentTimeTextRef = useRef<HTMLSpanElement>(null);
+  const durationTimeTextRef = useRef<HTMLSpanElement>(null);
+  const playbackPositionRef = useRef(603);
+  const duration = 1470;
+  const seekTo = (seconds: number) => {
+    const next = Math.max(0, Math.min(duration, seconds));
+    playbackPositionRef.current = next;
+    setPosition(next);
+  };
   return (
-    <figure className="min-w-0 w-full md:w-[70%]">
-      <div role="img" aria-label={pill ? 'Pill controls with rounded backgrounds, time after Play, and a full-width timeline.' : 'Default controls with time beside the timeline and buttons on a plain background.'}
-        className="relative h-64 overflow-hidden rounded-xl bg-black text-white sm:h-80">
+    <figure className="min-w-0 w-full">
+      <div role="group" aria-label={`${pill ? 'Pill' : 'Classic'} episode controls preview`}
+        className={cn('loom-player-root relative h-64 overflow-hidden rounded-xl bg-black text-white sm:h-80', pill && 'loom-player-pill', modern && 'loom-player-modern')}>
         {previewItem && (
           <SafeArtwork
             src={backdropSources(previewItem)}
@@ -39,22 +59,55 @@ function PlayerControlPreview({ style }: { style: AppPlayerControlStyle }) {
             imgClassName="h-full w-full object-cover"
           />
         )}
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-        <div aria-hidden="true" className="absolute inset-x-3 bottom-3 space-y-2">
-          <div className="flex items-center gap-2">
-            {!pill && time}
-            <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/20"><div className="h-full w-[45%] rounded-full bg-[var(--loom-accent)]" /></div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2" style={pill ? { zoom: 1.3 } : undefined}>
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className={cn('grid shrink-0 place-items-center', pill && 'h-7 w-7 rounded-full bg-black/55 backdrop-blur-xl')}><Play className={cn('h-4 w-4', !pill && 'fill-current')} /></span>
-              {pill && time}
-              <span className={cn('flex shrink-0 items-center gap-2', group)}><RotateCcw className="h-3 w-3" /><RotateCw className="h-3 w-3" /></span>
-              <span className={cn('flex shrink-0 items-center gap-1.5', group)}><Volume2 className="h-3 w-3" />{!pill && <span className="h-1 w-6 rounded-full bg-[var(--loom-accent)]" />}</span>
-            </div>
-            <span className={cn('flex shrink-0 items-center gap-2', group)}><Captions className="h-3 w-3" /><SlidersHorizontal className="h-3 w-3" /><Maximize className="h-3 w-3" /></span>
-          </div>
-        </div>
+        <PlayerControlBar
+          preview
+          controlStyle={style}
+          filePath="settings-episode-preview"
+          showControls
+          seekSliderRef={seekSliderRef}
+          progressFillRef={progressFillRef}
+          progressThumbRef={progressThumbRef}
+          scrubTimeHudRef={scrubTimeHudRef}
+          currentTimeTextRef={currentTimeTextRef}
+          durationTimeTextRef={durationTimeTextRef}
+          playbackPositionRef={playbackPositionRef}
+          duration={duration}
+          position={position}
+          isLiveStream={false}
+          showRemainingTime={showRemainingTime}
+          progressPct={position / duration * 100}
+          bufferedRanges={[{ start: position, end: Math.min(duration, position + 140) }]}
+          paused={paused}
+          muted={muted}
+          volume={volume}
+          skipBackSeconds={10}
+          skipForwardSeconds={10}
+          hasEpisodes
+          showSidebar={false}
+          showMediaPanel={false}
+          mediaPanelTab="video"
+          fullscreen={false}
+          handleProgressPointerDown={event => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            if (rect.width > 0) seekTo((event.clientX - rect.left) / rect.width * duration);
+          }}
+          handleProgressKeyDown={event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            seekTo(playbackPositionRef.current + (event.key === 'ArrowRight' ? 10 : -10));
+          }}
+          togglePlay={() => setPaused(value => !value)}
+          toggleTimeDisplay={() => setShowRemainingTime(value => !value)}
+          seekTo={seekTo}
+          toggleMute={() => setMuted(value => !value)}
+          handleVolume={setVolume}
+          handlePrevEpisode={() => seekTo(0)}
+          handleNextEpisode={() => seekTo(0)}
+          openEpisodePanel={ignorePreviewAction}
+          openSubtitlesPanel={ignorePreviewAction}
+          openMediaPanel={ignorePreviewAction}
+          toggleFullscreen={ignorePreviewAction}
+        />
       </div>
     </figure>
   );
@@ -121,13 +174,13 @@ export default function ThemeSettingsSection({ controller }: { controller: Appea
           <SettingsSegmented
             label="Player control style"
             value={theme.playerControlStyle}
-            options={[{ value: 'default', label: 'Default' }, { value: 'pill', label: 'Pill' }]}
+            options={[{ value: 'pill', label: 'Pill' }, { value: 'default', label: 'Classic' }]}
             onChange={(playerControlStyle) => void controller.setTheme({ playerControlStyle })}
           />
         </SettingsRow>
         <SettingsRow title="Preview" stacked>
           <div className="w-full">
-            <PlayerControlPreview style={theme.playerControlStyle} />
+            <PlayerControlPreview style={theme.playerControlStyle} modern={modern} />
           </div>
         </SettingsRow>
       </SettingsGroup>

@@ -1,6 +1,9 @@
 import { cachedDesktopRead, queryClient, queryScope, trimQueryCache } from '@/lib/queryClient';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RefreshCw, WifiOff } from 'lucide-react';
+import AddonTitleSearch, { savedAddonSearch } from '@/components/AddonTitleSearch';
+import CatalogNavigation from '@/components/CatalogNavigation';
+import DiscoverFilterPanel from '@/components/DiscoverFilterPanel';
 import { useLocation, useNavigate } from '@/lib/navigation';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -1229,9 +1232,12 @@ export default function PluginDiscover() {
 
 function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) {
   const { theme } = useTheme();
-  const { activeProfile } = useProfiles();
+  const { activeProfile, generation } = useProfiles();
   const [pageQueryScope] = useState(queryScope);
   const location = useLocation();
+  const searchRestoreKey = `${JSON.stringify(pageQueryScope)}:${generation}:discover:${location.key}`;
+  const [searchOpen, setSearchOpen] = useState(() => Boolean(savedAddonSearch(searchRestoreKey)));
+  const filtersId = useId();
   const initialFilterState = useMemo(() => parseDiscoverFilterState(location.search), [location.search]);
   const isHome = mode === 'home';
   const routePath = isHome ? '/' : DISCOVER_ROUTE;
@@ -1266,7 +1272,6 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
     ? initialCachedItems.filter((item) => hasYearMatch(item, initialResolvedYearFilter))
     : []);
   const [loading, setLoading] = useState(() => !initialCachedItems);
-  const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'offline' | 'provider' | 'generic' | null>(null);
   const [trailerItem, setTrailerItem] = useState<StremioPluginCatalogItem | null>(null);
@@ -1289,12 +1294,7 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
   const yearOptions = useMemo(() => releaseYearOptions(), []);
   const isModern = theme.homeStyle === 'modern';
   const frameClass = isModern ? 'loom-modern-content-frame' : 'loom-frame';
-  /* The library routes float a search bar above their frame and use pt-24 to
-     clear it. Discover carries its search inline in a sticky header instead,
-     so it only has to clear the draggable title strip — see
-     .loom-discover-page-frame, which is platform-aware because that strip only
-     exists on macOS. */
-  const topPaddingClass = isModern ? 'pt-6' : 'loom-discover-page-frame';
+  const topPaddingClass = 'pt-24';
   const currentSearch = location.search.startsWith('?') ? location.search.slice(1) : location.search;
 
   useEffect(() => {
@@ -1714,17 +1714,53 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
     void loadCatalog(query, genreFilter, yearFilter, platformFilter, availabilityRegion);
   }, [availabilityRegion, genreFilter, loadCatalog, platformFilter, query, yearFilter]);
 
+  const supportsPlatformFilters = contentType !== 'anime' && Boolean(tmdbCredential);
+  const sectionLabels = usesCinemeta
+    ? { trending: 'Popular', popular: 'Popular', top_rated: 'Featured', new: 'New' }
+    : DISCOVER_SECTION_LABELS;
+  const activeFilterLabels = [
+    ...(section !== 'trending' && !(usesCinemeta && section === 'popular') ? [sectionLabels[section]] : []),
+    ...(genreFilter ? [genreFilter.split(',').map(value => genreOptions.find(option => option.value === value)?.label || value).join(', ')] : []),
+    ...(yearFilter ? [yearFilter] : []),
+    ...(supportsPlatformFilters && platformFilter ? [activeProviderLabel] : []),
+    ...(supportsPlatformFilters && availabilityRegion !== DEFAULT_AVAILABILITY_REGION ? [`Region: ${availabilityRegionLabel}`] : []),
+  ];
+  const resetFilters = () => {
+    setSection('trending');
+    setGenreFilter('');
+    setYearFilter('');
+    setPlatformFilter('');
+    regionWasExplicitRef.current = false;
+    setAvailabilityRegion(DEFAULT_AVAILABILITY_REGION);
+  };
+  const filterFields = [
+    { label: 'Sort by', control: <ThemeDropdown id="discover-sort-panel" label="Sort titles" value={usesCinemeta && section === 'popular' ? 'trending' : section}
+      options={availableSections.map(value => ({ value, label: sectionLabels[value] }))} buttonClassName="!w-full !min-w-0" onChange={value => setSection(value as DiscoverSection)} /> },
+    { label: 'Genres', control: <ThemeDropdown id="discover-genre-panel" label="Filter genre" value={genreFilter}
+      options={[{ value: '', label: 'All genres' }, ...genreOptions]} buttonClassName="!w-full !min-w-0" searchable multiSelect searchPlaceholder="Search genres" emptySearchMessage="No matching genres" onChange={setGenreFilter} /> },
+    { label: 'Release year', control: <ThemeDropdown id="discover-year-panel" label="Filter year" value={yearFilter}
+      options={[{ value: '', label: 'All years' }, ...yearOptions.map(value => ({ value, label: value }))]} buttonClassName="!w-full !min-w-0" searchable searchPlaceholder="Search years" emptySearchMessage="No matching years" onChange={setYearFilter} /> },
+    ...(supportsPlatformFilters ? [
+      { label: 'Streaming platform', control: <ThemeDropdown id="discover-platform-panel" label={`Streaming on in ${availabilityRegionLabel}`} value={platformFilter}
+        options={providerDropdownOptions} buttonClassName="!w-full !min-w-0" searchable searchPlaceholder="Search platforms" emptySearchMessage="No matching platforms" onChange={setPlatformFilter} /> },
+      { label: 'Availability region', control: <ThemeDropdown id="discover-region-panel" label="Streaming availability region" value={availabilityRegion}
+        options={regionDropdownOptions} buttonClassName="!w-full !min-w-0" onChange={value => { regionWasExplicitRef.current = true; setAvailabilityRegion(normalizeAvailabilityRegion(value)); }} /> },
+    ] : []),
+  ];
+
   return (
     <div
       ref={pageRef}
       className={isHome ? 'mt-10' : 'loom-page loom-library-page h-full overflow-y-auto'}
-      onScroll={isHome ? undefined : (event) => setIsHeaderScrolled(event.currentTarget.scrollTop > 4)}
     >
+      {!isHome ? <CatalogNavigation label="Discover categories" items={(Object.keys(DISCOVER_SECTIONS) as DiscoverType[]).map(value => ({ value, label: value === 'tv' ? 'Series' : DISCOVER_TYPE_LABELS[value] }))}
+        value={contentType} onChange={setContentType} searchOpen={searchOpen} onSearch={() => setSearchOpen(true)} /> : null}
       <div className={`${frameClass} ${isHome ? 'rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-5 sm:p-6' : 'loom-library-page-frame page-bottom-safe page-list-bottom-safe'} ${isHome ? 'pt-0' : topPaddingClass}`}>
+        {isHome ? (
         <DiscoverHeader
           title={isHome ? 'Browse more titles' : 'Discover'}
           description={isHome ? 'Browse provider catalogs without leaving Home.' : 'Discover new anime, TV shows, and movies to watch.'}
-          scrolled={isHeaderScrolled}
+          scrolled={false}
           query={isHome ? undefined : query}
           onQueryChange={setQuery}
         >
@@ -1813,6 +1849,18 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
             {historicalTrendingNote && <p className="mt-2 text-xs text-[var(--loom-muted)]">{historicalTrendingNote}</p>}
           </div>
         </DiscoverHeader>
+        ) : (
+          <>
+            <h1 className="sr-only">{contentType === 'tv' ? 'Series' : DISCOVER_TYPE_LABELS[contentType]}</h1>
+            {query ? <button type="button" onClick={() => setQuery('')} className="mb-4 rounded-full border border-[var(--loom-border)] px-3 py-1.5 text-xs text-[var(--loom-muted)]">Clear search: {query}</button> : null}
+            <DiscoverFilterPanel id={filtersId} fields={filterFields} activeCount={activeFilterLabels.length} onReset={resetFilters} />
+            {activeFilterLabels.length ? <div role="status" aria-label="Applied filters" className="mb-4 flex flex-wrap items-center gap-2">
+              {activeFilterLabels.map(label => <span key={label} className="rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface)] px-3 py-1 text-xs text-[var(--loom-muted)]">{label}</span>)}
+            </div> : null}
+            {providerStatusMessage && contentType !== 'anime' && tmdbCredential ? <p role="status" className="mb-4 text-xs text-[var(--loom-muted)]">{providerStatusMessage}</p> : null}
+            {historicalTrendingNote ? <p className="mb-4 text-xs text-[var(--loom-muted)]">{historicalTrendingNote}</p> : null}
+          </>
+        )}
 
         {loading ? (
           <PosterGridShimmer className="mt-4" />
@@ -1841,6 +1889,7 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
           />
         )}
       </div>
+      {!isHome ? <AddonTitleSearch key={`${activeProfile?.id}:${generation}`} restoreKey={searchRestoreKey} open={searchOpen} onOpenChange={setSearchOpen} types={['movie', 'tv', 'anime']} initialFilter="all" onSelect={item => { void openItemDetails(item); }} /> : null}
       <TrailerDialog
         open={Boolean(trailerItem)}
         title={trailerItem?.title || 'Trailer'}

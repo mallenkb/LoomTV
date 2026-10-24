@@ -1939,6 +1939,7 @@ function confirmationSources(): ConfirmationSources {
     (loadMetadataOfflineModeFromDatabase() ?? Boolean(settings.metadataOfflineMode)) ? null : request()
   );
   return {
+    cinemeta: (title, year, type) => online(() => fetchCinemetaMetadataCandidates(title, type, year))(),
     tmdbMovie: (title, year) => online(() => fetchTMDBMovieMetadata(title, year, tmdb))(),
     tmdbShow: (title, year) => online(() => fetchTMDBTVMetadata(title, year, tmdb))(),
     omdb: (title, year, type) => online(() => fetchOMDbMetadata(title, year, omdb, type))(),
@@ -1977,7 +1978,19 @@ async function refreshMatchConfirmations(importId?: string): Promise<void> {
       const stored = matchConfirmations.get(item.id);
       if (stored && confirmationIsFresh(stored, item, now)) continue;
       const likelyAnime = item.type === 'anime' || animeRoots.some((root) => path.resolve(item.filePath).startsWith(root + path.sep));
-      matchConfirmations.set(item.id, await gatherConfirmation(item, searchTermsFor(item, roots), sources, { likelyAnime }));
+      const search = searchTermsFor(item, roots);
+      const probe = item.type === 'movie' ? await probeMediaFileAsync(item.filePath) : undefined;
+      const fileName = cleanMediaTitle(path.basename(item.filePath));
+      matchConfirmations.set(item.id, await gatherConfirmation(item, search, sources, {
+        likelyAnime,
+        ...(probe ? { localEvidence: {
+          fileTitle: fileName.title,
+          fileYear: fileName.year || undefined,
+          embeddedTitle: probe.embeddedTitle,
+          embeddedYear: probe.year,
+          providerIds: probe.providerIds,
+        } } : {}),
+      }));
     }
   })().finally(() => { matchConfirmationRefresh = null; });
   return matchConfirmationRefresh;

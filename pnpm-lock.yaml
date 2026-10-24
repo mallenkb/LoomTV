@@ -187,6 +187,8 @@ catalogs:
       version: 4.6.7
 
 overrides:
+  bittorrent-tracker@11.2.3>ip: '-'
+  '@expo/cli>zod': 4.6.7
   react-dom: 19.3.0
   source-map-js: 1.2.2
   compression: 1.8.2
@@ -213,6 +215,7 @@ overrides:
   xcode>uuid: 11.1.1
 
 patchedDependencies:
+  app-builder-lib@26.15.3: ddf13ee6c2040e48e1591b6b68fd221006a9bfd6077f7ff3eeea1ce6fb808fe1
   bittorrent-tracker@11.2.3: b688f024a2777df6bd5959e56b6f820a58eb915fa33ed360bd48b36561bd54d3
   braces@3.0.3: f74126492b9552c676d4ab5618cf9b074f33b4e6ccb8c8f8c07678ed92a6741f
   node-forge@1.4.0: 050b680788faa8b324e14f0af46ef86414e2294c13c2ef62f12bb1ef2ee74da5
@@ -7116,9 +7119,6 @@ packages:
     resolution: {integrity: sha512-XrBh9ZiQK5mJVRxZBAvD6LwRyAYrK3MFtH3+onyuxFL5hFD44EC3QOmIC1FjTj6H2MMwq46/NAI+NZxLZPZgxg==}
     engines: {node: '>=14.18.0'}
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -7993,7 +7993,7 @@ snapshots:
       toqr: 0.1.1
       wrap-ansi: 7.0.0
       ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      zod: 3.25.76
+      zod: 4.6.7
     optionalDependencies:
       react-native: 0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
@@ -9786,7 +9786,7 @@ snapshots:
 
   any-promise@1.3.0: {}
 
-  app-builder-lib@26.15.3(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1):
+  app-builder-lib@26.15.3(patch_hash=ddf13ee6c2040e48e1591b6b68fd221006a9bfd6077f7ff3eeea1ce6fb808fe1)(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1):
     dependencies:
       '@electron/asar': 3.4.1
       '@electron/fuses': 1.8.0
@@ -10562,7 +10562,7 @@ snapshots:
 
   dmg-builder@26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1):
     dependencies:
-      app-builder-lib: 26.15.3(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
+      app-builder-lib: 26.15.3(patch_hash=ddf13ee6c2040e48e1591b6b68fd221006a9bfd6077f7ff3eeea1ce6fb808fe1)(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
       builder-util: 26.15.3(supports-color@8.1.1)
       fs-extra: 10.1.0
       js-yaml: 4.3.2
@@ -10627,7 +10627,7 @@ snapshots:
 
   electron-builder-squirrel-windows@26.15.3(dmg-builder@26.15.3)(supports-color@8.1.1):
     dependencies:
-      app-builder-lib: 26.15.3(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
+      app-builder-lib: 26.15.3(patch_hash=ddf13ee6c2040e48e1591b6b68fd221006a9bfd6077f7ff3eeea1ce6fb808fe1)(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
       builder-util: 26.15.3(supports-color@8.1.1)
       electron-winstaller: 5.4.0(supports-color@8.1.1)
     transitivePeerDependencies:
@@ -10636,7 +10636,7 @@ snapshots:
 
   electron-builder@26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1):
     dependencies:
-      app-builder-lib: 26.15.3(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
+      app-builder-lib: 26.15.3(patch_hash=ddf13ee6c2040e48e1591b6b68fd221006a9bfd6077f7ff3eeea1ce6fb808fe1)(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
       builder-util: 26.15.3(supports-color@8.1.1)
       builder-util-runtime: 9.7.0(supports-color@8.1.1)
       chalk: 4.1.2
@@ -14030,7 +14030,5 @@ snapshots:
     dependencies:
       '@yuku-toolchain/types': 0.19.0
       yuku-core: 0.19.0
-
-  zod@3.25.76: {}
 
   zod@4.6.7: {}

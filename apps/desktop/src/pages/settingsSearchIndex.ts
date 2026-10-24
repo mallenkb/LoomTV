@@ -64,8 +64,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { section: 'profiles', title: 'Profile PIN', description: 'Protect this profile with four digits', keywords: 'pin password lock code' },
   { section: 'profiles', title: 'Sign in automatically', description: 'Open Loom without choosing a profile', keywords: 'auto login sign in' },
   { section: 'profiles', title: 'Everyone', description: 'Add, edit, and switch profiles', keywords: 'users people owner kids switch add' },
-  { section: 'profiles', title: 'My List', description: 'Saved titles for this profile', keywords: 'watchlist saved bookmark' },
-  { section: 'profiles', title: 'Favorites', description: 'Favorite titles for this profile', keywords: 'heart favorite' },
   { section: 'network', title: 'Local network sharing', description: 'Let phones and computers on this network play your library', keywords: 'lan share network sharing server' },
   { section: 'network', title: 'Require approval for new devices', description: 'Approve devices before they connect', keywords: 'approve approval security' },
   { section: 'network', title: 'Connect a device', description: 'Pair a phone or another computer', keywords: 'pair pin phone mobile qr code' },

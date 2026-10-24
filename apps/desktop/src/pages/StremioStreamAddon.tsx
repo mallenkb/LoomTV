@@ -1,6 +1,6 @@
 import AddonTitleSearch, { savedAddonSearch } from '@/components/AddonTitleSearch';
-import { ChevronRight, Search } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ChevronRight } from 'lucide-react';
+import CatalogNavigation from '@/components/CatalogNavigation';
 import AddonKeepWatching from '@/components/AddonKeepWatching';
 import { useEffect, useState } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
@@ -112,23 +112,8 @@ export default function StremioStreamAddon({ source, onPlay }: { source: Stremio
       </button>
     ) : null}
     <div className={`${modern ? 'loom-modern-content-frame' : 'loom-frame'} loom-library-page-frame page-bottom-safe page-list-bottom-safe pt-24`}>
-      <header className="loom-modern-header loom-no-drag pointer-events-none fixed inset-x-0 top-6 z-50 flex h-12 items-center justify-center px-5">
-        <div className="pointer-events-auto flex max-w-full flex-col items-center gap-3">
-          <div className="flex max-w-full items-center gap-3">
-          <nav aria-label="Add-on categories" className="loom-modern-category-pill loom-no-drag flex h-12 max-w-full items-center rounded-full border p-1 backdrop-blur-xl">
-            {(['all', ...types] as const).map(value => <button key={value} type="button" aria-pressed={type === value}
-              className={`relative inline-flex h-full items-center justify-center rounded-full px-3 text-xs font-semibold transition-colors sm:px-5 ${type === value ? 'loom-modern-category-active' : 'loom-modern-category-idle'}`}
-              onClick={() => { setType(value); setExpanded(null); }}>
-              {type === value ? <motion.span layoutId="addon-category-selection" className="loom-modern-category-selection absolute inset-0 rounded-full" transition={{ type: 'spring', stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden="true" /> : null}
-              <span className="relative z-10">{value === 'all' ? 'All' : labels[value]}</span>
-            </button>)}
-          </nav>
-            <button type="button" aria-label="Search titles" aria-expanded={searchOpen} onClick={() => setSearchOpen(true)} className="loom-modern-category-pill loom-modern-category-idle loom-no-drag grid h-12 w-12 shrink-0 place-items-center rounded-full border backdrop-blur-xl">
-              <Search aria-hidden="true" className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </header>
+      <CatalogNavigation label="Add-on categories" items={(['all', ...types] as const).map(value => ({ value, label: value === 'all' ? 'All' : labels[value] }))}
+        value={type} onChange={value => { setType(value); setExpanded(null); }} searchOpen={searchOpen} onSearch={() => setSearchOpen(true)} />
       <AddonTitleSearch restoreKey={searchRestoreKey} key={`${activeProfile?.id}:${generation}`} open={searchOpen} onOpenChange={setSearchOpen} types={types} initialFilter={type} onSelect={open} />
       {type === 'all' && !expanded && <AddonKeepWatching addonId={source.addonId} onPlay={onPlay} />}
       {sections.filter(section => !expanded || section.id === expanded).map(section => <CatalogSection key={`${activeProfile?.id}:${generation}:${source.revision}:${section.id}`} section={section} search={search} expanded={expanded === section.id} onExpand={() => setExpanded(section.id)} onSelect={open} />)}

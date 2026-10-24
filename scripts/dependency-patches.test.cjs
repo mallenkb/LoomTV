@@ -5,6 +5,40 @@ const { createRequire } = require('node:module')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
+test('Expo CLI plugin and MCP schemas work with the fixed Zod resolution', () => {
+  const cliRequire = createRequire(require.resolve('@expo/cli/package.json'))
+  const { PluginSchema, DevToolsPluginOutputSchema } = cliRequire('./build/src/start/server/DevToolsPlugin.schema.js')
+  const { createMCPDevToolsExtensionSchema } = cliRequire('./build/src/start/server/createMCPDevToolsExtensionSchema.js')
+  const plugin = {
+    packageName: 'fixture-tools', packageRoot: '/fixture',
+    cliExtensions: {
+      description: 'Fixture commands', entryPoint: 'cli.js', commands: [{
+        name: 'inspect', title: 'Inspect', environments: ['cli', 'mcp'],
+        parameters: [{ name: 'limit', type: 'number' }, { name: 'confirm', type: 'confirm' }, { name: 'query', type: 'text' }],
+      }],
+    },
+  }
+  assert.equal(PluginSchema.safeParse(plugin).success, true)
+  assert.equal(PluginSchema.safeParse({ ...plugin, packageName: '' }).success, false)
+  assert.equal(DevToolsPluginOutputSchema.safeParse([{ type: 'text', text: 'Ready', level: 'info' }]).success, true)
+  assert.equal(DevToolsPluginOutputSchema.safeParse([{ type: 'text', text: 1, level: 'info' }]).success, false)
+  const schema = createMCPDevToolsExtensionSchema(plugin)
+  const command = { command: 'inspect', limit: 2, confirm: true, query: 'fixture' }
+  assert.deepEqual(schema.parse(command), command)
+  assert.equal(schema.safeParse({ command: 'unknown' }).success, false)
+  assert.equal(schema.safeParse({ ...command, limit: 'two' }).success, false)
+  assert.equal(schema.safeParse({ ...command, unexpected: true }).success, false)
+})
+
+test('Expo CLI rejects oversized bounded collections before walking their elements', () => {
+  const cliRequire = createRequire(require.resolve('@expo/cli/package.json'))
+  const { z } = cliRequire('zod')
+  let parsed = 0
+  const schema = z.array(z.preprocess(value => { parsed += 1; return value }, z.string())).max(2)
+  assert.equal(schema.safeParse(['a', 'b', 'c', 'd']).success, false)
+  assert.equal(parsed, 0)
+})
+
 // Resolve the actual package used by each production-listed mobile build tool.
 // Missing or unapplied patches must fail CI instead of silently keeping a waiver.
 const workspaceRoot = path.resolve(__dirname, '..')

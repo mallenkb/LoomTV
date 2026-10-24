@@ -64,6 +64,16 @@ export type PlaybackViewport = {
   height: number;
   /** Measured subtitle shape in viewport-local CSS pixels, for native GPU blur. */
   subtitleBlur?: SubtitleBlurRegion | null;
+  /** Control backgrounds in window CSS pixels, composited above native video. */
+  controlBackdrops?: PlaybackControlBackdrop[];
+};
+
+export type PlaybackControlBackdrop = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  cornerRadius: number;
 };
 
 export type SubtitleBlurRegion = {

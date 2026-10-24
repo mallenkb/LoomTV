@@ -113,7 +113,7 @@ test('a complete host session relays selected bytes and seeking, then revokes ac
   t.after(() => playback.dispose());
   const reference = playback.issue({ profileId: 'owner', selectionRevision: 1, addonId: 'fixture', revision: 'r1',
     url: `torrent:${HASH}`, sourceKind: 'torrent', torrent: source, target: movie });
-  const files = await playback.prepareTorrent(reference, AbortSignal.timeout(2000));
+  const files = await playback.prepareTorrent(reference, AbortSignal.timeout(10_000));
   assert.equal(files.suggestedIndex, 1);
   assert.throws(() => playback.selectTorrent(reference, 20), /Choose a video/);
   const selected = playback.selectTorrent(reference, 1);

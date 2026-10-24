@@ -11,7 +11,7 @@ import {
   registerNativeVideoFunctions,
 } from 'loom-media-server-headless/native-persistence';
 import { migrateDatabase } from './databaseMigrations.ts';
-import { createNativeVideoSchema, nativeVideoSql, nativeVideoTables } from './nativeVideoSchema.ts';
+import { createNativeVideoSchema, nativeVideoSql, nativeVideoTables, repairNativeMovieProjection } from './nativeVideoSchema.ts';
 import { importLegacyVideoJson } from './legacyVideoJson.ts';
 
 const ident = (name: string) => `"${name.replaceAll('"', '""')}"`;
@@ -550,6 +550,7 @@ export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Da
           | undefined)
       : undefined;
     if (already?.value === '1') {
+      repairNativeMovieProjection(database);
       verify(database);
       return nativeDatabaseFacade(database);
     }

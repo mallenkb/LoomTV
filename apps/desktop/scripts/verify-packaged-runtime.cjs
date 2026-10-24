@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const asar = require('@electron/asar');
 const { bridgeProblems } = require('./libmpv-bridge.cjs');
+const { packagedDependencyProblems } = require('./verify-packaged-module-dependencies.cjs');
 
 const root = process.cwd();
 const outDir = path.join(root, 'out');
@@ -448,6 +449,8 @@ const appFiles = exists(appAsar)
   ? new Set(asar.listPackage(appAsar).map((entry) => entry.replace(/\\/g, '/')))
   : new Set();
 const requiredAsarEntries = [
+  '/.vite/build/torrent-worker.mjs',
+  '/node_modules/webtorrent/index.js',
   '/node_modules/better-sqlite3/lib/index.js',
   '/node_modules/builder-util-runtime/out/index.js',
   '/node_modules/electron-updater/out/main.js',
@@ -466,7 +469,12 @@ for (const entry of requiredAsarEntries) {
   if (!appFiles.has(entry)) fail(`Missing ${entry} in app.asar`);
 }
 
+if (exists(appAsar)) {
+  for (const problem of packagedDependencyProblems(appAsar, ['webtorrent'])) fail(problem);
+}
+
 const requiredUnpacked = [
+  path.join(unpacked, 'node_modules', 'node-datachannel', 'build', 'Release', 'node_datachannel.node'),
   path.join(unpacked, 'node_modules', 'better-sqlite3', 'prebuilds', `${platform}-${arch}.node`),
   // koffi's prebuilt binding. LibVLC's native window host and all three system
   // media sessions (macOS MediaPlayer, Windows SMTC, Linux MPRIS) go through it.
