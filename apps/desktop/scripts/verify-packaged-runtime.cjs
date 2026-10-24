@@ -492,7 +492,7 @@ for (const candidate of requiredUnpacked) {
   if (!exists(candidate)) fail(`Missing unpacked runtime file: ${candidate}`);
 }
 
-const sqliteNative = requiredUnpacked[0];
+const sqliteNative = path.join(unpacked, 'node_modules', 'better-sqlite3', 'prebuilds', `${platform}-${arch}.node`);
 // A host Electron cannot load another architecture's addon. Check its Mach-O
 // slice when inspecting an Intel Mac package from an Apple-silicon CI runner.
 if (platform === 'darwin') {

@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { buildScanner } = require('./build-scanner.cjs');
+const { stageDatachannel } = require('./stage-datachannel.cjs');
 const { UPDATE_CONFIG } = require('../../../scripts/release-identity.cjs');
 
 function resourcesPath(appOutDir, platform) {
@@ -95,6 +96,7 @@ exports.default = async function ensureUpdateConfig(context) {
   pruneUnsupportedLibMpv(resourcesPath(context.appOutDir, platform), platform, arch);
   thinMacUniversalBinaries(resourcesPath(context.appOutDir, platform), platform, arch);
   pruneUnpackedNativeModules(resourcesPath(context.appOutDir, platform), platform, arch);
+  await stageDatachannel(resourcesPath(context.appOutDir, platform), platform, arch);
   const target = path.join(resourcesPath(context.appOutDir, context.electronPlatformName), 'app-update.yml');
   const hadExistingConfig = fs.existsSync(target);
   const actual = hadExistingConfig ? fs.readFileSync(target, 'utf8') : undefined;

@@ -1,4 +1,5 @@
-const path = require('node:path').posix;
+const nativePath = require('node:path');
+const path = nativePath.posix;
 const asar = require('@electron/asar');
 const semver = require('semver');
 
@@ -13,7 +14,7 @@ function packagedDependencyProblems(archive, roots) {
     const filename = path.join(directory, 'package.json');
     if (!files.has(filename)) return null;
     if (!manifests.has(directory)) {
-      manifests.set(directory, JSON.parse(asar.extractFile(archive, filename.slice(1)).toString('utf8')));
+      manifests.set(directory, JSON.parse(asar.extractFile(archive, nativePath.normalize(filename.slice(1))).toString('utf8')));
     }
     return manifests.get(directory);
   };
