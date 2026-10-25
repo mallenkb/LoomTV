@@ -290,7 +290,14 @@ jobs:
       - name: Read Electron version
         id: electron-version
         shell: bash
-        run: echo "version=$(node -p "require('./apps/desktop/node_modules/electron/package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const electronPackage = require.resolve('electron/package.json', { paths: [process.cwd() + '/apps/desktop'] });
+          const version = require(electronPackage).version;
+          if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Missing or invalid Electron version');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
 
       - name: Cache Electron downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -300,6 +307,16 @@ jobs:
             ~/.cache/electron
             ~/AppData/Local/electron/Cache
           key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron-version.outputs.version }}
+
+      # Cache only downloaded archives. The fetcher checks each SHA-256 before
+      # extraction and rebuilds the bridge from the current checkout.
+      - name: Restore native runtime archives
+        if: runner.os != 'Linux'
+        id: native-runtime-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/loom-native-runtimes
+          key: native-runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/desktop/native-runtimes.json') }}
 
       - name: Cache Rust scanner build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -340,6 +357,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact }}-${{ github.sha }}-${{ github.run_attempt }}
+          # Installers are already compressed; avoid recompressing the upload archive.
+          compression-level: 0
           path: |
             apps/desktop/out/builder/**/*.dmg
             apps/desktop/out/builder/**/*.zip
@@ -352,3 +371,11 @@ jobs:
             apps/desktop/out/builder/**/*.yaml
           if-no-files-found: error
           retention-days: 7
+
+      # Only successful main pushes populate the archives used by release jobs.
+      - name: Save native runtime archives
+        if: runner.os != 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.native-runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/loom-native-runtimes
+          key: ${{ steps.native-runtime-cache.outputs.cache-primary-key }}

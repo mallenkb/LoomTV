@@ -9,9 +9,9 @@ const LEGACY_APP_BUNDLE_NAME = 'LoomTV.app';
 
 /**
  * Keep the macOS update ZIP consumable by LoomTV 1.0.36's fallback installer.
- * That shipped helper requires a top-level LoomTV.app even though the product
- * has since been renamed to LoomTV. DMGs and the signed bundle keep
- * the current product name; only the updater ZIP's outer directory is renamed.
+ * That shipped helper requires a top-level LoomTV.app. If the archive already
+ * uses that name, preserve its bytes and electron-builder's update information.
+ * Otherwise rename only the updater ZIP's outer app directory.
  */
 exports.default = async function prepareMacUpdateArchive(event) {
   if (process.platform !== 'darwin' || !event.file.endsWith('.zip')) return;
@@ -32,9 +32,12 @@ exports.default = async function prepareMacUpdateArchive(event) {
 
     const currentBundlePath = path.join(extractDir, appBundles[0].name);
     const legacyBundlePath = path.join(extractDir, LEGACY_APP_BUNDLE_NAME);
-    if (currentBundlePath !== legacyBundlePath) {
-      await fs.promises.rename(currentBundlePath, legacyBundlePath);
+    if (currentBundlePath === legacyBundlePath) {
+      // Avoid a second compression pass for each Mac architecture. Leaving the
+      // ZIP untouched also keeps its original checksum and blockmap valid.
+      return;
     }
+    await fs.promises.rename(currentBundlePath, legacyBundlePath);
 
     await execFileAsync('/usr/bin/ditto', [
       '-c',
