@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.36](docs/releases/v2.0.36.md)
+
+Cuts repeated download and compression work in release builds while keeping all installer formats.
+
 ### [2.0.35](docs/releases/v2.0.35.md)
 
 Keeps season accordion expansion in view and prevents the episode list from resetting the page scroll.
