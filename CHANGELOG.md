@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.35](docs/releases/v2.0.35.md)
+
+Keeps season accordion expansion in view and prevents the episode list from resetting the page scroll.
+
 ### [2.0.34](docs/releases/v2.0.34.md)
 
 Removes horizontal trackpad swipe seeking from the player while keeping timeline dragging and the seek controls.
