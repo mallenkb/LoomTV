@@ -6,7 +6,6 @@ export default function VirtualEpisodeList({ id, children }: { id: string; child
   const rows = Children.toArray(children);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [margin, setMargin] = useState(0);
-  const [focusIndex, setFocusIndex] = useState<number | null>(null);
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -22,8 +21,20 @@ export default function VirtualEpisodeList({ id, children }: { id: string; child
     if (root.parentElement) observer.observe(root.parentElement);
     return () => observer.disconnect();
   }, []);
+  return <div ref={rootRef} style={scroller ? undefined : { height: rows.length * 112 }}>
+    {scroller && <MeasuredEpisodeList id={id} rows={rows} scroller={scroller} margin={margin} />}
+  </div>;
+}
+
+function MeasuredEpisodeList({ id, rows, scroller, margin }: {
+  id: string; rows: ReactNode[]; scroller: HTMLElement; margin: number;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [focusIndex, setFocusIndex] = useState<number | null>(null);
   const virtual = useVirtualizer({
     count: rows.length, getScrollElement: () => scroller, estimateSize: () => 112,
+    // A newly opened season shares a page that may already be scrolled.
+    initialOffset: () => scroller.scrollTop,
     scrollMargin: margin, overscan: 3,
     getItemKey: index => {
       const row = rows[index];

@@ -5,7 +5,7 @@ import { queryClient, queryScope } from '@/lib/queryClient';
 import VirtualEpisodeList from '@/components/VirtualEpisodeList';
 import ShowUpdatesPanel from '@/components/ShowUpdatesPanel';
 import { useEpisodeUpdates } from '@/lib/useEpisodeUpdates';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from '@/lib/navigation';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown, ListVideo } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
@@ -444,6 +444,7 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     return card && cached?.revision === state.catalogRevision ? cached.item : card;
   });
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
+  const accordionAnchorRef = useRef<{ season: number; page: HTMLElement; top: number } | null>(null);
   const accordionPageKeyRef = useRef('');
   const accordionWasToggledRef = useRef(false);
   const progressTick = useProgressRefreshRevision();
@@ -613,7 +614,46 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, kind, mediaId, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
 
-  const toggleSeason = (seasonNumber: number) => {
+  useLayoutEffect(() => {
+    const anchor = accordionAnchorRef.current;
+    accordionAnchorRef.current = null;
+    if (!anchor) return;
+
+    const trigger = anchor.page.querySelector<HTMLElement>(`[data-season-accordion-trigger="${anchor.season}"]`);
+    if (!trigger) return;
+
+    const offset = trigger.getBoundingClientRect().top - anchor.top;
+
+    const previousScrollBehavior = anchor.page.style.scrollBehavior;
+    anchor.page.style.scrollBehavior = 'auto';
+    anchor.page.scrollTop += offset;
+    anchor.page.style.scrollBehavior = previousScrollBehavior;
+
+    if (expandedSeason !== anchor.season) return;
+    // Wait for the episode virtualizer to attach before revealing its first rows.
+    const frame = window.requestAnimationFrame(() => {
+      const bounds = anchor.page.getBoundingClientRect();
+      const header = trigger.getBoundingClientRect();
+      const top = bounds.top + 104;
+      const bottom = bounds.bottom - 24;
+      const previewHeight = Math.min(224, Math.max(0, bottom - top - header.height));
+      const revealBy = header.top < top
+        ? header.top - top
+        : Math.min(header.top - top, Math.max(0, header.bottom + previewHeight - bottom));
+      if (Math.abs(revealBy) < 1) return;
+      anchor.page.scrollBy({
+        top: revealBy,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expandedSeason]);
+
+  const toggleSeason = (seasonNumber: number, trigger: HTMLButtonElement) => {
+    const page = trigger.closest<HTMLElement>('.loom-detail-page');
+    accordionAnchorRef.current = page
+      ? { season: seasonNumber, page, top: trigger.getBoundingClientRect().top }
+      : null;
     accordionWasToggledRef.current = true;
     setExpandedSeason((current) => current === seasonNumber ? null : seasonNumber);
   };
@@ -1256,9 +1296,10 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
                     <div className="relative">
                     <button
                       type="button"
-                      onClick={() => toggleSeason(season.number)}
+                      onClick={(event) => toggleSeason(season.number, event.currentTarget)}
                       aria-expanded={isExpanded}
                       aria-controls={`season-${season.number}-episodes`}
+                      data-season-accordion-trigger={season.number}
                       data-shared-highlight-item
                       data-shared-highlight-id={String(season.number)}
                       className={`relative z-10 flex w-full items-center text-left p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${hasFiles ? 'pr-40' : ''}`}

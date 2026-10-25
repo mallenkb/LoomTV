@@ -858,6 +858,8 @@ body.platform-darwin .loom-photo-viewer-header {
 
 .loom-shared-highlight-season-cards {
   --loom-shared-highlight-background: transparent;
+  /* Keep virtual row size changes from triggering browser scroll anchoring. */
+  overflow-anchor: none;
 }
 
 .loom-season-accordion {
