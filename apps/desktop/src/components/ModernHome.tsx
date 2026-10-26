@@ -1,12 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Link, useLocation, useNavigate } from '@/lib/navigation';
-import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Search, Star, X } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation } from '@/lib/navigation';
+import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Star } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import MediaPosterCard from '@/components/MediaPosterCard';
-import VirtualPosterGrid from '@/components/VirtualPosterGrid';
+import LibrarySearch from '@/components/LibrarySearch';
 import ProviderMark from '@/components/ProviderMark';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaRail from '@/components/MediaRail';
@@ -14,7 +14,6 @@ import ContinueWatchingCard from '@/components/ContinueWatchingCard';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { backdropSources, logoSources, posterSources, routeArtworkState, uniqueArtworkSources } from '@/lib/artwork';
-import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { resetProgress, useProgressSnapshot } from '@/lib/progress';
 import { useTheme } from '@/components/ThemeProvider';
 import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
@@ -29,7 +28,6 @@ import {
 } from '@/lib/libraryFilters';
 import { useLibraryItemOrder } from '@/lib/libraryItemOrder';
 import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
-import { useModalLayer } from '@/components/ui/dialog';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 import WatchedToggle from '@/components/WatchedToggle';
@@ -51,7 +49,6 @@ export default function ModernHome() {
   const { theme } = useTheme();
   const progress = useProgressSnapshot();
   const location = useLocation();
-  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
@@ -66,10 +63,6 @@ export default function ModernHome() {
   }, []);
   const [libraryActionError, setLibraryActionError] = useState('');
   const prefersReducedMotion = useReducedMotion();
-  const searchControlRef = useRef<HTMLDivElement | null>(null);
-  const searchOverlayRef = useRef<HTMLDivElement | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const resultsGridRef = useRef<HTMLDivElement | null>(null);
   const homeScrollRef = useRef<HTMLDivElement | null>(null);
   const {
     movies: allMovies,
@@ -109,12 +102,7 @@ export default function ModernHome() {
     () => movies.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
     [activeFilter, listState, movies, progress],
   );
-  const normalizedQuery = searchQuery(query);
   const currentRoute = `${location.pathname}${location.search}`;
-  const results = useMemo(
-    () => normalizedQuery ? visibleItems.filter((item) => matchesMediaItem(item, normalizedQuery)) : [],
-    [normalizedQuery, visibleItems],
-  );
   const continueWatching = useMemo(
     () => selectContinueWatchingItems(visibleItems, progress),
     [progress, visibleItems],
@@ -185,26 +173,6 @@ export default function ModernHome() {
   }, [heroAutoRotates, heroItems.length]);
 
   useEffect(() => {
-    const routeState = location.state as { openLibrarySearch?: boolean } | null;
-    if (!routeState?.openLibrarySearch) return;
-
-    setSearchOpen(true);
-    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
-  }, [location.pathname, location.search, location.state, navigate]);
-
-  useEffect(() => {
-    if (!searchOpen) return undefined;
-
-    const dismissSearch = (event: PointerEvent) => {
-      if (!searchControlRef.current?.contains(event.target as Node)) setSearchOpen(false);
-    };
-    document.addEventListener('pointerdown', dismissSearch);
-    return () => {
-      document.removeEventListener('pointerdown', dismissSearch);
-    };
-  }, [searchOpen]);
-
-  useEffect(() => {
     const scrollElement = homeScrollRef.current;
     if (!scrollElement) return;
 
@@ -224,97 +192,12 @@ export default function ModernHome() {
     };
   }, []);
 
-  useModalLayer({
-    open: searchOpen,
-    contentRef: searchOverlayRef,
-    onEscape: () => setSearchOpen(false),
-    initialFocusRef: searchInputRef,
-  });
-
   return (
     <div ref={homeScrollRef} className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
-      {!searchOpen && (
-        <div className="loom-library-search-slot loom-no-drag pointer-events-auto fixed right-5 top-6 z-[55]">
-          <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
-        </div>
-      )}
-      <AnimatePresence>
-        {searchOpen && (
-          <motion.div
-            key="library-search-overlay"
-            ref={searchOverlayRef}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="library-search-title"
-            aria-describedby="library-search-description"
-            tabIndex={-1}
-            data-modal-layer="library-search"
-            className="loom-no-drag loom-modern-search-overlay fixed inset-0 z-[60] overflow-y-auto px-6 pb-12 pt-[12vh] backdrop-blur-xl"
-          >
-            <div ref={searchControlRef} className="mx-auto w-full max-w-5xl">
-              <h2 id="library-search-title" className="sr-only">Search your library</h2>
-              <p id="library-search-description" className="sr-only">Search titles in the local library and move through matching results.</p>
-              <div className="loom-modern-search-control flex h-16 items-center rounded-2xl border px-5 shadow-2xl">
-                <Search className="h-6 w-6 shrink-0 text-[var(--loom-muted)]" />
-                <input
-                  ref={searchInputRef}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    // Down from the field drops into the results, so the whole
-                    // search flow works without reaching for the mouse.
-                    if (event.key !== 'ArrowDown') return;
-                    const firstResult = resultsGridRef.current?.querySelector<HTMLAnchorElement>('a[href]');
-                    if (!firstResult) return;
-                    event.preventDefault();
-                    firstResult.focus();
-                  }}
-                  placeholder="Find movies, shows, and more"
-                  autoComplete="off"
-                  autoFocus
-                  aria-label="Find movies, shows, and more"
-                  className="loom-modern-search-input h-16 min-w-0 flex-1 bg-transparent px-4 text-lg text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)]"
-                />
-                <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">
-                  <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
-                </div>
-                <button type="button" onClick={() => { setQuery(''); setSearchOpen(false); }} aria-label="Close search" className="grid h-10 w-10 place-items-center rounded-full text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              {normalizedQuery ? (
-                <SearchResults items={results} query={query} from={currentRoute} isLoading={isLoading} overlay gridRef={resultsGridRef} onExitTop={() => searchInputRef.current?.focus()} />
-              ) : (
-                <>
-                  <div className="loom-mobile-search-landing">
-                    {visibleTVShows.length > 0 && (
-                      <PosterRail title="Popular TV" items={visibleTVShows} from={currentRoute} />
-                    )}
-                    <PosterRail
-                      title="For You"
-                      items={visibleSavedItems.length > 0 ? visibleSavedItems : visibleItems}
-                      from={currentRoute}
-                    />
-                    {visibleMovies.length > 0 && (
-                      <PosterRail title="Drama! Drama! Drama!" items={visibleMovies} from={currentRoute} />
-                    )}
-                  </div>
-                  <p className="loom-modern-search-empty-hint pt-8 text-center text-sm text-[var(--loom-muted)]">
-                    Search anime, TV shows, and movies
-                  </p>
-                </>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {!searchOpen && normalizedQuery ? (
-        <SearchResults items={results} query={query} from={currentRoute} isLoading={isLoading} />
-      ) : !searchOpen && hero ? (
+      <LibrarySearch value={query} onChange={setQuery} open={searchOpen} onOpenChange={setSearchOpen}
+        placeholder="Search your library" localItems={visibleItems} showModernSearchTrigger={false}
+        rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />} />
+      {hero ? (
         <>
           <Hero
             item={hero}
@@ -341,9 +224,9 @@ export default function ModernHome() {
             {visibleMovies.length > 0 && <PosterRail title="Movies" items={visibleMovies} from={currentRoute} />}
           </main>
         </>
-      ) : !searchOpen && isLoading ? (
+      ) : isLoading ? (
         <ModernHomeSkeleton />
-      ) : !searchOpen && activeFilter !== 'all' && visibleItems.length === 0 ? (
+      ) : activeFilter !== 'all' && visibleItems.length === 0 ? (
         <div className="px-[var(--loom-frame-inset)] pt-24">
           <div className="flex min-h-[22rem] items-center justify-center">
             <div className="max-w-lg text-center">
@@ -353,7 +236,7 @@ export default function ModernHome() {
             </div>
           </div>
         </div>
-      ) : !searchOpen ? (
+      ) : (
         <div className="px-[var(--loom-frame-inset)] pt-24">
           <div className="flex min-h-[22rem] items-center justify-center">
             <div className="max-w-lg text-center">
@@ -365,7 +248,7 @@ export default function ModernHome() {
             </div>
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -801,41 +684,5 @@ function ContinueWatchingRail({
         <ContinueWatchingCard key={item.id} item={item} from={from} progress={progress} />
       ))}
     </MediaRail>
-  );
-}
-
-type SearchResultsProps = {
-  items: MediaItem[];
-  query: string;
-  from: string;
-  isLoading: boolean;
-  overlay?: boolean;
-  gridRef?: RefObject<HTMLDivElement | null>;
-  /** Called when Up is pressed from the first row, to hand focus back. */
-  onExitTop?: () => void;
-};
-
-function SearchResults({ items, query, from, isLoading, overlay = false, gridRef, onExitTop }: SearchResultsProps) {
-  return (
-    <main className={overlay ? 'w-full pb-10 pt-10' : 'loom-modern-content-frame page-bottom-safe px-[var(--loom-frame-inset)] pb-10 pt-28'}>
-      <h1 className={overlay ? 'text-2xl font-bold tracking-tight' : 'text-3xl font-bold tracking-tight'}>Search results</h1>
-      <p className="mt-2 text-sm text-[var(--loom-muted)]" aria-live="polite">{items.length} {items.length === 1 ? 'title' : 'titles'} matching “{query}”</p>
-      <div ref={gridRef} className="mt-8">
-        <VirtualPosterGrid
-          items={items}
-          keyboardNavigation
-          onExitTop={onExitTop}
-          renderItem={(item) => (
-            <MediaPosterCard
-              item={item}
-              from={from}
-              variant="movies"
-              metaLine={mediaMetaLine(item)}
-            />
-          )}
-        />
-      </div>
-      {!isLoading && items.length === 0 && <p className="py-20 text-center text-[var(--loom-muted)]">No local matches found</p>}
-    </main>
   );
 }

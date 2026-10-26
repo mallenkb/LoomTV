@@ -4,13 +4,14 @@ import StremioPosterCard from '@/components/StremioPosterCard';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 
-export function DiscoverHeader({ title, description, scrolled, query, onQueryChange, children }: {
+export function DiscoverHeader({ title, description, scrolled, query, onQueryChange, searchResults, children }: {
   title: string;
   description: string;
   scrolled: boolean;
   query?: string;
   onQueryChange?: (value: string) => void;
   children?: ReactNode;
+  searchResults?: ReactNode;
 }) {
   return (
     <header className={`loom-library-page-heading sticky top-0 z-40 isolate mb-6 flex min-h-8 shrink-0 flex-wrap items-start justify-between gap-4 border-b bg-[var(--loom-bg)] py-3 backdrop-blur-xl transition-[border-color,box-shadow] duration-150 ${scrolled ? 'border-[var(--loom-border)] shadow-[0_12px_24px_-22px_rgb(0_0_0_/_0.9)]' : 'border-transparent'}`}>
@@ -20,7 +21,7 @@ export function DiscoverHeader({ title, description, scrolled, query, onQueryCha
           <p className="mt-1 text-sm text-[var(--loom-muted)]">{description}</p>
         </div>
         {query !== undefined && onQueryChange ? (
-          <LibrarySearch value={query} onChange={onQueryChange} placeholder="Search titles" placement="inline" />
+          <LibrarySearch value={query} onChange={onQueryChange} placeholder="Search titles" placement="inline" resultContent={searchResults} />
         ) : null}
       </div>
       {children}

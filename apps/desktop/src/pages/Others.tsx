@@ -213,35 +213,7 @@ function OthersContent({ onPlay }: OthersProps) {
     }
   };
 
-  return (
-    <LibraryPageLayout
-      title={visibleTitle}
-      subtitle={visibleFolders.length > 0
-        ? `${visibleFolders.length} custom ${visibleFolders.length === 1 ? 'folder' : 'folders'}`
-        : undefined}
-      headerAction={selectedGroup ? (
-        <Button type="button" variant="outline" onClick={() => void addFolderToSelectedGroup()} className="h-10 gap-2 rounded-full px-4"><FolderPlus className="h-4 w-4" />Add folder</Button>
-      ) : editableFolder ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={`Edit ${visibleTitle} folder`}
-          title="Edit folder"
-          onClick={openFolderEditor}
-          className="h-10 w-10 rounded-full border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)]"
-        >
-          <PencilSimple className="h-5 w-5" weight="regular" />
-        </Button>
-      ) : (
-        <Button type="button" variant="outline" onClick={() => void handleAddFolder()} className="h-10 gap-2 rounded-full px-4"><FolderPlus className="h-4 w-4" />Add group</Button>
-      )}
-      query={query}
-      onQueryChange={setQuery}
-      placeholder="Search custom folders"
-      activeFilter={activeFilter}
-      onFilterChange={setActiveFilter}
-    >
+  const folderResults = <>
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,160px))] justify-start gap-5">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -276,6 +248,39 @@ function OthersContent({ onPlay }: OthersProps) {
             )}
           </>
         )}
+  </>;
+
+  return (
+    <LibraryPageLayout
+      title={visibleTitle}
+      subtitle={visibleFolders.length > 0
+        ? `${visibleFolders.length} custom ${visibleFolders.length === 1 ? 'folder' : 'folders'}`
+        : undefined}
+      headerAction={selectedGroup ? (
+        <Button type="button" variant="outline" onClick={() => void addFolderToSelectedGroup()} className="h-10 gap-2 rounded-full px-4"><FolderPlus className="h-4 w-4" />Add folder</Button>
+      ) : editableFolder ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Edit ${visibleTitle} folder`}
+          title="Edit folder"
+          onClick={openFolderEditor}
+          className="h-10 w-10 rounded-full border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)]"
+        >
+          <PencilSimple className="h-5 w-5" weight="regular" />
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" onClick={() => void handleAddFolder()} className="h-10 gap-2 rounded-full px-4"><FolderPlus className="h-4 w-4" />Add group</Button>
+      )}
+      query={query}
+      onQueryChange={setQuery}
+      placeholder="Search custom folders"
+      searchResults={folderResults}
+      activeFilter={activeFilter}
+      onFilterChange={setActiveFilter}
+    >
+        {folderResults}
         <Dialog
           open={isFolderEditorOpen}
           onOpenChange={(open) => { if (!isSavingEditor) setIsFolderEditorOpen(open); }}

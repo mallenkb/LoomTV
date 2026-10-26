@@ -1,136 +1,83 @@
-import { X } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { SearchSmIcon } from '@/components/LoomIcons';
-import { useState, type ReactNode } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
+import { useLocation, useNavigate } from '@/lib/navigation';
+import { pageSearchFilter, usePageSearch } from '@/lib/pageSearch';
+import type { MediaItem } from '@/contexts/LibraryContext';
+import { SearchPaletteFrame } from '@/components/SearchPaletteFrame';
+import LocalTitleSearch from '@/components/LocalTitleSearch';
 
 interface LibrarySearchProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   rightSlot?: ReactNode;
-  /** Hide the floating search trigger when search is available from navigation. */
   showModernSearchTrigger?: boolean;
   placement?: 'floating' | 'inline';
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  localItems?: readonly MediaItem[];
+  resultContent?: ReactNode;
 }
 
-export default function LibrarySearch({
-  value,
-  onChange,
-  placeholder = 'Search library',
-  rightSlot,
-  showModernSearchTrigger = true,
-  placement = 'floating',
+export default function LibrarySearch({ value, onChange, placeholder = 'Search library', rightSlot,
+  showModernSearchTrigger = true, placement = 'floating', open, onOpenChange, localItems, resultContent,
 }: LibrarySearchProps) {
   const { theme } = useTheme();
-  const [isModernSearchOpen, setIsModernSearchOpen] = useState(Boolean(value));
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = open ?? internalOpen;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const resultsId = useId();
+  const isModern = theme.homeStyle === 'modern';
+  const isInline = placement === 'inline';
+  const changeOpen = useCallback((next: boolean) => {
+    setInternalOpen(next);
+    onOpenChange?.(next);
+  }, [onOpenChange]);
 
-  if (placement === 'inline') {
-    return (
-      <div className="w-[min(22rem,100%)] min-w-0 shrink-0">
-        <div className="loom-library-search-control loom-no-drag pointer-events-auto flex h-10 min-w-0 items-center gap-3 rounded-full border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-[var(--loom-text)] shadow-[0_12px_30px_rgba(0,0,0,0.16)] backdrop-blur-md transition-colors">
-          <SearchSmIcon className="h-4 w-4 shrink-0 text-[var(--loom-muted)]" />
-          <input
-            type="text"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder={placeholder}
-            autoComplete="off"
-            className="h-full min-w-0 flex-1 bg-transparent text-sm font-medium text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)]"
-          />
-          {value && (
-            <button
-              type="button"
-              onClick={() => onChange('')}
-              aria-label="Clear search"
-              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  usePageSearch(() => changeOpen(true));
 
-  if (theme.homeStyle === 'modern') {
-    return (
-      <div className="loom-library-search loom-library-search-modern loom-no-drag pointer-events-none fixed left-24 right-5 top-6 z-[55] flex justify-end">
-        <div className="loom-library-search-inner flex items-center justify-end gap-2">
-          {isModernSearchOpen ? (
-            <div className="loom-library-search-control loom-no-drag pointer-events-auto flex h-12 w-[min(22rem,calc(100vw-9rem))] items-center gap-3 rounded-full border border-[var(--loom-panel-border)] bg-black/55 px-4 text-white shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-colors">
-              <SearchSmIcon className="h-5 w-5 shrink-0 text-white/60" />
-              <input
-                type="text"
-                value={value}
-                onChange={(event) => onChange(event.target.value)}
-                placeholder={placeholder}
-                autoComplete="off"
-                autoFocus
-                className="h-full min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-white/38"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  onChange('');
-                  setIsModernSearchOpen(false);
-                }}
-                aria-label="Close search"
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white/55 transition-colors hover:bg-white/10 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ) : showModernSearchTrigger ? (
-            <button
-              type="button"
-              onClick={() => setIsModernSearchOpen(true)}
-              aria-label={placeholder}
-              title={placeholder}
-              className="loom-no-drag pointer-events-auto grid h-12 w-12 place-items-center rounded-full border border-white/12 bg-black/55 text-white/70 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-[background-color,color,transform] hover:scale-105 hover:bg-white/12 hover:text-white"
-            >
-              <SearchSmIcon className="h-5 w-5" />
-            </button>
-          ) : null}
-          {rightSlot && (
-            <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">
-              {rightSlot}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const routeState = location.state as { openLibrarySearch?: boolean } | null;
+    if (!routeState?.openLibrarySearch) return;
+    changeOpen(true);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate, changeOpen]);
 
-  return (
-    <div className="loom-library-search pointer-events-none fixed left-48 right-0 top-4 z-40 flex justify-center px-4">
-      <div className="loom-library-search-inner flex w-full max-w-3xl items-center justify-center gap-2">
-        <div className="loom-library-search-control loom-no-drag pointer-events-auto flex h-12 min-w-0 flex-1 items-center gap-3 rounded-full border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-4 text-[var(--loom-text)] shadow-[0_16px_42px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors">
-          <SearchSmIcon className="h-5 w-5 shrink-0 text-[var(--loom-muted)]" />
-          <input
-            type="text"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder={placeholder}
-            autoComplete="off"
-            className="h-full min-w-0 flex-1 bg-transparent text-sm font-medium text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)]"
-          />
-          {value && (
-            <button
-              type="button"
-              onClick={() => onChange('')}
-              aria-label="Clear search"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-        {rightSlot && (
-          <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">
-            {rightSlot}
-          </div>
-        )}
+  return <>
+    <div className={isInline ? 'w-[min(22rem,100%)] min-w-0 shrink-0'
+      : isModern ? 'loom-library-search loom-library-search-modern loom-no-drag pointer-events-none fixed left-24 right-5 top-6 z-[55] flex justify-end'
+        : 'loom-library-search pointer-events-none fixed left-48 right-0 top-4 z-40 flex justify-center px-4'}>
+      <div className={`loom-library-search-inner flex items-center gap-2 ${isModern && !isInline ? 'justify-end' : 'w-full max-w-3xl'}`}>
+        {(isInline || !isModern || showModernSearchTrigger) && <button type="button" onClick={() => changeOpen(true)}
+          aria-label={placeholder} aria-haspopup="dialog" aria-expanded={isOpen}
+          className={`loom-library-search-control loom-modern-category-pill loom-no-drag pointer-events-auto flex min-w-0 flex-1 items-center gap-3 rounded-full border px-4 text-left text-sm text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isInline ? 'h-10' : 'h-12'}`}>
+          <SearchSmIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">{value || placeholder}</span>
+        </button>}
+        {!isOpen && rightSlot && <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">{rightSlot}</div>}
       </div>
     </div>
-  );
+    {resultContent === undefined ? <LocalTitleSearch key={`${location.pathname}:${isOpen}`} initialFilter={pageSearchFilter(location.pathname)} open={isOpen} onOpenChange={changeOpen} query={value} onQueryChange={onChange}
+      items={localItems} title={placeholder} actions={rightSlot} />
+      : <SearchPaletteFrame wide open={isOpen} onOpenChange={changeOpen} title={placeholder}
+        description="Search the current collection. Use Tab to navigate results and Return to open one."
+        query={value} onQueryChange={onChange} controls={resultsId} inputRef={inputRef}
+        onKeyDown={event => {
+          const first = resultsRef.current?.querySelector<HTMLElement>('a[href], [data-search-result], [role="button"]');
+          if (!first) return;
+          if (event.key === 'ArrowDown') { event.preventDefault(); first.focus(); }
+          if (event.key === 'Enter') { event.preventDefault(); first.click(); }
+        }}>
+        {rightSlot && <div className="shrink-0 border-b border-[var(--loom-border)] px-5 py-2">{rightSlot}</div>}
+        <div ref={resultsRef} id={resultsId} className="min-h-0 overflow-y-auto overscroll-contain p-5"
+          onClick={event => { if ((event.target as Element).closest('a[href], [data-search-result], [role="button"]')) changeOpen(false); }}>
+          {value.trim() ? resultContent : <p role="status" className="px-3 py-6 text-center text-sm text-[var(--loom-muted)]">Type to search.</p>}
+        </div>
+        <div className="shrink-0 border-t border-[var(--loom-border)] px-5 py-2 text-xs text-[var(--loom-muted)]">Tab navigates · Return opens · Esc closes</div>
+      </SearchPaletteFrame>}
+  </>;
 }

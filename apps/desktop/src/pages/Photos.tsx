@@ -1,3 +1,5 @@
+import LibrarySearch from '@/components/LibrarySearch';
+import { searchQuery } from '@/lib/search';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Folder, Image as ImageIcon, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmProvider';
@@ -78,6 +80,7 @@ export default function Photos() {
   const [roots, setRoots] = useState<PhotoRoot[]>([]);
   const [rootId, setRootId] = useState<string>();
   const [folder, setFolder] = useState('');
+  const [photoQuery, setPhotoQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<PhotoPage | null>(null);
@@ -203,6 +206,17 @@ export default function Photos() {
   return <div className="loom-page loom-library-page h-full overflow-y-auto">
     <div className={`${frameClass} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${topPaddingClass} px-6 pb-6 md:px-10 md:pb-10`}>
         <header className="flex flex-wrap items-center gap-3">
+          <LibrarySearch value={photoQuery} onChange={setPhotoQuery} placeholder="Search this photo page" placement="inline"
+            resultContent={<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+              {(page?.entries ?? []).filter(entry => searchQuery(entry.name).includes(searchQuery(photoQuery))).map(entry => <button key={entry.id} type="button" data-search-result
+                onClick={() => {
+                  if (entry.kind === 'folder') { setShowAll(false); setFolder(entry.relativePath); setOffset(0); setPhotoQuery(''); }
+                  else setViewerIndex(photoEntries.findIndex(photo => photo.id === entry.id));
+                }} className="overflow-hidden rounded-xl border border-[var(--loom-panel-border)] text-left text-[var(--loom-text)]">
+                <div className="aspect-square"><PhotoPreview entry={entry} /></div><span className="block truncate p-2 text-sm">{entry.name}</span>
+              </button>)}
+              {!(page?.entries ?? []).some(entry => searchQuery(entry.name).includes(searchQuery(photoQuery))) && <p role="status" className="col-span-full py-6 text-center text-sm text-[var(--loom-muted)]">No matches on this photo page.</p>}
+            </div>} />
           <h1 className="sr-only">Photos</h1>
           {roots.length > 0 ? <div className="flex min-w-0 basis-full flex-wrap items-center gap-2 sm:basis-0 sm:flex-1" aria-label="Photo views">
         {roots.map((root) => <button key={root.id} type="button" onClick={() => { setRootId(root.id); setFolder(''); setShowAll(false); setOffset(0); }} aria-pressed={!showAll && root.id === rootId} className={`rounded-lg px-3 py-2 text-sm ${!showAll && root.id === rootId ? 'bg-[var(--loom-accent)] text-white' : 'bg-[var(--loom-surface)] text-[var(--loom-muted)]'}`}>{root.name}</button>)}

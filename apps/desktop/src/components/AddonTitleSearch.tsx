@@ -1,6 +1,8 @@
+import { usePageSearch } from '@/lib/pageSearch';
 import { useEffect, useRef, useState } from 'react';
 import StremioPosterCard from '@/components/StremioPosterCard';
-import { SearchPaletteFrame } from '@/pages/SettingsSearch';
+import { SearchPaletteFrame } from '@/components/SearchPaletteFrame';
+import SearchFilterTabs from '@/components/SearchFilterTabs';
 import { cachedCinemetaCatalog, cinemetaCatalog } from '@/pages/PluginDiscover/cinemeta';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { PosterGridShimmer } from '@/components/ContentShimmer';
@@ -16,6 +18,7 @@ export default function AddonTitleSearch({ open, onOpenChange, types, onSelect, 
   open: boolean; onOpenChange: (open: boolean) => void; types: readonly ('movie' | 'tv' | 'anime')[];
   onSelect: (item: StremioPluginCatalogItem) => void;
 }) {
+  usePageSearch(() => onOpenChange(true));
   const [restored] = useState(() => savedAddonSearch(restoreKey));
   const [filter, setFilter] = useState<SearchFilter>(restored?.filter || initialFilter);
   const restorePending = useRef(Boolean(restored));
@@ -116,14 +119,11 @@ export default function AddonTitleSearch({ open, onOpenChange, types, onSelect, 
         setActive(value => Math.max(0, Math.min(visibleItems.length - 1, value + delta)));
       } else if (event.key === 'Enter') { event.preventDefault(); choose(visibleItems[active]); }
     }}>
-    <div role="group" aria-label="Filter search by type" className="flex shrink-0 gap-1 border-b border-[var(--loom-border)] px-5 py-2">
-      {(['all', ...types] as SearchFilter[]).map(value => <button key={value} type="button"
-        aria-pressed={selectedFilter === value}
-        onClick={() => { setFilter(value); if (list.current) list.current.scrollTop = 0; }}
-        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${selectedFilter === value ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-2)]'}`}>
-        {{ all: 'All', movie: 'Movies', tv: 'Series', anime: 'Anime' }[value]}
-      </button>)}
-    </div>
+    <SearchFilterTabs
+      items={(['all', ...types] as SearchFilter[]).map(value => ({ value, label: { all: 'All', movie: 'Movies', tv: 'Series', anime: 'Anime' }[value] }))}
+      value={selectedFilter}
+      onChange={value => { setFilter(value); if (list.current) list.current.scrollTop = 0; }}
+    />
     <div ref={list} onScroll={event => {
       const element = event.currentTarget;
       if (element.scrollHeight - element.scrollTop - element.clientHeight < 160) setVisibleCount(count => Math.min(items.length, count + 10));

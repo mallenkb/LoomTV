@@ -148,28 +148,8 @@ function MyListContent() {
     </div>
   );
 
-  return (
-    <LibraryPageLayout
-      title="My List"
-      headerAction={!state.isLoading && hasAnything ? tabs : undefined}
-      query={query}
-      onQueryChange={setQuery}
-      placeholder="Search My List"
-      activeFilter={activeFilter}
-      onFilterChange={setActiveFilter}
-    >
-      {state.isLoading ? (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
-          {Array.from({ length: 8 }).map((_, index) => (
-            <div key={index} className="h-[300px] w-full max-w-[200px] animate-pulse rounded-lg bg-[var(--loom-surface)]" />
-          ))}
-        </div>
-      ) : savedCount === 0 && watchedCount === 0 ? (
-        <EmptyMyListState />
-      ) : (
-        <>
-          <div id="my-list-panel" role="tabpanel" aria-labelledby={`my-list-tab-${tab}`} className="space-y-6">
-            {tab === 'saved' ? (
+  const listResults = <>
+{tab === 'saved' ? (
               savedCount === 0 ? (
                 <p className="py-16 text-center text-sm text-[var(--loom-muted)]">Nothing saved yet. Use the bookmark button on a title to save it here.</p>
               ) : filteredItems.length > 0 || filteredBookmarks.length > 0 ? (
@@ -232,6 +212,31 @@ function MyListContent() {
                 )}
               </>
             )}
+  </>;
+
+  return (
+    <LibraryPageLayout
+      title="My List"
+      headerAction={!state.isLoading && hasAnything ? tabs : undefined}
+      query={query}
+      onQueryChange={setQuery}
+      placeholder="Search My List"
+      searchResults={listResults}
+      activeFilter={activeFilter}
+      onFilterChange={setActiveFilter}
+    >
+      {state.isLoading ? (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="h-[300px] w-full max-w-[200px] animate-pulse rounded-lg bg-[var(--loom-surface)]" />
+          ))}
+        </div>
+      ) : savedCount === 0 && watchedCount === 0 ? (
+        <EmptyMyListState />
+      ) : (
+        <>
+          <div id="my-list-panel" role="tabpanel" aria-labelledby={`my-list-tab-${tab}`} className="space-y-6">
+            {listResults}
           </div>
         </>
       )}

@@ -53,6 +53,7 @@ function MoviesContent() {
       title="Movies"
       query={query}
       onQueryChange={setQuery}
+      searchItems={movies.filter(item => matchesLibraryFilter(item, activeFilter, progress, listState))}
       placeholder="Search movies"
       activeFilter={activeFilter}
       onFilterChange={setActiveFilter}

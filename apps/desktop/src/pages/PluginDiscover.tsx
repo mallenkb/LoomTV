@@ -1763,6 +1763,8 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
           scrolled={false}
           query={isHome ? undefined : query}
           onQueryChange={setQuery}
+          searchResults={loading ? <PosterGridShimmer /> : <DiscoverPosterGrid entries={gridEntries} metaLine={stremioMetaLine}
+            onPlayTrailer={item => { void openItemTrailer(item); }} onSelect={item => { void openItemDetails(item); }} />}
         >
           <div className="w-full">
             <div className="flex items-center gap-2 overflow-x-auto overflow-y-visible pb-1">
@@ -1889,7 +1891,7 @@ function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) 
           />
         )}
       </div>
-      {!isHome ? <AddonTitleSearch key={`${activeProfile?.id}:${generation}`} restoreKey={searchRestoreKey} open={searchOpen} onOpenChange={setSearchOpen} types={['movie', 'tv', 'anime']} initialFilter="all" onSelect={item => { void openItemDetails(item); }} /> : null}
+      {!isHome ? <AddonTitleSearch key={`${activeProfile?.id}:${generation}:${contentType}`} restoreKey={searchRestoreKey} open={searchOpen} onOpenChange={setSearchOpen} types={['movie', 'tv', 'anime']} initialFilter={contentType} onSelect={item => { void openItemDetails(item); }} /> : null}
       <TrailerDialog
         open={Boolean(trailerItem)}
         title={trailerItem?.title || 'Trailer'}

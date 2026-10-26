@@ -1,3 +1,4 @@
+import PageSearchFallback from './components/PageSearchFallback';
 import AddonSourcePicker from './components/AddonSourcePicker';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createRootRoute, createRoute, createRouter, createHashHistory, lazyRouteComponent, RouterProvider, Outlet, Navigate } from '@tanstack/react-router';
@@ -611,6 +612,7 @@ function AppShell({
       <ArtworkSuspensionContext.Provider value={artworkSuspended}>
       <div className="loom-app-underlay contents" aria-hidden={sidebarHidden ? 'true' : undefined}>
       <Sidebar />
+      <PageSearchFallback />
       <div
         className={`loom-main-drag-region${isSettingsRoute ? ' loom-main-drag-region-settings' : ''}`}
         aria-hidden="true"

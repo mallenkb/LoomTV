@@ -63,8 +63,8 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
         aria-label={`Filter library, ${activeOption?.label || 'All'}`}
         title={`Filter: ${activeOption?.label || 'All'}`}
         onClick={() => setFilterOpen((open) => !open)}
-        style={{ borderColor: 'var(--loom-panel-border)' }}
-        className={`loom-library-filter-trigger loom-no-drag pointer-events-auto relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
+        style={{ backgroundColor: activeFilter === 'all' ? undefined : 'var(--loom-active-bg)' }}
+        className={`loom-library-filter-trigger loom-control-button loom-modern-category-pill loom-no-drag pointer-events-auto relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
           activeFilter === 'all'
             ? 'bg-[var(--loom-panel)] text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]'
             : 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
@@ -76,7 +76,7 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
       {filterOpen && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-lg bg-[var(--loom-surface)] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
+          className="loom-search-surface loom-library-filter-menu absolute right-0 top-full z-50 mt-2 max-h-[min(26rem,65dvh)] w-56 overflow-y-auto rounded-2xl border p-1"
         >
           <SharedListHighlight activeId={activeFilter} followPointer={false} className="loom-shared-highlight-menu">
             <FilterMenuGroup

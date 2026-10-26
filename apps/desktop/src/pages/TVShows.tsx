@@ -60,6 +60,7 @@ function TVShowsContent({ kind = 'series' }: TVShowsProps) {
       title={title}
       query={query}
       onQueryChange={setQuery}
+      searchItems={tvShows.filter(item => matchesLibraryFilter(item, activeFilter, progress, listState))}
       placeholder={kind === 'anime' ? 'Search anime' : 'Search TV shows'}
       activeFilter={activeFilter}
       onFilterChange={setActiveFilter}

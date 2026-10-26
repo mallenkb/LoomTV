@@ -1,3 +1,4 @@
+import LibrarySearch from '@/components/LibrarySearch';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -14,7 +15,6 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Search,
   Trash2,
   X,
 } from 'lucide-react';
@@ -278,7 +278,7 @@ function MediaItemCard({ item, config, onOpen, onPlay, onQueue, busy }: MediaIte
   const progressText = formatProgress(item);
   return (
     <article className="group min-w-0 overflow-hidden rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] transition-colors hover:border-[var(--loom-accent)]/60">
-      <button type="button" onClick={() => onOpen(item)} className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--loom-accent)]">
+      <button type="button" data-search-result onClick={() => onOpen(item)} className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--loom-accent)]">
         <div className="flex aspect-[1.55] items-center justify-center bg-[var(--loom-surface-2)] text-[var(--loom-muted)] transition-colors group-hover:bg-[var(--loom-surface-3)]">
           <Icon className="h-10 w-10" aria-hidden="true" />
         </div>
@@ -889,7 +889,21 @@ export default function MediaLibrary({ kind }: { kind: MediaLibraryKind }) {
             <nav aria-label={`${config.title} views`} className="flex flex-wrap gap-2">
               {config.views.map((option) => <button key={option.id} type="button" onClick={() => setView(option.id)} aria-pressed={view === option.id} className={`rounded-lg px-3 py-2 text-sm ${view === option.id ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-[var(--loom-surface)] text-[var(--loom-muted)] hover:bg-[var(--loom-surface-2)]'}`}>{option.label}</button>)}
             </nav>
-            <label className="relative block min-w-0 basis-full sm:basis-56 sm:flex-1 sm:max-w-xs"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)]" aria-hidden="true" /><span className="sr-only">Search {config.title}</span><input value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder={`Search ${config.title.toLowerCase()}`} className="h-9 w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface)] pl-9 pr-3 text-sm text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-muted)] focus:border-[var(--loom-accent)]" /></label>
+            <LibrarySearch value={queryInput} onChange={setQueryInput} placeholder={`Search ${config.title.toLowerCase()}`} placement="inline"
+              resultContent={loadingPage || queryInput.trim() !== query ? <p role="status" className="py-6 text-center text-sm text-[var(--loom-muted)]">Searching...</p>
+                : error ? <p role="alert" className="py-6 text-center text-sm text-[var(--loom-muted)]">{error}</p>
+                  : visibleItems.length ? <>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {visibleItems.map(item => <MediaItemCard key={item.id} item={item} config={config}
+                        onOpen={next => { void openItem(next); }} onPlay={config.audio ? next => { void startAudio(next); } : undefined}
+                        onQueue={config.audio ? queueAudio : undefined} busy={openingItemId === item.id} />)}
+                    </div>
+                    {pageCount > 1 && <div className="mt-5 flex items-center justify-center gap-4 text-sm text-[var(--loom-text)]">
+                      <button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - pageSize))} className="rounded-full border border-[var(--loom-panel-border)] px-4 py-2 disabled:opacity-40">Previous</button>
+                      <span>Page {pageNumber} of {pageCount}</span>
+                      <button type="button" disabled={offset + pageSize >= total} onClick={() => setOffset(offset + pageSize)} className="rounded-full border border-[var(--loom-panel-border)] px-4 py-2 disabled:opacity-40">Next</button>
+                    </div>}
+                  </> : <p role="status" className="py-6 text-center text-sm text-[var(--loom-muted)]">No matches found.</p>} />
           </div>
 
           {loadingPage ? <p role="status" className="mt-8 text-sm text-[var(--loom-muted)]">Loading {config.title.toLowerCase()}…</p> : null}

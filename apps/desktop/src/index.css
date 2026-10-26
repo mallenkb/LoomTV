@@ -87,6 +87,8 @@
   --loom-logo-word: #fafafa;
   --loom-panel: rgba(23, 23, 23, 0.88);
   --loom-panel-border: rgba(255, 255, 255, 0.10);
+  --loom-search-glass-base: color-mix(in srgb, var(--loom-surface) 88%, var(--loom-text) 12%);
+  --loom-search-glass-tint: color-mix(in srgb, var(--loom-search-glass-base) 85%, black 15%);
   --loom-control-veil: rgb(255 255 255 / 0.10);
   --loom-season-accordion-bg: rgb(255 255 255 / 0.07);
   --loom-season-episodes-veil: rgb(0 0 0 / 0.30);
@@ -909,10 +911,15 @@ body.platform-darwin .loom-photo-viewer-header {
   --loom-shared-highlight-background: color-mix(in srgb, var(--loom-accent) 24%, transparent);
 }
 
-.loom-modern-category-pill {
+.loom-modern-category-pill,
+.loom-settings-search.loom-modal-surface,
+.loom-detail-page-modern .loom-detail-back,
+.loom-detail-page-modern .loom-artwork-fix-button,
+.loom-detail-page-modern .loom-artwork-more-button {
   border-color: var(--loom-panel-border);
   background: color-mix(in srgb, var(--loom-panel) 65%, transparent);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
   backdrop-filter: blur(22px) saturate(130%);
 }
 
@@ -927,6 +934,13 @@ body.platform-darwin .loom-photo-viewer-header {
     background: color-mix(in srgb, var(--loom-panel) 65%, transparent);
     backdrop-filter: blur(22px) saturate(130%);
   }
+}
+
+.loom-detail-page-modern .loom-detail-back:hover,
+.loom-detail-page-modern .loom-artwork-fix-button:hover,
+.loom-detail-page-modern .loom-artwork-more-button:hover {
+  background: var(--loom-active-bg);
+  color: var(--loom-active-text);
 }
 
 .loom-modern-category-selection {
@@ -986,9 +1000,8 @@ body.platform-darwin .loom-photo-viewer-header {
   display: none;
 }
 
-/* Modal content is always an opaque surface. The dimmed backdrop may still
-   show the page behind it, but the dialog itself must never reveal artwork or
-   other page content through a translucent panel. */
+/* Dialogs use an opaque surface by default. Floating search palettes override
+   this below to share the navigation's frosted background. */
 .loom-modal-surface {
   --loom-modal-padding: 20px;
   --loom-modal-control-radius: 10px;
@@ -2947,6 +2960,15 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   color: #b91c1c;
 }
 
+/* Search dialogs and their menus share one glass surface in every route. */
+.loom-search-surface {
+  border-color: color-mix(in srgb, var(--loom-text) 4%, transparent) !important;
+  background-color: color-mix(in srgb, var(--loom-search-glass-tint) 65%, transparent) !important;
+  box-shadow: 0 24px 72px rgb(0 0 0 / 0.48), inset 0 1px 0 color-mix(in srgb, var(--loom-text) 2%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(130%) !important;
+  backdrop-filter: blur(22px) saturate(130%) !important;
+}
+
 /* Settings search sits near the top like a command palette, edge to edge. */
 .loom-settings-search.loom-modal-surface {
   top: 12dvh !important;
@@ -2954,7 +2976,6 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   max-height: min(520px, 80dvh);
   padding: 0 !important;
   border-radius: 16px !important;
-  background-color: var(--loom-surface) !important;
 }
 
 .loom-settings-search.loom-title-search.loom-modal-surface {

@@ -89,6 +89,7 @@ function ChannelCard({
     <div className="group relative h-full">
     <button
       type="button"
+      data-search-result
       onClick={onPlay}
       className="relative flex h-full w-full flex-col gap-3 rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3 text-left transition-colors hover:border-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
       aria-label={channel.nowTitle ? `Play ${name}, now showing ${channel.nowTitle}` : `Play ${name}`}
@@ -364,6 +365,19 @@ export default function LiveTv({ onPlay }: LiveTvProps) {
               onChange={setQuery}
               placeholder="Search channels"
               placement="inline"
+              resultContent={isLoading || query !== debouncedQuery ? <ChannelGridShimmer />
+                : loadError ? <p role="alert" className="py-6 text-center text-sm text-[var(--loom-muted)]">{loadError}</p>
+                  : channels.length ? <>
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
+                      {channels.map(channel => <ChannelCard key={channel.channelId} channel={channel} nowMs={nowMs}
+                        onPlay={() => playChannel(channel)} onToggleFavorite={() => toggleFavorite(channel)} />)}
+                    </div>
+                    {remainingCount > 0 && <button type="button" disabled={isPaging} onClick={() => { void loadChannels(channels.length); }}
+                      className="mt-5 rounded-full border border-[var(--loom-panel-border)] px-4 py-2 text-sm text-[var(--loom-text)] disabled:opacity-50">
+                      {isPaging ? 'Loading channels...' : 'Load more channels'}
+                    </button>}
+                  </> : <p role="status" className="py-6 text-center text-sm text-[var(--loom-muted)]">No channels match that search.</p>}
+
             />
           </div>
           <div className="w-full">

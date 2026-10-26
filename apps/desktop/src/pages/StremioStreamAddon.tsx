@@ -114,7 +114,7 @@ export default function StremioStreamAddon({ source, onPlay }: { source: Stremio
     <div className={`${modern ? 'loom-modern-content-frame' : 'loom-frame'} loom-library-page-frame page-bottom-safe page-list-bottom-safe pt-24`}>
       <CatalogNavigation label="Add-on categories" items={(['all', ...types] as const).map(value => ({ value, label: value === 'all' ? 'All' : labels[value] }))}
         value={type} onChange={value => { setType(value); setExpanded(null); }} searchOpen={searchOpen} onSearch={() => setSearchOpen(true)} />
-      <AddonTitleSearch restoreKey={searchRestoreKey} key={`${activeProfile?.id}:${generation}`} open={searchOpen} onOpenChange={setSearchOpen} types={types} initialFilter={type} onSelect={open} />
+      <AddonTitleSearch restoreKey={searchRestoreKey} key={`${activeProfile?.id}:${generation}:${type}`} open={searchOpen} onOpenChange={setSearchOpen} types={types} initialFilter={type} onSelect={open} />
       {type === 'all' && !expanded && <AddonKeepWatching addonId={source.addonId} onPlay={onPlay} />}
       {sections.filter(section => !expanded || section.id === expanded).map(section => <CatalogSection key={`${activeProfile?.id}:${generation}:${source.revision}:${section.id}`} section={section} search={search} expanded={expanded === section.id} onExpand={() => setExpanded(section.id)} onSelect={open} />)}
     </div>

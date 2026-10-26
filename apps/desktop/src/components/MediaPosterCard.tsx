@@ -193,7 +193,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
   return (
     <div className={`${ROOT_CLASS[variant]} relative`}>
       {onPlay ? (
-        <button type="button" onClick={() => onPlay(item)} className="flex h-full w-full flex-col">
+        <button type="button" data-search-result onClick={() => onPlay(item)} className="flex h-full w-full flex-col">
           {cardContent}
         </button>
       ) : (

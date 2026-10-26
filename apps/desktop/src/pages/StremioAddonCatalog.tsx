@@ -206,10 +206,25 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
     return <StremioStreamAddon key={`${source.addonId}:${activeProfile?.id}`} source={source} onPlay={onPlay} />;
   }
 
+  const catalogResults = <>
+        {error ? <p role="alert" className="mb-6 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p> : null}
+        {entries.length ? (
+          <DiscoverPosterGrid entries={entries} metaLine={item => item.releaseInfo || item.released?.slice(0, 4) || ''} onSelect={openDetails} onPlay={item => { void play(item); }} playbackStatus={openingId ? item => item.id === openingId ? 'Opening' : 'Play' : undefined} />
+        ) : loading ? <PosterGridShimmer className="mt-4" /> : source && !source.catalogs.length ? (
+          <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">This add-on has no catalog to browse. Its sources appear when you play a title from another catalog.</p>
+        ) : !error ? <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">No titles match this selection.</p> : null}
+        {!loading && pageCount > 1 ? <nav aria-label="Add-on catalog pages" className="mt-8 flex items-center justify-center gap-4">
+          <button type="button" disabled={page <= 1} aria-label="Previous page" onClick={() => setPage(current => current - 1)} className={discoverFilterChipClass(false)}><ChevronLeft className="h-4 w-4" /></button>
+          <span className="text-sm text-[var(--loom-muted)]">Page {page} of {pageCount}</span>
+          <button type="button" disabled={page >= pageCount} aria-label="Next page" onClick={() => setPage(current => current + 1)} className={discoverFilterChipClass(false)}><ChevronRight className="h-4 w-4" /></button>
+        </nav> : null}
+  </>;
+
   return (
     <div className="loom-page loom-library-page h-full overflow-y-auto" onScroll={event => setScrolled(event.currentTarget.scrollTop > 4)}>
       <div className={`${isModern ? 'loom-modern-content-frame' : 'loom-frame'} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${isModern ? 'pt-6' : 'loom-discover-page-frame'}`}>
-        <DiscoverHeader title={source?.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on'} description={source?.description || 'Browse this source’s titles.'} scrolled={scrolled} query={queryInput} onQueryChange={setQueryInput}>
+        <DiscoverHeader title={source?.name.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Add-on'} description={source?.description || 'Browse this source’s titles.'} scrolled={scrolled} query={queryInput} onQueryChange={setQueryInput}
+          searchResults={catalogResults}>
           <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
             {source ? types.map(type => {
               const first = defaultCatalog(source.catalogs.filter(entry => entry.type === type));
@@ -237,17 +252,7 @@ export default function StremioAddonCatalog({ addonId, onPlay }: {
           </div>
         </DiscoverHeader>
         <AddonKeepWatching addonId={addonId} onPlay={onPlay} />
-        {error ? <p role="alert" className="mb-6 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p> : null}
-        {entries.length ? (
-          <DiscoverPosterGrid entries={entries} metaLine={item => item.releaseInfo || item.released?.slice(0, 4) || ''} onSelect={openDetails} onPlay={item => { void play(item); }} playbackStatus={openingId ? item => item.id === openingId ? 'Opening' : 'Play' : undefined} />
-        ) : loading ? <PosterGridShimmer className="mt-4" /> : source && !source.catalogs.length ? (
-          <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">This add-on has no catalog to browse. Its sources appear when you play a title from another catalog.</p>
-        ) : !error ? <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">No titles match this selection.</p> : null}
-        {!loading && pageCount > 1 ? <nav aria-label="Add-on catalog pages" className="mt-8 flex items-center justify-center gap-4">
-          <button type="button" disabled={page <= 1} aria-label="Previous page" onClick={() => setPage(current => current - 1)} className={discoverFilterChipClass(false)}><ChevronLeft className="h-4 w-4" /></button>
-          <span className="text-sm text-[var(--loom-muted)]">Page {page} of {pageCount}</span>
-          <button type="button" disabled={page >= pageCount} aria-label="Next page" onClick={() => setPage(current => current + 1)} className={discoverFilterChipClass(false)}><ChevronRight className="h-4 w-4" /></button>
-        </nav> : null}
+        {catalogResults}
       </div>
     </div>
   );

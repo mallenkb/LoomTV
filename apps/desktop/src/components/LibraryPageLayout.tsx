@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { MediaItem } from '@/contexts/LibraryContext';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import LibrarySearch from '@/components/LibrarySearch';
 import { useTheme } from '@/components/ThemeProvider';
@@ -14,6 +15,8 @@ interface LibraryPageLayoutProps {
   activeFilter: LibraryFilter;
   onFilterChange: (filter: LibraryFilter) => void;
   children: ReactNode;
+  searchResults?: ReactNode;
+  searchItems?: readonly MediaItem[];
 }
 
 /** Shared frame for every library route so its controls and scroll clearance
@@ -28,6 +31,8 @@ export default function LibraryPageLayout({
   activeFilter,
   onFilterChange,
   children,
+  searchResults,
+  searchItems,
 }: LibraryPageLayoutProps) {
   const { theme } = useTheme();
   const isModern = theme.homeStyle === 'modern';
@@ -40,6 +45,8 @@ export default function LibraryPageLayout({
         value={query}
         onChange={onQueryChange}
         placeholder={placeholder}
+        resultContent={searchResults}
+        localItems={searchItems}
         showModernSearchTrigger={false}
         rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={onFilterChange} />}
       />

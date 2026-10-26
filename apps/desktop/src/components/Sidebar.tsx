@@ -1,5 +1,6 @@
+import { openPageSearch } from '@/lib/pageSearch';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate } from '@/lib/navigation';
+import { Link, useLocation } from '@/lib/navigation';
 import { Bookmark as LucideBookmark, Check, Download, LockKeyhole, Plus, RefreshCw, ScanSearch, Search, UsersRound } from 'lucide-react';
 import {
   Archive as ArchivePhosphorIcon,
@@ -246,17 +247,18 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   return null;
 }
 
-function ModernCategoryPill({ pathname }: { pathname: string }) {
-  const navigate = useNavigate();
+function ModernCategoryPill({ pathname, navOrder }: { pathname: string; navOrder: readonly string[] }) {
   const { state } = useLibrary();
   const isRemoteLibrary = desktopApi.isRemoteLibraryMode();
+  const order = new Map(navOrder.map((id, index) => [id, index]));
+  const categoryRank = (path: string) => path === '/' ? -1 : order.get(path.slice(1)) ?? Number.MAX_SAFE_INTEGER;
   const visibleCategories = modernVideoCategoryItems.filter((category) => {
     return isCategoryVisible(
       category.folderKey,
       isRemoteLibrary,
       category.folderKey ? state.libraryFolderGroups[category.folderKey] : undefined,
     );
-  });
+  }).sort((a, b) => categoryRank(a.path) - categoryRank(b.path));
   const activeCategory = visibleCategories.find((category) => category.path === '/'
     ? pathname === '/'
     : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
@@ -311,7 +313,7 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
         type="button"
         aria-label="Search library"
         title="Search library"
-        onClick={() => navigate('/', { replace: pathname === '/', state: { openLibrarySearch: true } })}
+        onClick={openPageSearch}
         className="loom-modern-category-pill loom-modern-category-idle loom-no-drag grid h-12 w-12 shrink-0 place-items-center rounded-full border backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
       >
         <Search aria-hidden="true" className="h-4 w-4" />
@@ -522,7 +524,6 @@ function SidebarProfileSwitcher({
 
 export default function Sidebar() {
   const location = useLocation();
-  const navigate = useNavigate();
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
   const { showToast } = useToast();
@@ -777,7 +778,7 @@ export default function Sidebar() {
               <DelayedIconTooltip label="Search library">
                 <button
                   type="button"
-                  onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
+                  onClick={openPageSearch}
                   aria-label="Search library"
                   data-shared-highlight-item
                   data-shared-highlight-id="search"
@@ -917,7 +918,7 @@ export default function Sidebar() {
               <button
                 type="button"
                 aria-label="Search library"
-                onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
+                onClick={openPageSearch}
                 className="loom-modern-mobile-nav-item"
               >
                 <Search className="h-6 w-6" aria-hidden="true" />
@@ -931,7 +932,7 @@ export default function Sidebar() {
           && !MEDIA_SIDEBAR_NAV_ITEM_IDS.some((id) => location.pathname === `/${id}`)
           && !(isDetailRoute && (routeState?.addonId || routeState?.streamAddonId || sourceRoute?.startsWith('/addons/stremio/')))
           && !isExploreContext && (
-          <ModernCategoryPill pathname={location.pathname} />
+          <ModernCategoryPill pathname={location.pathname} navOrder={navOrder} />
         )}
       </>
     );

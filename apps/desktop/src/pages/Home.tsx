@@ -131,6 +131,7 @@ function DefaultHome() {
         value={query}
         onChange={setQuery}
         placeholder="Search all libraries"
+        localItems={[...filteredAnime, ...filteredTVShows, ...filteredMovies]}
         rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
       />
       <div className="loom-frame page-bottom-safe pt-24">

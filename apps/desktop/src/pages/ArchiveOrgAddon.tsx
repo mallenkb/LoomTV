@@ -114,18 +114,7 @@ export function ArchiveCatalog({ onPlay }: ArchiveOrgAddonProps) {
   const isModern = theme.homeStyle === 'modern';
   const playbackStatus = (item: StremioPluginCatalogItem) => playingId ? item.id === playingId ? 'Opening' : 'Play' : undefined;
 
-  return (
-    <div className="loom-page loom-library-page h-full overflow-y-auto" onScroll={event => setScrolled(event.currentTarget.scrollTop > 4)}>
-      <div className={`${isModern ? 'loom-modern-content-frame' : 'loom-frame'} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${isModern ? 'pt-6' : 'loom-discover-page-frame'}`}>
-        <DiscoverHeader title="Archive.org" description="Films marked as public domain on Archive.org." scrolled={scrolled} query={queryInput} onQueryChange={setQueryInput}>
-          <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
-            <button type="button" aria-pressed className={discoverFilterChipClass(true)}>Movies</button>
-            <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-[var(--loom-border)]" />
-            <DiscoverDropdown id="archive-order" label="Sort films" value={filters.order} options={[{ value: 'popular', label: 'Popular' }, { value: 'new', label: 'Recently added' }]} onChange={order => setFilters(current => ({ ...current, order, page: 1 }))} />
-            <DiscoverDropdown id="archive-year" label="Release year" value={filters.year} options={YEAR_OPTIONS} searchable onChange={year => setFilters(current => ({ ...current, year, page: 1 }))} />
-            <button type="button" onClick={() => setRevision(current => current + 1)} className={discoverFilterChipClass(false)}>Refresh</button>
-          </div>
-        </DiscoverHeader>
+  const catalogResults = <>
         {error ? <p role="alert" className="mb-6 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p> : null}
         {entries.length ? (
           <DiscoverPosterGrid entries={entries} metaLine={item => item.releaseInfo || ''} onSelect={openDetails} onPlay={item => { void play(item); }} playbackStatus={playbackStatus} />
@@ -138,6 +127,22 @@ export function ArchiveCatalog({ onPlay }: ArchiveOrgAddonProps) {
             <button type="button" disabled={filters.page >= maxPage} aria-label="Next page" onClick={() => setFilters(current => ({ ...current, page: current.page + 1 }))} className="grid h-10 w-10 place-items-center rounded-full bg-[var(--loom-surface-2)] text-[var(--loom-text)] disabled:opacity-35"><ChevronRight className="h-5 w-5" /></button>
           </nav>
         ) : null}
+  </>;
+
+  return (
+    <div className="loom-page loom-library-page h-full overflow-y-auto" onScroll={event => setScrolled(event.currentTarget.scrollTop > 4)}>
+      <div className={`${isModern ? 'loom-modern-content-frame' : 'loom-frame'} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${isModern ? 'pt-6' : 'loom-discover-page-frame'}`}>
+        <DiscoverHeader title="Archive.org" description="Films marked as public domain on Archive.org." scrolled={scrolled} query={queryInput} onQueryChange={setQueryInput}
+          searchResults={catalogResults}>
+          <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
+            <button type="button" aria-pressed className={discoverFilterChipClass(true)}>Movies</button>
+            <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-[var(--loom-border)]" />
+            <DiscoverDropdown id="archive-order" label="Sort films" value={filters.order} options={[{ value: 'popular', label: 'Popular' }, { value: 'new', label: 'Recently added' }]} onChange={order => setFilters(current => ({ ...current, order, page: 1 }))} />
+            <DiscoverDropdown id="archive-year" label="Release year" value={filters.year} options={YEAR_OPTIONS} searchable onChange={year => setFilters(current => ({ ...current, year, page: 1 }))} />
+            <button type="button" onClick={() => setRevision(current => current + 1)} className={discoverFilterChipClass(false)}>Refresh</button>
+          </div>
+        </DiscoverHeader>
+        {catalogResults}
       </div>
     </div>
   );
