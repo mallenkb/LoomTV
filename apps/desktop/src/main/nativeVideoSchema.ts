@@ -22,15 +22,22 @@ const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
 const owner = '(SELECT account_id FROM owner_account WHERE singleton=1)';
 const parent = "json_extract(c.extension_json,'$.seriesId')";
 const movieSourcePredicate = "(c.media_kind!='movie' OR EXISTS(SELECT 1 FROM media_sources movie_source WHERE movie_source.media_id=c.id))";
+const legacySeriesParentPredicate = "json_extract(extension_json,'$.seriesId')=c.id";
+// Unary + preserves the string ID while removing the column's TEXT affinity.
+// That lets SQLite use the JSON expression index for this correlated lookup.
+const indexedSeriesParentPredicate = "json_extract(extension_json,'$.seriesId')=+c.id";
 
-/** Keep historical catalog identities, but do not expose source-less movies as playable cards. */
+/** Upgrade the catalog view in place, retaining media identities and write triggers. */
 export function repairNativeMovieProjection(database: BetterSqlite3.Database): void {
   const definition = database.prepare("SELECT sql FROM sqlite_master WHERE type='view' AND name='native_media_items'").get() as { sql: string } | undefined;
-  if (!definition || definition.sql.includes(movieSourcePredicate)) return;
+  if (!definition) return;
+  let nextSql = definition.sql.replaceAll(legacySeriesParentPredicate, indexedSeriesParentPredicate);
+  if (!nextSql.includes(movieSourcePredicate)) nextSql = `${nextSql.replace(/;\s*$/, '')} AND ${movieSourcePredicate}`;
+  if (nextSql === definition.sql) return;
   database.transaction(() => {
     const triggers = database.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='native_media_items'").all() as Array<{ sql: string }>;
     database.exec('DROP VIEW native_media_items');
-    database.exec(`${definition.sql.replace(/;\s*$/, '')} AND ${movieSourcePredicate}`);
+    database.exec(nextSql);
     for (const trigger of triggers) database.exec(trigger.sql);
   })();
 }
@@ -205,13 +212,13 @@ export function createNativeVideoSchema(database: BetterSqlite3.Database): void 
         AND COALESCE(json_extract(c.extension_json,'$.nativeRemoved'),0)=0
         AND ${movieSourcePredicate}
         AND ((NOT EXISTS(SELECT 1 FROM media_sources WHERE media_id=c.id
-          OR media_id IN(SELECT id FROM catalog_items WHERE json_extract(extension_json,'$.seriesId')=c.id))
+          OR media_id IN(SELECT id FROM catalog_items WHERE ${indexedSeriesParentPredicate}))
           AND NOT EXISTS(SELECT 1 FROM video_series_locations WHERE media_id=c.id))
           OR EXISTS(SELECT 1 FROM media_sources s JOIN library_roots r ON r.id=s.root_id
-            WHERE (s.media_id=c.id OR s.media_id IN(SELECT id FROM catalog_items WHERE json_extract(extension_json,'$.seriesId')=c.id))
+            WHERE (s.media_id=c.id OR s.media_id IN(SELECT id FROM catalog_items WHERE ${indexedSeriesParentPredicate}))
               AND r.state!='removed')
           OR (c.media_kind='series' AND NOT EXISTS(SELECT 1 FROM media_sources WHERE media_id=c.id
-            OR media_id IN(SELECT id FROM catalog_items WHERE json_extract(extension_json,'$.seriesId')=c.id))
+            OR media_id IN(SELECT id FROM catalog_items WHERE ${indexedSeriesParentPredicate}))
             AND EXISTS(SELECT 1 FROM video_series_locations l JOIN library_roots r
             ON loom_contains(r.locator,l.locator) WHERE l.media_id=c.id AND r.state!='removed')))`,
     itemInsert,

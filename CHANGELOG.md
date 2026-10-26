@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.41](docs/releases/v2.0.41.md)
+
+Speeds up library visibility queries and repairs existing SQLite catalog views without changing media identities or playback progress.
+
 ### [2.0.40](docs/releases/v2.0.40.md)
 
 Shows the desktop library sooner, reduces idle memory use, and improves playback controls and window recovery after sleep.

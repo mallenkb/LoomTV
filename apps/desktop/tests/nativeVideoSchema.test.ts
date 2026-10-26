@@ -16,7 +16,7 @@ import {
   getProfileLists, getProfilePreferences, getProfileRestrictions, saveProfilePreferences, saveProfileRestrictions,
   selectDeviceProfile, setProfileListEntry,
 } from '../src/main/databaseProfilesRepository.ts';
-import { createNativeVideoSchema, nativeVideoSql } from '../src/main/nativeVideoSchema.ts';
+import { createNativeVideoSchema, nativeVideoSql, repairNativeMovieProjection } from '../src/main/nativeVideoSchema.ts';
 
 function fixture(context: { after: (cleanup: () => void) => void }) {
   const database = new DatabaseSync(':memory:');
@@ -59,6 +59,62 @@ test('native catalog and server records are the same rows in both directions', (
     database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_items'").get(),
     undefined,
   );
+});
+
+test('catalog visibility uses the episode-parent index instead of repeated catalog scans', (context) => {
+  const { database, movie } = fixture(context);
+  movie();
+  const plan = database.prepare('EXPLAIN QUERY PLAN SELECT * FROM native_media_items').all()
+    .map((row) => String(row.detail));
+  assert.ok(plan.filter((step) => /SEARCH catalog_items USING INDEX/.test(step)).length >= 3);
+  assert.equal(plan.some((step) => step === 'SCAN catalog_items'), false);
+});
+
+test('indexed episode lookups preserve numeric-looking string IDs and root visibility', (context) => {
+  const { database } = fixture(context);
+  for (const id of ['42', '0042', 'series']) {
+    database.prepare(nativeVideoSql("INSERT INTO media_items(id,type,title,file_path) VALUES(?,'tv','Series',?)"))
+      .run(id, `/library/${id}`);
+    database.prepare(nativeVideoSql('INSERT INTO episode_files(media_id,season,episode,file_path) VALUES(?,1,1,?)'))
+      .run(id, `/library/${id}/pilot.mkv`);
+  }
+  const ids = () => database.prepare('SELECT id FROM native_media_items ORDER BY id').all().map((row) => row.id);
+  assert.deepEqual(ids(), ['0042', '42', 'series']);
+  database.prepare("UPDATE library_roots SET state='offline'").run();
+  assert.deepEqual(ids(), ['0042', '42', 'series']);
+  database.prepare("UPDATE library_roots SET state='removed'").run();
+  assert.deepEqual(ids(), []);
+});
+
+test('upgrading an existing catalog view preserves records, progress, and write triggers', (context) => {
+  const { database, movie } = fixture(context);
+  movie();
+  database.prepare(nativeVideoSql(`INSERT INTO playback_progress(profile_id,file_path,position,duration,watched,updated_at)
+    VALUES('owner-profile','/library/film.mkv',30,600,0,100)`)).run();
+  const definition = String(database.prepare("SELECT sql FROM sqlite_master WHERE name='native_media_items'").get()?.sql);
+  const triggers = database.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='native_media_items'").all();
+  database.exec('DROP VIEW native_media_items');
+  database.exec(definition.replaceAll("json_extract(extension_json,'$.seriesId')=+c.id", "json_extract(extension_json,'$.seriesId')=c.id"));
+  for (const trigger of triggers) database.exec(String(trigger.sql));
+  const items = database.prepare('SELECT * FROM native_media_items').all();
+  const progress = database.prepare('SELECT * FROM watch_progress').all();
+  const adapter = {
+    prepare: (sql: string) => database.prepare(sql),
+    exec: (sql: string) => database.exec(sql),
+    transaction: (callback: () => void) => () => {
+      database.exec('BEGIN');
+      try { callback(); database.exec('COMMIT'); }
+      catch (error) { database.exec('ROLLBACK'); throw error; }
+    },
+  } as unknown as BetterSqlite3.Database;
+  repairNativeMovieProjection(adapter);
+  assert.deepEqual(database.prepare('SELECT * FROM native_media_items').all(), items);
+  assert.deepEqual(database.prepare('SELECT * FROM watch_progress').all(), progress);
+  const version = database.prepare('PRAGMA schema_version').get();
+  repairNativeMovieProjection(adapter);
+  assert.deepEqual(database.prepare('PRAGMA schema_version').get(), version);
+  database.prepare(nativeVideoSql("UPDATE media_items SET title='Updated' WHERE id='movie-1'")).run();
+  assert.equal(database.prepare("SELECT title FROM catalog_items WHERE id='movie-1'").get()?.title, 'Updated');
 });
 
 test('native progress uses canonical media identity and server updates appear immediately', (context) => {
