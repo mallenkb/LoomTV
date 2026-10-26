@@ -65,11 +65,13 @@ function enabledByEnvironment(): boolean {
 
 export async function requiresUnifiedDesktopSetup(): Promise<boolean> {
   const flag = String(process.env[TEST_FLAG] || '').trim().toLowerCase();
-  if (!['1', 'true', 'yes', 'on'].includes(flag)) return false;
+  if (!enabledByEnvironment()) return false;
   const dataDir = configuredDataDir();
   const required = !dataDir || await isCanonicalSetupRequired(dataDir);
+  // The renderer can choose its saved host mode before the administration
+  // server starts. An empty, configured library must not look like a new app.
   state = { enabled: true, ready: false, ownerConfigured: !required };
-  return required;
+  return ['1', 'true', 'yes', 'on'].includes(flag) && required;
 }
 
 function configuredDataDir(): string | null {

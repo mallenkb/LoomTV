@@ -33,6 +33,20 @@ export function createStartupTimingRecorder(userData: string, options: {
   let pending: Promise<void> = Promise.resolve();
   let dirty = true;
   let history: StartupLaunch[] | undefined;
+  const libraryRenderWaiters = new Set<() => void>();
+
+  const waitForLibraryRender = (timeoutMs = 5_000): Promise<void> => {
+    if (launch.marks.firstLibraryRender !== undefined) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(deadline);
+        libraryRenderWaiters.delete(finish);
+        resolve();
+      };
+      const deadline = setTimeout(finish, timeoutMs);
+      libraryRenderWaiters.add(finish);
+    });
+  };
 
   const flush = (): Promise<void> => {
     clearTimeout(timer);
@@ -76,6 +90,9 @@ export function createStartupTimingRecorder(userData: string, options: {
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > now() + 50) throw new Error('Invalid startup timestamp.');
     if (launch.marks[mark] !== undefined) return false;
     launch.marks[mark] = elapsedMs;
+    if (mark === 'firstLibraryRender') {
+      for (const finish of libraryRenderWaiters) finish();
+    }
     const { windowRevealed, firstLibraryRender } = launch.marks;
     if (windowRevealed !== undefined && firstLibraryRender !== undefined) {
       launch.windowToLibraryMs = firstLibraryRender - windowRevealed;
@@ -85,7 +102,7 @@ export function createStartupTimingRecorder(userData: string, options: {
     return true;
   };
   schedule();
-  return { record, flush, recordLibraryRender: (timestamp: number) => record('firstLibraryRender', timestamp - launch.startedAt) };
+  return { record, flush, waitForLibraryRender, recordLibraryRender: (timestamp: number) => record('firstLibraryRender', timestamp - launch.startedAt) };
 }
 
 let recorder: ReturnType<typeof createStartupTimingRecorder> | undefined;
@@ -96,4 +113,5 @@ export function initializeStartupTimings(userData: string): void {
 }
 export function recordStartupMark(mark: StartupMark): void { recorder?.record(mark); }
 export function recordFirstLibraryRender(timestamp: number): boolean { return recorder?.recordLibraryRender(timestamp) ?? false; }
+export function waitForFirstLibraryRender(): Promise<void> { return recorder?.waitForLibraryRender() ?? Promise.resolve(); }
 export function flushStartupTimings(): Promise<void> { return recorder?.flush() ?? Promise.resolve(); }

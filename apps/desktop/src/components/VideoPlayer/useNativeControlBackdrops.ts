@@ -2,11 +2,12 @@ import { useEffect, type RefObject } from 'react';
 import type { PlaybackControlBackdrop } from '@/shared/playbackProtocol';
 
 export function useNativeControlBackdrops({
-  containerRef, enabled, showControls, onChange,
+  containerRef, enabled, showControls, showTopControls, onChange,
 }: {
   containerRef: RefObject<HTMLDivElement | null>;
   enabled: boolean;
   showControls: boolean;
+  showTopControls: boolean;
   onChange: (regions: PlaybackControlBackdrop[]) => void;
 }) {
   useEffect(() => {
@@ -24,6 +25,7 @@ export function useNativeControlBackdrops({
         : '.loom-player-controls button:not(.loom-player-time)';
       const candidates = Array.from(root.querySelectorAll<HTMLElement>([
         ...(showControls ? [buttonSelector, '.loom-player-pill .loom-player-volume'] : []),
+        ...(showTopControls ? ['.loom-player-top-controls .loom-player-top-control'] : []),
       ].join(',') || ':not(*)'));
       // A grouped volume pill needs one backdrop, not overlapping blur layers.
       const regions = candidates.filter(element => !candidates.some(parent => parent !== element && parent.contains(element)))
@@ -45,12 +47,15 @@ export function useNativeControlBackdrops({
     };
     const resize = new ResizeObserver(schedule);
     resize.observe(root);
-    root.querySelectorAll<HTMLElement>('.loom-player-controls, .loom-player-controls button, .loom-player-volume')
+    root.querySelectorAll<HTMLElement>([
+      '.loom-player-controls', '.loom-player-controls button', '.loom-player-volume',
+      '.loom-player-top-controls', '.loom-player-top-control',
+    ].join(','))
       .forEach(element => resize.observe(element));
     // Dynamic source buttons and episode labels can change the pill positions.
     const mutation = new MutationObserver(schedule);
     mutation.observe(root, { attributes: true, attributeFilter: ['class'] });
-    root.querySelectorAll('.loom-player-controls')
+    root.querySelectorAll('.loom-player-controls, .loom-player-top-controls')
       .forEach(element => mutation.observe(element, { childList: true, subtree: true }));
     window.addEventListener('resize', schedule);
     schedule();
@@ -60,5 +65,5 @@ export function useNativeControlBackdrops({
       mutation.disconnect();
       window.removeEventListener('resize', schedule);
     };
-  }, [containerRef, enabled, onChange, showControls]);
+  }, [containerRef, enabled, onChange, showControls, showTopControls]);
 }

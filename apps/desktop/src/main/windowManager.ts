@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, powerMonitor, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { windowChromeOptions } from './windowChrome';
@@ -7,6 +7,7 @@ import { installSettingsShortcut } from './openSettings';
 import { recordPlaybackDiagnostic } from './playbackDiagnostics.ts';
 import { recordStartupMark } from './startupTiming.ts';
 import { PACKAGED_RENDERER_URL, isPackagedRendererUrl } from './rendererProtocol.ts';
+import { installWindowRepaint } from './windowRepaint.ts';
 
 const MAIN_WINDOW_DEV_SERVER_URL = (() => {
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
@@ -154,6 +155,7 @@ export function createWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+  installWindowRepaint(mainWindow, powerMonitor);
   recordPlaybackDiagnostic('desktop.window.created');
   recordStartupMark('windowCreated');
   mainWindow.once('show', () => recordStartupMark('windowRevealed'));

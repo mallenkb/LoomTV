@@ -62,7 +62,7 @@ export default function LibrarySearch({ value, onChange, placeholder = 'Search l
       </div>
     </div>
     {resultContent === undefined ? <LocalTitleSearch key={`${location.pathname}:${isOpen}`} initialFilter={pageSearchFilter(location.pathname)} open={isOpen} onOpenChange={changeOpen} query={value} onQueryChange={onChange}
-      items={localItems} title={placeholder} actions={rightSlot} />
+      items={localItems} title={placeholder} />
       : <SearchPaletteFrame wide open={isOpen} onOpenChange={changeOpen} title={placeholder}
         description="Search the current collection. Use Tab to navigate results and Return to open one."
         query={value} onQueryChange={onChange} controls={resultsId} inputRef={inputRef}
@@ -72,7 +72,6 @@ export default function LibrarySearch({ value, onChange, placeholder = 'Search l
           if (event.key === 'ArrowDown') { event.preventDefault(); first.focus(); }
           if (event.key === 'Enter') { event.preventDefault(); first.click(); }
         }}>
-        {rightSlot && <div className="shrink-0 border-b border-[var(--loom-border)] px-5 py-2">{rightSlot}</div>}
         <div ref={resultsRef} id={resultsId} className="min-h-0 overflow-y-auto overscroll-contain p-5"
           onClick={event => { if ((event.target as Element).closest('a[href], [data-search-result], [role="button"]')) changeOpen(false); }}>
           {value.trim() ? resultContent : <p role="status" className="px-3 py-6 text-center text-sm text-[var(--loom-muted)]">Type to search.</p>}

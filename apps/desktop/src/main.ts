@@ -31,7 +31,7 @@ import squirrelStartup from 'electron-squirrel-startup';
 import { recordPlaybackDiagnostic } from './main/playbackDiagnostics.ts';
 import { startMainThreadWatchdog } from './main/mainThreadWatchdog.ts';
 import { startProviderHealthStore } from './main/providerHealthStore.ts';
-import { initializeStartupTimings, recordStartupMark, flushStartupTimings } from './main/startupTiming.ts';
+import { initializeStartupTimings, recordStartupMark, flushStartupTimings, waitForFirstLibraryRender } from './main/startupTiming.ts';
 
 import {
   LOCAL_ACCESS_HEADER,
@@ -3265,6 +3265,7 @@ app.whenReady().then(async () => {
   const waitForSetup = await requiresUnifiedDesktopSetup();
   unifiedServerStartup = startDesktopPresentation({
     waitForSetup,
+    waitForRenderer: waitForFirstLibraryRender,
     presentWindow: () => {
       primaryWindowStartupReady = true;
       presentPrimaryWindow();

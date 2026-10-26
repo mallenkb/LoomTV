@@ -34,6 +34,7 @@ test('unified onboarding waits for the setup response before presenting a window
   const server = new Promise<UnifiedDesktopServerState>((done) => { resolve = done; });
   const startup = startDesktopPresentation({
     waitForSetup: true,
+    waitForRenderer: () => { throw new Error('Setup must not wait for a renderer that needs the server.'); },
     presentWindow: () => { events.push('window'); },
     startServer: () => { events.push('server'); return server; },
     serverSettled: () => { events.push('refresh'); },
@@ -42,6 +43,25 @@ test('unified onboarding waits for the setup response before presenting a window
   resolve({ ...ready, ownerConfigured: false });
   await startup;
   assert.deepEqual(events, ['server', 'refresh', 'window']);
+});
+
+test('restored desktop serves its first library frame before administration starts', async () => {
+  const events: string[] = [];
+  let rendered!: () => void;
+  const frame = new Promise<void>((resolve) => { rendered = resolve; });
+  const startup = startDesktopPresentation({
+    waitForSetup: false,
+    presentWindow: () => { events.push('window'); },
+    waitForRenderer: () => frame,
+    startServer: async () => { events.push('server'); return ready; },
+    serverSettled: () => { events.push('refresh'); },
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['window']);
+  events.push('library');
+  rendered();
+  await startup;
+  assert.deepEqual(events, ['window', 'library', 'server', 'refresh']);
 });
 
 test('canonical failure leaves the desktop usable and reports the final state', async () => {

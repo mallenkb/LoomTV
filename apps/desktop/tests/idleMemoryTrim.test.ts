@@ -33,6 +33,7 @@ function harness() {
 
 test('idle trims once per stretch of inactivity and again after new input', () => {
   const { state, trims, trimmer } = harness();
+  state.active = false;
   state.idle = IDLE_TRIM_AFTER_SECONDS - 1;
   trimmer.poll();
   assert.deepEqual(trims, []);
@@ -47,6 +48,19 @@ test('idle trims once per stretch of inactivity and again after new input', () =
   state.idle = IDLE_TRIM_AFTER_SECONDS + 60;
   trimmer.poll();
   assert.deepEqual(trims, ['idle', 'idle']);
+});
+
+test('reading the visible library does not clear its resources after system idle', () => {
+  const { state, trims, trimmer } = harness();
+  state.idle = IDLE_TRIM_AFTER_SECONDS * 2;
+  trimmer.poll();
+  trimmer.poll();
+  assert.deepEqual(trims, []);
+
+  // A skipped visible trim must not suppress cleanup once the window hides.
+  state.active = false;
+  trimmer.poll();
+  assert.deepEqual(trims, ['idle']);
 });
 
 test('idle and inactive-window trims wait while media plays', () => {

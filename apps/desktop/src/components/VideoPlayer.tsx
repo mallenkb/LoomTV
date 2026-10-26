@@ -705,8 +705,9 @@ export default function VideoPlayer({
   }, [syncNativeViewport]);
   useNativeControlBackdrops({
     containerRef,
-    enabled: libVlcSurfaceActive && theme.playerControlStyle === 'pill',
+    enabled: libVlcSurfaceActive,
     showControls,
+    showTopControls,
     onChange: syncNativeControlBackdrops,
   });
   const toggleFullscreen = useCallback(() => {

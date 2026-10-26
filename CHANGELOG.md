@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.40](docs/releases/v2.0.40.md)
+
+Shows the desktop library sooner, reduces idle memory use, and improves playback controls and window recovery after sleep.
+
 ### [2.0.39](docs/releases/v2.0.39.md)
 
 Adds a shared search palette for local media and add-on catalogs, with filters that follow the current page and navigation that preserves page context.

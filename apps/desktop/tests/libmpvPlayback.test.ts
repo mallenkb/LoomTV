@@ -11,7 +11,8 @@ import type { MpvCommand, MpvPlaybackState } from '../src/shared/desktopProtocol
 import * as helpers from '../src/main/mpvPlaybackHelpers.ts';
 import { restoreOffscreenTrack } from '../src/main/offscreenVideoRestore.ts';
 
-function fixture() {
+function fixture(options: { bundledRuntime?: boolean } = {}) {
+  let nativeLoads = 0;
   const sent: Array<Partial<MpvPlaybackState>> = [];
   const powerStates: Array<Pick<MpvPlaybackState, 'status' | 'paused'>> = [];
   const intervals = new Map<() => void, number>();
@@ -37,13 +38,14 @@ function fixture() {
     '../shared/resumeRewind.ts': resumeRewind,
     electron: { BrowserWindow: {} },
     'node:crypto': { randomUUID: () => 'mpv-session' },
-    'node:fs': fs, 'node:path': path, 'node:util': { isDeepStrictEqual },
+    'node:fs': options.bundledRuntime ? { ...fs, existsSync: () => true } : fs,
+    'node:path': path, 'node:util': { isDeepStrictEqual },
     './offscreenVideoRestore.ts': { restoreOffscreenTrack },
     './playbackDiagnostics.ts': { recordPlaybackDiagnostic: () => undefined },
     './screenLock.ts': { isScreenLocked: () => false },
     './mpvPlaybackHelpers.ts': helpers,
     './libvlcPlayback.ts': {
-      loadKoffi: () => ({}),
+      loadKoffi: () => { nativeLoads += 1; return {}; },
       createNativeViewHost: () => ({ drawable: 1, setVisible: () => undefined, destroy: () => undefined }),
     },
     './nativePlaybackPower.ts': {
@@ -57,20 +59,34 @@ function fixture() {
   }).outputText;
   const module = { exports: {} };
   vm.runInNewContext(code + '\nmodule.exports.LibMpvSession = LibMpvSession;', {
-    module, exports: module.exports, Buffer, console, process,
+    module, exports: module.exports, Buffer, console,
+    process: options.bundledRuntime ? { ...process, defaultApp: false, env: {
+      ...process.env, LOOMTV_DISABLE_LIBMPV: '',
+      LOOMTV_LIBMPV_PATH: '/mock/libmpv', LOOMTV_LIBMPV_BRIDGE_PATH: '/mock/bridge',
+    } } : process,
     require: (id: string) => { assert.ok(id in dependencies, `Unexpected dependency ${id}`); return dependencies[id]; },
     setInterval: (fn: () => void, ms: number) => { intervals.set(fn, ms); return { fn, unref: () => undefined }; },
     clearInterval: (timer: { fn: () => void }) => { intervals.delete(timer.fn); },
   });
-  const { LibMpvSession } = module.exports as {
+  const { LibMpvSession, libMpvRuntimeSummary } = module.exports as {
     LibMpvSession: new (...args: unknown[]) => { command: (command: MpvCommand) => boolean; stop: () => boolean };
+    libMpvRuntimeSummary: () => string;
   };
   const session = new LibMpvSession(runtime, owner, {}, 'toy.mkv', {}, () => undefined);
   const poll = () => { for (const fn of [...intervals.keys()]) fn(); };
   const event = (message: unknown) => { queued.push(message); poll(); };
   const property = (name: string, data: unknown) => event({ event: 'property-change', name, data });
-  return { session, sent, powerStates, intervals, poll, event, property };
+  return { session, sent, powerStates, intervals, poll, event, property,
+    runtimeSummary: libMpvRuntimeSummary, nativeLoads: () => nativeLoads };
 }
+
+test('startup logging detects bundled mpv without loading native libraries', () => {
+  const f = fixture({ bundledRuntime: true });
+  const before = f.nativeLoads();
+  assert.match(f.runtimeSummary(), /detected.*loaded on demand/);
+  assert.equal(f.nativeLoads(), before);
+  f.session.stop();
+});
 
 test('libmpv sends no state or display-sleep sync for empty polls or unchanged paused properties', () => {
   const f = fixture();

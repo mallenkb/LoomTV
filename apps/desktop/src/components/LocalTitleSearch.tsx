@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useLibrary, type MediaItem } from '@/contexts/LibraryContext';
 import { useLocation } from '@/lib/navigation';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
@@ -15,10 +15,10 @@ const FILTERS = [
 ] as const;
 type Filter = typeof FILTERS[number]['value'];
 
-export default function LocalTitleSearch({ open, onOpenChange, query, onQueryChange, items, title = 'Search your library', actions, initialFilter = 'all' }: {
+export default function LocalTitleSearch({ open, onOpenChange, query, onQueryChange, items, title = 'Search your library', initialFilter = 'all' }: {
   open: boolean; onOpenChange: (open: boolean) => void;
   query: string; onQueryChange: (query: string) => void;
-  items?: readonly MediaItem[]; title?: string; actions?: ReactNode; initialFilter?: PageSearchFilter;
+  items?: readonly MediaItem[]; title?: string; initialFilter?: PageSearchFilter;
 }) {
   const { state } = useLibrary();
   const location = useLocation();
@@ -48,7 +48,7 @@ export default function LocalTitleSearch({ open, onOpenChange, query, onQueryCha
       if (event.key === 'ArrowDown') { event.preventDefault(); first.focus(); }
       if (event.key === 'Enter') { event.preventDefault(); first.click(); }
     }}>
-    <SearchFilterTabs items={FILTERS} value={filter} onChange={setFilter} actions={actions} />
+    <SearchFilterTabs items={FILTERS} value={filter} onChange={setFilter} />
     <div ref={resultsRef} id={resultsId} className="min-h-0 overflow-y-auto overscroll-contain p-5"
       aria-busy={query !== deferredQuery || state.isLoading}
       onClick={event => { if ((event.target as Element).closest('a[href]')) onOpenChange(false); }}>

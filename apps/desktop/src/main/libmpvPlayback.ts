@@ -222,10 +222,15 @@ export function libMpvAvailability(force = false): MpvAvailability {
 }
 
 export function libMpvRuntimeSummary(): string {
-  const availability = libMpvAvailability();
-  return availability.available
-    ? `[playback] native libmpv ready — ${availability.libraryPath}`
-    : `[playback] native libmpv unavailable — ${availability.reason}`;
+  if (disabled()) return '[playback] native libmpv disabled for this run';
+  if (cachedRuntime === null) return `[playback] native libmpv unavailable — ${cachedWarning}`;
+  if (cachedRuntime) return `[playback] native libmpv ready — ${cachedRuntime.libraryPath}`;
+  // Startup logging must not dlopen mpv and all of its codec libraries on the
+  // main thread. Availability and playback validate the bridge when needed.
+  const paths = configuredPaths();
+  return paths
+    ? `[playback] native libmpv detected — ${paths.libraryPath}; loaded on demand`
+    : '[playback] native libmpv unavailable — the bundled library or bridge is missing';
 }
 
 const PRESENTATION_COMMANDS: ReadonlySet<MpvCommand['type']> = new Set([

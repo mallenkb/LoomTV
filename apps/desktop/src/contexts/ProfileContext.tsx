@@ -119,9 +119,13 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     setListOverrides({});
     setWatchedOverrides({});
     setQueryProfile(profileId);
-    await setProgressProfile(profileId);
-    if (hydrationGeneration !== generationRef.current) return;
+    // setProgressProfile changes scope synchronously before its first await.
+    // These independent reads can then share the same profile without a
+    // progress round trip holding up preferences and saved lists.
+    const progressReady = setProgressProfile(profileId);
     if (!profileId) {
+      await progressReady;
+      if (hydrationGeneration !== generationRef.current) return;
       setPreferences({});
       setLists([]);
       return;
@@ -129,6 +133,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     const [nextPreferences, nextLists] = await Promise.all([
       desktopApi.getProfilePreferences(),
       desktopApi.getProfileLists(),
+      progressReady,
     ]);
     if (!mountedRef.current || hydrationGeneration !== generationRef.current
       || hadPendingWrites || pendingPersonalWrites.current > 0 || writeRevision !== personalWriteRevision.current) return;

@@ -5,8 +5,6 @@ import SharedListHighlight from '@/components/SharedListHighlight';
 import { useLibraryFilterVisibility } from '@/contexts/LibraryFilterVisibilityContext';
 import {
   libraryFilterOptions,
-  issueLibraryFilterOptions,
-  personalLibraryFilterOptions,
   primaryLibraryFilterOptions,
   type LibraryFilterOption,
   type LibraryFilter,
@@ -76,25 +74,13 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
       {filterOpen && (
         <div
           role="menu"
-          className="loom-search-surface loom-library-filter-menu absolute right-0 top-full z-50 mt-2 max-h-[min(26rem,65dvh)] w-56 overflow-y-auto rounded-2xl border p-1"
+          aria-label="Library filters"
+          className="loom-search-surface loom-library-filter-menu absolute right-0 top-full z-50 mt-2 max-h-[min(26rem,65dvh)] w-64 overflow-y-auto rounded-2xl border p-2"
         >
           <SharedListHighlight activeId={activeFilter} followPointer={false} className="loom-shared-highlight-menu">
             <FilterMenuGroup
-              label="Watch status"
               activeFilter={activeFilter}
               options={primaryLibraryFilterOptions}
-              onChoose={chooseFilter}
-            />
-            <FilterMenuGroup
-              label="Personal lists"
-              activeFilter={activeFilter}
-              options={personalLibraryFilterOptions}
-              onChoose={chooseFilter}
-            />
-            <FilterMenuGroup
-              label="Library health"
-              activeFilter={activeFilter}
-              options={issueLibraryFilterOptions}
               onChoose={chooseFilter}
             />
           </SharedListHighlight>
@@ -104,22 +90,13 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
   );
 }
 
-function FilterMenuGroup({
-  label,
-  activeFilter,
-  options,
-  onChoose,
-}: {
-  label: string;
+function FilterMenuGroup({ activeFilter, options, onChoose }: {
   activeFilter: LibraryFilter;
   options: LibraryFilterOption[];
   onChoose: (filter: LibraryFilter) => void;
 }) {
   return (
-    <div className="border-b border-[var(--loom-panel-border)] py-1 last:border-b-0">
-      <div className="px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--loom-faint)]">
-        {label}
-      </div>
+    <div className="py-1">
       {options.map((option) => (
         <button
           key={option.id}
@@ -129,7 +106,7 @@ function FilterMenuGroup({
           onClick={() => onChoose(option.id)}
           data-shared-highlight-item
           data-shared-highlight-id={option.id}
-          className={`relative z-10 flex w-full items-center justify-between rounded px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${
+          className={`relative z-10 flex min-h-10 w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${
             activeFilter === option.id
               ? 'text-[var(--loom-active-text)]'
               : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'

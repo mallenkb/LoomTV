@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, Type, X } from 'lucide-react';
+import { FileText, FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Star, Type, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
@@ -940,7 +940,7 @@ export default function ArtworkEditorControls({
           {isFetchingArtwork ? (
             <Loader2 className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4 animate-spin text-[var(--loom-accent)]`} />
           ) : (
-            <Search className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4`} />
+            <RefreshCw className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4`} />
           )}
           {!isPageScrolled && <span className="text-sm font-medium">Update Metadata</span>}
         </Button>
@@ -973,7 +973,7 @@ export default function ArtworkEditorControls({
                 disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
               >
-                <Search className="h-4 w-4" />
+                <RefreshCw className="h-4 w-4" />
                 Update Metadata
               </button>
               <button

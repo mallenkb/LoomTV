@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('desktopApi', createDesktopBridge(ipcRenderer));
 // image data. Visible artwork, the current video and the disk cache stay warm.
 // An inactivity trim is dropped if the user comes back during that wait, so it
 // cannot evict artwork they are about to scroll back to.
-const RETURN_EVENTS = ['pointerdown', 'keydown', 'wheel'] as const;
+const RETURN_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'focus'] as const;
 let memoryTrimPending = false;
 let userReturned = false;
 const markReturned = () => { userReturned = true; };
@@ -31,7 +31,9 @@ ipcRenderer.on('app:trim-memory', (_event, reason: IdleTrimReason) => {
   window.requestIdleCallback(() => {
     memoryTrimPending = false;
     if (inactivityTrim) watchForReturn(false);
-    if (userReturned) return;
+    // A queued trim can outlive the hidden window that requested it. Never
+    // clear the library's resource cache once its document is visible again.
+    if (userReturned || (inactivityTrim && document.visibilityState !== 'hidden')) return;
     const { images } = webFrame.getResourceUsage();
     if (images.size - images.liveSize >= 16 * 1024 * 1024) webFrame.clearCache();
   }, { timeout: 5_000 });

@@ -54,6 +54,26 @@ test('startup persistence recovers from corrupt history and reports write failur
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test('library readiness releases background startup and also has a deadline', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-startup-ready-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const recorder = createStartupTimingRecorder(directory, { startedAt: 1_000, now: () => 700 });
+  let ready = false;
+  const waiting = recorder.waitForLibraryRender(1_000).then(() => { ready = true; });
+  await Promise.resolve();
+  assert.equal(ready, false);
+  recorder.recordLibraryRender(1_600);
+  await waiting;
+  assert.equal(ready, true);
+  await recorder.waitForLibraryRender();
+  await recorder.flush();
+
+  // A profile picker or a failed renderer must not leave hosting disabled.
+  const noLibrary = createStartupTimingRecorder(path.join(directory, 'no-library'));
+  await noLibrary.waitForLibraryRender(5);
+  await noLibrary.flush();
+});
+
 test('startup IPC accepts only a finite timestamp and the bridge uses the validated invoke channel', async () => {
   const channel = 'startup:library-render';
   assert.deepEqual(parseIpcArguments(channel, [1234], startupLibraryRenderArgsSchema), [1234]);

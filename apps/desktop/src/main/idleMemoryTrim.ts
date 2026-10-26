@@ -1,6 +1,6 @@
 // Chromium and the main process keep caches warm for as long as the app runs,
 // including the hours LoomTV sits in the tray serving other devices. Hand that
-// memory back once nobody is looking. Playback trims only unused UI resources;
+// memory back once the window is hidden. Playback trims only unused UI resources;
 // the decoder and its resume/seek buffers are never part of this cleanup.
 
 export const IDLE_TRIM_AFTER_SECONDS = 5 * 60;
@@ -39,7 +39,9 @@ export function createIdleMemoryTrimmer(deps: IdleMemoryTrimDependencies) {
     if (reason === 'playback') {
       if (!deps.isPlayerOpen()) return;
     } else {
-      if (deps.isPlaybackActive()) return;
+      // System inactivity also includes reading the visible library. Keep its
+      // decoded resources intact until the window is actually hidden.
+      if (deps.isPlaybackActive() || deps.isWindowActive()) return;
       trimmedThisIdlePeriod = true;
     }
     deps.trim(reason);
