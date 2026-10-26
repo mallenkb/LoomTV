@@ -19,7 +19,7 @@ test('native response buffering bounds in-flight bytes and drains before complet
     fileURLToPath(new URL('../modules/loomtv-secure-transport/ios/LoomTvResponseBuffer.swift', import.meta.url)),
     fileURLToPath(new URL('./fixtures/response-buffer.swift', import.meta.url)),
   ];
-  const compiled = spawnSync('swiftc', [...sources, '-o', executable], { encoding: 'utf8', timeout: 45_000 });
+  const compiled = spawnSync('swiftc', [...sources, '-o', executable], { encoding: 'utf8', timeout: 120_000 });
   assert.equal(compiled.status, 0, compiled.stderr);
   const ran = spawnSync(executable, [], { encoding: 'utf8', timeout: 5_000 });
   assert.equal(ran.status, 0, ran.stderr);
