@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.38](docs/releases/v2.0.38.md)
+
+Adds a shared search palette for local media and add-on catalogs, with filters that follow the current page and navigation that preserves page context.
+
 ### [2.0.37](docs/releases/v2.0.37.md)
 
 Corrects season selection from filenames, keeps episode details aligned with local files, and adds an opt-in player window fit setting.
