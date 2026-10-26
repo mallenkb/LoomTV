@@ -41,7 +41,10 @@ function defaultAudioTrack(file: EpisodeFile): number {
 }
 
 function revisionFor(item: MediaItem, file: EpisodeFile): AnalysisRevision | null {
-  if (!file.filePath || !fs.existsSync(file.filePath)) return null;
+  if (!file.filePath) return null;
+  const hasStoredIdentity = typeof file.localMetadata?.fileSize === 'number'
+    && typeof file.localMetadata.modifiedAtMs === 'number';
+  if (!hasStoredIdentity && !fs.existsSync(file.filePath)) return null;
   const durationMs = Math.round((file.localMetadata?.durationSeconds || 0) * 1000);
   if (!durationMs) return null;
   return {

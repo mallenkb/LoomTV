@@ -828,9 +828,12 @@ export default function TVDetail({ kind = 'series', onPlay, onPlayStream }: TVDe
     );
   }
 
+  const localEpisodeKeys = !isRemoteStremioShow && show.episodeFiles
+    ? new Set(show.episodeFiles.map((file) => `${file.season}:${file.episode}`))
+    : null;
   const episodesForSeason = (seasonNum: number): EpisodeMeta[] =>
     (show.episodes || [])
-      .filter((e) => e.season === seasonNum)
+      .filter((e) => e.season === seasonNum && (!localEpisodeKeys || localEpisodeKeys.has(`${e.season}:${e.number}`)))
       .sort((a, b) => a.number - b.number);
 
   const newEpisodeKeys = new Set(

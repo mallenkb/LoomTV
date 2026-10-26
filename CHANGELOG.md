@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.37](docs/releases/v2.0.37.md)
+
+Corrects season selection from filenames, keeps episode details aligned with local files, and adds an opt-in player window fit setting.
+
 ### [2.0.36](docs/releases/v2.0.36.md)
 
 Cuts repeated download and compression work in release builds while keeping all installer formats.

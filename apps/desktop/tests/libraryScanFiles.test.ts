@@ -8,6 +8,7 @@ import {
   extractSeasons,
   getLibraryFolderSignatureAsync,
   scanEpisodeFiles,
+  scanEpisodeFilesAsync,
   seasonNumberFromDirectoryName,
 } from '../src/main/libraryScanFiles.ts';
 import {
@@ -22,6 +23,27 @@ test('episode filename parsing covers TV, anime, and numbered-title conventions'
   assert.deepEqual(parseEpisodeFileName('[Group] Show - 07.mkv', 1), { season: 1, episode: 7 });
   assert.deepEqual(parseEpisodeFileName('03 - A Beginning.mkv', 5), { season: 5, episode: 3 });
   assert.equal(parseEpisodeFileName('Show 2026.mkv', 1), null);
+});
+
+test('corrected season folders and filenames override stale embedded seasons', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'loomtv-corrected-season-'));
+  try {
+    mkdirSync(path.join(root, 'Season 02'));
+    writeFileSync(path.join(root, 'Season 02', 'Show.S01E01.mkv'), 'video');
+    writeFileSync(path.join(root, 'Show.S02E02.mkv'), 'video');
+    writeFileSync(path.join(root, 'Show Season 2 - 03.mkv'), 'video');
+    const probe = () => ({ season: 1, localMetadata: { videoCodec: 'h264' } });
+    const expected = [
+      { season: 2, episode: 1 },
+      { season: 2, episode: 2 },
+      { season: 2, episode: 3 },
+    ];
+    for (const episodes of [scanEpisodeFiles(root, probe), await scanEpisodeFilesAsync(root, async () => probe())]) {
+      assert.deepEqual(episodes.map(({ season, episode }) => ({ season, episode })), expected);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('decorated season folder names retain their leading season number', () => {

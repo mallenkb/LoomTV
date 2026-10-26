@@ -177,7 +177,7 @@ export function scanEpisodeFiles(folderPath: string, probe: MediaFileProbe = EMP
         if (!parsed) continue;
         // Preserve the user's season folder even when a filename or embedded
         // tag disagrees. Naming conflicts are left for review by the organizer.
-        const season = folderSeason ?? mediaProbe.season ?? parsed.season;
+        const season = folderSeason ?? parsed.season;
         files.push({
           season,
           // The filename's episode number wins over embedded tags: release
@@ -260,12 +260,11 @@ export async function scanEpisodeFilesAsync(
         const mediaProbe = await probe(fullPath);
         if (!mediaProbe.localMetadata?.videoCodec) return null;
         const folderSeason = seasonFromRelativePath(folderPath, directory);
-        const hint = scanInventory.getStore()?.get(fullPath)?.hints;
-        const parsed = hint?.episode !== undefined
-          ? { episode: hint.episode, season: folderSeason ?? mediaProbe.season ?? hint.season ?? 1 }
-          : parseEpisodeFileName(fileName, folderSeason ?? mediaProbe.season ?? 1);
+        // Explicit filename seasons beat embedded tags. Tags are only the
+        // fallback for episode-only names; a named season folder wins both.
+        const parsed = parseEpisodeFileName(fileName, folderSeason ?? mediaProbe.season ?? 1);
         if (!parsed) return null;
-        const season = folderSeason ?? mediaProbe.season ?? parsed.season;
+        const season = folderSeason ?? parsed.season;
         return {
           season,
           episode: parsed.episode,

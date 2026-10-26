@@ -80,8 +80,8 @@ function audioIdentity(file: EpisodeFile): { index: number; language: string } {
   return { index: audio?.index ?? 0, language: audio?.language || 'und' };
 }
 
-function automaticRevision(filePath: string, durationMs: number, audioTrack: number, audioLanguage: string): string {
-  const stats = fs.statSync(filePath);
+async function automaticRevision(filePath: string, durationMs: number, audioTrack: number, audioLanguage: string): Promise<string> {
+  const stats = await fs.promises.stat(filePath);
   void audioLanguage;
   return hashId(path.resolve(filePath), stats.size, Math.round(stats.mtimeMs), durationMs, audioTrack);
 }
@@ -379,10 +379,11 @@ export function createLocalSegmentAnalysis(deps: {
       .find((candidate) => candidate.id === mediaId);
     if (!item || item.type === 'movie') return [];
     const files = (item.episodeFiles || [])
-      .filter((file) => file.season === season && fs.existsSync(file.filePath) && !excluded(item, season, file.filePath))
+      .filter((file) => file.season === season && !excluded(item, season, file.filePath))
       .sort((a, b) => a.episode - b.episode);
     const result: AnalysisContext[] = [];
     for (const file of files) {
+      try { await fs.promises.access(file.filePath); } catch { continue; }
       const analyzedFile = await analysisFile(file);
       const durationMs = Math.round((analyzedFile.localMetadata?.durationSeconds || 0) * 1000);
       if (!durationMs) continue;
@@ -394,7 +395,7 @@ export function createLocalSegmentAnalysis(deps: {
         durationMs,
         audioTrack: audio.index,
         audioLanguage: audio.language,
-        fileRevision: automaticRevision(file.filePath, durationMs, audio.index, audio.language),
+        fileRevision: await automaticRevision(file.filePath, durationMs, audio.index, audio.language),
       });
     }
     return result;
@@ -402,7 +403,8 @@ export function createLocalSegmentAnalysis(deps: {
 
   async function movieContext(mediaId: string): Promise<AnalysisContext | null> {
     const item = (deps.loadLibrary().movies || []).find((candidate) => candidate.id === mediaId);
-    if (!item || item.type !== 'movie' || !item.filePath || !fs.existsSync(item.filePath) || excluded(item, 0, item.filePath)) return null;
+    if (!item || item.type !== 'movie' || !item.filePath || excluded(item, 0, item.filePath)) return null;
+    try { await fs.promises.access(item.filePath); } catch { return null; }
     const file = await analysisFile({
       season: 0,
       episode: 0,
@@ -419,7 +421,7 @@ export function createLocalSegmentAnalysis(deps: {
       durationMs,
       audioTrack: audio.index,
       audioLanguage: audio.language,
-      fileRevision: automaticRevision(file.filePath, durationMs, audio.index, audio.language),
+      fileRevision: await automaticRevision(file.filePath, durationMs, audio.index, audio.language),
     };
   }
 
@@ -528,9 +530,11 @@ export function createLocalSegmentAnalysis(deps: {
             const frameMs = target.durationMs / target.frames.length;
             const neighbors = episodes.slice(Math.max(0, index - 4), Math.min(episodes.length, index + 5))
               .filter((candidate) => candidate.fileRevision !== episode.fileRevision);
-            const matches = neighbors.flatMap((neighbor) => {
+            const matches: FingerprintMatch[] = [];
+            for (const neighbor of neighbors) {
               const other = fingerprints.get(neighbor.fileRevision)?.[type];
-              if (!other) return [];
+              if (!other) continue;
+              await yieldToAnalysisEvents(canContinue);
               const limits = configured.durationLimits[type];
               const conflicting = type === 'recap'
                 ? candidates.filter((candidate) => candidate.type === 'intro')
@@ -550,8 +554,8 @@ export function createLocalSegmentAnalysis(deps: {
                   endMs: (candidate.endMs ?? episode.durationMs) - target.windowStartMs,
                 })),
               });
-              return match ? [match] : [];
-            });
+              if (match) matches.push(match);
+            }
             const cluster = strongestCluster(matches, frameMs);
             if (cluster.length < 2) continue;
             const confidence = scoreFingerprintMatches(cluster);

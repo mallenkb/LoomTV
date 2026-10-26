@@ -9,6 +9,8 @@ type PlaybackSettingsSectionProps = {
   rewindOnResumeSeconds: number;
   skipBackSeconds: number;
   skipForwardSeconds: number;
+  fitWindowToVideo: boolean;
+  onFitWindowToVideoChange: (enabled: boolean) => void;
   displaySleepTimeoutMinutes: number;
   /** Seek and resume choices save as soon as they change. */
   onPlaybackPreferenceChange: (key: 'skipBackSeconds' | 'skipForwardSeconds' | 'rewindOnResumeSeconds', value: number) => void;
@@ -51,6 +53,8 @@ export default function PlaybackSettingsSection({
   rewindOnResumeSeconds,
   skipBackSeconds,
   skipForwardSeconds,
+  fitWindowToVideo,
+  onFitWindowToVideoChange,
   displaySleepTimeoutMinutes,
   onPlaybackPreferenceChange,
   onDisplaySleepTimeoutChange,
@@ -142,6 +146,11 @@ export default function PlaybackSettingsSection({
     <div>
       <SettingsPageHeader title="Playback" description="Seek buttons, resuming, and automatic intro and outro skipping." />
       <SettingsGroup title="Controls">
+        {displaySleepSettingsAvailable ? (
+          <SettingsRow title="Fit window to video" description="Resize the window to match the video. Off keeps your window size and fits the video inside it.">
+            <SettingsSwitch label="Fit window to video" checked={fitWindowToVideo} onChange={onFitWindowToVideoChange} />
+          </SettingsRow>
+        ) : null}
         <SettingsRow title="Skip back" description="How far the back button and left arrow jump.">
           <SettingsSelect label="Skip back" value={skipBackSeconds} options={secondsOptions(SEEK_CHOICES, skipBackSeconds)} onChange={(value) => onPlaybackPreferenceChange('skipBackSeconds', value)} className="w-32" />
         </SettingsRow>

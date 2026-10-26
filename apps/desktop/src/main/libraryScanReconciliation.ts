@@ -195,6 +195,7 @@ export function preserveExistingItemDuringScan(
     if (seasonCounts.has(season.number)) seasons.set(season.number, season);
   }
   for (const season of fresh.seasons || []) {
+    if (fresh.episodeFiles && !seasonCounts.has(season.number)) continue;
     if (!seasons.has(season.number)) seasons.set(season.number, season);
   }
   for (const [number, count] of seasonCounts) {

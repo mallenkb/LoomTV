@@ -640,6 +640,7 @@ export default function VideoPlayer({
   const [cropMode, setCropMode] = useState<CropMode>('none');
   const [rotation, setRotation] = useState<RotationMode>(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [fitWindowToVideo, setFitWindowToVideo] = useState(false);
   const [displaySleepTimeoutMinutes, setDisplaySleepTimeoutMinutes] = useState(0);
   useEffect(() => window.desktopApi?.onPlaybackSleepTimerReset?.(() => {
     setDisplaySleepTimeoutMinutes(0);
@@ -911,6 +912,7 @@ export default function VideoPlayer({
     void Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()])
       .then(([settings, preferences]) => {
         if (cancelled) return;
+        setFitWindowToVideo(settings.playbackFitWindowToVideo === true);
         setRewindOnResumeSeconds(normalizeResumeRewind(preferences.playbackRewindOnResumeSeconds));
         setSkipBackSeconds(
           Number.isFinite(preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds)
@@ -4163,14 +4165,14 @@ export default function VideoPlayer({
   const playbackWindowRatio = unrotatedWindowRatio && (rotation === 90 || rotation === 270)
     ? 1 / unrotatedWindowRatio : unrotatedWindowRatio;
   useEffect(() => {
-    if (activeIframeUrl) {
+    if (!fitWindowToVideo || activeIframeUrl) {
       void desktopApi.setPlaybackWindowAspect(playbackWindowSessionId, null).catch(() => undefined);
     } else if (playbackWindowRatio && Number.isFinite(playbackWindowRatio)) {
       void desktopApi.setPlaybackWindowAspect(playbackWindowSessionId, playbackWindowRatio).catch(error => {
         console.warn('[player] Could not fit the window to the video.', error);
       });
     }
-  }, [activeIframeUrl, playbackWindowRatio, playbackWindowSessionId]);
+  }, [activeIframeUrl, fitWindowToVideo, playbackWindowRatio, playbackWindowSessionId]);
   useEffect(() => () => {
     void desktopApi.setPlaybackWindowAspect(playbackWindowSessionId, null).catch(() => undefined);
   }, [playbackWindowSessionId]);

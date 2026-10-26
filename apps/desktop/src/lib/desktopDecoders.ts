@@ -224,6 +224,7 @@ export const settingsPayloadSchema = z.object({
   cleanUpLibraryFiles: z.enum(['auto', 'off']).optional(),
   playbackSkipBackSeconds: finiteNumber.optional(),
   playbackSkipForwardSeconds: finiteNumber.optional(),
+  playbackFitWindowToVideo: z.boolean().optional(),
   playbackDisplaySleepTimeoutMinutes: finiteNumber.optional(),
   localSkipAnalysisEnabled: z.boolean().optional(),
   skipAnalysis: z.object({

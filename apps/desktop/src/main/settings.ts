@@ -50,6 +50,7 @@ const settingsInputSchema = z.looseObject({
   metadataApiKeys: z.unknown().optional(),
   metadataOfflineMode: z.unknown().optional(),
   omdbApiKey: z.unknown().optional(),
+  playbackFitWindowToVideo: z.boolean().optional(),
   playbackDisplaySleepTimeoutMinutes: z.unknown().optional(),
   playbackSkipBackSeconds: z.unknown().optional(),
   playbackSkipForwardSeconds: z.unknown().optional(),
@@ -229,6 +230,7 @@ function normalizeSettings(input: unknown): AppSettings {
     playbackSkipForwardSeconds: Number.isFinite(Number(raw.playbackSkipForwardSeconds)) && Number(raw.playbackSkipForwardSeconds) > 0
       ? Number(raw.playbackSkipForwardSeconds)
       : 15,
+    playbackFitWindowToVideo: raw.playbackFitWindowToVideo === true,
     playbackDisplaySleepTimeoutMinutes: Number.isFinite(Number(raw.playbackDisplaySleepTimeoutMinutes))
       ? Math.max(0, Math.min(480, Math.round(Number(raw.playbackDisplaySleepTimeoutMinutes))))
       : 0,

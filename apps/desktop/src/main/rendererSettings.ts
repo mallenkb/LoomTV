@@ -12,6 +12,7 @@ const RENDERER_SETTINGS_WRITE_KEYS: ReadonlySet<string> = new Set([
   'cleanUpLibraryFiles',
   'playbackSkipBackSeconds',
   'playbackSkipForwardSeconds',
+  'playbackFitWindowToVideo',
   'playbackDisplaySleepTimeoutMinutes',
   'localSkipAnalysisEnabled',
   'skipAnalysis',
@@ -71,6 +72,7 @@ export const rendererSettingsPatchSchema: z.ZodType<SettingsPayload> = z.object(
   cleanUpLibraryFiles: z.enum(['auto', 'off']).optional(),
   playbackSkipBackSeconds: z.number().finite().positive().optional(),
   playbackSkipForwardSeconds: z.number().finite().positive().optional(),
+  playbackFitWindowToVideo: z.boolean().optional(),
   playbackDisplaySleepTimeoutMinutes: z.number().finite().nonnegative().max(480).optional(),
   localSkipAnalysisEnabled: z.boolean().optional(),
   skipAnalysis: skipAnalysisSettingsSchema.optional(),
@@ -107,6 +109,7 @@ export function settingsForRenderer(settings: AppSettings): SettingsPayload {
     cleanUpLibraryFiles: settings.cleanUpLibraryFiles,
     playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
     playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+    playbackFitWindowToVideo: settings.playbackFitWindowToVideo,
     playbackDisplaySleepTimeoutMinutes: settings.playbackDisplaySleepTimeoutMinutes,
     localSkipAnalysisEnabled: settings.localSkipAnalysisEnabled,
     skipAnalysis: settings.skipAnalysis,
@@ -131,6 +134,7 @@ export function settingsPreferencesForRenderer(settings: AppSettings): SettingsP
     appLoaderStyle: settings.appLoaderStyle,
     playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
     playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+    playbackFitWindowToVideo: settings.playbackFitWindowToVideo,
     playbackDisplaySleepTimeoutMinutes: settings.playbackDisplaySleepTimeoutMinutes,
   };
 }

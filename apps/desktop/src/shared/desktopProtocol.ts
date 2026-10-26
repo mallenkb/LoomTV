@@ -318,6 +318,7 @@ export interface SettingsPayload {
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
   /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
+  playbackFitWindowToVideo?: boolean;
   playbackDisplaySleepTimeoutMinutes?: number;
   localSkipAnalysisEnabled?: boolean;
   skipAnalysis?: SkipAnalysisSettings;

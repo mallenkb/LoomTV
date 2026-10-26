@@ -55,11 +55,16 @@ export default function HeroMetadata({ item, isOther = false, onOpenProviders, p
     || item.episodeFiles?.length
     || item.seasons?.reduce((total, season) => total + Math.max(0, season.episodeCount || 0), 0)
     || 0;
-  const episodeCount = item.episodeCount
+  const localEpisodeKeys = !item.episodeFiles?.length ? null : new Set(
+    item.episodeFiles.filter((episode) => episode.season > 0).map((episode) => `${episode.season}:${episode.episode}`),
+  );
+  const episodeCount = localEpisodeKeys ? localEpisodeKeys.size : item.episodeCount
     || regularEpisodeCount
     || allEpisodeCount
     || episodeCountFromRuntime(item.runtime);
-  const seasonCount = reportedSeasonCount;
+  const seasonCount = localEpisodeKeys
+    ? new Set(item.episodeFiles?.filter((episode) => episode.season > 0).map((episode) => episode.season)).size
+    : reportedSeasonCount;
   const hasSeriesMetadata = item.type !== 'movie' && (seasonCount > 0 || episodeCount > 0);
   const durationLabel = (item.type === 'movie' || (item.type === 'anime' && !hasSeriesMetadata))
     ? formatDuration(item.localMetadata?.durationSeconds) || formatRuntime(item.runtime)

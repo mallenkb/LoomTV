@@ -215,6 +215,7 @@ export function useSettingsController(activeSection: SettingsSection | null) {
   const [playbackRewindOnResumeSeconds, setPlaybackRewindOnResumeSeconds] = useState(DEFAULT_RESUME_REWIND_SECONDS);
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
+  const [playbackFitWindowToVideo, setPlaybackFitWindowToVideo] = useState(false);
   const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
   useEffect(() => window.desktopApi?.onPlaybackSleepTimerReset?.(() => {
     setPlaybackDisplaySleepTimeoutMinutes(0);
@@ -447,6 +448,7 @@ export function useSettingsController(activeSection: SettingsSection | null) {
       setPlaybackRewindOnResumeSeconds(loadedRewind);
       setPlaybackSkipBackSeconds(loadedSkipBack);
       setPlaybackSkipForwardSeconds(loadedSkipForward);
+      setPlaybackFitWindowToVideo(s.playbackFitWindowToVideo === true);
       const loadedDisplaySleepTimeout = Number.isFinite(Number(s.playbackDisplaySleepTimeoutMinutes))
         ? Math.max(0, Math.min(480, Math.round(Number(s.playbackDisplaySleepTimeoutMinutes))))
         : 0;
@@ -1203,6 +1205,11 @@ export function useSettingsController(activeSection: SettingsSection | null) {
     return true;
   }, [activeProfile?.type, isRemoteLibraryMode, persistSettings]);
 
+  const saveFitWindowToVideo = useCallback(async (enabled: boolean): Promise<void> => {
+    if (isRemoteLibraryMode || activeProfile?.type !== 'owner') return;
+    if (await persistSettings({ playbackFitWindowToVideo: enabled })) setPlaybackFitWindowToVideo(enabled);
+  }, [activeProfile?.type, isRemoteLibraryMode, persistSettings]);
+
   const renderSection = (section: SettingsSection): ReactNode => (
     <>
       {section === 'profiles' && <ProfilesSettingsSection />}
@@ -1214,6 +1221,8 @@ export function useSettingsController(activeSection: SettingsSection | null) {
           rewindOnResumeSeconds={playbackRewindOnResumeSeconds}
           skipBackSeconds={playbackSkipBackSeconds}
           skipForwardSeconds={playbackSkipForwardSeconds}
+          fitWindowToVideo={playbackFitWindowToVideo}
+          onFitWindowToVideoChange={(enabled) => void saveFitWindowToVideo(enabled)}
           displaySleepTimeoutMinutes={playbackDisplaySleepTimeoutMinutes}
           onPlaybackPreferenceChange={(key, value) => void savePlaybackPreference(key, value)}
           onDisplaySleepTimeoutChange={(minutes) => void saveDisplaySleep(minutes)}
