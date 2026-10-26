@@ -4,9 +4,13 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
-### [2.0.38](docs/releases/v2.0.38.md)
+### [2.0.39](docs/releases/v2.0.39.md)
 
 Adds a shared search palette for local media and add-on catalogs, with filters that follow the current page and navigation that preserves page context.
+
+### [2.0.38](docs/releases/v2.0.38.md) (not published)
+
+Prepared the shared search palette release, but validation found a stale modal contract check. Its desktop changes are included in 2.0.39.
 
 ### [2.0.37](docs/releases/v2.0.37.md)
 

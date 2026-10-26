@@ -28,14 +28,22 @@ test('full-screen desktop layers opt into shared modal semantics', () => {
   const profileGate = source('components/profiles/ProfileGate.tsx');
   const player = source('components/VideoPlayer.tsx');
   const modernHome = source('components/ModernHome.tsx');
+  const searchPalette = source('components/SearchPaletteFrame.tsx');
+  const librarySearch = source('components/LibrarySearch.tsx');
 
   assert.match(app, /aria-hidden=\{appUnderlayHidden \? 'true' : undefined\}/);
-  for (const layer of [player, modernHome]) {
+  for (const layer of [player]) {
     assert.match(layer, /useModalLayer\(/);
     assert.match(layer, /role="dialog"/);
     assert.match(layer, /aria-modal="true"/);
     assert.match(layer, /data-modal-layer=/);
   }
+  // ModernHome delegates its search surface to the shared palette. The Dialog
+  // owns the modal stack and accessibility attributes for that extracted UI.
+  assert.match(modernHome, /open=\{searchOpen\}/);
+  assert.match(modernHome, /localItems=\{visibleItems\}/);
+  assert.match(librarySearch, /<SearchPaletteFrame/);
+  assert.match(searchPalette, /<Dialog open=\{open\}/);
   // The profile gate is modal when it covers the app (startup, first run,
   // locked). Opened from inside the app it sits beside the side nav instead:
   // not a modal layer, the nav stays reachable, and only the page under it is
@@ -52,7 +60,6 @@ test('full-screen desktop layers opt into shared modal semantics', () => {
   assert.match(player, /data-modal-layer="playback-settings"/);
   assert.match(player, /data-modal-layer="episode-list"/);
   assert.match(player, /data-modal-layer="loom-player-error-title"|aria-labelledby="loom-player-error-title"/);
-  assert.match(modernHome, /initialFocusRef: searchInputRef/);
 });
 
 test('settings and player dialogs expose descriptions for their accessible names', () => {
