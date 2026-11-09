@@ -19,3 +19,89 @@ index 8853912e013d3769f3e763d06720a94091a7ffaa..fd3387fa54fff0efbe33c8e5491c82bf
          };
          for (const [key, value] of Object.entries(tree.dependencies || {})) {
              await visit(key, value);
+diff --git a/out/util/electronGet.js b/out/util/electronGet.js
+--- a/out/util/electronGet.js
++++ b/out/util/electronGet.js
+@@ -404,6 +404,42 @@
+     return extractDir;
+ }
+ // ─── Public API ───────────────────────────────────────────────────────────────
++function isTransientReleaseDownloadError(error) {
++    const status = error?.response?.statusCode;
++    return status >= 500 || ["ETIMEDOUT", "ECONNRESET", "EPIPE"].includes(error?.code);
++}
++async function fetchPinnedReleaseAsset(repo, tag, name, expectedHash, target) {
++    if (!/^[a-f0-9]{64}$/.test(expectedHash)) {
++        throw new Error(`A SHA-256 checksum is required for ${name}.`);
++    }
++    const headers = { Accept: "application/vnd.github+json", "User-Agent": "electron-builder-release-fallback" };
++    const releaseResponse = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, {
++        headers,
++        signal: AbortSignal.timeout(30000),
++    });
++    if (!releaseResponse.ok) throw new Error(`Could not inspect ${repo} release ${tag}: HTTP ${releaseResponse.status}.`);
++    const release = await releaseResponse.json();
++    const asset = release.assets?.find(entry => entry.name === name && Number.isSafeInteger(entry.id));
++    if (!asset) throw new Error(`Release ${tag} does not contain ${name}.`);
++    const response = await fetch(`https://api.github.com/repos/${repo}/releases/assets/${asset.id}`, {
++        headers: { ...headers, Accept: "application/octet-stream" },
++        signal: AbortSignal.timeout(10 * 60000),
++    });
++    if (!response.ok) throw new Error(`Could not download ${name} through the GitHub API: HTTP ${response.status}.`);
++    const archive = Buffer.from(await response.arrayBuffer());
++    const actualHash = crypto.createHash("sha256").update(archive).digest("hex");
++    if (actualHash !== expectedHash) throw new Error(`Checksum mismatch for ${name}.`);
++    await fs.mkdir(path.dirname(target), { recursive: true });
++    const partial = `${target}.${process.pid}.partial`;
++    try {
++        await fs.writeFile(partial, archive);
++        await fs.rename(partial, target);
++    }
++    finally {
++        await fs.rm(partial, { force: true });
++    }
++    return target;
++}
+ /**
+  * Downloads a generic artifact (.tar.gz or .zip) from a GitHub release.
+  * Used for electron-builder-binaries tools (appimage, etc.).
+@@ -436,7 +472,17 @@
+         mirrorOptions,
+         isGeneric: true,
+     };
+-    return downloadAndExtract(config, extractDir, filenameWithExt, archiveCachePath);
++    try {
++        return await downloadAndExtract(config, extractDir, filenameWithExt, archiveCachePath);
++    }
++    catch (error) {
++        if (!isTransientReleaseDownloadError(error)
++            || !fullUrl.startsWith(`https://github.com/${githubOrgRepo}/releases/download/`)
++            || !checksums?.[filenameWithExt]) throw error;
++        builder_util_1.log.warn({ filenameWithExt }, "direct builder tool download failed; trying GitHub release API");
++        await fetchPinnedReleaseAsset(githubOrgRepo, releaseName, filenameWithExt, checksums[filenameWithExt], archiveCachePath);
++        return downloadAndExtract(config, extractDir, filenameWithExt, archiveCachePath);
++    }
+ }
+ // Keys present in ElectronGetOptions but absent from ElectronDownloadOptions.
+ // Used to discriminate between the two config shapes at runtime.
+@@ -490,9 +536,18 @@
+  * Downloads the electron artifact zip via @electron/get (with caching) and returns the zip file path.
+  * Use when you need to extract the zip yourself (e.g. directly to appOutDir to preserve empty dirs and symlinks).
+  */
+-function downloadElectronArtifactZip(options) {
++async function downloadElectronArtifactZip(options) {
+     const config = buildElectronArtifactConfig(options);
+-    return downloadArtifactToFile(config, config.artifactName);
++    try {
++        return await downloadArtifactToFile(config, config.artifactName);
++    }
++    catch (error) {
++        const filename = `electron-v${config.version}-${config.platform}-${config.arch}.zip`;
++        if (!isTransientReleaseDownloadError(error) || !config.checksums?.[filename]) throw error;
++        builder_util_1.log.warn({ filename }, "direct Electron download failed; trying GitHub release API");
++        const archiveCachePath = path.join(getCacheDirectory({ allowEnvVarOverride: true }), `electron-v${config.version}`, filename);
++        return fetchPinnedReleaseAsset("electron/electron", `v${config.version}`, filename, config.checksums[filename], archiveCachePath);
++    }
+ }
+ async function downloadElectronArtifact(options) {
+     const { arch, version, platformName: platform, artifactName } = options;

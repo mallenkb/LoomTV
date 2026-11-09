@@ -58,13 +58,11 @@ function pruneUnpackedNativeModules(resources, platform, arch) {
   const removed = [];
   if (platform === 'darwin' && ['arm64', 'x64'].includes(arch)) {
     const otherArch = arch === 'arm64' ? 'x64' : 'arm64';
-    for (const scope of ['@img', '@koromix', '@node-datachannel']) {
+    for (const scope of ['@img', '@koromix']) {
       const scopeDirectory = path.join(modules, scope);
       if (!fs.existsSync(scopeDirectory)) continue;
       for (const entry of fs.readdirSync(scopeDirectory)) {
-        if (entry === `darwin-${otherArch}` || entry.endsWith(`-darwin-${otherArch}`)) {
-          removed.push(path.join(scopeDirectory, entry));
-        }
+        if (entry.endsWith(`-darwin-${otherArch}`)) removed.push(path.join(scopeDirectory, entry));
       }
     }
   }
