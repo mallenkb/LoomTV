@@ -223,6 +223,7 @@ patchedDependencies:
   bittorrent-tracker@11.2.3: b688f024a2777df6bd5959e56b6f820a58eb915fa33ed360bd48b36561bd54d3
   braces@3.0.3: f74126492b9552c676d4ab5618cf9b074f33b4e6ccb8c8f8c07678ed92a6741f
   react-native-zeroconf@0.17.6: 2fc87cef73ffbc7ae490dbe247e002637bcce3d3634a3888bf1c46db49ad26fe
+  webrtc-polyfill@1.2.2: 990908ac7b435aec9bf3529f9e2918a8e7e847127dee245f4ba17a3cd6caa039
 
 importers:
 
@@ -9185,7 +9186,7 @@ snapshots:
       err-code: 3.0.1
       streamx: 2.28.0
       uint8-util: 2.3.2
-      webrtc-polyfill: 1.2.2
+      webrtc-polyfill: 1.2.2(patch_hash=990908ac7b435aec9bf3529f9e2918a8e7e847127dee245f4ba17a3cd6caa039)
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
@@ -13765,7 +13766,7 @@ snapshots:
       asn1js: 3.1.0
       tslib: 2.8.1
 
-  webrtc-polyfill@1.2.2:
+  webrtc-polyfill@1.2.2(patch_hash=990908ac7b435aec9bf3529f9e2918a8e7e847127dee245f4ba17a3cd6caa039):
     dependencies:
       node-datachannel: 0.33.6
 

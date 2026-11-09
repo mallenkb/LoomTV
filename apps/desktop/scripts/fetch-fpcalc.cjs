@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { fetchReleaseAsset } = require('./github-release-asset.cjs');
 
 const VERSION = '1.6.0';
 const DOWNLOAD_ATTEMPTS = 4;
@@ -78,10 +79,16 @@ async function main() {
     if (version.status === 0 && `${version.stdout}${version.stderr}`.includes(VERSION)) return;
   }
 
-  const archive = await downloadArchive(
-    `https://github.com/acoustid/chromaprint/releases/download/v${VERSION}/${name}`,
-    name,
-  );
+  let archive;
+  try {
+    archive = await downloadArchive(
+      `https://github.com/acoustid/chromaprint/releases/download/v${VERSION}/${name}`,
+      name,
+    );
+  } catch (error) {
+    console.warn(`Direct download of ${name} failed; trying the GitHub release API: ${error.message}`);
+    archive = await fetchReleaseAsset('acoustid/chromaprint', `v${VERSION}`, name);
+  }
   const digest = crypto.createHash('sha256').update(archive).digest('hex');
   if (digest !== expectedHash) throw new Error(`Checksum mismatch for ${name}.`);
 

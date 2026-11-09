@@ -473,8 +473,10 @@ if (exists(appAsar)) {
   for (const problem of packagedDependencyProblems(appAsar, ['webtorrent'])) fail(problem);
 }
 
+const datachannelPlatform = platform === 'linux' ? `${platform}-${arch}-gnu`
+  : platform === 'win32' ? `${platform}-${arch}-msvc` : `${platform}-${arch}`;
 const requiredUnpacked = [
-  path.join(unpacked, 'node_modules', 'node-datachannel', 'build', 'Release', 'node_datachannel.node'),
+  path.join(unpacked, 'node_modules', '@node-datachannel', datachannelPlatform, 'node_datachannel.node'),
   path.join(unpacked, 'node_modules', 'better-sqlite3', 'prebuilds', `${platform}-${arch}.node`),
   // koffi's prebuilt binding. LibVLC's native window host and all three system
   // media sessions (macOS MediaPlayer, Windows SMTC, Linux MPRIS) go through it.

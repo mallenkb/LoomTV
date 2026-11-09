@@ -2,7 +2,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { buildScanner } = require('./build-scanner.cjs');
-const { stageDatachannel } = require('./stage-datachannel.cjs');
 const { UPDATE_CONFIG } = require('../../../scripts/release-identity.cjs');
 
 function resourcesPath(appOutDir, platform) {
@@ -59,11 +58,13 @@ function pruneUnpackedNativeModules(resources, platform, arch) {
   const removed = [];
   if (platform === 'darwin' && ['arm64', 'x64'].includes(arch)) {
     const otherArch = arch === 'arm64' ? 'x64' : 'arm64';
-    for (const scope of ['@img', '@koromix']) {
+    for (const scope of ['@img', '@koromix', '@node-datachannel']) {
       const scopeDirectory = path.join(modules, scope);
       if (!fs.existsSync(scopeDirectory)) continue;
       for (const entry of fs.readdirSync(scopeDirectory)) {
-        if (entry.endsWith(`-darwin-${otherArch}`)) removed.push(path.join(scopeDirectory, entry));
+        if (entry === `darwin-${otherArch}` || entry.endsWith(`-darwin-${otherArch}`)) {
+          removed.push(path.join(scopeDirectory, entry));
+        }
       }
     }
   }
@@ -96,7 +97,6 @@ exports.default = async function ensureUpdateConfig(context) {
   pruneUnsupportedLibMpv(resourcesPath(context.appOutDir, platform), platform, arch);
   thinMacUniversalBinaries(resourcesPath(context.appOutDir, platform), platform, arch);
   pruneUnpackedNativeModules(resourcesPath(context.appOutDir, platform), platform, arch);
-  await stageDatachannel(resourcesPath(context.appOutDir, platform), platform, arch);
   const target = path.join(resourcesPath(context.appOutDir, context.electronPlatformName), 'app-update.yml');
   const hadExistingConfig = fs.existsSync(target);
   const actual = hadExistingConfig ? fs.readFileSync(target, 'utf8') : undefined;

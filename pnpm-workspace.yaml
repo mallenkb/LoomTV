@@ -87,3 +87,4 @@ patchedDependencies:
   bittorrent-tracker@11.2.3: patches/bittorrent-tracker@11.2.3.patch
   braces@3.0.3: patches/braces@3.0.3.patch
   react-native-zeroconf@0.17.6: patches/react-native-zeroconf@0.17.6.patch
+  webrtc-polyfill@1.2.2: patches/webrtc-polyfill@1.2.2.patch

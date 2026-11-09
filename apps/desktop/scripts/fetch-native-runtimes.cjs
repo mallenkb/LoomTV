@@ -32,6 +32,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { fetchReleaseAsset } = require('./github-release-asset.cjs');
 const { spawnSync } = require('node:child_process');
 const { ensureBridge } = require('./libmpv-bridge.cjs');
 
@@ -144,7 +145,14 @@ async function verifiedArchive(manifest, runtime) {
   const partial = `${cached}.${process.pid}.partial`;
   try {
     console.log(`[native-runtimes] Downloading ${runtime.archive} (${Math.round(runtime.size / 1_048_576)} MB).`);
-    await download(`${manifest.baseUrl}${runtime.archive}`, partial, runtime.archive);
+    try {
+      await download(`${manifest.baseUrl}${runtime.archive}`, partial, runtime.archive);
+    } catch (error) {
+      const release = /^https:\/\/github\.com\/mallenkb\/LoomTV\/releases\/download\/([^/]+)\/$/.exec(manifest.baseUrl);
+      if (!release) throw error;
+      console.warn(`[native-runtimes] Direct download of ${runtime.archive} failed; trying the GitHub release API: ${error.message}`);
+      fs.writeFileSync(partial, await fetchReleaseAsset('mallenkb/LoomTV', release[1], runtime.archive));
+    }
     const size = fs.statSync(partial).size;
     if (size !== runtime.size) throw new Error(`${runtime.archive} is ${size} bytes; expected ${runtime.size}.`);
     const digest = sha256File(partial);
