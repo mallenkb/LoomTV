@@ -2,6 +2,8 @@ const API_HEADERS = {
   Accept: 'application/vnd.github+json',
   'User-Agent': 'LoomTV-release-download',
 };
+const apiToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+if (apiToken) API_HEADERS.Authorization = `Bearer ${apiToken}`;
 
 /** Read the same release asset through GitHub's API when its download URL is unavailable. */
 async function fetchReleaseAsset(repo, tag, name) {

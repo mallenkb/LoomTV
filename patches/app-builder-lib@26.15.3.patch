@@ -34,7 +34,7 @@ diff --git a/out/electron/ElectronFramework.js b/out/electron/ElectronFramework.
 diff --git a/out/util/electronGet.js b/out/util/electronGet.js
 --- a/out/util/electronGet.js
 +++ b/out/util/electronGet.js
-@@ -404,6 +404,43 @@
+@@ -404,6 +404,45 @@
      return extractDir;
  }
  // ─── Public API ───────────────────────────────────────────────────────────────
@@ -48,6 +48,8 @@ diff --git a/out/util/electronGet.js b/out/util/electronGet.js
 +        throw new Error(`A SHA-256 checksum is required for ${name}.`);
 +    }
 +    const headers = { Accept: "application/vnd.github+json", "User-Agent": "electron-builder-release-fallback" };
++    const apiToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
++    if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
 +    const releaseResponse = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, {
 +        headers,
 +        signal: AbortSignal.timeout(30000),
@@ -78,7 +80,7 @@ diff --git a/out/util/electronGet.js b/out/util/electronGet.js
  /**
   * Downloads a generic artifact (.tar.gz or .zip) from a GitHub release.
   * Used for electron-builder-binaries tools (appimage, etc.).
-@@ -436,7 +473,17 @@
+@@ -436,7 +475,17 @@
          mirrorOptions,
          isGeneric: true,
      };
@@ -97,7 +99,7 @@ diff --git a/out/util/electronGet.js b/out/util/electronGet.js
  }
  // Keys present in ElectronGetOptions but absent from ElectronDownloadOptions.
  // Used to discriminate between the two config shapes at runtime.
-@@ -490,9 +537,18 @@
+@@ -490,9 +539,18 @@
   * Downloads the electron artifact zip via @electron/get (with caching) and returns the zip file path.
   * Use when you need to extract the zip yourself (e.g. directly to appOutDir to preserve empty dirs and symlinks).
   */

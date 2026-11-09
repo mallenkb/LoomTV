@@ -253,6 +253,7 @@ jobs:
         id: build-macos
         if: runner.os == 'macOS'
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           MACOS_CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
           MACOS_CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -284,6 +285,7 @@ jobs:
         id: build-windows
         if: runner.os == 'Windows'
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
           WINDOWS_SIGNER_THUMBPRINT: ${{ secrets.WINDOWS_SIGNER_THUMBPRINT }}
@@ -327,6 +329,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           node apps/desktop/scripts/fetch-fpcalc.cjs

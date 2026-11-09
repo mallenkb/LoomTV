@@ -328,6 +328,7 @@ jobs:
       - name: Build unsigned installers
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
