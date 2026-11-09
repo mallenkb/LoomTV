@@ -764,7 +764,12 @@ export function registerIpcHandlers<
         progressPublisher.flush();
         if (deps.saveLibraryFromScan(scanned, scanVersion)) {
           progressPublisher.complete();
-          await deps.cacheArtworkNow(scanned);
+          // Publish the committed catalog without waiting for artwork downloads.
+          void deps.cacheArtworkNow(scanned).catch((error) => {
+            console.warn('[library] Artwork caching after scan failed:', error);
+          });
+        } else {
+          throw new Error('The library changed during scanning. Retry the scan.');
         }
         return deps.libraryIndexForRenderer();
       } finally {

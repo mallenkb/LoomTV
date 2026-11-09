@@ -964,6 +964,10 @@ async function scanLibrary(
         continue;
       }
 
+      let rootMode = mode;
+      // A failed quick path must not require a separate manual full scan.
+      // Retry only this root, and publish nothing from the failed attempt.
+      for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const selected = process.env.LOOM_SCANNER_ENGINE || 'auto';
         if (!['typescript', 'rust', 'auto'].includes(selected)) throw new Error('Invalid scanner engine.');
@@ -971,7 +975,7 @@ async function scanLibrary(
         const cachedEntry = previousScanCache[folder];
         let reusedRoot = false;
         let inspected: Awaited<ReturnType<typeof inspectLibraryRoot>>;
-        if (canCheckUnchangedRoot({ mode, root: folder, folderKind, items: cachedItems, entry: cachedEntry,
+        if (canCheckUnchangedRoot({ mode: rootMode, root: folder, folderKind, items: cachedItems, entry: cachedEntry,
           cacheVersion: SCAN_CACHE_VERSION, providerProfile: metadataProviderProfile, now: Date.now(),
           metadataRefreshIntervalMs, missingMetadataRetryIntervalMs })) {
           inspected = await inspectLibraryRoot(folder, cachedEntry.signature, {
@@ -1019,7 +1023,7 @@ async function scanLibrary(
         refreshProviderRatings = !ratingsAreFresh || providerOrScannerChanged;
 
         if (
-          mode !== 'full'
+          rootMode !== 'full'
           && folderSignature
           && cachedEntry?.version === SCAN_CACHE_VERSION
           && cachedEntry?.folderKind === folderKind
@@ -1027,7 +1031,7 @@ async function scanLibrary(
           && (cachedEntry.subtitleProfile || '') === metadataProviderProfile
         ) {
           const canUseCachedMetadata = ratingsAreFresh
-            && mode !== 'metadata'
+            && rootMode !== 'metadata'
             && (!missingMetadataRetryIsDue || cachedMetadataIsComplete);
           if (canUseCachedMetadata && cachedItems.length === cachedEntry.itemCount) {
             appendItems(cachedItems, folderKind);
@@ -1042,7 +1046,7 @@ async function scanLibrary(
         // when nothing else (version, providers, ratings age, a forced or
         // metadata scan) asks for the whole root to be refreshed.
         const childSignatures = await inventory.childSignaturesAsync();
-        const canReuseChildren = mode === 'quick'
+        const canReuseChildren = rootMode === 'quick'
           && cachedEntry?.version === SCAN_CACHE_VERSION
           && cachedEntry.folderKind === folderKind
           && (cachedEntry.subtitleProfile || '') === metadataProviderProfile
@@ -1093,6 +1097,14 @@ async function scanLibrary(
         for (const item of [...movies, ...tvShows, ...animeShows]) scannedItemIds.add(item.id);
         completedRoots.delete(folder);
         const currentStatus = getLibraryFolderStatus(folder, libraryFolderKindForScanKind(folderKind));
+        cancellation.signal.throwIfAborted();
+        if (rootMode === 'quick' && currentStatus.state !== 'unavailable') {
+          console.warn(`[library] Quick scan failed for ${folder}; retrying with a full scan:`, error);
+          rootMode = 'full';
+          cachedItems = cachedItemsForFolder(folder, folderKind);
+          delete nextScanCache[folder];
+          continue;
+        }
         const message = error instanceof Error ? error.message : String(error);
         folderStatusesByPath.set(folder, {
           ...currentStatus,
@@ -1104,6 +1116,8 @@ async function scanLibrary(
         appendItems(cachedItemsForFolder(folder, folderKind), folderKind);
         if (previousScanCache[folder]) nextScanCache[folder] = previousScanCache[folder];
         console.warn(`[library] Preserved ${folder} after an incomplete scan:`, error);
+      }
+      break;
       }
       processedFolders.add(folder);
       scannedFolders++;

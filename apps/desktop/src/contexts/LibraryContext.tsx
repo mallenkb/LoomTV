@@ -810,26 +810,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         }
 
         if (cached && activeProfile?.type === 'owner' && hasConfiguredFolders(cached)) {
-          isScanningRef.current = true;
-          dispatch({ type: 'SET_SCANNING', payload: true });
-          dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
-          const mutationToken = beginLibraryMutation('catalog');
-          try {
-            const index = await desktopApi.scanLibrary('quick');
-            if (!cancelled && index?.catalogVersion === 1) await applyScanCatalog(index, mutationToken);
-          } catch (error) {
-            const mutationError = toLibraryMutationError('scan', error);
-            console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
-          }
+          // Share manual scan serialization, catalog refresh and fallback handling.
+          await runLibraryScan('quick');
         }
-      } finally {
-        if (!cancelled) {
-          isScanningRef.current = false;
-          dispatch({ type: 'SET_SCANNING', payload: false });
-          const pendingMode = pendingScanModeRef.current;
-          pendingScanModeRef.current = null;
-          if (pendingMode) void runLibraryScan(pendingMode);
-        }
+      } catch (error) {
+        const mutationError = toLibraryMutationError('scan', error);
+        console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
       }
     };
 

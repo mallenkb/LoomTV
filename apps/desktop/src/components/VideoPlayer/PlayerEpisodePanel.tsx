@@ -5,7 +5,7 @@ import { WatchedSolidIcon } from '../LoomIcons';
 import { desktopApi } from '@/lib/desktopApi';
 import { isWatched, progressFraction } from '@/lib/progress';
 import { ScrollArea } from '../ui/scroll-area';
-import { clampSidePanelWidth, epCode, isInProgress } from './helpers';
+import { clampSidePanelWidth, epCode, getStoredDuration, isInProgress } from './helpers';
 import type { EpisodeFile, EpisodeMeta } from './types';
 import { episodeFileKey, indexEpisodeFiles } from './episodeIndex';
 import SharedListHighlight from '../SharedListHighlight';
@@ -129,7 +129,42 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
   buttonRef,
 }: PlayerEpisodeRowProps) {
   const epPath = file?.filePath;
-  const epDur = isCurrent ? currentDuration : file?.localMetadata?.durationSeconds;
+  const thumbnailRef = useRef<HTMLSpanElement | null>(null);
+  const [isNearViewport, setIsNearViewport] = useState(false);
+  const [probe, setProbe] = useState<{ filePath: string; duration: number } | null>(null);
+  const savedDuration = file?.localMetadata?.durationSeconds || (epPath ? getStoredDuration(epPath) : 0);
+  const epDur = (isCurrent && currentDuration && currentDuration > 0 ? currentDuration : 0)
+    || savedDuration || (probe && probe.filePath === epPath ? probe.duration : 0);
+
+  useEffect(() => {
+    const thumbnail = thumbnailRef.current;
+    if (!thumbnail || typeof IntersectionObserver === 'undefined') {
+      setIsNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) {
+        setIsNearViewport(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '480px 0px' });
+    observer.observe(thumbnail);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isNearViewport || sourceMode || !epPath || epPath.startsWith('addon-video:')
+      || savedDuration > 0 || probe?.filePath === epPath
+      || (isCurrent && currentDuration && currentDuration > 0)) return;
+    let cancelled = false;
+    void desktopApi.media.probe(epPath).then((result) => {
+      const duration = (result.data as { durationSeconds?: unknown } | undefined)?.durationSeconds;
+      if (!cancelled && result.ok && typeof duration === 'number' && Number.isFinite(duration) && duration > 0) {
+        setProbe({ filePath: epPath, duration });
+      }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [currentDuration, epPath, isCurrent, isNearViewport, probe?.filePath, savedDuration, sourceMode]);
   const episodeTitle = displayEpisodeTitle(episode.season, episode.number, episode.title, epPath);
   const watched = !sourceMode && epPath ? isWatched(epPath, epDur) : false;
   const inProgress = !sourceMode && epPath ? isInProgress(epPath, epDur) : false;
@@ -149,14 +184,14 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       type="button"
       disabled={!file}
       onClick={() => file && goToEpisode(episode.season, episode.number)}
-      aria-label={`${isCurrent ? 'Now playing. ' : ''}${code}: ${episodeTitle}${watched ? '. Watched.' : inProgress ? '. In progress.' : ''}${!file ? '. File unavailable.' : ''}`}
+      aria-label={`${isCurrent ? 'Now playing. ' : ''}${code}: ${episodeTitle}${runtime ? `. Runtime ${runtime}.` : ''}${watched ? '. Watched.' : inProgress ? '. In progress.' : ''}${!file ? '. File unavailable.' : ''}`}
       aria-current={isCurrent ? 'true' : undefined}
       data-shared-highlight-item
       data-shared-highlight-id={`${episode.season}-${episode.number}`}
       className={`group relative z-10 flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
         ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
     >
-      <span className="relative block w-32 shrink-0 overflow-hidden rounded-[8px]">
+      <span ref={thumbnailRef} className="relative block w-32 shrink-0 overflow-hidden rounded-[8px]">
         <EpisodeThumbnail
           code={code}
           episode={episode}

@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.42](docs/releases/v2.0.42.md)
+
+Shows episode runtimes in the player list, including episodes that have not been played. Makes startup and manual scans use the same catalog refresh, retries incomplete quick scans with a full pass for the affected folder, and returns scan results before artwork caching finishes.
+
 ### [2.0.41](docs/releases/v2.0.41.md)
 
 Speeds up library visibility queries and repairs existing SQLite catalog views without changing media identities or playback progress.
