@@ -58,6 +58,10 @@ overrides:
   '@expo/cli>tar': 7.5.21
   '@expo/cli>undici': 6.28.1
   '@expo/cli>ws': 8.21.0
+  # Expo SDK 58 still requests older affected majors of these build tools.
+  'glob@13': 14.0.4
+  'minimatch@10': 11.0.5
+  node-forge: 1.4.3
   '@expo/metro-config>postcss': 8.5.23
   '@expo/xcpretty>js-yaml': 4.3.2
   '@istanbuljs/load-nyc-config>js-yaml': 4.3.2
@@ -80,5 +84,4 @@ patchedDependencies:
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   bittorrent-tracker@11.2.3: patches/bittorrent-tracker@11.2.3.patch
   braces@3.0.3: patches/braces@3.0.3.patch
-  node-forge@1.4.0: patches/node-forge@1.4.0.patch
   react-native-zeroconf@0.17.6: patches/react-native-zeroconf@0.17.6.patch
