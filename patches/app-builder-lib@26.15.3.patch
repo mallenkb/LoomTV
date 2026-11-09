@@ -19,16 +19,29 @@ index 8853912e013d3769f3e763d06720a94091a7ffaa..fd3387fa54fff0efbe33c8e5491c82bf
          };
          for (const [key, value] of Object.entries(tree.dependencies || {})) {
              await visit(key, value);
+diff --git a/out/electron/ElectronFramework.js b/out/electron/ElectronFramework.js
+--- a/out/electron/ElectronFramework.js
++++ b/out/electron/ElectronFramework.js
+@@ -31,7 +31,7 @@
+     if (Object.hasOwnProperty.call(dl, "mirrorOptions")) {
+         // ElectronGetOptions: flatten mirrorOptions.mirror for the app-builder binary
+         const { mirrorOptions } = dl;
+-        return { ...base, mirror: (_a = mirrorOptions === null || mirrorOptions === void 0 ? void 0 : mirrorOptions.mirror) !== null && _a !== void 0 ? _a : undefined };
++        return { ...base, ...dl, mirror: (_a = mirrorOptions === null || mirrorOptions === void 0 ? void 0 : mirrorOptions.mirror) !== null && _a !== void 0 ? _a : undefined };
+     }
+     return { ...base, ...dl };
+ }
 diff --git a/out/util/electronGet.js b/out/util/electronGet.js
 --- a/out/util/electronGet.js
 +++ b/out/util/electronGet.js
-@@ -404,6 +404,42 @@
+@@ -404,6 +404,43 @@
      return extractDir;
  }
  // ─── Public API ───────────────────────────────────────────────────────────────
 +function isTransientReleaseDownloadError(error) {
 +    const status = error?.response?.statusCode;
-+    return status >= 500 || ["ETIMEDOUT", "ECONNRESET", "EPIPE"].includes(error?.code);
++    return status >= 500 || /Response code 5\d\d/.test(error?.message || "")
++        || ["ETIMEDOUT", "ECONNRESET", "EPIPE"].includes(error?.code);
 +}
 +async function fetchPinnedReleaseAsset(repo, tag, name, expectedHash, target) {
 +    if (!/^[a-f0-9]{64}$/.test(expectedHash)) {
@@ -65,7 +78,7 @@ diff --git a/out/util/electronGet.js b/out/util/electronGet.js
  /**
   * Downloads a generic artifact (.tar.gz or .zip) from a GitHub release.
   * Used for electron-builder-binaries tools (appimage, etc.).
-@@ -436,7 +472,17 @@
+@@ -436,7 +473,17 @@
          mirrorOptions,
          isGeneric: true,
      };
@@ -84,7 +97,7 @@ diff --git a/out/util/electronGet.js b/out/util/electronGet.js
  }
  // Keys present in ElectronGetOptions but absent from ElectronDownloadOptions.
  // Used to discriminate between the two config shapes at runtime.
-@@ -490,9 +536,18 @@
+@@ -490,9 +537,18 @@
   * Downloads the electron artifact zip via @electron/get (with caching) and returns the zip file path.
   * Use when you need to extract the zip yourself (e.g. directly to appOutDir to preserve empty dirs and symlinks).
   */
