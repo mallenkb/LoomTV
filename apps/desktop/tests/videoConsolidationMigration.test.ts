@@ -9,6 +9,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { initializeCanonicalSchema, profileAllowsCanonicalMedia } from 'loom-media-server-headless/native-persistence';
 import { migrateDatabase } from '../src/main/databaseMigrations.ts';
 import { canonicalVideoConnection, openConsolidatedVideoDatabase } from '../src/main/consolidatedVideoDatabase.ts';
+import { migrationBackupForRecovery, restoreVideoDatabase } from '../src/main/videoDatabaseRecovery.ts';
 import { importLegacyVideoJson } from '../src/main/legacyVideoJson.ts';
 
 const { rollback } = createRequire(import.meta.url)('../../../scripts/rollback-native-video.cjs') as {
@@ -299,3 +300,40 @@ test('overlapping native metadata uses a private source extension and preserves 
     assert.deepEqual(JSON.parse(row.extension_json).nativeLocalMetadata,nativeMetadata);
   } finally { connection.close(); }
 });
+
+for (const mode of ['migration', 'chosen'] as const) {
+  test(`startup restores a damaged consolidated library from a ${mode} backup`, async (context) => {
+    const { directory, legacy, canonical } = fixture(context);
+    legacy.close();
+    canonical.close();
+    const livePath = path.join(directory, 'loomtv-canonical.sqlite');
+    const selected = path.join(directory, 'chosen.sqlite');
+    const raw = canonicalVideoConnection(openConsolidatedVideoDatabase(directory));
+    const page = raw.prepare("SELECT rootpage FROM sqlite_schema WHERE name='catalog_items'").pluck().get() as number;
+    const pageSize = Number(raw.pragma('page_size', { simple: true }));
+    if (mode === 'chosen') {
+      raw.prepare("INSERT INTO meta VALUES('saved_after_migration','yes')").run();
+      await raw.backup(selected);
+    }
+    raw.close();
+    const file = fs.openSync(livePath, 'r+');
+    try { fs.writeSync(file, Buffer.alloc(pageSize), 0, pageSize, (page - 1) * pageSize); }
+    finally { fs.closeSync(file); }
+
+    assert.throws(() => openConsolidatedVideoDatabase(directory), { code: 'video_canonical_damaged' });
+    const migration = migrationBackupForRecovery(directory);
+    assert.ok(migration);
+    const saved = await restoreVideoDatabase(directory, mode === 'chosen' ? { filename: selected } : { backup: migration });
+    const archived = fs.openSync(saved, 'r');
+    const damagedPage = Buffer.alloc(pageSize, 1);
+    try { assert.equal(fs.readSync(archived, damagedPage, 0, pageSize, (page - 1) * pageSize), pageSize); }
+    finally { fs.closeSync(archived); }
+    assert.deepEqual(damagedPage, Buffer.alloc(pageSize));
+    const recovered = canonicalVideoConnection(openConsolidatedVideoDatabase(directory));
+    try {
+      assert.equal(recovered.prepare("SELECT title FROM catalog_items WHERE id='desktop-id'").pluck().get(), 'Desktop title');
+      assert.equal(recovered.prepare("SELECT value FROM meta WHERE key='saved_after_migration'").pluck().get(), mode === 'chosen' ? 'yes' : undefined);
+      assert.ok(migrationBackupForRecovery(directory));
+    } finally { recovered.close(); }
+  });
+}

@@ -14,7 +14,7 @@ export function createCanonicalPersistence(options) {
   if (!options?.dataDir) throw new Error('Canonical persistence requires a data directory.');
   if (!options.bootstrapSecurity) throw new Error('Canonical persistence requires bootstrap security.');
 
-  const store = createCanonicalStateStore({ dataDir: options.dataDir });
+  const store = createCanonicalStateStore({ dataDir: options.dataDir, openDatabase: options.openDatabase });
   /** @type {ReturnType<typeof createHeadlessAdminService>} */
   let accountsAndCatalog;
   const pairing = createPairingService({

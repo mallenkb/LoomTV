@@ -359,6 +359,7 @@ import { fetchVideoProviderRatings } from './main/metadata/providerRatings.ts';
 import {
   createOfficialMetadataService,
 } from './main/officialMetadataService.ts';
+import { recoverLibraryAtStartup } from './main/recoverLibraryAtStartup.ts';
 import { metadataRefreshCategories } from './main/databaseMetadataRefreshRepository.ts';
 import { createMetadataProviderGateway } from './main/metadataProviderGateway.ts';
 import type {
@@ -3187,7 +3188,16 @@ app.whenReady().then(async () => {
   initializePlaybackPowerMonitoring();
   recordPlaybackDiagnostic('desktop.ready');
   applyAppIcon();
-  prepareDesktopProfileStartup();
+  try {
+    prepareDesktopProfileStartup();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'video_canonical_damaged') throw error;
+    if (!await recoverLibraryAtStartup(app.getPath('userData'))) {
+      app.exit(1);
+      return;
+    }
+    prepareDesktopProfileStartup();
+  }
   try {
     migrateLegacyCredentialStorage();
   } catch (error) {

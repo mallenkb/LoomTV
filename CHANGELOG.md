@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [2.0.43](docs/releases/v2.0.43.md)
+
+LoomTV can restore a damaged library at startup and keeps a copy of the damaged database. The desktop and its built-in server now use the same SQLite library.
+
 ### [2.0.42](docs/releases/v2.0.42.md)
 
 Shows episode runtimes in the player list, including episodes that have not been played. Makes startup and manual scans use the same catalog refresh, retries incomplete quick scans with a full pass for the affected folder, and returns scan results before artwork caching finishes. Updates transitive dependencies to pass the production audit.

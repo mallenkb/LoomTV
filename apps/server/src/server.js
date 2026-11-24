@@ -217,6 +217,7 @@ export function createCanonicalVideoServer(options) {
   };
 
   const persistence = createCanonicalPersistence({
+    openDatabase: options.openDatabase,
     dataDir: options.paths.dataDir,
     mediaDir: options.paths.mediaDir || undefined,
     version: options.version,

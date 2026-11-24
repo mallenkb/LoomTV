@@ -1269,8 +1269,8 @@ function downloadLeaseView(row, includeSecretHash = false) {
   };
 }
 
-/** @param {{ dataDir: string }} options */
-export function createCanonicalStateStore({ dataDir }) {
+/** @param {{ dataDir: string, openDatabase?: import('./server.js').OpenCanonicalDatabase }} options */
+export function createCanonicalStateStore({ dataDir, openDatabase = (filename) => new DatabaseSync(filename) }) {
   const databasePath = path.join(path.resolve(dataDir), CANONICAL_STATE_FILENAME);
   /** @type {DatabaseSync | null} */
   let database = null;
@@ -1303,7 +1303,7 @@ export function createCanonicalStateStore({ dataDir }) {
         for (const fileName of LEGACY_STATE_FILENAMES) if (await fs.access(path.join(path.dirname(databasePath), fileName)).then(() => true, () => false)) legacySources.push(fileName);
         if (legacySources.length) throw codedError('canonical_migration_required', 'Legacy state requires a verified canonical migration before startup.', { sourceKinds: legacySources.map((name) => name.replace(/^headless-/,'').replace(/\..*$/,'')) });
         const stagedPath = path.join(path.dirname(databasePath), `.${CANONICAL_STATE_FILENAME}.fresh-${randomUUID()}.stage`);
-        const staged = new DatabaseSync(stagedPath);
+        const staged = openDatabase(stagedPath);
         try {
           initializeCanonicalSchema(staged);
           const now = Date.now();
@@ -1316,7 +1316,7 @@ export function createCanonicalStateStore({ dataDir }) {
         await fs.rename(stagedPath, databasePath);
         await syncDirectory(path.dirname(databasePath));
       }
-      const next = new DatabaseSync(databasePath);
+      const next = openDatabase(databasePath);
       registerNativeVideoFunctions(next);
       next.exec('PRAGMA busy_timeout=5000');
       try {

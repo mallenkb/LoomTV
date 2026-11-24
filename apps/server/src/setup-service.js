@@ -39,11 +39,14 @@ export const DEFAULT_METADATA_SETTINGS = {
 
 const MAX_NAME_LENGTH = 80;
 
-/** Read only the setup decision before the desktop starts the full server. @param {string} dataDir */
-export async function isCanonicalSetupRequired(dataDir) {
+/** Read only the setup decision before the desktop starts the full server.
+ * @param {string} dataDir
+ * @param {import('./server.js').OpenCanonicalDatabase} [openDatabase]
+ */
+export async function isCanonicalSetupRequired(dataDir, openDatabase = (filename, readOnly) => new DatabaseSync(filename, { readOnly })) {
   let database;
   try {
-    database = new DatabaseSync(path.join(dataDir, CANONICAL_STATE_FILENAME), { readOnly: true });
+    database = openDatabase(path.join(dataDir, CANONICAL_STATE_FILENAME), true);
     const reader = database;
     const setup = createSetupService({
       store: {

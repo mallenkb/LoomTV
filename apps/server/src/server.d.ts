@@ -19,7 +19,10 @@ export type CanonicalCompatibilityHandler = (
   context: CanonicalCompatibilityContext,
 ) => boolean | Promise<boolean>;
 
+export type OpenCanonicalDatabase = (filename: string, readOnly?: boolean) => import('node:sqlite').DatabaseSync;
+
 export interface CanonicalRuntimeOptions {
+  openDatabase?: OpenCanonicalDatabase;
   host: string;
   port: number;
   paths: RuntimePaths;
@@ -99,4 +102,4 @@ export interface CanonicalVideoServer {
 
 export function createCanonicalVideoServer(options: CanonicalRuntimeOptions): CanonicalVideoServer;
 export function readServerVersion(packageRoot: string): Promise<string>;
-export function isCanonicalSetupRequired(dataDir: string): Promise<boolean>;
+export function isCanonicalSetupRequired(dataDir: string, openDatabase?: OpenCanonicalDatabase): Promise<boolean>;

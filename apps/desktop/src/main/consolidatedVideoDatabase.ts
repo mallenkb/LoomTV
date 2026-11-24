@@ -21,7 +21,7 @@ type SchemaRow = { name: string; type: string; tbl_name: string; sql: string };
 
 function verify(database: BetterSqlite3.Database): void {
   if (database.pragma('quick_check', { simple: true }) !== 'ok')
-    throw new Error('Video database integrity verification failed.');
+    throw Object.assign(new Error('Video database integrity verification failed.'), { code: 'SQLITE_CORRUPT' });
   if ((database.pragma('foreign_key_check') as unknown[]).length)
     throw new Error('Video database reference verification failed.');
   const columns = database.prepare('PRAGMA table_info(profiles)').all() as Array<{ name: string }>;
@@ -51,7 +51,7 @@ function verify(database: BetterSqlite3.Database): void {
   }
 }
 
-function syncFile(file: string): void {
+export function syncFile(file: string): void {
   const descriptor = fs.openSync(file, 'r');
   try {
     fs.fsyncSync(descriptor);
@@ -73,7 +73,7 @@ function backup(source: BetterSqlite3.Database, destination: string): void {
   syncFile(destination);
 }
 
-function digest(file: string): { sha256: string; sizeBytes: number } {
+export function digest(file: string): { sha256: string; sizeBytes: number } {
   const hash = createHash('sha256');
   const handle = fs.openSync(file, 'r');
   const buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -100,7 +100,7 @@ function durableJson(file: string, value: unknown): void {
   }
 }
 
-function syncDirectory(directory: string): void {
+export function syncDirectory(directory: string): void {
   let descriptor: number | undefined;
   try {
     descriptor = fs.openSync(directory, 'r');
@@ -521,7 +521,7 @@ function importNativeVideo(
 }
 
 /** Prepare canonical storage before the native repositories can access it. */
-export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Database {
+export function openConsolidatedVideoDatabase(dataDir: string, evidenceDir = dataDir): BetterSqlite3.Database {
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const canonicalPath = path.join(dataDir, CANONICAL_STATE_FILENAME);
   const legacyPath = path.join(dataDir, 'loomtv.sqlite');
@@ -534,7 +534,9 @@ export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Da
   let legacy: BetterSqlite3.Database | null = null;
   let stagingLegacy: BetterSqlite3.Database | null = null;
   const migrationId = randomUUID();
-  const backupDir = path.join(dataDir, 'video-consolidation-backups', migrationId);
+  const backupDir = path.join(evidenceDir, 'video-consolidation-backups', migrationId);
+  let alreadyConsolidated = false;
+  let inspectingCanonical = !isNew;
   let canonicalVersion: unknown;
   let stagePath: string | null = null;
   let committed = false;
@@ -550,8 +552,9 @@ export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Da
           | undefined)
       : undefined;
     if (already?.value === '1') {
-      repairNativeMovieProjection(database);
+      alreadyConsolidated = true;
       verify(database);
+      repairNativeMovieProjection(database);
       return nativeDatabaseFacade(database);
     }
     if (already) throw new Error('This video storage version requires a newer LoomTV application.');
@@ -559,9 +562,10 @@ export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Da
     fs.mkdirSync(backupsParent, { recursive: true, mode: 0o700 });
     fs.mkdirSync(backupDir, { mode: 0o700 });
     syncDirectory(backupsParent);
-    syncDirectory(dataDir);
+    syncDirectory(evidenceDir);
     if (!isNew) {
       verify(database);
+      inspectingCanonical = false;
       canonicalVersion = database.pragma('data_version', { simple: true });
       backup(database, path.join(backupDir, CANONICAL_STATE_FILENAME));
     } else {
@@ -719,9 +723,9 @@ export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Da
       .immediate();
     committed = true;
     database.pragma('wal_checkpoint(TRUNCATE)');
-    syncFile(targetPath);
     if (isNew) {
       database.close();
+      syncFile(targetPath);
       // Publish without replacing a database another process created meanwhile.
       fs.linkSync(targetPath, canonicalPath);
       published = true;
@@ -752,6 +756,12 @@ export function openConsolidatedVideoDatabase(dataDir: string): BetterSqlite3.Da
         }
       }
     const causeCode = (error as NodeJS.ErrnoException).code;
+    if (inspectingCanonical && (causeCode?.startsWith('SQLITE_CORRUPT') || causeCode === 'SQLITE_NOTADB')) {
+      throw Object.assign(new Error('SQLite found damage in the existing LoomTV library.', { cause: error }), {
+        code: 'video_canonical_damaged',
+      });
+    }
+    if (alreadyConsolidated) throw error;
     const code =
       typeof causeCode === 'string' && /^video_[a-z_]+$/.test(causeCode) ? causeCode : 'video_consolidation_failed';
     try {

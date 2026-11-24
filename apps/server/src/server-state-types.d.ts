@@ -156,6 +156,7 @@ export type ImportState = CanonicalState & { adminState: AdminState; clientState
   devices: StoredDevice[]; deviceCredentials: StoredDeviceCredential[]; generatedAliasCount: number };
 export type ImportPlan = Omit<import('./legacy-state-import.js').LegacyCanonicalImportPlan, 'state'> & {state: ImportState};
 export type PersistenceOptions = import('./server-admin-types.js').AdminOptions & {
+  openDatabase?: import('./server.js').OpenCanonicalDatabase;
   getCertificateFingerprint?: () => string | undefined;
   clock?: () => number;
   proxyPolicy: Parameters<typeof import('./remote-policy.js').createRemotePolicyService>[0]['proxyPolicy'];

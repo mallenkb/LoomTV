@@ -1,8 +1,17 @@
+import BetterSqlite3 from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   createCanonicalVideoServer,
   type CanonicalVideoServer,
   type CanonicalCompatibilityHandler,
 } from 'loom-media-server-headless/runtime';
+
+// Both desktop connections must share SQLite's process-local file lock bookkeeping.
+export function openDesktopServerDatabase(filename: string, readOnly = false): DatabaseSync {
+  const database = new BetterSqlite3(filename, { readonly: readOnly });
+  Object.defineProperty(database, 'isTransaction', { get: () => database.inTransaction });
+  return database as unknown as DatabaseSync;
+}
 
 type RuntimePaths = {
   dataDir: string;
@@ -80,6 +89,7 @@ export function createCanonicalServerHost(options: CanonicalServerHostOptions) {
 
       startPromise = (async () => {
         const nextRuntime = createCanonicalVideoServer({
+          openDatabase: openDesktopServerDatabase,
           host: options.host || '127.0.0.1',
           port: options.port ?? 3847,
           paths: options.paths,

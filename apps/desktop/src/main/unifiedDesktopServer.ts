@@ -6,7 +6,7 @@ import path from 'node:path';
 import { canonicalStatePath } from '@loom-media-server/video-migration';
 import { isCanonicalSetupRequired } from 'loom-media-server-headless/runtime';
 import type { UnifiedDesktopServerState } from '../shared/desktopProtocol.ts';
-import { createCanonicalServerHost } from './canonicalServerHost.ts';
+import { createCanonicalServerHost, openDesktopServerDatabase } from './canonicalServerHost.ts';
 import {
   closeCanonicalSetupWindow,
   configureCanonicalWindow,
@@ -67,7 +67,7 @@ export async function requiresUnifiedDesktopSetup(): Promise<boolean> {
   const flag = String(process.env[TEST_FLAG] || '').trim().toLowerCase();
   if (!enabledByEnvironment()) return false;
   const dataDir = configuredDataDir();
-  const required = !dataDir || await isCanonicalSetupRequired(dataDir);
+  const required = !dataDir || await isCanonicalSetupRequired(dataDir, openDesktopServerDatabase);
   // The renderer can choose its saved host mode before the administration
   // server starts. An empty, configured library must not look like a new app.
   state = { enabled: true, ready: false, ownerConfigured: !required };
