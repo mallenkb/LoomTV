@@ -304,6 +304,10 @@ test('overlapping native metadata uses a private source extension and preserves 
 for (const mode of ['migration', 'chosen'] as const) {
   test(`startup restores a damaged consolidated library from a ${mode} backup`, async (context) => {
     const { directory, legacy, canonical } = fixture(context);
+    // A running server commits its cutover marker before desktop consolidation.
+    canonical.exec(`INSERT INTO migration_markers(id,format,schema_version,source_fingerprint,state,
+      source_counts_json,reconciliation_json,target_counts_json,created_at,committed_at)
+      VALUES('fixture','loomtv-canonical-migration-v1',1,'fresh-install','committed','{}','{}','{}',1,1)`);
     legacy.close();
     canonical.close();
     const livePath = path.join(directory, 'loomtv-canonical.sqlite');
